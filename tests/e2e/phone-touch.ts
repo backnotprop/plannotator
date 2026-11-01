@@ -49,6 +49,24 @@ export function png(width: number, height: number, hue: [number, number, number]
   return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
+/** Two real fingers (Chromium only, the DevTools protocol): down at `from`, moved to `to` together, lifted. */
+export async function pinch(page: Page, from: [Point, Point], to: [Point, Point], moves = 12): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  const at = (t: number) => from.map((a, id) => ({ id, x: a.x + (to[id]!.x - a.x) * t, y: a.y + (to[id]!.y - a.y) * t }));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(0) });
+  for (let i = 1; i <= moves; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(i / moves) });
+    await page.waitForTimeout(16);
+  }
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await cdp.detach();
+}
+
 export interface Finger {
   /** Put one finger down at (x, y) and move it by (dx, dy) in `moves` moves. */
   down(x: number, y: number, dx: number, dy: number, moves?: number): Promise<void>;

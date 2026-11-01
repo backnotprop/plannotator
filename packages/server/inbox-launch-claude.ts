@@ -48,7 +48,7 @@ import {
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchTrustOffer, LaunchTrustTarget } from "./inbox-launch-host";
+import { launchUploadsDir, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchTrustOffer, type LaunchTrustTarget } from "./inbox-launch-host";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
 export const CLAUDE_LAUNCH_MIN_VERSION = "2.1.314";
@@ -279,7 +279,8 @@ export function createClaudeHost(options: {
 }) {
   const run = async (argv: string[], cwd: string | undefined, timeoutMs = COMMAND_TIMEOUT_MS, environment?: AgentEnvironment) => {
     const e = environment ?? (await options.environment());
-    const claude = e.which("claude");
+    // A start's own env may not reach `claude` (its shell read failed): the plain env also searches Claude's install folders.
+    const claude = e.which("claude") ?? (environment ? (await options.environment()).which("claude") : null);
     if (!claude) return { result: { exitCode: 127, timedOut: false, stdout: "", stderr: "claude is not on PATH" } as AgentRunResult, missing: true };
     return { result: await e.run([claude, ...argv], { timeoutMs, killGroup: false, ...(cwd ? { cwd } : {}) }), missing: false };
   };
@@ -343,7 +344,7 @@ export function createClaudeHost(options: {
       };
     },
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
-    respawn: async (short: string) => (await run(["respawn", short], undefined)).result,
+    respawn: async (short: string, environment: AgentEnvironment) => (await run(["respawn", short], undefined, COMMAND_TIMEOUT_MS, environment)).result,
     rm: async (short: string) => (await run(["rm", short], undefined)).result,
     /**
      * `claude purge --yes <folder>`: every session, transcript and `~/.claude.json` entry Claude keeps for that folder
@@ -375,6 +376,8 @@ export type ClaudeHost = ReturnType<typeof createClaudeHost>;
 const CLAUDE = "claude-code" as const;
 /** The agent's own Inbox call never prompts, whatever the person's permission mode. */
 const INBOX_TOOL_PERMISSION = `mcp__plannotator__${INBOX_TOOL_NAME}`;
+/** Read of everything under a folder, whatever folder the session runs in: `//` makes a rule's path absolute (a single `/` means the project's root). */
+export const claudeReadRule = (folder: string) => `Read(/${folder}/**)`;
 
 const resultOf = (result: AgentRunResult): LaunchHostResult => ({ exitCode: result.exitCode, text: `${result.stdout}${result.stderr}` });
 
@@ -393,6 +396,12 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env });
   };
   const cli = createClaudeHost({ environment: ctx.environment, files: claudeFiles });
+  /**
+   * A start or a restart runs with the person's login env: either may be the call that starts Claude's shared
+   * supervisor, and a session gets the supervisor's env, not its caller's. Only the settings file reaches a
+   * session whose supervisor was already running.
+   */
+  const loginEnvironment = (login: LaunchEnv) => createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(login) });
   /** The person's own Claude setup (bypass consent, a bypass disable, their default mode), read from their files now; `folder` adds that project's settings. */
   const claudeSetup = (folder: string | null = null) => claudeBypassSetup(claudeFiles(), folder);
   /** How a launch made now would start (`launchStartOf`), from the switch, the person's Claude setup and the last shell read. */
@@ -428,7 +437,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         bypassAvailable: launch.bypass_available === true,
       }),
       enableAllProjectMcpServers: true,
-      permissions: { allow: [INBOX_TOOL_PERMISSION], ...(modeOf(launch) === "auto" ? { defaultMode: "default" } : {}) },
+      permissions: { allow: [INBOX_TOOL_PERMISSION, claudeReadRule(launchUploadsDir(ctx.dataDir))], ...(modeOf(launch) === "auto" ? { defaultMode: "default" } : {}) },
       // Permission prompts come to the launch thread as questions (inbox-launch-claude-permission.ts).
       hooks: launchPermissionHooks(ctx.selfCommand),
     };
@@ -450,7 +459,10 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local" };
       const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}` };
-      if (!claudeCodePluginEnabled(e) || !claudeCodeInboxToolOn(e)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
+      // In the Claude folder a launched session will use: CLAUDE_CONFIG_DIR may be set only in the person's shell.
+      const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR;
+      const files = configDir ? createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, CLAUDE_CONFIG_DIR: configDir } }) : e;
+      if (!claudeCodePluginEnabled(files) || !claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off" };
       return { ok: true, version };
     },
 
@@ -503,7 +515,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         settingsPath,
         mode: modeOf(launch),
         allowBypass: launch.bypass_available === true,
-        environment: createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: launchSpawnEnv(input.login) }),
+        environment: loginEnvironment(input.login),
       });
       ctx.startLog(launch.id, result.output);
       if (result.modeRefused) {
@@ -528,7 +540,7 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
 
     /** `claude respawn <short>`: a pending reply is delivered once it connects. Claude checks trust here too. */
     async resume(launch: InboxLaunchRecord) {
-      const result = await cli.respawn(launch.session_ref!);
+      const result = await cli.respawn(launch.session_ref!, loginEnvironment(await ctx.loginEnv()));
       return { ...resultOf(result), failure: result.exitCode === 0 ? null : startFailureOf(result, ctx.displayFolder(trustFolderOf(launch))) };
     },
     stop: async (ref: string) => resultOf(await cli.stop(ref)),

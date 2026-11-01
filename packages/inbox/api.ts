@@ -34,10 +34,16 @@ import type {
   InboxUpload,
   InboxPromptsChange,
   InboxPromptsSettings,
+  InboxVoiceEngine,
+  InboxVoiceFailure,
+  InboxVoiceKeyState,
+  InboxVoiceSettings,
+  InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
@@ -58,7 +64,7 @@ import type {
   InboxWindowPermission,
 } from '@plannotator/core/inbox-types';
 
-import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeSharedInboxEvents } from './sharedEvents';
+import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -80,6 +86,8 @@ export interface ProjectFolder extends InboxProject {
   archived?: number;
   /** The machine whose project it is (`ibx_…`), in the merged view only. */
   machine?: string;
+  /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
+  combined?: { id: string; name: string; root: string }[];
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -327,6 +335,8 @@ export interface SettingsModel {
   tailscale?: TailscaleSettings;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
+  /** A tailnet login other than the owner's (its page offers no What's new). Absent from an older Inbox. */
+  guest?: boolean;
   version: string;
   port: number;
   url: string;
@@ -342,6 +352,8 @@ export interface SettingsModel {
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };
+  /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
+  voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
@@ -384,6 +396,10 @@ export interface SettingsModel {
       root: string;
       bytes: number;
       threads: { thread_id: string; subject: string | null; bytes: number }[];
+      /** The project this folder was combined into, by name. */
+      combined_into?: string;
+      /** The projects combined into this one, by name: deleting it leaves them. */
+      combined?: string[];
     }[];
   };
 }
@@ -640,7 +656,9 @@ async function localInstead(response: Response): Promise<boolean> {
 async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
+  resumeDebugLog();
   const response = await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store', signal });
+  learnDebugLog(response);
   if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal);
   const answer = await readJson<T>(response);
   // Local ids come only from this Inbox's own records (list rows, the archived list, thread reads, its own
@@ -1029,21 +1047,29 @@ export const inboxApi = {
   /** Mark read (the thread leaves the top for Quiet, its waiting questions closed) or its Undo. */
   markRead: (threadId: string, read: boolean) =>
     post<{ thread: InboxListRow }>(threadUrl(threadId, `/${read ? 'read' : 'unread'}`), {}),
+  /** Mark unread: the thread's latest agent message is new again (New, bold). Nothing is sent to the agent. */
+  markUnread: (threadId: string) => post<{ thread: InboxListRow; wrote: boolean; through_seq: number }>(threadUrl(threadId, '/mark-unread'), {}),
   /** 👍 Looks good on the agent's latest message (the thread is marked read; sent to the agent after the Undo window), or its Undo. */
   ack: (messageId: string, on: boolean) =>
     post<{ message: InboxMessageWire; thread: InboxListRow }>(messageUrl(messageId, `/ack`), { ack: on }),
   /** The project menu's Mark all as read: Mark read on every thread waiting on the person. */
   markProjectRead: (projectId: string, batchId: string) =>
-    post<ProjectBatchAnswer<{ read: string[] }>>(projectUrl(projectId, `/read`), { batch_id: batchId }),
-  /** Its Undo: exactly the threads the batch took. */
-  unmarkProjectRead: (projectId: string, threads: readonly string[]) =>
-    post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/unread`), { threads }),
+    post<ProjectBatchAnswer<{ read: string[]; looked?: string[] }>>(projectUrl(projectId, `/read`), { batch_id: batchId }),
+  /** Its Undo: exactly the threads the batch took (`looked`: those whose Mark read stood, which go back to unread). */
+  unmarkProjectRead: (projectId: string, threads: readonly string[], looked: readonly string[] = []) =>
+    post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/unread`), { threads, looked }),
   /** The project menu's Archive all: every listed thread resolved (one that came back is marked read instead). */
   archiveProject: (projectId: string, batchId: string) =>
     post<ProjectBatchAnswer<{ resolved: string[]; read: string[] }>>(projectUrl(projectId, `/resolve`), { resolved: true, batch_id: batchId }),
   /** Its Undo: exactly the threads the batch took. */
   unarchiveProject: (projectId: string, threads: { resolved: readonly string[]; read: readonly string[] }) =>
     post<{ threads: InboxListRow[]; skipped: string[] }>(projectUrl(projectId, `/resolve`), { resolved: false, threads }),
+  /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
+  renameProject: (projectId: string, name: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
+  /** Combine a project into another, or undo that (null): answers the project the person now sees. */
+  combineProject: (projectId: string, into: string | null) =>
+    post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
@@ -1277,6 +1303,28 @@ export const inboxApi = {
   claimBoardIntro: () => post<{ show: boolean }>(inboxUrl('/board/intro'), {}),
   /** The one-time list options dialog: only the first claim ever gets `show: true` (once per machine). */
   claimListIntro: () => post<{ show: boolean; list_intro: { due: boolean } }>(inboxUrl('/list-intro'), {}),
+  /** The one-time voice announcement, as the list options dialog; the Inbox also checks this computer's Codex login. */
+  claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
+  saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
+  /** Only on this computer; the answer never holds the key. Null removes it. */
+  saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
+  voiceStatus: (fresh: boolean) => get<InboxVoiceStatus>(inboxUrl('/voice/status', fresh ? 'fresh=1' : undefined)),
+  /**
+   * The clip, to the Inbox that serves this window: never a `machine`, so audio is never forwarded, even for a thread
+   * on a linked machine. A failure is an answer here, not a throw; only an Inbox that can't be reached throws.
+   */
+  transcribeVoice: async (clip: Blob, signal: AbortSignal): Promise<{ text: string } | { code: InboxVoiceFailure | null; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] }> => {
+    const response = await fetch(inboxUrl('/voice/transcribe', pageSession ? `serverSession=${encodeURIComponent(pageSession)}` : undefined), {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav', Accept: 'application/json' },
+      body: clip,
+      signal,
+    });
+    const body = (await response.json().catch(() => ({}))) as { text?: unknown; code?: unknown; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] };
+    if (response.ok && typeof body.text === 'string') return { text: body.text };
+    const code = typeof body.code === 'string' && body.code.startsWith('voice_') ? (body.code as InboxVoiceFailure) : null;
+    return { code, engine: body.engine, reason: body.reason };
+  },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
   pin: (threadId: string, pinned: boolean) =>
@@ -1425,6 +1473,13 @@ export interface InboxEventHandlers {
   onMachines?: (machines: MachineView[]) => void;
   /** A write held for another machine changed state (queued, sending, delivered, refused…). */
   onOutbox?: (entry: OutboxView) => void;
+  /**
+   * The live stream went silent past its window (liveStream.ts), or the tab came back after it: read the list and
+   * the open thread again, so nothing it missed stays missed. Never called while the stream is heard.
+   */
+  onCatchUp?: () => void;
+  /** The live stream is dead (`false`: a reconnect brought nothing) or heard again (`true`). Called on a change only. */
+  onLive?: (live: boolean) => void;
 }
 
 /** The `machine` frame: one record of another machine's event stream. */
@@ -1443,7 +1498,8 @@ export interface InboxEventWindow {
 }
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox'] as const;
+// `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1480,6 +1536,9 @@ export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEvent
 /** One frame to the handlers: what each named event means. */
 export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventHandlers): void {
   switch (frame.name) {
+    case 'heartbeat':
+      // Only proof the stream is alive: no read, nothing to show.
+      return;
     case 'hello':
       handlers.onConnect?.();
       return;
@@ -1585,6 +1644,15 @@ export function subscribeInboxEvents(
 ): () => void {
   if (win && sharedInboxEventsSupported()) {
     return subscribeSharedInboxEvents(cursor, handlers, win, browserSharedEventsEnv({ open: openInboxEventFrames, dispatch: dispatchInboxFrame }));
+  }
+  // A window's own stream beats too: the same silence watch, reopening this tab's stream.
+  if (win && typeof document !== 'undefined') {
+    return subscribeOwnInboxEvents(cursor, handlers, win, {
+      open: openInboxEventFrames,
+      dispatch: dispatchInboxFrame,
+      lifecycle: { document, window },
+      isVisible: () => document.visibilityState === 'visible',
+    });
   }
   return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
 }

@@ -12,7 +12,9 @@ import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
+import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useInboxTheme } from '../theme';
@@ -60,6 +62,15 @@ export interface SidebarProps {
    */
   projectsReadable?: ReadonlySet<string>;
   onProjectAction?: (projectId: string, action: ProjectAction) => void;
+  /**
+   * The project menu's Rename… and Reset name: a name, or null for the folder's name. Offered on this
+   * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
+   */
+  onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
+  onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -168,6 +179,8 @@ export function Sidebar(props: SidebarProps) {
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
   const phone = usePhone();
+  // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
+  const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
@@ -235,7 +248,14 @@ export function Sidebar(props: SidebarProps) {
   const machinesClosed = sections.closed('machines');
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
+  /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
+  const combinedInto = useRef<{ from: string; into: string } | null>(null);
   useLayoutEffect(() => {
+    const combined = combinedInto.current;
+    if (combined && !shown.some((p) => p.id === combined.from)) {
+      combinedInto.current = null;
+      asideRef.current?.querySelector<HTMLElement>(`[data-pmore="${combined.into}"]`)?.focus({ preventScroll: true });
+    }
     const id = actedOn.current;
     if (!id || shown.some((p) => p.id === id)) return;
     actedOn.current = null;
@@ -503,6 +523,28 @@ export function Sidebar(props: SidebarProps) {
                     setOpenMobile(false);
                     props.onProjectAction?.(project.id, action);
                   }}
+                  // Another machine's project keeps the name that machine gives it. The sheet stays open on a phone: the field is in it.
+                  onRename={
+                    props.onProjectRename && (!project.machine || project.machine === selfMachineId())
+                      ? (name) => props.onProjectRename!(project.id, name)
+                      : undefined
+                  }
+                  announce={props.announce}
+                  // This machine's projects only: combining never crosses machines.
+                  others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}
+                  onCombine={
+                    props.onProjectCombine && local(project)
+                      ? async (into) => {
+                          combinedInto.current = { from: project.id, into: into.id };
+                          setOpenMobile(false);
+                          // The name it will have: alone again, it loses a clash's parent.
+                          const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
+                          const done = await props.onProjectCombine!({ from: project.id, into: into.id, intoName });
+                          if (!done) combinedInto.current = null;
+                          return done;
+                        }
+                      : undefined
+                  }
                 />
               );
             })
@@ -511,7 +553,7 @@ export function Sidebar(props: SidebarProps) {
       </div>
       <div className="ib-side-foot">
         {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
-        {props.connectPrompt !== false && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
+        {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
           update={props.update}
           restarting={props.restarting}
@@ -629,8 +671,8 @@ export const CONNECT_COPY_FAILED_ANNOUNCEMENT = "Couldn't copy the connect promp
  * 2 s (or "Couldn't copy"), the marks stay, focus stays on it, and a polite
  * live region says the same. Its name reads "Copy prompt to connect an
  * agent": the visible words first, then what they are for. Not navigation,
- * so the phone sheet stays open to show it. Shown everywhere, the tailnet
- * included.
+ * so the phone sheet stays open to show it. Not drawn on a phone (owner:
+ * it does not need to show there); the tailnet page on a desktop shows it.
  */
 function CopyConnectPrompt({ mcpCommand }: { mcpCommand: readonly string[] | null }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');

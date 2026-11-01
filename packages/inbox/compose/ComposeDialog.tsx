@@ -41,6 +41,8 @@ import { TrustDetails } from './TrustDetails';
 import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
+import { VoiceFoot } from '../components/VoiceMic';
+import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -196,6 +198,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const drop = useFileDrop(files.add, takesFiles);
   const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
   const { model, load } = useComposeSessions(true, transport?.sessions, startPick ? { agent: startPick.agent, project: startPick.projectId } : null);
+  const voice = useVoiceSession();
   const projects = model?.projects ?? [];
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
@@ -338,8 +341,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
 
   // ── sending ──
   const send = async () => {
-    // Still reading the live sessions: nothing to say yet, the status line says it.
-    if (busy || !model) return;
+    // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
+    if (busy || !model || voice.busy) return;
     // The details just opened on a changed folder: a double press or a held key never answers what it hasn't shown.
     if (Date.now() - trustChangedAt.current < ARM_MS) return;
     setError(null);
@@ -672,7 +675,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
               className={`ib-cp-barb ib-strong${sendable ? '' : ' ib-dis'}`}
               aria-disabled={!sendable || undefined}
               onClick={() => void send()}
-              disabled={busy !== null}
+              disabled={busy !== null || voice.busy}
               data-compose-send=""
             >
               Send
@@ -839,6 +842,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <div className="ib-cp-field" data-compose-text="">
           <InboxComposerField
             textareaRef={textRef}
+            voice={voice}
             ariaLabel="Message"
             ariaDescribedBy={status ? statusId : undefined}
             destination="your message"
@@ -917,6 +921,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </span>
             </Tip>
           )}
+          <VoiceFoot voice={voice} phone={phone} lead />
           {/* On a desktop the To line already says "Draft · saved". */}
           {draft && !dirty && phone && (
             <span className="ib-cp-savedline" data-compose-saved="">
@@ -963,7 +968,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
               aria-disabled={!sendable || undefined}
               aria-keyshortcuts={phone ? undefined : sendKeys}
               onClick={() => void send()}
-              disabled={busy !== null}
+              disabled={busy !== null || voice.busy}
               data-compose-send=""
             >
               <Icon name="send" size={15} />

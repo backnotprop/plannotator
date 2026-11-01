@@ -21,7 +21,7 @@
  *     and the Stopped-on-you row go, with no Stop → Stop (11) → a reply
  *     respawns it once, Starting again (12), delivered once → no line (10);
  *     Delete runs stop and rm, removes launch/<id>/, never purge. The login
- *     shell ran once.
+ *     shell ran for the composer, the start and the respawn.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
@@ -356,6 +356,8 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(start.settings!.env!.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
   expect(start.settings!.env!.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
   expect(start.settings!.permissions!.allow).toContain(INBOX_TOOL_PERMISSION);
+  // A file the person attached is read without a prompt, wherever the session runs.
+  expect(start.settings!.permissions!.allow).toContain(`Read(/${join(world.dataDir, 'inbox', 'uploads')}/**)`);
   // An auto launch is pinned to default mode, should Claude drop auto.
   expect(start.settings!.permissions!.defaultMode).toBe('default');
   // The spawn env: no Plannotator name at all (data dir, ports, markers), no session marker.
@@ -438,9 +440,9 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await shot(page, '10-replied');
   expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(1);
   expect(fake.starts()).toHaveLength(1);
-  // The login shell was read twice, both off the Send's wait: ahead when the composer picked "Start Claude Code",
-  // and by the start for its own env. Never for a status read, the stop or the respawn.
-  expect(fake.logins()).toBe(2);
+  // The login shell was read off the Send's wait: ahead when the composer picked "Start Claude Code", by the start
+  // for its own env, and by the respawn for its own (either may start Claude's supervisor). Never for a status read or the stop.
+  expect(fake.logins()).toBe(3);
   // Delivered once: one answer to the reply, and the reply was handed over once.
   const thread = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string; author: { kind: string }; reply_to?: string | null; delivery?: unknown }[] } };
   const reply = thread.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;

@@ -335,7 +335,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
+  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <title> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
 
 /**
  * Fixed text, the description's last line: where everything the tool's short
@@ -389,6 +389,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       'Context in one to three plain sentences: what it affects, what you know, why you recommend one. The person switches in cold.',
       '',
+      '- [ ] Nowhere — silent loss, as today',
       '- [ ] Local only, purged after 30 days — cheap',
       '- [ ] Server-side per user — needs a retention policy',
       '',
@@ -396,7 +397,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       'Holds up: sync release',
       ':::',
       '',
-      'Your recommendation goes on the `Recommended:` line, never in a choice label. `:::question-multi` takes several choices, `:::question-text` free text. The person can always answer Other, add a note or skip, so never add an Other choice yourself. `Stopped: <why>` only when you cannot go on until it is answered (never `Stopped: no`); `Holds up: <work>` names work that waits while you go on. Ask only what you cannot decide alone, about 8 a round at most. Answers come back in the reply under "Answers to your questions".',
+      'Your recommendation goes on the `Recommended:` line, never in a choice label. Keep the choices in their natural order; never move yours first. `:::question-multi` takes several choices, `:::question-text` free text. The person can always answer Other, add a note or skip, so never add an Other choice yourself. `Stopped: <why>` only when you cannot go on until it is answered (never `Stopped: no`); `Holds up: <work>` names work that waits while you go on. Ask only what you cannot decide alone, about 8 a round at most. Answers come back in the reply under "Answers to your questions".',
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone. Visual options can be picture choices, `- [ ] Label — ![alt](path)`: the picture picks it, the label comes back.',
       '',
@@ -431,14 +432,14 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
  * the send, before anything about the chat, so it reads as about the Inbox.
  */
 export const INBOX_REMINDER_TEXT =
-  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
+  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message (each decision as a \`:::question\` block) and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Their reply comes back here. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
 
 /**
  * The same line for a host without the wake (OpenCode 1): the reply does not
  * come back by itself there, so it names wait_for_reply instead.
  */
 export const INBOX_REMINDER_TEXT_NO_WAKE =
-  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
+  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message (each decision as a \`:::question\` block) and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
 
 /**
  * The reminder naming the tool as the host registered it. Claude Code defers
@@ -747,7 +748,12 @@ export interface InboxReplyCommand {
   thread_id: string
   /** The agent message a reply answers; null for a message. */
   reply_to: string | null
-  /** The thread's subject. */
+  /**
+   * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
+   * on a plain reply the thread's short name, or null when it has none, which
+   * every connection words `a reply`; on everything else the thread's
+   * subject. An older Inbox always sends the subject here.
+   */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
   body: string
@@ -956,6 +962,36 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * The poll field (`true`) by which a connection says it can answer Ask AI
+ * live. An older connection never sends it, so a question never waits for it.
+ */
+export const INBOX_ASK_POLL_FIELD = 'ask'
+
+/**
+ * Set (`true`) on every poll answer while a question waits for this session
+ * and its Ask AI client has not connected, and a held poll ends at once. The
+ * connection then runs the client against `inboxAskBridgeBase(session)`, with
+ * the Inbox's token, until the Inbox says `closing`. It is a state, not an
+ * event: a poll answer that does not read it loses nothing.
+ */
+export const INBOX_ASK_WAITS_FIELD = 'ask_waits'
+
+export const INBOX_ASK_BRIDGE_PREFIX = '/api/inbox/ask/'
+
+/** Where a session's Ask AI client talks to the Inbox: the pull bridge's two paths go after it. */
+export function inboxAskBridgeBase(session: string): string {
+  return `${INBOX_ASK_BRIDGE_PREFIX}${encodeURIComponent(session)}`
+}
+
+export function parseInboxAskWaits(text: string): boolean {
+  try {
+    return (JSON.parse(text) as Record<string, unknown>)[INBOX_ASK_WAITS_FIELD] === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * The turn a connection submits when a reply it put into a running turn
  * arrived as that turn ended, so the model never read it: the reply is in
  * the conversation already, so this only points at it.
@@ -1114,8 +1150,9 @@ export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX
 }
 
 /**
- * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
- * the fixed instruction line for its type (a reply, a New message, or a
+ * The turn a reply or a message becomes: `Plannotator Inbox: <title> (<id>)`
+ * (the title is the command's `subject`, or `a reply` / `a message` without
+ * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
  * saying so under it), then the words verbatim, then the closing line
  * (`inboxWakeClosingLine`, naming `toolName`, the tool as the host

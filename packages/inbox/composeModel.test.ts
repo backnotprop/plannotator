@@ -84,6 +84,19 @@ describe('To', () => {
     expect(filterGroups(groups, 'nothing-like-this')).toEqual([]);
   });
 
+  test('a session in another folder of a combined project shows that folder in the picker, and the filter finds it by it', () => {
+    const combined: InboxComposeProject[] = [
+      { project: { id: 'prj_d', name: 'docs', root: '/code/docs' }, sessions: [session('ses-docs', 'claude-code'), session('ses-site', 'claude-code', { root: '/code/docs-site' })] },
+    ];
+    const groups = composeGroups(combined, null);
+    expect(groups[0]!.project.root).toBe('/code/docs');
+    expect(pickerRows(groups).map((row) => [row.target.session, row.target.project.name, row.target.project.root])).toEqual([
+      ['ses-docs', 'docs', '/code/docs'],
+      ['ses-site', 'docs', '/code/docs-site'],
+    ]);
+    expect(filterGroups(groups, 'docs-site').flatMap((g) => g.sessions.map((s) => s.session))).toEqual(['ses-site']);
+  });
+
   test('the picker is one row per session, the current project first; a start time only where a project has two live sessions, whatever the filter', () => {
     const groups = composeGroups(PROJECTS, { id: null, root: '/src/billing' });
     const rows = pickerRows(groups);
