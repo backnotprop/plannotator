@@ -71,6 +71,7 @@ packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
 packages/inbox/whatsNewLink.test.tsx
 packages/inbox/whatsNewHeader.test.tsx
+packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
 packages/inbox/reask.test.tsx

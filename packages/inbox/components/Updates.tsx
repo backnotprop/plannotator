@@ -964,7 +964,15 @@ export function AboutBlock({
   onUpdate,
   onWhatsNew,
   where,
+  updates = true,
 }: {
+  /**
+   * False on a page opened over the tailnet, where every /api/inbox/update*
+   * route answers 403 local_only: the block shows the version, and for the
+   * computer's owner (an `onWhatsNew` given) a link to What's new in it, and
+   * no Update, Check now or update switch.
+   */
+  updates?: boolean;
   version: string;
   details: UpdateDetails | null;
   switches: UpdateSwitches | undefined;
@@ -994,6 +1002,34 @@ export function AboutBlock({
   const available = update?.version ?? (latest && newerThan(latest.version, version) ? latest.version : null);
   const updateLabel = update?.state === 'ready' ? 'Restart to update' : update?.state === 'failed' ? 'Update failed…' : 'Update now';
   const locked = (checks?.env !== null && checks?.env !== undefined) || (auto?.env !== null && auto?.env !== undefined);
+  if (!updates) {
+    // The running release's notes; a development build has none to name.
+    const running = onWhatsNew && STABLE.test(version) ? version : null;
+    return (
+      <>
+        <section className="ib-sgroup ib-sgroup-first" data-settings-about="tailnet" aria-label="Version">
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-tile">
+                <Icon name="inbox" />
+              </span>
+              <span className="ib-txt">
+                <span className="ib-l">Plannotator {version}</span>
+                {running && (
+                  <span className="ib-desc" data-update-status="">
+                    <button type="button" className="ib-lnk" data-about-whats-new={running} onClick={() => onWhatsNew!(running)}>
+                      What&apos;s new in {running}
+                    </button>
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+        </section>
+        {where && <AboutWhere where={where} />}
+      </>
+    );
+  }
   return (
     <>
       <section className="ib-sgroup ib-sgroup-first" data-settings-about="" aria-label="Version and updates">
@@ -1085,29 +1121,33 @@ export function AboutBlock({
         {failing && details && <CheckFailingCommand command={details.command} />}
         {error && <div className="ib-error">{error}</div>}
       </section>
-      {where && (
-        <section className="ib-sgroup" aria-labelledby="ib-g-where">
-          <h2 id="ib-g-where">Where things are</h2>
-          <div className="ib-card">
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l">Data</span>
-                <span className="ib-desc">
-                  <code>{where.data}</code>
-                </span>
-              </span>
-            </div>
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l">MCP for other agents</span>
-                <span className="ib-desc">
-                  <code>{where.mcpUrl}</code> · or the command <code>{where.mcpCommand}</code>
-                </span>
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
+      {where && <AboutWhere where={where} />}
     </>
+  );
+}
+
+function AboutWhere({ where }: { where: { data: string; mcpUrl: string; mcpCommand: string } }) {
+  return (
+    <section className="ib-sgroup" aria-labelledby="ib-g-where">
+      <h2 id="ib-g-where">Where things are</h2>
+      <div className="ib-card">
+        <div className="ib-prow">
+          <span className="ib-txt">
+            <span className="ib-l">Data</span>
+            <span className="ib-desc">
+              <code>{where.data}</code>
+            </span>
+          </span>
+        </div>
+        <div className="ib-prow">
+          <span className="ib-txt">
+            <span className="ib-l">MCP for other agents</span>
+            <span className="ib-desc">
+              <code>{where.mcpUrl}</code> · or the command <code>{where.mcpCommand}</code>
+            </span>
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }

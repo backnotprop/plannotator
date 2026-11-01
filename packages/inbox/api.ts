@@ -326,6 +326,8 @@ export interface SettingsModel {
   tailscale?: TailscaleSettings;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
+  /** A tailnet login other than the owner's (its page offers no What's new). Absent from an older Inbox. */
+  guest?: boolean;
   version: string;
   port: number;
   url: string;
