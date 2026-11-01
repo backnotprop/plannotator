@@ -2,8 +2,8 @@
  * Settings → Voice. Off shows the switch and the plain line about the route, and starts nothing. On asks the Inbox
  * about this computer (`account/read` through a short-lived Codex: the sign-in type and plan, never a token).
  *
- * A key typed here goes to the Inbox and never comes back: the page holds at most its last 4. It can be set only on
- * the computer itself, so a page over the tailnet says that instead of offering the field.
+ * A key typed here goes to the Inbox and never comes back: the page holds at most its last 4. The owner sets it on the
+ * computer or over the tailnet's HTTPS; a tailnet guest never gets this far (the note in `VoiceSettings`).
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { InboxVoiceEngine, InboxVoiceStatus } from '@plannotator/core/inbox-types';
@@ -87,7 +87,6 @@ function ApiKey({ onError }: { onError: (message: string | null) => void }) {
   const [typed, setTyped] = useState('');
   const [saving, setSaving] = useState(false);
   const key = voice?.key;
-  const tailnet = voice?.computer !== null && voice?.computer !== undefined;
   const save = async (next: string | null) => {
     if (!voice) return;
     setSaving(true);
@@ -125,25 +124,12 @@ function ApiKey({ onError }: { onError: (message: string | null) => void }) {
           <span className="ib-desc">Kept on {voiceWhere(voice)}. It is never shown again or sent to any page.</span>
         </span>
         <span className="ib-ctl">
-          {!tailnet && (
-            <>
-              <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-voice-key-replace="">
-                Replace
-              </button>
-              <button type="button" className="ib-btn ib-ghost" disabled={saving} onClick={() => void save(null)} data-voice-key-remove="">
-                Remove
-              </button>
-            </>
-          )}
-        </span>
-      </div>
-    );
-  if (tailnet)
-    return (
-      <div className="ib-prow" data-voice-key="elsewhere">
-        <span className="ib-txt">
-          <span className="ib-l">No key saved</span>
-          <span className="ib-desc">Add the key on {voiceWhere(voice)} itself. It can’t be set from here.</span>
+          <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-voice-key-replace="">
+            Replace
+          </button>
+          <button type="button" className="ib-btn ib-ghost" disabled={saving} onClick={() => void save(null)} data-voice-key-remove="">
+            Remove
+          </button>
         </span>
       </div>
     );
@@ -157,7 +143,7 @@ function ApiKey({ onError }: { onError: (message: string | null) => void }) {
         <label className="ib-l" htmlFor="ib-vkey">
           API key
         </label>
-        <span className="ib-desc">Kept on this computer. It is never shown again or sent to any page.</span>
+        <span className="ib-desc">Kept on {voiceWhere(voice)}. It is never shown again or sent to any page.</span>
       </span>
       <span className="ib-ctl ib-vkeyctl">
         <input id="ib-vkey" className="ib-vkey" type="password" autoComplete="new-password" spellCheck={false} placeholder="sk-…" value={typed} onChange={(event) => setTyped(event.target.value)} />

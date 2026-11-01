@@ -10,10 +10,10 @@
  * adds (the MagicDNS Host and the owner's `Tailscale-User-Login`).
  *
  * Proved at 390 by 844 with touch: the page is `via: tailnet`; the sidebar's
- * quiet "What's new in X" link and Settings → About (the version and the
- * link, no Update, Check now or update switch) open the notes; the notes
- * scroll, show their saved image, fit the width, and close back to the
- * Inbox. No update control shows anywhere.
+ * quiet "What's new in X" link and Settings → About (the computer's block,
+ * with a link to the running release) open the notes; the notes scroll, show
+ * their saved image, fit the width, and close back to the Inbox. No newer
+ * release is known here, so nothing offers an update.
  *
  * Needs the built apps (apps/hook/dist), as the other specs do; then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-whats-new-tailnet.spec.ts`.
@@ -174,9 +174,9 @@ test.afterAll(async () => {
   }
 });
 
-const noUpdateControls = async (page: Page) => {
-  await expect(page.locator('.ib-upd, [data-about-update], [data-general-update], [data-general-check], [data-whats-new-update], [data-settings-about] [role="switch"]')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: /check now|^update/i })).toHaveCount(0);
+const noUpdateOffered = async (page: Page) => {
+  await expect(page.locator('.ib-upd, [data-about-update], [data-general-update], [data-whats-new-update]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^update/i })).toHaveCount(0);
 };
 
 test('the sidebar link opens What\'s new on a phone through the tailnet: it scrolls, shows the image, fits, and closes', async () => {
@@ -190,14 +190,14 @@ test('the sidebar link opens What\'s new on a phone through the tailnet: it scro
   await page.locator('[data-sidebar="trigger"]').first().click();
   const link = page.locator(`[data-whats-new-link="${VERSION}"]`);
   await expect(link).toBeVisible();
-  await noUpdateControls(page);
+  await noUpdateOffered(page);
   await link.click();
 
   const wn = page.locator('.ib-wn');
   await expect(wn).toBeVisible();
   await expect(wn).toContainText(`Opening line of ${VERSION}.`);
   await expect(page.locator('.ib-error')).toHaveCount(0);
-  await noUpdateControls(page);
+  await noUpdateOffered(page);
 
   // The saved image loads through the tailnet path.
   const image = wn.locator('img').first();
@@ -224,13 +224,14 @@ test('the sidebar link opens What\'s new on a phone through the tailnet: it scro
   expect(world.errors).toEqual([]);
 });
 
-test('Settings → About over the tailnet: the version and the link, no update controls; the link opens the notes', async () => {
+test('Settings → About over the tailnet: the computer\'s block and the link to this release; the link opens the notes', async () => {
   const { page } = world;
   await page.goto(`${world.url}#settings/about`);
-  const about = page.locator('[data-settings-about="tailnet"]');
+  const about = page.locator('[data-settings-about]');
   await expect(about).toBeVisible();
+  await expect(about).toHaveAttribute('data-settings-about', '');
   await expect(about).toContainText(`Plannotator ${VERSION}`);
-  await noUpdateControls(page);
+  await noUpdateOffered(page);
   await page.screenshot({ path: join(proofDir, 'about-phone.png') });
   await page.locator(`[data-about-whats-new="${VERSION}"]`).click();
   await expect(page.locator('.ib-wn')).toContainText(`Opening line of ${VERSION}.`);
