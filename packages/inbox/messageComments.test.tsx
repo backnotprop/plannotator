@@ -456,9 +456,10 @@ test.skipIf(!hasDom)('a click on a diagram part in a message: the composer, the 
 
   act(() => button(el, 'Send').click());
   await until(async () => (await pending(message.id)).length === 0, 'the comment sent');
-  const { waited } = await command<{ waited: { status: string; reply: { body: string } } }>({ wait: { thread: message.id, session: message.session } });
-  expect(waited.reply.body).toContain('# Feedback on your messages');
-  expect(waited.reply.body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
+  const { read } = await command<{ read: { thread: { messages: { body: string; author: { kind: string } }[] } } }>({ read: { thread: message.id, session: message.session } });
+  const body = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.body;
+  expect(body).toContain('# Feedback on your messages');
+  expect(body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
 }, 30_000);
 
 test.skipIf(!hasDom)('a diagram in the person\'s own message and in an archived message opens no composer', async () => {
