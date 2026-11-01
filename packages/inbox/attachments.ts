@@ -6,6 +6,7 @@
 
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
+import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
 import { cutText } from '@plannotator/core/inbox-questions';
 import {
@@ -355,7 +356,8 @@ function lineRangeLabel(start: number, end: number): string {
 /** The small tag beside a row in the chip's list: the element, diagram part, or a guided-review comment's lines. */
 export function recordTag(record: InboxAnnotationRecord): string | null {
   if (record.guide) return lineRangeLabel(record.guide.line_start, record.guide.line_end);
-  if (record.message) return null;
+  // A comment on a message's words has no tag; one on a diagram part in the message names the part.
+  if (record.message && annotationOf(record).diagramAnchor == null) return null;
   return annotationTag(annotationOf(record));
 }
 
@@ -484,7 +486,16 @@ export function isFileComment(record: InboxAnnotationRecord): boolean {
 export const MESSAGE_FEEDBACK_HEADING = {
   title: 'Feedback on your messages',
   intro: 'The following feedback is on the text of your messages in this thread, one section per message. Each quote is the words I selected (as shown on screen) in your message.',
+  /** Added to the intro only when a comment is on a diagram part. */
+  diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
 };
+
+/** The location a comment on a diagram part prints: core's line on one line, as ui's export writes it. A malformed anchor prints none. */
+function messageDiagramLocation(annotation: Annotation): string | null {
+  const anchor = annotation.diagramAnchor === undefined ? null : parseDiagramAnchor(annotation.diagramAnchor);
+  if (anchor === null) return null;
+  return cutText(diagramAnchorLocationLine(anchor).replace(/\s+/g, ' ').trim().replace(/`+/g, "'"), 600);
+}
 
 /** A message comment's section heading: "Feedback on your message from 2:58 PM (msg_…)", the time in the person's own time zone. */
 export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'message_id' | 'message'>, time: (iso: string) => string = whenTime): string {
@@ -499,7 +510,8 @@ export function messageFeedbackLabel(record: Pick<InboxAnnotationRecord, 'messag
  * line starting with `#`): words on one line sit inline in quotes, words on
  * several lines go in a fenced block no line of theirs can close
  * (`codeFenceFor`, as the guided-review export quotes code), so nothing in
- * them reads as a heading or leaves a fence open.
+ * them reads as a heading or leaves a fence open. A comment on a diagram part
+ * has the part's label for its words, and its location line under them.
  */
 function messageCommentEntry(annotation: Annotation, number: number): string {
   const words = annotation.originalText ?? '';
@@ -510,6 +522,8 @@ function messageCommentEntry(annotation: Annotation, number: number): string {
     const fence = codeFenceFor(words);
     out += `${fence}\n${words.replace(/\r\n?/g, '\n')}\n${fence}\n`;
   }
+  const location = messageDiagramLocation(annotation);
+  if (location !== null) out += `${location}\n\n`;
   if (!annotation.isQuickLabel && annotation.text) out += `${annotation.text.split(/\r\n|\r|\n/).map((line) => `> ${line}`).join('\n')}\n`;
   return `${out}\n`;
 }
@@ -536,7 +550,8 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
     byMessage.set(record.message_id, entry);
   }
   const ordered = [...byMessage].sort(([idA, a], [idB, b]) => a.at.localeCompare(b.at) || idA.localeCompare(idB));
-  let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}\n\n`;
+  const onDiagrams = ordered.some(([, entry]) => entry.annotations.some((annotation) => messageDiagramLocation(annotation) !== null));
+  let out = `# ${MESSAGE_FEEDBACK_HEADING.title}\n\n${MESSAGE_FEEDBACK_HEADING.intro}${onDiagrams ? ` ${MESSAGE_FEEDBACK_HEADING.diagrams}` : ''}\n\n`;
   for (const [id, entry] of ordered) {
     const list = [...entry.annotations].sort(compareInMessage);
     out += `## ${messageFeedbackLabel({ message_id: id, message: { at: entry.at } }, time)}\n\n`;
