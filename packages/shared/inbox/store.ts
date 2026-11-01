@@ -127,6 +127,7 @@ import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachm
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
+import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { INBOX_CARD_PR_HINT } from "./cards";
@@ -606,6 +607,7 @@ export class InboxStore {
   private pinList: InboxPin[] = [];
   /** Told when the pins change (no store line is written for them). */
   private readonly pinListeners = new Set<() => void>();
+  private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
   /** The seq of the line that last wrote to each card (a drop's seen mark is not a write): the Board's unread rule. */
@@ -882,6 +884,12 @@ export class InboxStore {
   onPinsChange(listener: () => void): () => void {
     this.pinListeners.add(listener);
     return () => this.pinListeners.delete(listener);
+  }
+
+  /** A thread or project was deleted: whatever runs for a thread that is gone can stop. */
+  onDeletion(listener: () => void): () => void {
+    this.deletionListeners.add(listener);
+    return () => this.deletionListeners.delete(listener);
   }
 
   private pinsChanged(): void {
@@ -4657,10 +4665,19 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
     }
+    // So does its Ask AI conversation.
+    pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
     // A person's sent uploads are files under inbox/uploads/<att_id>/: they go with their message.
     removeUnusedInboxUploadFiles(this.dir, attachmentIds);
     const stillNamed = this.markupsOf(() => true);
     removeInboxMarkups(this.dir, [...deletedMarkups].filter((name) => !stillNamed.has(name)));
+    for (const listener of this.deletionListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the deletion.
+      }
+    }
   }
 
   /**
