@@ -133,10 +133,10 @@ describe.if(hasDom)('the submit key stays in the box', () => {
 describe.if(hasDom)('a controlled composer', () => {
   test('shows the value it is given and reports typing without changing itself', () => {
     const typed: string[] = [];
-    composer({ value: 'fixed', onChange: (next) => typed.push(next) });
-    type('fixed!');
-    expect(typed).toEqual(['fixed!']);
-    expect(field().value).toBe('fixed');
+    composer({ value: 'held', onChange: (next) => typed.push(next) });
+    type('held and more');
+    expect(typed).toEqual(['held and more']);
+    expect(field().value).toBe('held');
   });
 
   test('a host holding the value drives the field, and can clear it after Send', () => {
