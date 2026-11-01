@@ -20,7 +20,7 @@ import type { InboxLaunchAgent, InboxLaunchRecord, InboxMessage } from "@plannot
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
-import type { LaunchHost, LaunchHostContext, LaunchLive } from "./inbox-launch-host";
+import { launchNoteText, writeLaunchNote, type LaunchHost, type LaunchHostContext, type LaunchLive } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 
 const restore: (() => void)[] = [];
@@ -162,6 +162,40 @@ async function until(check: () => boolean) {
   for (let i = 0; i < 200 && !check(); i++) await Bun.sleep(5);
   expect(check()).toBe(true);
 }
+
+describe("a thread note quoting an agent", () => {
+  test("one line of what can be seen: a control, a bidi mark or a line break can't hide or reorder the text; an emoji's joiner stays", () => {
+    expect(launchNoteText("rate‮ limit\n\treached\u0007", 80)).toBe("rate limit reached");
+    expect(launchNoteText("🧑‍💻", 80)).toBe("🧑‍💻");
+    expect(launchNoteText(null, 80)).toBe("");
+  });
+
+  test("its Markdown is escaped, so a provider's text can't draw a link or a heading in the thread", () => {
+    expect(launchNoteText("# see [this](http://x) `now`", 80)).toBe("\\# see \\[this\\](http://x) \\`now\\`");
+  });
+
+  test("cut by characters to the limit, never through an emoji", () => {
+    expect(launchNoteText("😀".repeat(10), 5)).toBe(`${"😀".repeat(4)}…`);
+  });
+
+  test("the note answers the thread's latest message, as the session; a failed write is logged and ends nothing", () => {
+    const { store, project } = setup();
+    const { message: root } = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "first", idempotency_key: "root" });
+    const { message: second } = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "second", reply_to: root.id, idempotency_key: "second" });
+    const changed: string[] = [];
+    const lines: string[] = [];
+    const note = { author: { host: "fake-agent", session: "s1", name: "Fake Agent" }, body: "It failed.", key: "note-1" };
+    writeLaunchNote({ store, onChange: () => changed.push("changed") }, root, note, (line) => lines.push(line));
+    const written = store.message(store.threadMessageIds(root.thread_id).at(-1)!)!;
+    expect(written).toMatchObject({ body: "It failed.", reply_to: second.id, author: { kind: "agent", session: "s1" } });
+    expect(changed).toEqual(["changed"]);
+
+    const broken = { sendMessage: () => { throw new Error("the disk is full"); }, threadMessageIds: () => [] } as unknown as InboxStore;
+    writeLaunchNote({ store: broken, onChange: () => changed.push("changed") }, root, note, (line) => lines.push(line));
+    expect(lines.join("\n")).toContain("the disk is full");
+    expect(changed).toEqual(["changed"]);
+  });
+});
 
 describe("a second agent behind LaunchHost", () => {
   test("drives the shared flow: offered, started, its line, its question, Stop, a reply restarts it once, Delete", async () => {
