@@ -38,7 +38,7 @@
 
 import { resolve } from "node:path";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
-import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
+import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
@@ -198,13 +198,10 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   if ("error" in input) return refused(input.code, input.error, 2);
 
   const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller);
-  const body = JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    // Where the script runs is where its relative attachments and images are, wherever its project is.
-    params: inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd, peek: caller.caller === null }),
-  });
+  // Where the script runs is where its relative attachments and images are, wherever its project is.
+  const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
+  if (caller.caller === null) params._meta = { ...(params._meta as Record<string, unknown>), [INBOX_PEEK_META_KEY]: true };
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params });
   const bytes = Buffer.byteLength(body);
   if (bytes > INBOX_MAX_REQUEST_BYTES) return refused("request_too_large", inboxRequestTooLargeMessage(bytes));
 
