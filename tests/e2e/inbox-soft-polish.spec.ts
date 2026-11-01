@@ -3,10 +3,10 @@
  * against the compiled binary:
  *
  *  - Mark read's `E` is a keycap inside its borderless button, centred on it;
- *  - a tile's hidden Open holds no room, so a name is never cut more than in
- *    today's look; when Open shows (hover, keyboard focus) it is back in the
- *    row and the name is cut before it, keeping its end, left to right and
- *    right to left; a screen without hover keeps its room;
+ *  - a tile's Open holds no room, at rest or shown (hover, keyboard focus), so
+ *    a name is never cut more than in today's look and never differently when
+ *    Open shows, left to right and right to left; a screen without hover keeps
+ *    its room (inbox-attachment-hover.spec.ts proves nothing moves);
  *  - layout corners one step smaller (panes 10, row pills 8, tiles 10), buttons
  *    unchanged;
  *  - the text size (`--inbox-text-size`, the Text size setting, 14 by default):
@@ -190,7 +190,7 @@ test("Mark read's E is a keycap inside its button, centred on it; today's look k
   await expect(kbd).toHaveAttribute('data-keycap', 'E');
 });
 
-test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard focus) the name is cut before it and keeps its end, left to right and right to left", async () => {
+test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it lies over the tile's end and the name is cut the same either way, left to right and right to left", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
   await expect(page.locator('[data-mark-read]')).toBeVisible();
@@ -211,10 +211,9 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
           shown: head.clientWidth,
           position: getComputedStyle(openEl).position,
           opacity: Number(getComputedStyle(openEl).opacity),
-          // The name's end (the extension) and its start are both inside the text box, and Open covers none of it.
+          // The name's end (the extension) and its start are both inside the text box.
           tailInside: tail.left >= text.left - 0.5 && tail.right <= text.right + 0.5,
           nameInside: name.left >= text.left - 0.5 && name.right <= text.right + 0.5,
-          clearOfOpen: name.right <= open.left + 0.5 || name.left >= open.right - 0.5,
           openInside: open.right <= t.getBoundingClientRect().right,
         };
       });
@@ -230,10 +229,10 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await tile.hover();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
     const hovered = await measure();
-    expect(hovered.position, name).toBe('static');
-    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, clearOfOpen: true, openInside: true });
-    // Never cut more than today's look while Open shows.
-    expect(hovered.shown, name).toBeGreaterThanOrEqual(today.shown - 0.5);
+    // Out of the row still: the name is cut exactly as at rest (inbox-attachment-hover.spec.ts proves every box).
+    expect(hovered.position, name).toBe('absolute');
+    expect(hovered, `${name} hovered`).toMatchObject({ tailInside: true, nameInside: true, openInside: true });
+    expect(hovered.shown, name).toBe(rest.shown);
     await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, `4-tiles-hover-${name === LONG ? 'ltr' : 'rtl'}.png`) });
     // From the keyboard: focus-visible shows Open the same way.
     await page.mouse.move(700, 880);
@@ -243,7 +242,7 @@ test("a tile's hidden Open holds no room at rest; when it shows (hover, keyboard
     await page.keyboard.press('Tab');
     await expect(tile).toBeFocused();
     await expect.poll(async () => (await measure()).opacity).toBe(1);
-    expect(await measure(), `${name} focused`).toMatchObject({ position: 'static', tailInside: true, nameInside: true, clearOfOpen: true });
+    expect(await measure(), `${name} focused`).toMatchObject({ position: 'absolute', tailInside: true, nameInside: true, shown: rest.shown });
   }
   await page.mouse.move(700, 880);
   await page.locator('.ib-atts').last().screenshot({ path: join(proofDir, '4-tiles-rest.png') });
