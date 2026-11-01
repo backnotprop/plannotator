@@ -3,7 +3,7 @@
  * stylesheet. A class with no rule fails silently in a browser: the window
  * draws, with a corner, a hover or a focus halo missing. The folder's classes
  * are read from the source, then compiled one at a time through Tailwind with
- * the Inbox's own entry, the mapping in `packages/inbox/inbox.css` included.
+ * the Inbox's own entry, the mapping in `apps/inbox/index.css` included.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync, readdirSync } from 'node:fs';
