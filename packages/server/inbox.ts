@@ -972,6 +972,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
           (await codexWake.wakes(host, session, meta)) ||
           qwenWake.wakes(host, session, meta),
+        bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
@@ -2344,7 +2345,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A Codex thread (inbox-codex-wake.ts). Codex names its thread on every call (`_meta.threadId`), so a
         // tool without a session (search, get_guide_brief) counts too: it is there, and it read what was queued
         // before this turn started. While this Inbox can wake it (not a `codex exec` run), it is live for New
-        // message, compose and tags. A command its shell runs (host codex, CODEX_THREAD_ID) is presence only.
+        // message, compose and tags. A command its shell runs (host codex, CODEX_THREAD_ID) names no turn, so
+        // it is presence, and marks a queued Tidy wake delivered, but it delivers no reply and is not made live.
         const meta = params?._meta;
         const thread = codexThreadOfCall(meta);
         if (thread && (!session || session === thread)) {
