@@ -608,18 +608,29 @@ const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: sa
 
 ### Inbox thread parts (`components/inbox-thread`; unreleased, in progress)
 
-The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete and styles ship (below).
+The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete.
 
 ```tsx
 import { Icon, HostMark } from "@plannotator/ui/components/inbox-thread/icons";
 import { GuideCard } from "@plannotator/ui/components/inbox-thread/GuideCard";
+
+<div className="pn-inbox" data-pn-tooltip-root="">
+  <GuideCard guide={guide} onOpen={open} />
+</div>
+```
+
+```css
+/* Its own stylesheet: import it OUTSIDE any cascade layer, after the host's base reset. */
+@import "@plannotator/ui/inbox-thread.css";
 ```
 
 - **In the folder so far.** `icons` (`Icon`, `HostMark`, `AuthorMark`, `TabGlyph`, `TailscaleMark`), `Tip` (`Tip`, `isTextCut`), `FileName`, `GuideCard`, `SkillsLine`, `ReaskNote`, and `reask` (the pure Re-ask rules).
 - **Host-neutral.** A part takes what it shows as props, over core's `InboxMessageWire`, `InboxAttachmentState` and related types. It makes no request and reads no route, hash, cookie or storage. `tests/inbox-thread-parts-host-neutral.test.ts` fails if one does.
-- **Tooltips.** `Tip` portals into the nearest `[data-pn-tooltip-root]`, so put that attribute on your root. Without a `TooltipProvider`, each `Tip` keeps its own 150 ms delay.
-- **Styles are not shipped yet.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. A later step generates `@plannotator/ui/inbox-thread.css` from that file at `prepack` (the pattern of `bridge-script.asset.js`), and hosts wrap the parts in a `.pn-inbox` root. Until then a part renders here without its look.
-- **Plannotator.** The parts' old paths in `packages/inbox` re-export them, and the Inbox passes nothing new. These parts add no Tailwind output: the built CSS of plan review, code review, the Inbox and `styles.css` does not change.
+- **Tooltips.** `Tip` portals into the nearest `[data-pn-tooltip-root]`, so put that attribute on your `.pn-inbox` root, the same element: the sheet styles nothing outside that root. Without a `TooltipProvider`, each `Tip` keeps its own 150 ms delay.
+- **Styles.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. `@plannotator/ui/inbox-thread.css` is generated from that file at `prepack` (the pattern of `bridge-script.asset.js`; gitignored, in `files`). It is the whole sheet, about 560 KB raw and 79 KB gzipped, not a subset. What a host has to do is under "Consuming it".
+- **Nothing reaches outside `.pn-inbox`.** The generator scopes every selector to the root with `:where(.pn-inbox)`, which adds no specificity, so the cascade is the Inbox's. It drops the rules that style the page itself (`html`, `body`, `#root`, `html:has(.pn-inbox)`, `:root[data-ib-keyboard-pin]:has(.pn-inbox)`, `html.ib-theme-instant`). What stays on `:root` is `--ib-*` tokens only, and every global name (`@keyframes`, `@property`, `::highlight()`, container names) starts `ib-`. The cost: a part that portals outside the root has no look, so portal into the root. `tests/inbox-thread-css.test.ts` checks all of this over the real `inbox.css`, so a new rule there cannot leak unnoticed. A new at-rule the generator does not know, such as `@font-face`, fails `prepack`.
+- **Width.** The sheet carries the Inbox's viewport media queries as they are. In a panel narrower or wider than the Inbox's pane they answer for the window, not the panel. See HANDOFF.md § "Inbox thread stylesheet".
+- **Plannotator.** The parts' old paths in `packages/inbox` re-export them, and the Inbox passes nothing new and does not load the generated sheet. These parts add no Tailwind output: the built CSS of plan review, code review, the Inbox and `styles.css` does not change.
 
 ## Consuming it (e.g. from Workspaces)
 
@@ -638,6 +649,13 @@ npm install @plannotator/ui @plannotator/core
    The same policy covers math: KaTeX's stylesheet + fonts are deliberately not in `styles.css` — if you render math, load `katex/dist/katex.min.css` yourself (import, CDN tag, or self-hosted copy; see HANDOFF.md "Math rendering").
 4. Import components: `import { Viewer } from "@plannotator/ui/components/Viewer";`
 5. Build with a bundler that compiles TS/TSX (Vite + React 19 + Tailwind v4). The packages ship **source**, so your bundler compiles them — set `moduleResolution: "bundler"`, `allowImportingTsExtensions`, `jsx: "react-jsx"`.
+6. **If you render the Inbox thread parts** (`components/inbox-thread`):
+   - Import `@plannotator/ui/inbox-thread.css` **outside any cascade layer, after your base reset**, as with `contents-rail.css`. Inside a layer below Tailwind's `base`, Tailwind's preflight beats it.
+   - Keep `styles.css` from step 2: the sheet reads its theme tokens and defines none of them.
+   - Wrap the parts in one root with both markers, `<div className="pn-inbox" data-pn-tooltip-root="">`. The root sets the type, `height: 100%`, `position: relative` and `background: var(--ib-ground)`. The Inbox's pane paints `--card`, so set `background: var(--card)` on your root to match it, or use your panel's own surface. In a panel that scrolls, `height: 100%` stops the background short of tall content, so set `height: auto` on the root too, or make the root the scroller.
+   - Fonts are step 3's. The sheet ships none. With Tailwind, its theme defines `--font-sans` and `--font-mono`, and that beats `styles.css` in a lower layer, so the parts draw in the system font. Set both on your root.
+   - Set the mode on `<html>` as `ThemeProvider` does: the sheet reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount.
+   - Portal into the root: the sheet styles nothing outside it.
 
 **Upgrade note: the plan look defaults to Clean.** `gridEnabled` (storage key `plannotator-grid-enabled`) now defaults to `false`, and a stored value counts only with the v2 marker `plannotator-plan-look-v2 = 'resolved'`. Plannotator's chooser and its Settings switch write it. On the first settings read, a v1 marker (`plannotator-plan-look-choice-resolved = 'true'`, or the legacy `plannotator-look-feel-announcement-seen = '2'`) next to a stored `'true'` is moved to Clean once (the stored value is rewritten to `'false'` and the v2 key set to `'notice'`); a v1 marker with Clean becomes `'resolved'` silently. Plannotator's apps then show a one-time notice. That includes the share portal's root and demo pages; only a shared session puts it off. A host that renders no chooser (Workspaces) shows nothing, so its users simply open in Clean, and every user with no marker opens in Clean too. To keep stored values instead, call `markLookAndFeelChoiceResolved()` from `@plannotator/ui/utils/lookAndFeelAnnouncement` before the first settings read, or seed `plannotator-plan-look-v2 = 'resolved'` in your `storageBackend`. A host that writes `gridEnabled` from its own UI should call `markLookAndFeelChoiceResolved()` with it, or the value will not survive a reload.
 
