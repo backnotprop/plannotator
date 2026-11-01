@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxAnnotationRecord } from "@plannotator/core/inbox-types";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { attachmentFeedback } from "../inbox/attachments";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -211,6 +212,111 @@ test("an archived thread's messages take no new comment and no edit (409) until 
   expect((await post(server, `/api/inbox/messages/${back.message_id}/annotations`, { annotation: comment({ id: "ann-back", originalText: "retry budget" }) })).status).toBe(200);
   expect((await post(server, `/api/inbox/messages/${sent.message_id}/resolve`, { resolved: false })).status).toBe(200);
   expect((await post(server, route, { annotation: comment({ text: "An edit." }) })).status).toBe(200);
+});
+
+/** A comment on a diagram part in a message, as DiagramBlock makes it. */
+function diagramComment(overrides: Record<string, unknown> = {}) {
+  return comment({
+    id: "ann-diagram-1",
+    blockId: "block-1",
+    startOffset: 0,
+    endOffset: 0,
+    text: "Run the integration suite here too.",
+    originalText: "Tests pass?",
+    diagramAnchor: { v: 1, family: "flowchart", kind: "node", id: "B", label: "Tests pass?", sourceLine: [5, 5] },
+    ...overrides,
+  });
+}
+
+test("a comment on a diagram part keeps its anchor through the door, an edit and a restart, and Send names the part; a malformed anchor is refused", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await sendMessage(client, project);
+  const route = `/api/inbox/messages/${sent.message_id}/annotations`;
+
+  for (const diagramAnchor of [null, "node B", { v: 2, family: "flowchart", kind: "node", id: "B" }, { v: 1, family: "plantuml", kind: "node", id: "B" }, { v: 1, family: "flowchart", kind: "edge", from: "B" }]) {
+    const answer = await post(server, route, { annotation: diagramComment({ diagramAnchor }) });
+    expect([answer.status, ((await answer.json()) as { code: string }).code]).toEqual([422, "validation_error"]);
+  }
+  expect(await pending(server, sent.thread_id)).toHaveLength(0);
+
+  // What is stored is the anchor as the parser reads it: anything else a client put beside it stays out.
+  const anchor = { v: 1, family: "flowchart", kind: "node", id: "B", label: "Tests pass?", sourceLine: [5, 5] };
+  expect((await post(server, route, { annotation: diagramComment({ diagramAnchor: { ...anchor, extra: "<script>" } }) })).status).toBe(200);
+  expect((await post(server, route, { annotation: diagramComment({ text: "Run it nightly too." }) })).status).toBe(200);
+  server.stop();
+  servers.splice(servers.indexOf(server), 1);
+  const again = await start(dataDir);
+  const records = await pending(again, sent.thread_id);
+  expect(records.map((r) => [r.annotation.text, r.annotation.diagramAnchor])).toEqual([["Run it nightly too.", anchor]]);
+
+  const reply = await post(again, `/api/inbox/messages/${sent.message_id}/reply`, {
+    idempotency_key: "send-diagram",
+    words: "One note on the diagram.",
+    feedback: attachmentFeedback(records, [], new Map(), project),
+    annotation_ids: records.map((r) => r.id),
+  });
+  expect(reply.status).toBe(200);
+  const body = ((await reply.json()) as { reply: { body: string } }).reply.body;
+  expect(body).toContain('Feedback on: "Tests pass?"\nDiagram node Tests pass? (B), line 5\n\n> Run it nightly too.');
+  expect(await pending(again, sent.thread_id)).toHaveLength(0);
+});
+
+test("over the tailnet a comment on a diagram part goes as a comment on words does, the owner's and an allowed guest's; another site's is refused the same", async () => {
+  const MAGIC = "macbook-pro.tail0000.ts.net";
+  const OWNER = "ramos@example.com";
+  const GUEST = "guest@example.com";
+  const serve = new Map<number, string>();
+  const fakeTailscale: TailscaleRunner = (args) => {
+    const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+    if (args[1] === "status") {
+      const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
+      const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
+      return ok(serve.size === 0 ? "{}" : JSON.stringify({ TCP, Web }));
+    }
+    const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+    if (args.includes("off")) serve.delete(httpsPort);
+    else serve.set(httpsPort, args.at(-1)!);
+    return ok(`https://${MAGIC}:${httpsPort}/\n`);
+  };
+  const { project, dataDir } = world();
+  mkdirSync(dataDir, { recursive: true });
+  // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
+  const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+  try {
+    const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
+    servers.push(server);
+    const client = await agent(server);
+    const sent = await sendMessage(client, project);
+    const listener = server.tailscale.listenerPort();
+    expect(listener).not.toBeNull();
+    const origin = `https://${MAGIC}:${server.port}`;
+    const through = (login: string, annotation: unknown, site: string = origin) =>
+      fetch(`http://127.0.0.1:${listener}/api/inbox/messages/${sent.message_id}/annotations`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: site, "Sec-Fetch-Site": site === origin ? "same-origin" : "cross-site", "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: server.serverSession, annotation }),
+      });
+    const codes: [string, number][] = [];
+    for (const [login, words, diagram] of [
+      [OWNER, comment({ id: "ann-owner-words" }), diagramComment({ id: "ann-owner-part" })],
+      [GUEST, comment({ id: "ann-guest-words" }), diagramComment({ id: "ann-guest-part" })],
+    ] as const) {
+      codes.push([login, (await through(login, words)).status], [login, (await through(login, diagram)).status]);
+    }
+    expect(codes).toEqual([[OWNER, 200], [OWNER, 200], [GUEST, 200], [GUEST, 200]]);
+    expect((await through(OWNER, diagramComment({ id: "ann-evil" }), "https://evil.example")).status).toBe((await through(OWNER, comment({ id: "ann-evil-2" }), "https://evil.example")).status);
+    expect((await pending(server, sent.thread_id)).filter((r) => r.annotation.diagramAnchor).map((r) => r.id).sort()).toEqual(["ann-guest-part", "ann-owner-part"]);
+  } finally {
+    if (previous.data === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = previous.data;
+    if (previous.ts !== undefined) process.env.PLANNOTATOR_INBOX_TAILSCALE = previous.ts;
+  }
 });
 
 test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's wait_for_reply returns it, and a sent comment is closed", async () => {

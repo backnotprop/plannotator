@@ -7,6 +7,8 @@
    system face. */
 @source "../../packages/ui/components/**/*.tsx";
 @source "../../packages/ui/hooks/**/*.ts";
+/* The shared chat window has no host in this app, so its classes stay out of this stylesheet. */
+@source not "../../packages/ui/components/chat/**";
 @source "../../packages/inbox/surface/**/*.tsx";
 @source "../../packages/inbox/guide/**/*.tsx";
 @source "../../packages/guide-viewer/**/*.tsx";
