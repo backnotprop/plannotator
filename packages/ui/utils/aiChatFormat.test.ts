@@ -12,7 +12,8 @@
  * the step DOMPurify runs on, instead of running DOMPurify.
  */
 import { describe, expect, test } from 'bun:test';
-import { CHAT_SANITIZE_CONFIG, chatMarkdownToHtml } from './aiChatFormat';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CHAT_SANITIZE_CONFIG, chatMarkdownToHtml, renderChatMarkdown } from './aiChatFormat';
 
 function tagsIn(html: string): string[] {
   return [...new Set([...html.matchAll(/<([a-z][a-z0-9]*)\b/gi)].map((m) => m[1].toLowerCase()))];
@@ -53,6 +54,28 @@ describe('Ask AI answers keep their markdown structure', () => {
       expect(attr.startsWith('on')).toBe(false);
       expect(attr).not.toBe('style');
       expect(attr).not.toBe('src');
+      expect(attr).not.toBe('class');
     }
+    expect(CHAT_SANITIZE_CONFIG.ALLOW_DATA_ATTR).toBe(false);
+    expect(CHAT_SANITIZE_CONFIG.ALLOW_ARIA_ATTR).toBe(false);
+  });
+});
+
+describe('renderChatMarkdown never throws', () => {
+  test('deeply nested input renders as escaped text with its line breaks', () => {
+    const text = `${'>'.repeat(20000)} deep\nsecond line`;
+    expect(() => chatMarkdownToHtml(text)).toThrow();
+    const html = renderToStaticMarkup(renderChatMarkdown(text) as never);
+    expect(html).toContain('white-space:pre-wrap');
+    expect(html).toContain('&gt;&gt;&gt;');
+    expect(html).toContain('deep\nsecond line');
+    expect(html).not.toContain('<blockquote');
+  });
+
+  test('a script in the fallback stays text', () => {
+    const text = `${'>'.repeat(20000)}\n<script>window.x = 1</script>`;
+    const html = renderToStaticMarkup(renderChatMarkdown(text) as never);
+    expect(html).not.toContain('<script');
+    expect(html).toContain('&lt;script&gt;');
   });
 });
