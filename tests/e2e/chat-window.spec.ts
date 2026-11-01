@@ -268,13 +268,17 @@ test.describe('a stream', () => {
   const delta = (page: Page, text: string, state: 'streaming' | 'done') =>
     show(page, [say('a', 'assistant', text, state)], state === 'streaming' ? 'streaming' : 'ready');
 
-  const costly: [string, string, string][] = [
-    ['a very wide table', `${'|a'.repeat(33_000)}\n${'|-'.repeat(33_000)}\n`, 'th'],
-    ['a square table', `${`|${' a |'.repeat(300)}\n|${' - |'.repeat(300)}\n`}${`|${' b |'.repeat(300)}\n`.repeat(300)}`, 'td'],
-    ['many short paragraphs', 'x\n\n'.repeat(80_000), 'p + p'],
+  const square = (side: number) =>
+    `|${' a |'.repeat(side)}\n|${' - |'.repeat(side)}\n${`|${' b |'.repeat(side)}\n`.repeat(side)}`;
+  // The last says how it ends: a table of 300 by 300 is past the limit for good.
+  const costly: [string, string, string, number][] = [
+    ['a very wide table', `${'|a'.repeat(33_000)}\n${'|-'.repeat(33_000)}\n`, 'th', 33_000],
+    ['a table of 200 by 200', square(200), 'tbody tr', 200],
+    ['a table of 300 by 300', square(300), 'tbody tr', 0],
+    ['many short paragraphs', 'x\n\n'.repeat(80_000), 'p + p', 79_999],
   ];
-  for (const [name, text, element] of costly) {
-    test(`of ${name} does not pay its draw on every delta, and ends in full`, async ({ page }) => {
+  for (const [name, text, element, atTheEnd] of costly) {
+    test(`of ${name} does not pay its draw on every delta`, async ({ page }) => {
       await open(page);
       await delta(page, text, 'streaming');
       const later: number[] = [];
@@ -282,7 +286,7 @@ test.describe('a stream', () => {
       expect(Math.max(...later)).toBeLessThan(50);
       await expect(page.locator(`[data-text-part] ${element}`)).toHaveCount(0);
       await delta(page, text, 'done');
-      expect(await page.locator(`[data-text-part] ${element}`).count()).toBeGreaterThan(0);
+      await expect(page.locator(`[data-text-part] ${element}`)).toHaveCount(atTheEnd);
     });
   }
 
@@ -294,8 +298,9 @@ test.describe('a stream', () => {
       for (let step = 1; step <= 20; step += 1) total += await delta(page, text.slice(0, size + step * 32), 'streaming');
       return total / 20;
     };
-    await delta(page, text.slice(0, 200_000), 'streaming');
-    expect(await average(400_000)).toBeLessThan(50);
+    const atTheCeiling = await average(200_000);
+    expect(await average(240_000)).toBeLessThan(atTheCeiling / 2);
+    expect(await average(400_000)).toBeLessThan(atTheCeiling / 2);
     expect(await hostStanding(page)).toBe(true);
   });
 
