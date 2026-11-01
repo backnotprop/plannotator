@@ -257,7 +257,8 @@ test.describe('text that would stop the page', () => {
       await open(page);
       const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
       expect(took).toBeLessThan(1_000);
-      expect(await page.locator('[data-text-part] *').count()).toBeLessThan(20);
+      // Text with no spaces gets a <wbr> every so often. Those are ours, not the source's.
+      expect(await page.locator('[data-text-part] *:not(wbr)').count()).toBeLessThan(20);
       await expect(page.locator('[data-chat-window]')).toContainText('still here');
     });
   }
