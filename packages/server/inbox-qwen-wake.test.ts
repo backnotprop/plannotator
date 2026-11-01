@@ -13,7 +13,7 @@ import { createConnection, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxThread } from "@plannotator/core/inbox-types";
+import { INBOX_TIDY_INSTRUCTION, type InboxThread, type InboxTidyPlan } from "@plannotator/core/inbox-types";
 import { INBOX_WAKE_INSTRUCTION } from "@plannotator/shared/inbox/connection";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
@@ -152,7 +152,7 @@ async function fakeSession(fake: FakeAgents, qwenHome: string, project: string):
   return session;
 }
 
-async function world(options: { trust?: boolean; env?: Record<string, string>; knobs?: Record<string, unknown> } = {}): Promise<World> {
+async function world(options: { trust?: boolean; env?: Record<string, string>; knobs?: Record<string, unknown>; storeNow?: () => Date } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-qwen-wake-");
   fakes.push(fake);
   fake.install("qwen");
@@ -164,7 +164,7 @@ async function world(options: { trust?: boolean; env?: Record<string, string>; k
   if (options.trust !== false) expect((await ensureQwenTrust(dataDir, environment)).kind).toBe("added");
   const session = await fakeSession(fake, qwenHome, project);
   const start = async (knobs: Record<string, unknown> = {}) => {
-    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, qwenWake: { receiptTimeoutMs: 1_000, ...options.knobs, ...knobs } });
+    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, qwenWake: { receiptTimeoutMs: 1_000, ...options.knobs, ...knobs }, ...(options.storeNow ? { storeNow: options.storeNow } : {}) });
     servers.push(server);
     return server;
   };
@@ -511,6 +511,66 @@ describe("a reply to a running Qwen Code session", () => {
     // The forged refusal changed nothing: the session is still woken.
     expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
     void replyId;
+  });
+});
+
+describe("a Tidy through the Qwen wake", () => {
+  /**
+   * A question old enough to Tidy, then the Tidy `tidyAgo` ms ago, with Qwen
+   * answering its frame with `answer` (null: no receipt). No frame is awaited
+   * when the receipts socket cannot be made (`knobs`).
+   */
+  async function tidied(answer: string | null, options: { knobs?: Record<string, unknown>; tidyAgo?: number } = {}) {
+    const clock = { behind: 3 * 60 * 60_000 };
+    const w = await world({ knobs: options.knobs, storeNow: () => new Date(Date.now() - clock.behind) });
+    const asked = await qwenSends(w.client, w.project, ":::question\nShip it?\n\n- [ ] Yes\n- [ ] No\n:::");
+    clock.behind = options.tidyAgo ?? 0;
+    w.session.answer = answer;
+    const startTidy = (key: string) => fetch(`${base(w.server)}/api/inbox/tidy`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, sessions: [SESSION], idempotency_key: key }) });
+    expect((await startTidy("t1")).status).toBe(200);
+    await w.server.qwenWake.sweep();
+    if (!options.knobs) await until(() => w.session.received.length > 0);
+    const note = (await thread(w.server, asked.thread_id)).messages.find((m) => m.tidy)!;
+    const read = async () => {
+      const result = (await w.client.callTool({ name: "read_thread", arguments: { agent_session: SESSION, thread_id: asked.thread_id } })) as { content: { text: string }[]; structuredContent: { tidy?: { id: string } } };
+      return { text: result.content.map((part) => part.text).join("\n"), tidy: result.structuredContent.tidy };
+    };
+    const state = async () => ((await (await fetch(`${base(w.server)}/api/inbox/tidy`)).json()) as InboxTidyPlan).run!.agents[0]!.state;
+    return { ...w, asked, note, read, state, startTidy };
+  }
+
+  for (const [name, answer] of [
+    ["held for the person's review", "held"],
+    ["no receipt", null],
+    ["dropped by Qwen's rate limit, to be sent again", "dropped"],
+  ] as const) {
+    test(`${name}: the session's next read hands the Tidy over, once`, async () => {
+      const t = await tidied(answer);
+      expect(await t.state()).toBe("waiting");
+      const first = await t.read();
+      expect(first.text).toContain(INBOX_TIDY_INSTRUCTION);
+      expect(first.tidy?.id).toBe(t.note.id);
+      expect(await t.state()).toBe("delivered");
+      expect((await t.read()).tidy).toBeUndefined();
+    });
+  }
+
+  test("the receipts socket cannot be made: no frame goes, and the session's next read hands the Tidy over", async () => {
+    const t = await tidied(null, { knobs: { socketParent: "/nonexistent/plannotator" } });
+    expect(t.session.received).toHaveLength(0);
+    expect((await t.read()).tidy?.id).toBe(t.note.id);
+    expect(await t.state()).toBe("delivered");
+  });
+
+  test("a healthy wake with nothing to change: reads alone record the Tidy, and a later Tidy is not held back", async () => {
+    // Past the cool-down, so only a Tidy still not delivered can refuse the next one.
+    const t = await tidied("delivered", { tidyAgo: 31 * 60_000 });
+    await Bun.sleep(150);
+    expect((await t.read()).tidy?.id).toBe(t.note.id);
+    expect(await t.state()).toBe("delivered");
+    expect((await t.read()).tidy).toBeUndefined();
+    expect(t.session.received).toHaveLength(1);
+    expect((await t.startTidy("t2")).status).toBe(200);
   });
 });
 
