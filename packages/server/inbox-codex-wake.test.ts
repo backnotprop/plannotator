@@ -22,7 +22,7 @@ import {
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_WAITS_TEXT } from "./inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const OTHER_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5c";
@@ -355,10 +355,10 @@ describe("a reply to a Codex thread", () => {
     expect((await thread(w.server, sent.thread_id)).messages.find((m) => m.id === replyId)!.delivery).toMatchObject({ host: "codex", session: THREAD });
   });
 
-  test("a codex exec run is never woken: its agent is told to wait_for_reply, it is not live, and nothing is queued", async () => {
+  test("a codex exec run is never woken: its agent is told to read the thread later, it is not live, and nothing is queued", async () => {
     const w = await world();
     const sent = await codexSends(w.client, w.project, "Ship it?", THREAD, "exec");
-    expect(sent.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect((await thread(w.server, sent.thread_id)).messages[0]!.wakes).toBeUndefined();
     await Bun.sleep(100);
     const sessions = (await (await fetch(`${base(w.server)}/api/inbox/threads/${sent.thread_id}/sessions`)).json()) as { sessions: { session: string }[] };
@@ -369,41 +369,10 @@ describe("a reply to a Codex thread", () => {
     expect(w.server.codexWake.status(THREAD)).toBeNull();
   });
 
-  test("an open wait on one thread holds back only that thread's reply; another thread's reply to the same session is queued", async () => {
-    const w = await world();
-    const a = await codexSends(w.client, w.project, "A?");
-    const b = await w.client.callTool({
-      name: "send_message",
-      arguments: { body: "B?", project_path: w.project, agent_session: THREAD, agent_host: "codex", thread: "other work" },
-      _meta: codexMeta(THREAD),
-    });
-    const bSent = b.structuredContent as { message_id: string; thread_id: string };
-    expect(bSent.thread_id).not.toBe(a.thread_id);
-    const waiting = w.client.callTool({ name: "wait_for_reply", arguments: { agent_session: THREAD, thread_id: a.thread_id, timeout_seconds: 3 }, _meta: codexMeta(THREAD) });
-    await Bun.sleep(200);
-    await reply(w.server, bSent.message_id, { idempotency_key: "kb", words: "for B" });
-    await w.server.codexWake.sweep();
-    expect(queues(w.fake)).toHaveLength(1);
-    expect(argOf(queues(w.fake)[0]!.args, "message")).toContain("for B");
-    await waiting;
-  });
-
-  test("a thread blocked in wait_for_reply gets the reply from that call, and it is not queued as a turn as well", async () => {
-    const w = await world();
-    const sent = await codexSends(w.client, w.project, "Ship it?");
-    const waiting = w.client.callTool({ name: "wait_for_reply", arguments: { agent_session: THREAD, thread_id: sent.thread_id, timeout_seconds: 20 }, _meta: codexMeta(THREAD) });
-    await Bun.sleep(200);
-    await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
-    const answer = (await waiting).structuredContent as { status: string };
-    expect(answer.status).toBe("replied");
-    await w.server.codexWake.sweep();
-    expect(queues(w.fake)).toEqual([]);
-  });
-
   test("without a Codex CLI that queues, nothing wakes: the message is MCP-only and nothing is run", async () => {
     for (const w of [await world({ codex: false }), await world({ env: { FAKE_CODEX_VERSION: "codex-cli 0.148.0" } })]) {
       const sent = await codexSends(w.client, w.project, "Ship it?");
-      expect(sent.text).toContain(INBOX_REPLY_WAITS_TEXT);
+      expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
       expect((await thread(w.server, sent.thread_id)).messages[0]!.wakes).toBeUndefined();
       await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
       await w.server.codexWake.sweep();

@@ -60,7 +60,7 @@ export const INBOX_UPLOADS_DIR = "uploads";
 /**
  * The lines an agent reads under a message's words for the files the person
  * attached, each with its path so the agent can open it: `Attached: name (path)`.
- * Empty when it carries none. The wake and `wait_for_reply` both append them.
+ * Empty when it carries none. The wake appends them; read_thread gives the attachment records.
  */
 export function inboxAttachedLines(message: { attachments?: readonly InboxAttachment[] | null }): string {
   return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");

@@ -9,8 +9,8 @@
  *  - a click presses the button, draws the line ("goes to Claude Code in a
  *    few seconds") and the toast, the agent's thread gains no message, and
  *    the row reads "👍 Looks good" in Quiet once the thread is left;
- *  - after the Undo window the agent's wait_for_reply returns
- *    `acknowledged`, and the line says "Delivered to Claude Code";
+ *  - after the Undo window the agent's read_thread shows the 👍, and the
+ *    line says "Delivered to Claude Code";
  *  - a message from a waking connection: the line says Queued, the bridge
  *    hands its session one command whose wake names the message, and once
  *    delivered the line says Delivered;
@@ -180,11 +180,11 @@ test('a click: pressed, the line and the toast, nothing sent yet; the row reads 
   await shot(page, '04-row-looks-good', ['light']);
 });
 
-test('after the Undo window the agent gets acknowledged, and the line says Delivered to Claude Code', async () => {
+test('after the Undo window the agent reads the 👍, and the line says Delivered to Claude Code', async () => {
   const { page, threads, claude } = world;
-  const waited = await claude.waitForReply(threads.merged, 20);
-  expect(waited.status).toBe('acknowledged');
-  expect((waited.acks as { label: string }[])[0]!.label).toBe('Looks good');
+  await expect
+    .poll(async () => ((await claude.readThread(threads.merged)).messages as { ack?: { label: string } | null }[]).at(-1)!.ack?.label, { timeout: 20_000 })
+    .toBe('Looks good');
   await page.goto(`${world.url}#thread=${threads.merged}`);
   await expect(page.locator('[data-ack-pill]')).toHaveAttribute('data-ack-pill', 'delivered');
   await expect(page.locator('[data-ack-pill]')).toContainText(/👍 Looks good\s*Delivered to Claude Code, \d/);

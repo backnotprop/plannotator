@@ -24,8 +24,6 @@ import {
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { createMcpHandler } from "@modelcontextprotocol/server";
-import { createInboxMcpServer } from "./inbox-mcp";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxLiveSessions, INBOX_ASKER_GRACE_MS } from "./inbox-sessions";
@@ -125,19 +123,6 @@ describe("a reply to another session when the asking one has ended", () => {
     expect(right.status).toBe(200);
     expect((await thread(server, asked.thread_id)).messages.at(-1)?.delivery).toMatchObject({ host: "claude-code", session: "ses-taker" });
     expect(await poll(server, "ses-taker", project)).toEqual([]);
-  });
-
-  test("the asking session's wait_for_reply never returns a reply sent to another session; that session's own wait does, and records the delivery", async () => {
-    const { server, client, project } = await setup();
-    const asked = await agentSends(client, project, "ses-asker", QUESTION);
-    await poll(server, "ses-taker", project);
-    expect((await reply(server, asked.message_id, { idempotency_key: "k1", words: "Retry once.", to: { session: "ses-taker" } })).status).toBe(200);
-
-    const askerWait = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: asked.thread_id, agent_session: "ses-asker", timeout_seconds: 1 } });
-    expect((askerWait.structuredContent as { status: string }).status).toBe("waiting");
-    const takerWait = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: asked.thread_id, agent_session: "ses-taker", timeout_seconds: 1 } });
-    expect(JSON.stringify(takerWait.content)).toContain("Retry once.");
-    expect((await thread(server, asked.thread_id)).messages.at(-1)?.delivery).toMatchObject({ session: "ses-taker" });
   });
 
   test("a session that is not live is refused with 409 session_not_live and nothing is written; a replay of a reply that went answers what it wrote", async () => {
@@ -262,45 +247,6 @@ describe("a reply to another session when the asking one has ended", () => {
   });
 });
 
-describe("MCP presence through the real MCP server", () => {
-  test("an open wait_for_reply holds its session present until it answers; nothing else does", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-ended-mcp-")));
-    roots.push(root);
-    const store = InboxStore.open(join(root, "data"));
-    const project = store.ensureProject({ name: "ledger", root });
-    const events: string[] = [];
-    const handler = createMcpHandler(
-      () =>
-        createInboxMcpServer({
-          store,
-          baseUrl: () => "http://localhost:1/",
-          resolveProject: async () => project,
-          presence: {
-            seen: (session) => void events.push(`seen ${session}`),
-            hold: (session) => {
-              events.push(`hold ${session}`);
-              return () => void events.push(`release ${session}`);
-            },
-          },
-        }),
-      { legacy: "stateless" },
-    );
-    const http = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => handler.fetch(req) });
-    const client = new Client({ name: "inbox-ended-presence-test", version: "1.0.0" });
-    try {
-      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${http.port}/mcp`)));
-      const sent = (await client.callTool({ name: "send_message", arguments: { body: QUESTION, project_path: root, agent_session: "ses-mcp" } }))
-        .structuredContent as { thread_id: string };
-      expect(events).toEqual([]);
-      await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, agent_session: "ses-mcp", timeout_seconds: 1 } });
-      expect(events).toEqual(["hold ses-mcp", "release ses-mcp"]);
-    } finally {
-      await client.close().catch(() => {});
-      http.stop(true);
-    }
-  });
-});
-
 describe("the Pi and OpenCode wake (agent-link) for a redirected reply", () => {
   test("the picked session's wake delivers the reply once, with the line saying the asker ended, and acknowledges it", async () => {
     const { server, client, project } = await setup();
@@ -356,20 +302,16 @@ describe("the asking session's grace", () => {
     expect(live.askerLive("ses-a")).toBe(true);
   });
 
-  test("MCP activity is presence: an open wait_for_reply keeps an MCP-only asker there for as long as it waits; a tool call counts for the grace", () => {
+  test("MCP activity is presence: a tool call counts for the grace", () => {
     let now = 1_000_000;
     const live = createInboxLiveSessions({ store: {} as InboxStore, serverSession: "s", resolveRoot: async (path) => path, now: () => now });
     now += INBOX_ASKER_GRACE_MS + 1;
     expect(live.askerLive("ses-mcp")).toBe(false);
-    const release = live.holdOverMcp("ses-mcp");
-    now += INBOX_ASKER_GRACE_MS * 5;
+    live.seenOverMcp("ses-mcp");
     expect(live.askerLive("ses-mcp")).toBe(true);
-    release();
     now += INBOX_ASKER_GRACE_MS - 1;
     expect(live.askerLive("ses-mcp")).toBe(true);
     now += 2;
     expect(live.askerLive("ses-mcp")).toBe(false);
-    live.seenOverMcp("ses-mcp");
-    expect(live.askerLive("ses-mcp")).toBe(true);
   });
 });

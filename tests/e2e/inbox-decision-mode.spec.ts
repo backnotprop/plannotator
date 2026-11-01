@@ -13,7 +13,7 @@
  * one two-way question with a picture in its context, Pi a pick-any. The
  * dialog from that thread opens Stopped first; picks save at once; once Claude
  * Code's two are answered its chip says "Sending in N s · Hold", and after the
- * Hold its reply reaches the agent's own wait_for_reply as ONE reply carrying
+ * Hold the agent reads its reply with read_thread as ONE reply carrying
  * both answers; Codex replaces its question while it is on screen and the card
  * swaps under a banner; the end screen. Then a phone (WebKit, iPhone 15).
  * Then the agent contract lines (approval "inbox-decision-mode", "Agent
@@ -277,8 +277,8 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   const claudes = replies.filter((m) => m.body.includes('Retry with the same key'));
   expect(claudes).toHaveLength(1);
   expect(claudes[0]!.body).toContain('Yes, page on-call');
-  const received = await claude.waitForReply(claudeThread.thread_id, 5);
-  expect(JSON.stringify(received)).toContain('Yes, page on-call');
+  const received = await claude.nextReply(claudeThread.thread_id, 5);
+  expect(received.body).toContain('Yes, page on-call');
   // The agent answers: its chip and its end row go to Replied.
   await claude.send({ project_path: world.billing, reply_to: claudeThread.thread_id, body: 'Retrying 409s with the same key now; paging on-call after 5 tries.' }, { wakes: true });
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText('Replied');

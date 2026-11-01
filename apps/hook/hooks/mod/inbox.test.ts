@@ -234,7 +234,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     // The mod's wake delivers the reply as a turn: the result says to end the turn, never to wait.
     const next = await session.callInbox({ action: 'send_message', body: 'A second note.' }, w.project)
     expect('text' in next && next.text).toContain('arrives in this session by itself')
-    expect('text' in next && next.text).not.toContain('wait_for_reply with this thread_id')
+    expect('text' in next && next.text).not.toContain('call read_thread')
     w.proof(`thread ${sent.thread_id}: project ${t.project.root}, author ${JSON.stringify(t.messages[0]?.author)}`)
   }, 60_000)
 
@@ -583,9 +583,6 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
         body: JSON.stringify({ serverSession: health.serverSession, session, body, idempotency_key: key }),
       })
     const words = 'While you are in there, add a header row to the CSV export.'
-    // The writer waits on the thread while the person picks the other session (review blocker B1, PR 1764).
-    const writerWait = writer.callInbox({ action: 'wait_for_reply', thread_id: asked.thread_id, timeout_seconds: 8 }, w.project)
-    await Bun.sleep(500)
     const response = await post('session-other', words, 'nm-1')
     expect(response.status).toBe(200)
     const message = ((await response.json()) as { message: { id: string; to: unknown; reply_to: unknown } }).message
@@ -601,11 +598,6 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(lines[1]).toBe(INBOX_MESSAGE_INSTRUCTION)
     expect(other.host.submits[0]!.endsWith(`\n\n${words}\n\n[thread ${asked.thread_id} · more: ${CLAUDE_INBOX_TOOL_NAME} read_thread · how it works: plannotator inbox --help]`)).toBe(true)
     expect(writer.host.submits).toEqual([])
-    const waited = await writerWait
-    // The wait's text is complete (the Inbox marks it), so the mod hands the model the text alone.
-    expect('text' in waited && waited.text).toStartWith('No reply yet.')
-    expect('text' in waited && waited.text).not.toContain('"status"')
-    w.proof(`session-writer's wait_for_reply on the same thread kept waiting: ${('text' in waited ? waited.text : waited.deny).split('\n')[0]}`)
     w.proof(`turn.start ${turn.id} in session-other:\n${turn.text}\n\nsession-writer submits: ${writer.host.submits.length}`)
 
     const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === message.id)?.delivery)

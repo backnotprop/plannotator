@@ -127,6 +127,8 @@ import {
   inboxHandedAwayLine,
   inboxReaskItemsOf,
   INBOX_MAX_REQUEST_BYTES,
+  INBOX_REMOVED_ACTION,
+  INBOX_REMOVED_ACTION_TEXT,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   type InboxReplyCommand,
@@ -928,19 +930,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
-        // An open wait_for_reply keeps its session present (never "ended").
-        presence: {
-          seen: (session) => live.seenOverMcp(session),
-          hold: (session, threadId) => {
-            const release = live.holdOverMcp(session, threadId);
-            return () => {
-              release();
-              // A Codex thread's wait ended: what it left (a wait cut short) is queued as a turn now.
-              if (codexWake.status(session) !== null) void codexWake.sweep();
-              if (qwenWake.status(session) !== null) void qwenWake.sweep();
-            };
-          },
-        },
         // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
         searchIndex: search.index,
         findProjects,
@@ -2289,30 +2278,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return json({ ok: true, delivery: reply.delivery });
   };
 
-  /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
   /**
-   * A `card` call while the Board is off (a session listed the tool while it
-   * was on; its tool list is fixed for the session): answered here with the
-   * tool result `board_off`, before the MCP server (which no longer has the
-   * tool) would say "unknown tool". Anything else, or a body that does not
-   * read, goes on to the MCP server unchanged.
+   * A tool call answered here as a tool result, before the MCP server (which
+   * has no such tool) would say "unknown tool", with nothing written:
+   * `wait_for_reply`, gone from the Inbox while an older plugin, skill or
+   * client may still call it, and `card` while the Board is off (a session
+   * listed the tool while it was on; its tool list is fixed for the session).
+   * Anything else, or a body that does not read, goes on to the MCP server
+   * unchanged.
    */
-  const boardOffCardCall = async (req: Request): Promise<Response | null> => {
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      return null;
-    }
+  const refusedToolCall = (body: unknown): Response | null => {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const call = body as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: { name?: unknown } };
-    if (call.method !== "tools/call" || call.params?.name !== "card" || call.id === undefined) return null;
-    return json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text: INBOX_BOARD_OFF_TEXT }], isError: true } });
+    if (call.method !== "tools/call" || call.id === undefined) return null;
+    const text = call.params?.name === INBOX_REMOVED_ACTION ? INBOX_REMOVED_ACTION_TEXT : call.params?.name === "card" && !boardOn() ? INBOX_BOARD_OFF_TEXT : null;
+    return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };
 
-  const noteMcpPresence = async (req: Request): Promise<void> => {
+  /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
+  const noteMcpPresence = async (body: unknown): Promise<void> => {
     try {
-      const body = (await req.json()) as unknown;
       for (const call of Array.isArray(body) ? body : [body]) {
         if ((call as { method?: unknown } | null)?.method !== "tools/call") continue;
         const params = (call as { params?: { arguments?: Record<string, unknown>; _meta?: unknown } }).params;
@@ -2343,7 +2328,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
       }
     } catch {
-      // Not JSON: the MCP handler answers it.
+      // A shape it does not know: the MCP handler answers it.
     }
   };
 
@@ -2387,8 +2372,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
-    // A thread blocked in wait_for_reply gets the reply from that call, not as another turn as well.
-    waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -2401,7 +2384,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     environment: agentEnvironment,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
-    waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
     ...options.qwenWake,
   });
 
@@ -2639,13 +2621,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (origin !== null) {
         return json({ error: "Browser requests are not accepted on /mcp.", code: "origin_not_allowed" }, 403);
       }
-      // A tool call naming an agent_session is presence: that session is
-      // not "ended" while it talks to the Inbox, connection or not.
-      if (req.method === "POST") void noteMcpPresence(req.clone());
-      // The Board off: `card` is not listed, and a session that listed it while it was on gets
-      // board_off (a tool result, as any refusal) instead of "unknown tool". Nothing is written.
-      if (req.method === "POST" && !boardOn()) {
-        const refused = await boardOffCardCall(req.clone());
+      if (req.method === "POST") {
+        const body = (await req.clone().json().catch(() => undefined)) as unknown;
+        // A tool call naming an agent_session is presence: that session is
+        // not "ended" while it talks to the Inbox, connection or not.
+        void noteMcpPresence(body);
+        const refused = refusedToolCall(body);
         if (refused) return refused;
       }
       return mcp.fetch(req);
