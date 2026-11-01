@@ -16,7 +16,13 @@
 
 import { type InboxTidyCombine, isInboxId } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
-import { INBOX_PROJECTS_USAGE } from "./cli";
+import { hasHelpFlag, INBOX_PROJECTS_USAGE } from "./cli";
+
+/** One request never waits longer: a wedged Inbox must not hang the agent. */
+const REQUEST_TIMEOUT_MS = 90_000;
+/** How long a list waits for the Inbox to read its repositories, which takes moments after a start. */
+const TIDY_WAIT_MS = 5_000;
+const TIDY_POLL_MS = 100;
 
 export type ParsedProjectsCommand =
   | { ok: true; op: "list" }
@@ -67,19 +73,18 @@ interface Answer {
 export interface ProjectsCommandDeps {
   json: boolean;
   ensureRunning: () => Promise<InboxRegistryEntry>;
+  /** This program as a shell line, for the commands the answers print. Default `plannotator`. */
+  self?: string;
   out?: (text: string) => void;
   err?: (text: string) => void;
-}
-
-async function request(port: number, path: string, post?: Record<string, unknown>): Promise<Answer> {
-  const response = await fetch(`http://127.0.0.1:${port}${path}`, post ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post) } : undefined);
-  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-  return { status: response.status, body };
+  /** Tests: how long one request, and a list's wait for the repositories, may take. */
+  timeoutMs?: number;
+  tidyWaitMs?: number;
 }
 
 const threadCount = (count: number) => `${count} ${count === 1 ? "thread" : "threads"}`;
 
-function listText(folders: readonly Folder[], suggestions: readonly InboxTidyCombine[]): string {
+function listText(folders: readonly Folder[], suggestions: readonly InboxTidyCombine[], loading: boolean, self: string): string {
   if (folders.length === 0) return "No projects yet.\n";
   const lines: string[] = [];
   for (const folder of folders) {
@@ -92,9 +97,10 @@ function listText(folders: readonly Folder[], suggestions: readonly InboxTidyCom
   }
   if (suggestions.length > 0) {
     lines.push("Suggested combines:");
-    for (const { from, into, why } of suggestions) lines.push(`  ${from.name} into ${into.name}: ${why}`, `    plannotator inbox projects combine ${from.id} --into ${into.id}`);
+    for (const { from, into, why } of suggestions) lines.push(`  ${from.name} into ${into.name}: ${why}`, `    ${self} inbox projects combine ${from.id} --into ${into.id}`);
     lines.push("");
   }
+  if (loading) lines.push("Suggestions are still loading: the Inbox has not read every repository. List again in a moment.");
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
@@ -102,7 +108,8 @@ function listText(folders: readonly Folder[], suggestions: readonly InboxTidyCom
 export async function runInboxProjectsCommand(argv: readonly string[], deps: ProjectsCommandDeps): Promise<number> {
   const out = deps.out ?? ((text: string) => void process.stdout.write(text));
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
-  if (argv[0] === "--help" || argv[0] === "-h") {
+  const self = deps.self ?? "plannotator";
+  if (hasHelpFlag([...argv])) {
     out(`${INBOX_PROJECTS_USAGE}\n`);
     return 0;
   }
@@ -114,10 +121,14 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
   // A name is the likely slip: the list prints both, and only an id is one project for sure.
   const notAnId = (parsed.op === "combine" ? [parsed.project, parsed.into] : parsed.op === "undo" ? [parsed.project] : []).find((id) => !isInboxId("prj", id));
   if (notAnId !== undefined) {
-    err(`validation_error: ${notAnId} is not a project id. Run 'plannotator inbox projects' for the ids (prj_…).\n`);
+    err(`validation_error: ${notAnId} is not a project id. Run '${self} inbox projects' for the ids (prj_…).\n`);
     return 1;
   }
   const print = (json: unknown, text: string) => out(deps.json ? `${JSON.stringify(json, null, 2)}\n` : text);
+  const refused = (code: string, message: string) => {
+    err(`${code}: ${message}\n`);
+    return 1;
+  };
   let entry: InboxRegistryEntry;
   try {
     entry = await deps.ensureRunning();
@@ -125,18 +136,33 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
     err(`Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+  const request = async (path: string, post?: Record<string, unknown>): Promise<Answer> => {
+    const signal = AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS);
+    const response = await fetch(`http://127.0.0.1:${entry.port}${path}`, post ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(post), signal } : { signal });
+    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    return { status: response.status, body };
+  };
+  /** Tidy's plan once the repositories are read, or the last one with `loading` when they take too long. A list read never runs git itself. */
+  const suggestionsOf = async () => {
+    const deadline = Date.now() + (deps.tidyWaitMs ?? TIDY_WAIT_MS);
+    for (;;) {
+      const { body } = await request("/api/inbox/tidy?surface=list");
+      const loading = body?.combine_loading === true;
+      if (!loading || Date.now() >= deadline) return { suggestions: (body?.combine as InboxTidyCombine[] | undefined) ?? [], loading };
+      await Bun.sleep(TIDY_POLL_MS);
+    }
+  };
   try {
-    const listed = await request(entry.port, "/api/inbox/projects");
+    const listed = await request("/api/inbox/projects");
     const folders = listed.body?.projects as Folder[] | undefined;
     if (listed.status !== 200 || !folders) {
       err("Plannotator Inbox did not list its projects.\n");
       return 1;
     }
     if (parsed.op === "list") {
-      const tidy = await request(entry.port, "/api/inbox/tidy?surface=list");
-      const suggestions = (tidy.body?.combine as InboxTidyCombine[] | undefined) ?? [];
+      const { suggestions, loading } = await suggestionsOf();
       const projects = folders.map(({ id, name, root, threads, combined }) => ({ id, name, root, threads, ...(combined ? { combined } : {}) }));
-      print({ projects, suggestions }, listText(folders, suggestions));
+      print({ projects, suggestions, ...(loading ? { suggestions_loading: true } : {}) }, listText(folders, suggestions, loading, self));
       return 0;
     }
 
@@ -145,18 +171,14 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
     const headOf = (id: string) => folders.find((folder) => folder.id === id || folder.combined?.some((member) => member.id === id));
     const head = headOf(project);
     const name = head?.id === project ? head.name : (head?.combined?.find((member) => member.id === project)?.name ?? project);
-    const refused = (code: string, message: string) => {
-      err(`${code}: ${message}\n`);
-      return 1;
-    };
     const into = parsed.op === "combine" ? parsed.into : null;
-    if (into === null && head?.id === project) return refused("not_combined", `${name} is not combined into another project.`);
     if (into !== null && into !== project && head && head.id !== project && head.id === headOf(into)?.id) {
       print({ project: head, changed: false }, `${name} is already in ${head.name}. Nothing changed.\n`);
       return 0;
     }
 
-    const answer = await request(entry.port, `/api/inbox/projects/${encodeURIComponent(project)}/combine`, { serverSession: listed.body?.serverSession, into });
+    // Asked of the route even when the list shows a project of its own: an older Inbox lists a combined project that way.
+    const answer = await request(`/api/inbox/projects/${encodeURIComponent(project)}/combine`, { into });
     const shown = answer.body?.project as Folder | null | undefined;
     if (answer.status !== 200 || !shown) {
       // The id was well formed, so `not_found` (not `project_not_found`) means no such route: an Inbox from before combining.
@@ -165,8 +187,13 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
       return refused(code, String(answer.body?.error ?? "The projects did not change."));
     }
     if (into !== null) {
-      print({ project: shown, changed: true }, `Combined ${name} into ${shown.name}. To undo: plannotator inbox projects undo ${project}\n`);
+      print({ project: shown, changed: true }, `Combined ${name} into ${shown.name}. To undo: ${self} inbox projects undo ${project}\n`);
       return 0;
+    }
+    // The route answers 200 and writes nothing for a project that is not combined, which must not read as done.
+    if (head?.id === project) {
+      const members = head.combined?.map((member) => `${member.name} (${member.id})`).join(", ");
+      return refused("not_combined", `${name} is not combined into another project.${members ? ` In it: ${members}. Undo one of those.` : ""}`);
     }
     const kept = shown.combined?.map((member) => member.name).join(", ");
     print({ project: shown, changed: true }, `${shown.name} is its own project again${kept ? `, with ${kept} still combined into it` : ""}.\n`);

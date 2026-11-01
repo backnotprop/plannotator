@@ -84,6 +84,15 @@ describe("combineSuggestions", () => {
     }
   });
 
+  test("through a chain: a project is not offered back into the group it left, whichever project now heads it", () => {
+    // fix-y left notes, and notes has since gone into web: web is the group fix-y said no to.
+    const projects = [project("prj_web", "/web"), project("prj_fix", "/fix", { separated_from: "prj_notes" })];
+    const sameProject = (a: string, b: string) => (a === "prj_notes" ? "prj_web" : a) === (b === "prj_notes" ? "prj_web" : b);
+    expect(pairs({ projects, repoOf: () => repo("acme/app"), threads: noThreads, sameProject })).toEqual([]);
+    // Another head is another project: the no was not about it.
+    expect(pairs({ projects, repoOf: () => repo("acme/app"), threads: noThreads, sameProject: (a, b) => a === b })).toEqual([["prj_fix", "prj_web"]]);
+  });
+
   test("a leftover whose combine was undone is not offered", () => {
     const projects = [project("prj_app", "/code/app"), project("prj_left", "/code/app/worktrees/fix-y", { separated_from: "prj_app" })];
     expect(pairs({ projects, repoOf: () => null, threads: noThreads })).toEqual([]);

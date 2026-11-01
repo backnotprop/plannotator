@@ -1077,7 +1077,8 @@ export class InboxStore {
    * they were written: a thread stays in its own project, whoever joined it.
    * A project that others were combined into takes them along and brings them back,
    * because they keep pointing at it. `intoId` may be a combined project: its head
-   * is what is stored. Refuses a project already inside this one (the two would loop).
+   * is what is stored. Refuses a project already inside this one (the two would
+   * loop), and a project already in another (`already_combined`: undo it first).
    */
   combineProject(projectId: string, intoId: string | null): InboxProject {
     const project = this.projectsById.get(projectId);
@@ -1092,7 +1093,13 @@ export class InboxStore {
       if (!this.projectsById.has(intoId)) throw new InboxError("project_not_found", `No project ${intoId}.`, { field: "into" });
       const head = this.canonicalProjectId(intoId);
       if (head === projectId) throw new InboxError("validation_error", "into: that project is already combined into this one.", { field: "into" });
-      if (head === this.canonicalProjectId(projectId)) return this.labeled(project);
+      const current = this.canonicalProjectId(projectId);
+      if (head === current) return this.labeled(project);
+      // Moving it would lose where it was: an undo would leave it alone, not back in that project.
+      if (current !== projectId) {
+        const name = this.combinedInto(current).find((member) => member.id === projectId)?.name ?? project.name;
+        throw new InboxError("already_combined", `${name} is in ${this.project(current)?.name ?? current}. Undo it first.`, { field: "project" });
+      }
       record = { ...rest, merged_into: head };
     }
     this.write(join(this.projectFolder(project), PROJECT_FILE), {

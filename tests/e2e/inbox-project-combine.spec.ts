@@ -469,10 +469,12 @@ test('an older binary on a combined store: the two projects it always showed, no
   // It writes to the folder's project, as it always did.
   const sent = await older.send({ project_path: folders.site, subject: 'From an older binary', thread: 'older', body: 'Written by an older Inbox.' });
   expect(sent.project.id).toBe(ids.site);
-  // The agent command, new, on the Inbox that is running, old: it says so instead of a bare 404.
-  const refused = spawnSync(binary, ['inbox', 'projects', 'combine', ids.site, '--into', ids.docs], { env: world.env, encoding: 'utf8', timeout: 60_000 });
-  expect(refused.status).toBe(1);
-  expect(refused.stderr).toMatch(/^not_supported:/);
+  // The agent command, new, on the Inbox that is running, old: it says so instead of a bare 404, for an undo too.
+  for (const args of [['combine', ids.site, '--into', ids.docs], ['undo', ids.site]]) {
+    const refused = spawnSync(binary, ['inbox', 'projects', ...args], { env: world.env, encoding: 'utf8', timeout: 60_000 });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/^not_supported:/);
+  }
   await stopScratchInbox(dataDir);
 
   await startInbox(binary);
@@ -607,7 +609,8 @@ test('the agent command: a combine shows in an open window, and an undo from ano
   const combined = projects(['combine', ids.site, '--into', ids.docs], 'ses-combiner-0001', folders.site);
   expect(combined.stderr).toBe('');
   expect(combined.status).toBe(0);
-  expect(combined.stdout).toContain(`Combined Marketing site into docs. To undo: plannotator inbox projects undo ${ids.site}`);
+  expect(combined.stdout).toContain('Combined Marketing site into docs. To undo: ');
+  expect(combined.stdout).toContain(` inbox projects undo ${ids.site}`);
   // The window that was open follows, with nothing to reload.
   await expect(row(page, 'Marketing site')).toHaveCount(0);
   await expect.poll(() => rowProject(page, threads.site)).toBe('docs');

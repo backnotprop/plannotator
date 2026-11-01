@@ -87,6 +87,8 @@ export interface InboxTidyPlan {
   run: InboxTidyRun | null;
   /** Projects that are one, each a suggestion the person ticks. Counted in `count`. Absent when there are none. */
   combine?: InboxTidyCombine[];
+  /** Repositories are still being read, so `combine` may be short of a pair. Absent once they are read. */
+  combine_loading?: true;
 }
 
 /** One suggested combine: `from` goes into `into`. `why` is a few words ("same repository"). */

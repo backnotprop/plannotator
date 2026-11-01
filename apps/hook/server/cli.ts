@@ -276,13 +276,6 @@ export const FEEDBACK_COMMAND_USAGE = [
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
 ].join("\n");
 
-/**
- * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
- * the full agent guide (inbox-help.ts), which carries this block as its
- * "Commands and flags" section; it is also the `inbox` entry of
- * SUBCOMMAND_HELP, so the skill freshness test reads the same flags.
- * The parser is `runInboxCommand` in inbox-command.ts.
- */
 /** `plannotator inbox projects …` (inbox-projects-command.ts): list, combine and undo, on the person's request. */
 export const INBOX_PROJECTS_USAGE = [
   "Usage:",
@@ -295,6 +288,13 @@ export const INBOX_PROJECTS_USAGE = [
   "Run 'plannotator inbox --help' for when to use it.",
 ].join("\n");
 
+/**
+ * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
+ * the full agent guide (inbox-help.ts), which carries this block as its
+ * "Commands and flags" section; it is also the `inbox` entry of
+ * SUBCOMMAND_HELP, so the skill freshness test reads the same flags.
+ * The parser is `runInboxCommand` in inbox-command.ts.
+ */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
   "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
@@ -303,8 +303,8 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
   "  plannotator inbox projects [--json]",
-  "  plannotator inbox projects combine <project id> --into <project id>",
-  "  plannotator inbox projects undo <project id>",
+  "  plannotator inbox projects combine <project id> --into <project id> [--json]",
+  "  plannotator inbox projects undo <project id> [--json]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -592,6 +592,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
+  // `inbox projects --help` is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && args[1] === "projects") return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

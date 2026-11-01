@@ -17,6 +17,7 @@ import { type InboxRegistryEntry, readInboxRegistry } from "@plannotator/shared/
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, stopProvenInboxes, waitGone } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
+import { formatInboxHelp } from "./inbox-help";
 import { parseProjectsCommand, runInboxProjectsCommand } from "./inbox-projects-command";
 
 const entry = resolve(import.meta.dir, "index.ts");
@@ -119,14 +120,13 @@ describe("plannotator inbox projects", () => {
     await projects(box, []);
     await say(box, box.docs, { subject: "One", body: "One." });
     await say(box, box.site, { subject: "Two", body: "Two." });
-    let found = (await listing(box)).suggestions;
-    for (let i = 0; i < 50 && found.length === 0; i++) {
-      await Bun.sleep(50);
-      found = (await listing(box)).suggestions;
-    }
+    // The person asks with the Inbox stopped: the first list, the one that starts it, is the one the agent reads.
+    await mustSignalInbox(inboxEntryOf(box.dataDir), box.root, "SIGKILL");
+    await waitGone(started.map((s) => s.entry.pid), 5_000);
+    const found = (await listing(box)).suggestions;
     expect(found).toHaveLength(1);
     expect(found[0]!.why).toBe("same repository");
-    const line = /plannotator inbox projects (combine .+)/.exec((await projects(box, [])).stdout)![1]!;
+    const line = /inbox projects (combine .+)/.exec((await projects(box, [])).stdout)![1]!;
     expect((await projects(box, line.split(" "))).code).toBe(0);
     const after = await listing(box);
     expect(after.projects).toHaveLength(1);
@@ -143,7 +143,8 @@ describe("plannotator inbox projects", () => {
     const combined = await projects(box, ["combine", site, "--into", docs], { session: "ses-combiner-0001" });
     expect(combined.stderr).toBe("");
     expect(combined.code).toBe(0);
-    expect(combined.stdout).toContain(`Combined Marketing site into docs. To undo: plannotator inbox projects undo ${site}`);
+    expect(combined.stdout).toContain("Combined Marketing site into docs. To undo: ");
+    expect(combined.stdout).toContain(` inbox projects undo ${site}`);
 
     // One project now, with what the folders do while it stands.
     const one = (await listing(box)).projects;
@@ -195,6 +196,31 @@ describe("plannotator inbox projects", () => {
     expect((await listing(box)).projects.map((project) => project.id).sort()).toEqual([docs, site].sort());
   });
 
+  test("undoing a head names what is in it, with the ids to undo", async () => {
+    const { box, docs, site } = await seeded();
+    const web = (await say(box, box.elsewhere, { subject: "Web", body: "Web." })).project.id as string;
+    expect((await projects(box, ["combine", site, "--into", docs])).code).toBe(0);
+    expect((await projects(box, ["combine", web, "--into", docs])).code).toBe(0);
+    const head = await projects(box, ["undo", docs]);
+    expect([head.code, head.stdout]).toEqual([1, ""]);
+    expect(head.stderr).toBe(`not_combined: docs is not combined into another project. In it: docs-site (${site}), elsewhere (${web}). Undo one of those.\n`);
+    expect((await listing(box)).projects.map((project) => project.id)).toEqual([docs]);
+  });
+
+  test("a combined project is not moved: combine again says where it is, and the undo comes first", async () => {
+    const { box, docs, site } = await seeded();
+    const web = (await say(box, box.elsewhere, { subject: "Web", body: "Web." })).project.id as string;
+    expect((await projects(box, ["combine", site, "--into", docs])).code).toBe(0);
+    const moved = await projects(box, ["combine", site, "--into", web]);
+    expect([moved.code, moved.stdout]).toEqual([1, ""]);
+    expect(moved.stderr).toBe("already_combined: docs-site is in docs. Undo it first.\n");
+    const one = (await listing(box)).projects.find((project) => project.id === docs)!;
+    expect(one.combined?.map((member) => member.id)).toEqual([site]);
+    // And the undo is a way back to where it was: its own project.
+    expect((await projects(box, ["undo", site])).code).toBe(0);
+    expect((await projects(box, ["combine", site, "--into", web])).code).toBe(0);
+  });
+
   test("a refusal never reads as done: exit 1 with the code, and nothing written", async () => {
     const { box, docs, site } = await seeded();
     const notCombined = await projects(box, ["undo", site]);
@@ -234,34 +260,69 @@ describe("plannotator inbox projects", () => {
     const help = await projects(box, ["--help"]);
     expect([help.code, help.stderr]).toEqual([0, ""]);
     expect(help.stdout).toContain("plannotator inbox projects undo <project id>");
+    // Its own usage, not the whole guide.
+    expect(help.stdout).not.toContain("# Plannotator Inbox");
     expect(inboxEntryOf(box.dataDir)).toBeNull();
   });
 
   test("every projects command the agents' guide names is one the parser takes", () => {
-    const box = sandbox();
-    const guide = spawnSync(process.execPath, ["run", entry, "inbox", "--help"], { cwd: box.docs, env: box.env, encoding: "utf8" }).stdout;
+    const guide = formatInboxHelp({ command: ["plannotator"], dataDir: "/data", board: false });
     // Command lines only: the usage's description column follows two spaces.
     const lines = [...guide.matchAll(/^ *plannotator inbox projects(?: (?! )(.*))?$/gm)].map((match) => (match[1] ?? "").replace("[--json]", "").replaceAll("<project id>", "prj_x").trim());
     const named = new Set(lines.map((line) => parseProjectsCommand(line === "" ? [] : line.split(/\s+/))).map((parsed) => (parsed.ok ? parsed.op : parsed.error)));
     expect([...named].sort()).toEqual(["combine", "list", "undo"]);
   });
 
-  test("an Inbox older than the command says so, instead of a bare 404", async () => {
-    const from = "prj_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-    const into = "prj_01BX5ZZKBKACTAV9WEVGEMMVRZ";
-    // What any Inbox answers for a route it does not have.
-    const older = Bun.serve({
+  const FROM = "prj_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const INTO = "prj_01BX5ZZKBKACTAV9WEVGEMMVRZ";
+
+  /** An Inbox answering what `routes` gives and `not_found`, as every Inbox does, for the rest. */
+  async function against(routes: Record<string, () => Response | Promise<Response>>, argv: string[], extra: { json?: boolean; tidyWaitMs?: number; timeoutMs?: number } = {}) {
+    const inbox = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (req) => (new URL(req.url).pathname === "/api/inbox/projects" ? Response.json({ serverSession: "s", projects: [{ id: from, name: "a", root: "/a", threads: 0 }] }) : Response.json({ error: "Not found", code: "not_found" }, { status: 404 })),
+      fetch: (req) => routes[new URL(req.url).pathname]?.() ?? Response.json({ error: "Not found", code: "not_found" }, { status: 404 }),
     });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
     try {
-      const errors: string[] = [];
-      const code = await runInboxProjectsCommand(["combine", from, "--into", into], { json: false, ensureRunning: async () => ({ port: older.port }) as InboxRegistryEntry, out: () => {}, err: (text) => errors.push(text) });
-      expect(code).toBe(1);
-      expect(errors.join("")).toStartWith("not_supported:");
+      const code = await runInboxProjectsCommand(argv, { json: false, ...extra, ensureRunning: async () => ({ port: inbox.port }) as InboxRegistryEntry, out: (text) => stdout.push(text), err: (text) => stderr.push(text) });
+      return { code, stdout: stdout.join(""), stderr: stderr.join("") };
     } finally {
-      older.stop(true);
+      inbox.stop(true);
     }
+  }
+
+  const listOf = () => Response.json({ serverSession: "s", projects: [{ id: FROM, name: "a", root: "/a", threads: 0 }] });
+
+  test("an Inbox older than the command says so, for combine and for undo, instead of a bare 404 or a wrong answer", async () => {
+    // An older Inbox shows a combined project as a project of its own, so only the route can tell.
+    for (const argv of [["combine", FROM, "--into", INTO], ["undo", FROM]]) {
+      const older = await against({ "/api/inbox/projects": listOf }, argv);
+      expect(older.code).toBe(1);
+      expect(older.stderr).toStartWith("not_supported:");
+    }
+  });
+
+  test("a list still reading repositories waits, and past the wait says so instead of a thin list", async () => {
+    let reads = 0;
+    const tidy = (loadingFor: number) => () => Response.json({ ...(++reads <= loadingFor ? { combine_loading: true } : { combine: [{ from: { id: FROM, name: "a", root: "/a" }, into: { id: INTO, name: "b", root: "/b" }, why: "same repository" }] }) });
+    const settled = await against({ "/api/inbox/projects": listOf, "/api/inbox/tidy": tidy(2) }, []);
+    expect(settled.stdout).toContain("a into b: same repository");
+    expect(settled.stdout).not.toContain("still loading");
+
+    reads = 0;
+    const stuck = await against({ "/api/inbox/projects": listOf, "/api/inbox/tidy": tidy(Number.MAX_SAFE_INTEGER) }, [], { tidyWaitMs: 10 });
+    expect(stuck.code).toBe(0);
+    expect(stuck.stdout).toContain("Suggestions are still loading");
+    reads = 0;
+    const asJson = await against({ "/api/inbox/projects": listOf, "/api/inbox/tidy": tidy(Number.MAX_SAFE_INTEGER) }, [], { tidyWaitMs: 10, json: true });
+    expect(JSON.parse(asJson.stdout)).toMatchObject({ suggestions: [], suggestions_loading: true });
+  });
+
+  test("a wedged Inbox ends the command instead of hanging the agent", async () => {
+    const wedged = await against({ "/api/inbox/projects": () => new Promise<Response>(() => {}) }, [], { timeoutMs: 50 });
+    expect(wedged.code).toBe(1);
+    expect(wedged.stderr).toStartWith("Plannotator Inbox did not answer:");
   });
 });
