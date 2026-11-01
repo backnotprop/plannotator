@@ -17,6 +17,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { writeReleaseNotes } from '../shared/update-check';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -55,8 +56,11 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-whatsnew-tailnet-dom-')));
+  // A newer release (0.28.25) is already known, so this Inbox offers an update (state "available") next to the notes
+  // of the version it runs; the notes of both are saved and checks are off, so nothing asks GitHub.
+  for (const version of ['0.28.19', '0.28.25']) writeReleaseNotes({ version, notes: `What ${version} brings to the Inbox.`, highlights: [] }, join(dir, 'data'));
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '1', 'whats-new'], {
-    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PLANNOTATOR_UPDATE_CHECK: '' },
+    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), HOME: dir, PLANNOTATOR_UPDATE_CHECK: '0', WHATS_NEW_LATEST: '0.28.25' },
     stdout: 'pipe',
     stderr: 'inherit',
   });
@@ -148,7 +152,10 @@ test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings 
   guest = false;
   const el = renderApp();
   await until(() => !!el.querySelector('[data-whats-new-link="0.28.19"]'), "the sidebar's What's new link");
+  // The fixture really offers an update (a loopback page would show the Update button), and this page shows none of it.
+  expect(JSON.parse((await loopback('/api/inbox/threads')).text).update).toMatchObject({ state: 'available', version: '0.28.25' });
   expect(el.querySelector('.ib-upd')).toBeNull();
+  expect(buttonsNamed(el, /Update/)).toEqual([]);
 
   // Settings → About: the version and the link, none of what needs the update routes.
   act(() => {
@@ -173,6 +180,15 @@ test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings 
   // The sidebar's link opens them too.
   act(() => (el.querySelector('[data-whats-new-link="0.28.19"]') as HTMLButtonElement).click());
   await until(() => !!el.querySelector('[data-whats-new-page="0.28.19"]'), 'the notes from the sidebar link');
+
+  // The release that IS offered: its What's new page has no Update button on this page.
+  act(() => {
+    window.location.hash = '#whats-new=0.28.25';
+  });
+  await until(() => !!el.querySelector('[data-whats-new-page="0.28.25"]') && !!el.querySelector('.ib-wn-hero'), 'the offered release notes');
+  await settle();
+  expect(el.querySelector('[data-whats-new-update]')).toBeNull();
+  expect(el.querySelector('.ib-upd')).toBeNull();
 
   expect(updateActions()).toEqual([]);
 });
