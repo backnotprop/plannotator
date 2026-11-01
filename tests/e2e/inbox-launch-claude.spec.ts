@@ -16,11 +16,12 @@
  *     (02), the folder menu (03); Send writes the thread before `--bg`, with no
  *     prompt or secret on argv and a 0600 settings file holding the login
  *     shell's CLAUDE_* value; Starting (05) → Working · N min (06) → the ⋯
- *     items (07) → a permission prompt in "Stopped on you" (08) → answered in
- *     Terminal: the line and the Stopped-on-you row go, with no Stop → Stop
- *     (11) → a reply respawns it once, Starting again (12), delivered once →
- *     no line (10); Open in Terminal runs `claude attach`; Delete runs stop
- *     and rm, removes launch/<id>/, never purge. The login shell ran once.
+ *     items (07) → a permission prompt in "Stopped on you" (08), whose line's
+ *     Open in Terminal runs `claude attach` → answered in Terminal: the line
+ *     and the Stopped-on-you row go, with no Stop → Stop (11) → a reply
+ *     respawns it once, Starting again (12), delivered once → no line (10);
+ *     Delete runs stop and rm, removes launch/<id>/, never purge. The login
+ *     shell ran once.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
@@ -382,25 +383,26 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await shot(page, '06-working');
   await shot(page, '06-working-dark', { scheme: 'dark' });
 
-  // 07: the ⋯ menu's items on top.
+  // 07: the ⋯ menu's items on top. A healthy session has no Open in Terminal, there or on its line.
   await p.locator('[data-thread-more]').click();
   const items = page.locator('[data-thread-menu] [data-launch-item]');
-  await expect(items).toHaveText(['Open in Terminal', 'Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await expect(items).toHaveText(['Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await expect(p.locator('[data-run-open]')).toHaveCount(0);
   await shot(page, '07-working-thread-menu');
-  // Open in Terminal: osascript runs `claude attach <id>` in the folder, as an argument (never in the script's text).
-  await page.locator('[data-launch-item="open"]').click();
+  await page.keyboard.press('Escape');
   const agent = await waitFor('the fake session', () => fake.agents()[0]);
-  const ran = await waitFor('osascript', () => fake.osascript()[0]);
-  expect(ran.at(-1)).toBe(`cd '${world.projects.plannotator}' && claude attach ${agent.id}`);
-  expect(ran.slice(0, -1).join(' ')).not.toContain('claude attach');
 
   // 08: Claude Code waits on a permission prompt: the line says so, the row goes to Stopped on you.
   fake.configure({ waiting: true });
   await expect(p.locator('[data-run="waiting_terminal"]')).toContainText('Claude Code is waiting on a permission prompt', { timeout: 30_000 });
-  await expect(p.locator('[data-run="waiting_terminal"] [data-run-open]')).toBeVisible();
   await expect(p.locator('[data-run="waiting_terminal"] [data-run-attach] code')).toHaveText(`claude attach ${agent.id}`);
   await expect(page.locator(`button[data-thread-id="${threadId}"]`)).toHaveAttribute('data-section', 'stopped');
   await shot(page, '08-permission-prompt-v1');
+  // Open in Terminal: osascript runs `claude attach <id>` in the folder, as an argument (never in the script's text).
+  await p.locator('[data-run="waiting_terminal"] [data-run-open]').click();
+  const ran = await waitFor('osascript', () => fake.osascript()[0]);
+  expect(ran.at(-1)).toBe(`cd '${world.projects.plannotator}' && claude attach ${agent.id}`);
+  expect(ran.slice(0, -1).join(' ')).not.toContain('claude attach');
 
   // The person answers the prompt in Terminal (no Stop): the turn ends, it answers, and it rests.
   // The line goes and the row leaves Stopped on you.

@@ -1240,11 +1240,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   };
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
+  // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
+  const openTerminal = launched && !phone && remote !== true && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
           name: hostName(launched.agent),
-          open: phone || remote === true || (!launched.session_ref && !runLine?.untrusted) ? null : () => void launchAct(() => inboxApi.launchOpen(launched.id)),
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
@@ -4366,7 +4367,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -4374,7 +4375,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             if (message === last && runLine && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -4683,7 +4684,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && !runInCard && <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>

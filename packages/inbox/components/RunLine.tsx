@@ -26,12 +26,16 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * what the agent the person started is doing. It goes away while the agent
  * rests (`run` null: the thread draws nothing). Stop is a text button; the
  * bordered buttons are where something is blocked on the person: Open in
- * Terminal (a permission prompt, an untrusted folder), and for an untrusted
- * folder the owner's Trust folder, which also works on a phone. No keyboard
- * shortcuts.
+ * Terminal (a session waiting on Terminal, one that can't start; it is on no
+ * menu, so it shows only then), and for an untrusted folder the owner's Trust
+ * folder, which also works on a phone. No keyboard shortcuts.
  */
-/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). */
-export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; onChanged: () => void }) {
+/**
+ * `canOpen`: this window can open Terminal on this launch (the thread's rule: on the Inbox's computer, with
+ * a session or a folder to trust). `canReaddress`: the waiting message can go to another session (Send to
+ * another session is shown under the line).
+ */
+export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -48,7 +52,7 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id);
       else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null);
       else await inboxApi.launchOpen(run.launch_id);
-      if (what !== 'open') onChanged();
+      onChanged();
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
       // The folder changed since this line was read: draw the new warning for the next click.
@@ -121,12 +125,12 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
         <>
           <b>{name} is waiting on a permission prompt</b>
           {minutes ? ` · ${minutes}` : ''}
-          {phone ? <span className="ib-run-sub">Answer it in Terminal on your Mac:</span> : null}
+          {canOpen ? null : <span className="ib-run-sub">Answer it in Terminal on your Mac:</span>}
         </>
       );
       actions = (
         <>
-          {!phone && openTerminal}
+          {canOpen && openTerminal}
           {attach}
           {stop}
         </>
@@ -166,7 +170,7 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
               Trust folder
             </button>
           )}
-          {run.untrusted && !phone && openTerminal}
+          {canOpen && openTerminal}
           <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
             Try again
           </button>

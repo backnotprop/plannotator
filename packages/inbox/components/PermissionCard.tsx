@@ -43,7 +43,7 @@ import { useMinuteClock } from './Undelivered';
 export const ARM_MS = 600;
 
 type Outcome = 'once' | 'session' | 'auto' | 'full' | 'deny' | 'terminal' | 'withdrawn' | 'closed';
-/** The thread's ways to the session in a terminal (its ⋯ menu's): Open in Terminal on a computer, Copy everywhere. */
+/** The thread's ways to the session in a terminal: Open in Terminal on a computer, Copy everywhere. */
 export type PermissionTerminal = { open: (() => void) | null; copyAttach: (() => void) | null };
 type Kind = 'bash' | 'file' | 'fetch' | 'search' | 'other';
 
@@ -352,7 +352,7 @@ export function PermissionCard({
   newest: boolean;
   /** The follow-up that withdrew it ("Answered in Terminal."), or null. */
   followUp: string | null;
-  /** Open in Terminal and Copy attach command, as the thread's ⋯ menu has them (Approve in Terminal opens it); null outside a launch. */
+  /** Open in Terminal, as the run line has it (Approve in Terminal opens it), and ⋯'s Copy attach command; null outside a launch. */
   terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
