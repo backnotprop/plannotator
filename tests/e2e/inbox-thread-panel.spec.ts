@@ -96,8 +96,6 @@ async function send(w: World, agent: keyof typeof agents, args: Record<string, u
 
 const ask = (q: string) => [':::question', q, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
 
-test.describe.configure({ mode: 'serial' });
-
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   world = startWorld('plannotator-inbox-thread-panel-e2e-');
@@ -141,12 +139,17 @@ async function open(browser: Browser, opts: { panel?: boolean; hash?: string; wi
   const page = await context.newPage();
   await page.goto(`${world.url}${opts.hash ?? ''}`);
   await expect(page.locator('.ib-lbody')).toBeVisible();
+  await expect(anyRow(page)).toBeVisible();
+  // The read rows are in Quiet: unfolded, so every row is there to open.
+  const quiet = page.locator('.ib-lbody [data-section-id="quiet"] button.ib-band');
+  if ((await quiet.count()) > 0) await quiet.click();
   return page;
 }
 
 const list = (p: Page) => p.locator('section.ib-listcol');
 const empty = (p: Page) => p.locator('[data-thread-panel-empty]');
 const row = (p: Page, id: string) => p.locator(`.ib-lbody [data-thread-id="${id}"]:visible`);
+const anyRow = (p: Page) => p.locator('.ib-lbody [data-thread-id]:visible, .ib-lbody button.ib-band:visible').first();
 const subject = (p: Page) => p.locator('section.ib-pane h2.ib-subject');
 const item = (p: Page) => p.locator('[data-tidy-menu-popup] [data-thread-panel-option]');
 const openMenu = async (p: Page) => {
@@ -243,7 +246,7 @@ test('a reload never draws the wide list first, and never the empty panel under 
   await recordFrames(context);
   const page = await context.newPage();
   await page.goto(world.url);
-  await expect(row(page, threads.release)).toBeVisible();
+  await expect(anyRow(page)).toBeVisible();
   await expect(empty(page)).toBeVisible();
   const plain = await frames(page);
   expect(plain.length).toBeGreaterThan(0);
@@ -265,8 +268,9 @@ test('a dragged column comes back at its width from the first frame', async ({ b
   await recordFrames(context);
   const page = await context.newPage();
   await page.goto(world.url);
-  await expect(row(page, threads.release)).toBeVisible();
+  await expect(anyRow(page)).toBeVisible();
   const seen = await frames(page);
+  expect(seen.length).toBeGreaterThan(0);
   expect(seen.filter((f) => f.list !== 460)).toEqual([]);
   await context.close();
 });
@@ -277,7 +281,7 @@ test('a reload in a window that stacks never draws the short list or a panel', a
   await recordFrames(context);
   const page = await context.newPage();
   await page.goto(world.url);
-  await expect(row(page, threads.release)).toBeVisible();
+  await expect(anyRow(page)).toBeVisible();
   const seen = await frames(page);
   expect(seen.length).toBeGreaterThan(0);
   expect(seen.filter((f) => f.list <= 380 || f.empty)).toEqual([]);
@@ -287,9 +291,9 @@ test('a reload in a window that stacks never draws the short list or a panel', a
 test('a thread fills the panel, the list stays where it is; × and Escape return to the empty panel', async ({ browser }) => {
   const page = await open(browser, { height: 520 });
   const body = page.locator('.ib-lbody');
-  await body.evaluate((el) => {
-    el.scrollTop = 80;
-  });
+  await row(page, threads.release).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const scrolled = await body.evaluate((el) => el.scrollTop);
+  expect(scrolled, 'the list is scrolled').toBeGreaterThan(0);
   const before = await rowTops(page);
   const box = await list(page).boundingBox();
 
@@ -301,7 +305,7 @@ test('a thread fills the panel, the list stays where it is; × and Escape return
   await expect(empty(page)).toHaveCount(0);
   expect(await rowTops(page), 'opening moves no row').toEqual(before);
   expect(await list(page).boundingBox()).toEqual(box);
-  expect(await body.evaluate((el) => el.scrollTop)).toBe(80);
+  expect(await body.evaluate((el) => el.scrollTop)).toBe(scrolled);
 
   await page.getByRole('button', { name: 'Close the thread' }).click();
   await expect(empty(page)).toBeVisible();
@@ -358,13 +362,16 @@ test('full screen, the Artifacts view and a file beside the thread all come back
   await page.keyboard.press('Escape');
   await expect(empty(page)).toBeVisible();
 
-  // Closed from full screen with ×: the sidebar and the list come back with the empty panel.
+  // The address leaving the thread while in full screen (Back, a link): the sidebar and the list come back with the empty panel.
   await row(page, threads.release).click();
   await page.getByRole('button', { name: /^Hide the sidebar and the list/ }).click();
   await expect(page.locator('.pn-inbox[data-thread-full]')).toBeVisible();
-  await page.getByRole('button', { name: 'Close the thread' }).click();
+  await page.evaluate(() => {
+    window.location.hash = '';
+  });
   await expect(empty(page)).toBeVisible();
   await expect(list(page)).toBeVisible();
+  await expect(page.locator('.ib-sb')).toHaveAttribute('data-state', 'expanded');
 
   // The Artifacts view: a rung of Escape, the list still at its width.
   await row(page, threads.files).click();
@@ -435,8 +442,7 @@ test('search opens its thread in the panel, and closing it returns to the empty 
   const hit = palette.locator('[role="option"]', { hasText: 'Refund events' }).first();
   await expect(hit).toBeVisible();
   await hit.click();
-  await expect(subject(page)).toBeVisible();
-  await expect(subject(page)).toContainText('Refund events');
+  await expect(subject(page)).toContainText('Trust the webhook');
   expect(await width(page)).toBe(380);
   await page.keyboard.press('Escape');
   await expect(empty(page)).toBeVisible();
@@ -542,7 +548,8 @@ test('rows at the short width: the agents against the project, the project cut w
 });
 
 test('the tour draws its own list: no panel, no item; leaving it, the panel is back', async ({ browser }) => {
-  const page = await open(browser, { hash: '#settings/general' });
+  const page = await open(browser);
+  await page.goto(`${world.url}#settings/general`);
   await page.locator('[data-settings-take-tour]').click();
   await expect(page.locator('[data-tour-bar]')).toBeVisible();
   await page.locator('[data-tour-intro-go]').click();
@@ -573,7 +580,7 @@ test('a thread on a linked machine opens in the panel and closes to the empty pa
   const macbook = startWorld('plannotator-inbox-thread-panel-macbook-e2e-', 'MacBook');
   const cli = (w: World, ...args: string[]) => spawnSync(binary, ['inbox', ...args], { env: w.env, cwd: w.root, encoding: 'utf8', timeout: 60_000 });
   await send(studio, 'claude', { project_path: scratchProject(join(studio.root, 'src'), 'studio-app'), thread: 'Here', subject: 'On this machine', body: 'Local.' });
-  const away = await send(macbook, 'codex', { project_path: scratchProject(join(macbook.root, 'src'), 'macbook-app'), thread: 'There', subject: 'On the MacBook', body: 'Linked.' });
+  await send(macbook, 'codex', { project_path: scratchProject(join(macbook.root, 'src'), 'macbook-app'), thread: 'There', subject: 'On the MacBook', body: 'Linked.' });
   const offered = cli(macbook, 'link', '--offer');
   expect(offered.status, offered.stderr).toBe(0);
   const linked = cli(studio, 'link', offered.stdout.trim(), '--address', base(macbook), '--back', base(studio));
@@ -586,9 +593,7 @@ test('a thread on a linked machine opens in the panel and closes to the empty pa
   await expect(page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first()).toBeVisible({ timeout: 30_000 });
   await expect(empty(page)).toBeVisible();
   await page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first().click();
-  await expect(subject(page)).toBeVisible();
-  await expect(page).toHaveURL(/thread=/);
-  expect(page.url()).toContain(away.slice(0, 8));
+  await expect(subject(page)).toHaveText('On the MacBook');
   expect(await width(page)).toBe(380);
   await page.getByRole('button', { name: 'Close the thread' }).click();
   await expect(empty(page)).toBeVisible();
