@@ -61,9 +61,11 @@ export function OptionCaption({ set, index, otherFiles, note, phone = false }: {
       </div>
       <div className="ib-optcap-q">
         {noteInLine ? (
-          <span className="ib-optcap-prompt" data-option-end="">
-            {end.note}
-            {end.others > 0 && <>{` · ${end.others} other ${end.others === 1 ? 'file' : 'files'} under `}</>}
+          <span className="ib-optcap-noteline" data-option-end="">
+            <span className="ib-optcap-note">
+              {end.note}
+              {end.others > 0 && ` · ${end.others} ${end.others === 1 ? 'file' : 'files'} under `}
+            </span>
             {endPill}
           </span>
         ) : (

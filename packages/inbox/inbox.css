@@ -2029,6 +2029,11 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-optcap-rec { flex: none; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); border-radius: 6px; padding: 2px 7px; }
 .ib-optcap-q { display: flex; align-items: center; gap: 10px; margin-top: 6px; min-width: 0; }
 .ib-optcap-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+/* A phone's end note, in the question's line: its words give way, never the pill they point to. */
+.ib-optcap-q:has(.ib-optcap-noteline) { gap: 8px; }
+.ib-optcap-noteline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-optcap-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-optcap-noteline .ib-optcap-pill { flex: none; }
 .ib-optcap-dots { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .ib-optcap-dots i { display: block; width: 6px; height: 6px; border-radius: 3px; background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); transition: width 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms ease; }
 .ib-optcap-dots i.ib-on { width: 16px; background: var(--primary); }

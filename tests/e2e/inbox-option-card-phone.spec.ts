@@ -77,6 +77,7 @@ async function world() {
     'opt-d': [600, 1800, [150, 60, 230]],
     'opt-e': [2000, 400, [230, 150, 40]],
     plain: [1440, 900, [40, 180, 190]],
+    'plain-2': [1200, 900, [120, 120, 130]],
   };
   for (const [name, [width, height, hue]] of Object.entries(pictures)) writeFileSync(join(project, 'shots', `${name}.png`), png(width, height, hue));
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -84,8 +85,8 @@ async function world() {
     project_path: project,
     subject: 'Back to draft',
     thread: 'draft',
-    body: ['Five ways to place Back to draft. A mockup is attached too.', '', QUESTION].join('\n'),
-    attachments: ['shots/plain.png'],
+    body: ['Five ways to place Back to draft. Two mockups are attached too.', '', QUESTION].join('\n'),
+    attachments: ['shots/plain.png', 'shots/plain-2.png'],
   });
   return { root, url, agent, thread: sent.thread_id as string };
 }
@@ -151,6 +152,27 @@ async function openChoice(page: Page, url: string, thread: string, letter: strin
   await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
   await expect(caption(page)).toHaveAttribute('data-option-caption', letter);
   await settled(page);
+}
+
+/** The end note as drawn: whether its words are cut, and where the pill it points to ends up. */
+function noteLine(page: Page) {
+  return caption(page)
+    .locator('[data-option-end]')
+    .evaluate((line) => {
+      const note = line.querySelector<HTMLElement>('.ib-optcap-note')!;
+      const pill = line.querySelector<HTMLElement>('.ib-optcap-pill')!.getBoundingClientRect();
+      const dots = line.parentElement!.querySelector('.ib-optcap-dots')!.getBoundingClientRect();
+      return {
+        text: line.textContent,
+        wordsCut: note.scrollWidth > note.clientWidth,
+        wordsRoom: note.clientWidth,
+        wordsWant: note.scrollWidth,
+        pillOverlapsWords: pill.left < note.getBoundingClientRect().right - 0.5,
+        pillPastLine: pill.right > line.getBoundingClientRect().right + 0.5,
+        pillOverlapsDots: pill.right > dots.left + 0.5,
+        pillWidth: pill.width,
+      };
+    });
 }
 
 /** The picture's middle, on the stage, where a finger lands without touching a button. */
@@ -463,49 +485,86 @@ test('a picture opens where it stays: it does not slide into place once the rows
   }
 });
 
-test('the card keeps one height: the "Last option" note takes the question\'s line for its time, and every text size stays clear', async () => {
-  const { root, url, agent, thread } = await world();
-  const browser: Browser = await chromium.launch();
-  try {
-    const context = await browser.newContext(sized(pixel, 402, 660));
-    const page = await context.newPage();
-    await openChoice(page, url, thread, 'B');
-    const recommended = (await layout(page)).card!;
-    await page.goto('about:blank');
-    await openChoice(page, url, thread, 'E');
-    const line = caption(page).locator('.ib-optcap-prompt');
-    await expect(line).toHaveText('Last option · 1 other file under 5/5');
-    expect((await layout(page)).card!.height).toBe(recommended.height);
-    expect((await layout(page)).card!.top).toBe(recommended.top);
-    await shot(page, '402x660-E-last-option-note');
-    await page.waitForTimeout(NOTE_MS + 200);
-    await expect(line).toHaveText('Where should Back to draft sit on a waiting thread?');
-    expect((await layout(page)).card!.height).toBe(recommended.height);
+for (const [width, height] of [
+  [402, 660],
+  [390, 844],
+  [360, 780],
+] as const)
+  test(`the card keeps one height at ${width} × ${height}: the "Last option" note fits beside its pill, for its time, and is said once`, async () => {
+    const { root, url, agent, thread } = await world();
+    const browser: Browser = await chromium.launch();
+    try {
+      const context = await browser.newContext(sized(pixel, width, height));
+      const page = await context.newPage();
+      await openChoice(page, url, thread, 'B');
+      const recommended = (await layout(page)).card!;
 
-    // A swipe past the end (the panorama panned to its far end first) says it again.
-    const touch = await finger(page, 'chromium');
-    const l = await panTo(page, touch, 'right');
-    await touch.down(l.stage.right - 60, middle(l).y, -l.stage.width * 0.5, 0);
-    await touch.up();
-    await expect(line).toHaveText('Last option · 1 other file under 5/5');
-    expect((await layout(page)).card!.height).toBe(recommended.height);
+      // A step onto the last option: the note in the question's line, whole, and said in the window's live region.
+      await openChoice(page, url, thread, 'D');
+      const touch = await finger(page, 'chromium');
+      const tall = await layout(page);
+      await touch.down(tall.stage.right - 60, middle(tall).y, -tall.stage.width * 0.5, 0);
+      await touch.up();
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'E');
+      await expect(page.locator('[data-step-live]')).toHaveText('Option E of 5: A panorama. Last option. 2 other files under the 5/5 button');
+      const fits = async () => {
+        const note = await noteLine(page);
+        expect(note.text).toBe('Last option · 2 files under 5/5');
+        expect(note.wordsCut, `the words want ${note.wordsWant} px of ${note.wordsRoom}`).toBe(false);
+        expect(note.pillOverlapsWords).toBe(false);
+        expect(note.pillPastLine).toBe(false);
+        expect(note.pillOverlapsDots).toBe(false);
+      };
+      await fits();
+      expect((await layout(page)).card!.height).toBe(recommended.height);
+      expect((await layout(page)).card!.top).toBe(recommended.top);
+      await shot(page, `${width}x${height}-E-last-option-note`);
+      await page.waitForTimeout(NOTE_MS + 200);
+      await expect(caption(page).locator('[data-option-end]')).toHaveCount(0);
+      await expect(caption(page).locator('.ib-optcap-prompt')).toHaveText('Where should Back to draft sit on a waiting thread?');
+      expect((await layout(page)).card!.height).toBe(recommended.height);
 
-    // The largest text size: the card grows to hold its words, and the picture stays above it.
-    await openChoice(page, url, thread, 'A');
-    await page.evaluate(() => document.documentElement.style.setProperty('--inbox-text-size', '15'));
-    await settled(page);
-    const large = await layout(page);
-    expect(large.card!.height).toBeGreaterThan(recommended.height);
-    expect(await caption(page).evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
-    inTheClear(large);
+      // A swipe past the end (the panorama panned to its far end first) says it again, as the pane always has.
+      const l = await panTo(page, touch, 'right');
+      await touch.down(l.stage.right - 60, middle(l).y, -l.stage.width * 0.5, 0);
+      await touch.up();
+      await expect(page.locator('[data-step-live]')).toHaveText('Last option');
+      await fits();
+      expect((await layout(page)).card!.height).toBe(recommended.height);
 
-    await context.close();
-  } finally {
-    await browser.close().catch(() => {});
-    await agent.close().catch(() => {});
-    await removeInboxScratch(root);
-  }
-});
+      // The largest text size: the pill still stands whole, whatever the words have to give.
+      await openChoice(page, url, thread, 'E');
+      await page.evaluate(() => document.documentElement.style.setProperty('--inbox-text-size', '15'));
+      const largeNote = await noteLine(page);
+      expect(largeNote.pillOverlapsWords).toBe(false);
+      expect(largeNote.pillPastLine).toBe(false);
+      expect(largeNote.pillOverlapsDots).toBe(false);
+      expect(await caption(page).evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+
+      // The longest wording a real thread can give (a two-digit count, eight choices), at that size: the same.
+      await caption(page).evaluate((card) => {
+        card.querySelector('.ib-optcap-note')!.textContent = 'Last option · 12 files under ';
+        const dots = card.querySelector('.ib-optcap-dots')!;
+        for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('i'));
+      });
+      const longest = await noteLine(page);
+      expect(longest.pillOverlapsWords).toBe(false);
+      expect(longest.pillPastLine).toBe(false);
+      expect(longest.pillOverlapsDots).toBe(false);
+
+      // The card grows to hold its words, and the picture stays above it.
+      await settled(page);
+      const large = await layout(page);
+      expect(large.card!.height).toBeGreaterThan(recommended.height);
+      inTheClear(large);
+
+      await context.close();
+    } finally {
+      await browser.close().catch(() => {});
+      await agent.close().catch(() => {});
+      await removeInboxScratch(root);
+    }
+  });
 
 test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, the pan stops, a pinch and Hide', async () => {
   const { root, url, agent, thread } = await world();
@@ -626,7 +685,9 @@ test('a phone on its side and a desktop stay as they were: Fit has the whole sta
 
     // The note stays, in its own row, and keeps its words.
     await page.waitForTimeout(NOTE_MS + 200);
-    await expect(caption(page).locator('.ib-optcap-end')).toHaveText("Last option · the thread's 1 other file is under 5/5");
+    await expect(caption(page).locator('.ib-optcap-end')).toHaveText("Last option · the thread's 2 other files are under 5/5");
+    // Only a phone's note is timed, so only a phone's step says it.
+    await expect(page.locator('[data-step-live]')).not.toContainText('other file');
     await expect(caption(page).locator('.ib-optcap-prompt')).toHaveText('Where should Back to draft sit on a waiting thread?');
 
     expect((await layout(page)).card!.height).toBeGreaterThan(80);

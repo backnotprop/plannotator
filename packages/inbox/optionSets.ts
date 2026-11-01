@@ -133,11 +133,20 @@ export function optionOf(set: OptionSet, attachmentId: string): { choice: Option
 export const LAST_OPTION_NOTE = 'Last option';
 export const FIRST_OPTION_NOTE = 'First option';
 
-/** "Option B of 4: Quiet hover menu, recommended": what a step inside a set says to a screen reader. */
-export function optionAnnouncement(set: OptionSet, index: number): string {
+/**
+ * "Option B of 4: Quiet hover menu, recommended": what a step inside a set
+ * says to a screen reader. Given `otherFiles` (a phone, where the caption shows
+ * the end note only for a moment), the step onto the last option says the note
+ * too: "Option D of 4: Header menu only. Last option. 2 other files under the
+ * 4/4 button".
+ */
+export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: number): string {
   const choice = set.choices[index];
   if (!choice) return '';
-  return `Option ${choice.letter} of ${set.choices.length}: ${choice.label}${choice.recommended ? ', recommended' : ''}`;
+  const said = `Option ${choice.letter} of ${set.choices.length}: ${choice.label}${choice.recommended ? ', recommended' : ''}`;
+  if (otherFiles === undefined || index !== set.steps.length - 1) return said;
+  if (otherFiles === 0) return `${said}. ${LAST_OPTION_NOTE}`;
+  return `${said}. ${LAST_OPTION_NOTE}. ${otherFiles} other ${otherFiles === 1 ? 'file' : 'files'} under the ${index + 1}/${set.steps.length} button`;
 }
 
 /**

@@ -252,7 +252,9 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
   // The last choice: the caption says where the thread's other files are.
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('Last option · 2 other files under 4/4');
+  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('Last option · 2 files under 4/4');
+  // Stepping onto it says so too, once: the caption shows it only for a moment.
+  expect(live()).toBe('Option D of 4: Header menu only. Last option. 2 other files under the 4/4 button');
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
@@ -301,9 +303,12 @@ async function captionAlone(at: number, phone: boolean) {
 test.skipIf(!hasDom)('on a phone the end note takes the question\'s line for its time, so the card keeps one height, and comes back with a step or a swipe past the end', async () => {
   const card = await captionAlone(3, true);
   try {
-    const line = () => caption()!.querySelector('.ib-optcap-prompt')!;
-    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+    const line = () => caption()!.querySelector('.ib-optcap-q > :first-child')!;
+    expect(line().textContent).toBe('Last option · 2 files under 4/4');
     expect(line().hasAttribute('data-option-end')).toBe(true);
+    // The pill stands beside the words, so they can give way and it cannot.
+    expect(line().querySelector('.ib-optcap-note .ib-optcap-pill')).toBeNull();
+    expect(line().querySelector(':scope > .ib-optcap-pill')).not.toBeNull();
     expect(caption()!.querySelector('.ib-optcap-end')).toBeNull();
 
     await card.noteTimeUp();
@@ -312,7 +317,7 @@ test.skipIf(!hasDom)('on a phone the end note takes the question\'s line for its
 
     // A swipe past the last choice says it again, for as long as the pane's note shows.
     await card.show(3, LAST_OPTION_NOTE);
-    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+    expect(line().textContent).toBe('Last option · 2 files under 4/4');
     await card.show(3, null);
     expect(line().textContent).toBe(QUESTION.prompt);
 
@@ -320,7 +325,7 @@ test.skipIf(!hasDom)('on a phone the end note takes the question\'s line for its
     await card.show(2);
     expect(line().textContent).toBe(QUESTION.prompt);
     await card.show(3);
-    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+    expect(line().textContent).toBe('Last option · 2 files under 4/4');
   } finally {
     card.done();
   }
