@@ -119,6 +119,8 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
+  INBOX_ASK_BRIDGE_PREFIX,
+  INBOX_ASK_WAITS_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
   INBOX_BRIDGE_POLL_PATH,
@@ -171,6 +173,7 @@ import {
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
+import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -356,6 +359,8 @@ export interface InboxServerOptions {
    * else off). Off, its routes answer the unknown-route 404.
    */
   askAi?: boolean;
+  /** Tests: Ask AI's waits (inbox-ask-live.ts). */
+  askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
   machineLinkTimings?: Partial<PeerLinkTimings>;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
@@ -473,6 +478,11 @@ const ERROR_STATUS: Record<string, number> = {
   ask_unreadable: 503,
   ask_damaged: 409,
   ask_full: 409,
+  // Ask AI: the slot is taken, or this session's connection can't answer live (nothing new is saved).
+  ask_busy: 409,
+  ask_no_live_path: 409,
+  // Ask AI: a client polling for a session no question asked for (it stops).
+  ask_no_bridge: 404,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
@@ -1799,6 +1809,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
   const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
+    /** A tailnet login other than the owner's: the window offers it no What's new. */
+    guest,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
@@ -2212,10 +2224,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     const commands = () => store.pendingReplies(session, { tags }).map((reply) => replyCommand(reply, sendNow, session));
+    // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
+    const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     const now = commands();
-    if (now.length > 0 || waitMs === 0) {
+    if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
-      return json({ commands: now });
+      return json({ commands: now, ...askWaits() });
     }
     return new Promise<Response>((resolve) => {
       let done = false;
@@ -2224,13 +2238,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         done = true;
         clearTimeout(timer);
         unsubscribe();
+        stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
-        resolve(json({ commands: commands() }));
+        resolve(json({ commands: commands(), ...askWaits() }));
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
         if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session, { tags }).length > 0) finish();
+      });
+      const stopAskWaits = ask.onWaits((waiting) => {
+        if (waiting === session) finish();
       });
       req.signal.addEventListener("abort", finish);
     });
@@ -2484,6 +2502,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (threadId) => {
       for (const listener of askListeners) listener(threadId);
     },
+    token,
+    hostOf: (session) => live.askHostOf(session),
+    ...(options.askTimes ? { times: options.askTimes } : {}),
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
@@ -2630,7 +2651,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
+    // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
+    const askClient = askOn && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -2641,6 +2664,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const match = /^Bearer\s+(\S+)$/i.exec((req.headers.get("authorization") ?? "").trim());
       if (!match || !tokensEqual(match[1]!, token)) {
         return json({ error: "Missing or wrong Inbox token.", code: "unauthorized" }, 401);
+      }
+      if (askClient) {
+        try {
+          return await ask.hostRoute(req, url);
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       if (path === "/api/inbox/control/stop") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -2714,6 +2744,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tourAnswer) return tourAnswer;
 
     try {
+      // Ask AI's session and query routes. Off, and on any other server path, they do not exist here.
+      if (path.startsWith("/api/ai/")) {
+        const answer = await ask.aiRoute(req, path, via);
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
       if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
@@ -2803,32 +2838,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
-      // The update control (packages/server/inbox-updates.ts). Updating changes
-      // this computer, so none of it answers a page that came through the tailnet;
-      // nor does the What's new page, nor its images (inbox-whats-new-images.ts).
-      if (
-        path === "/api/inbox/update" ||
-        path.startsWith("/api/inbox/update/") ||
-        path === "/api/inbox/whats-new" ||
-        path === INBOX_WHATS_NEW_IMAGE_PATH
-      ) {
-        if (via === "tailnet") return localOnly();
+      // What's new and its images (inbox-whats-new-images.ts) only read release
+      // notes, so the computer's owner can read them over the tailnet too; any
+      // other tailnet login is refused (`owner_only`, as voice and Feedback do).
+      // Fetching missing notes by a release's tag is limited to the versions
+      // this Inbox knows (inbox-updates.ts fetchableVersion) and stays inside
+      // the update-notes folder of the data directory.
+      if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_IMAGE_PATH) {
+        if (via === "tailnet" && !tailscale.isOwnerRequest(req.headers)) {
+          throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
+        }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
-        if (path === "/api/inbox/whats-new") {
-          if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-          // Notes this machine never saved (a version installed outside the
-          // Inbox) are fetched by the release's tag, waited for at most 3 s;
-          // past that the page is told to ask again (503 notes_loading).
-          const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
-          if (answer.kind === "notes") return json(answer.notes);
-          if (answer.kind === "loading") {
-            const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
-            res.headers.set("Retry-After", "1");
-            return res;
-          }
-          return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        // Notes this machine never saved (a version installed outside the
+        // Inbox) are fetched by the release's tag, waited for at most 3 s;
+        // past that the page is told to ask again (503 notes_loading).
+        const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
+        if (answer.kind === "notes") return json(answer.notes);
+        if (answer.kind === "loading") {
+          const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
+          res.headers.set("Retry-After", "1");
+          return res;
         }
+        return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+      }
+      // The update control (packages/server/inbox-updates.ts). Updating changes
+      // this computer, so none of it answers a page that came through the tailnet.
+      if (path === "/api/inbox/update" || path.startsWith("/api/inbox/update/")) {
+        if (via === "tailnet") return localOnly();
         if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -3710,6 +3748,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     voice.stop();
+    // An answer in progress is saved. Open clients lose the connection (the force below cuts their
+    // `closing` short); one that polls the next Inbox gets a 404, and stops.
+    ask.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its
