@@ -37,6 +37,8 @@ export const INBOX_ASK_TEXT_MAX = INBOX_DRAFT_BODY_MAX;
  * whole on the server's one thread. It has room for many of the largest turns.
  */
 export const INBOX_ASK_FILE_MAX = 32 * 1024 * 1024;
+/** Ends an answer cut to fit, in a turn or in the file. */
+export const INBOX_ASK_CUT_NOTE = "\n\n… (the rest of the answer was cut)";
 /** A turn id: what a window's id generator makes, and nothing a path could misread. */
 const TURN_ID = /^[A-Za-z0-9_-]{8,80}$/;
 
@@ -54,6 +56,8 @@ export interface InboxAskTurn {
   answered_at?: string;
   /** The person stopped the answer. */
   stopped?: boolean;
+  /** Why `answer` is only part of one: the session went away, another message took the turn, or it failed. */
+  failure?: "gone" | "taken_over" | "failed";
 }
 
 export interface InboxAskConversation {
@@ -205,6 +209,41 @@ export function addInboxAskTurn(inboxDirPath: string, threadId: string, turn: In
   if (Buffer.byteLength(text) > INBOX_ASK_FILE_MAX) throw new InboxError("ask_full", "This conversation is full. End it to ask again. Your question was not saved.");
   writeWhole(inboxDirPath, threadId, text);
   return { conversation, turn, added: true };
+}
+
+const jsonBytes = (text: string): number => Buffer.byteLength(JSON.stringify(text));
+
+/** The start of `answer` whose JSON is at most `room` bytes, and the note. */
+function cutToFit(answer: string, room: number): string {
+  let fits = 0;
+  let over = answer.length;
+  while (over - fits > 1) {
+    const middle = Math.floor((fits + over) / 2);
+    if (jsonBytes(answer.slice(0, middle)) <= room) fits = middle;
+    else over = middle;
+  }
+  return `${answer.slice(0, fits)}${INBOX_ASK_CUT_NOTE}`;
+}
+
+/**
+ * Change a saved turn, only if it is still there: an answer that ends after
+ * End or a thread delete writes nothing, so the file cannot come back. An
+ * answer takes only the room the file has left, and says so when that cuts it.
+ * A file that cannot be read throws, as every read here does.
+ */
+export function updateInboxAskTurn(inboxDirPath: string, threadId: string, turnId: string, patch: Partial<Omit<InboxAskTurn, "id" | "question" | "passage">>): { conversation: InboxAskConversation; turn: InboxAskTurn } | null {
+  const conversation = readInboxAsk(inboxDirPath, threadId);
+  const turn = conversation?.turns.find((candidate) => candidate.id === turnId);
+  if (!conversation || !turn) return null;
+  Object.assign(turn, patch);
+  let text = serialize(conversation);
+  const over = Buffer.byteLength(text) - INBOX_ASK_FILE_MAX;
+  if (over > 0 && patch.answer) {
+    turn.answer = cutToFit(patch.answer, jsonBytes(patch.answer) - over - jsonBytes(INBOX_ASK_CUT_NOTE));
+    text = serialize(conversation);
+  }
+  writeWhole(inboxDirPath, threadId, text);
+  return { conversation, turn };
 }
 
 /**

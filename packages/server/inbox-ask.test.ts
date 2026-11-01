@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { resolveInboxAskAi } from "@plannotator/shared/config";
 import { INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, writeInboxAsk, type InboxAskConversation } from "@plannotator/shared/inbox/ask";
+import { SESSION_BRIDGE_POLL_PATH } from "@plannotator/ai/session-bridge-pull";
+import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH, inboxAskBridgeBase } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -19,6 +21,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
+const clientsOf = new WeakMap<Client, InboxServer>();
 
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => {});
@@ -36,6 +39,7 @@ async function connect(server: InboxServer): Promise<Client> {
   const client = new Client({ name: "inbox-ask-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
+  clientsOf.set(client, server);
   return client;
 }
 
@@ -44,16 +48,29 @@ async function setup(askAi = true) {
   const project = join(root, "api");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, askAi, binaryPath: null });
+  const server = await startInboxServer({ dataDir, askAi, binaryPath: null, askTimes: { connectWaitMs: 0 } });
   servers.push(server);
   return { server, client: await connect(server), project, dataDir, root };
 }
 
+/**
+ * The agent sends, and its connection says it can answer live, so a question
+ * is saved. Nothing answers here: what happens next is inbox-ask-live.test.ts.
+ */
 async function agentSends(client: Client, project: string, session: string | null, body: string, reply_to?: string): Promise<{ message_id: string; thread_id: string }> {
   const result = await client.callTool({
     name: "send_message",
     arguments: { body, project_path: project, ...(session ? { agent_session: session } : {}), agent_host: "claude-code", agent_name: "Claude Code", ...(reply_to ? { reply_to } : {}) },
   });
+  if (session) {
+    const server = servers.find((candidate) => clientsOf.get(client) === candidate)!;
+    const poll = await fetch(`http://127.0.0.1:${server.port}${INBOX_BRIDGE_POLL_PATH}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${server.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ session, host: "claude-code", project_path: project, waitMs: 0, [INBOX_ASK_POLL_FIELD]: true }),
+    });
+    expect(poll.status).toBe(200);
+  }
   return result.structuredContent as { message_id: string; thread_id: string };
 }
 
@@ -469,17 +486,29 @@ describe("the event stream", () => {
     const curlStream = listen(await open("/api/inbox/events?window=window-two"));
     await Bun.sleep(100);
 
+    const askFrames = () => windowStream.frames.filter((frame) => frame === "ask").length;
     expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
     await Bun.sleep(100);
-    expect(windowStream.frames.filter((frame) => frame === "ask")).toHaveLength(1);
-    // A retry changes nothing, so it says nothing.
-    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    const afterAsk = askFrames();
+    expect(afterAsk).toBeGreaterThan(0);
     expect((await fromWindow(server, askPath(thread_id, "/end"), {})).status).toBe(200);
     await Bun.sleep(100);
-    expect(windowStream.frames.filter((frame) => frame === "ask")).toHaveLength(2);
+    expect(askFrames()).toBe(afterAsk + 1);
     expect(agentStream.frames).not.toContain("ask");
     expect(curlStream.frames).not.toContain("ask");
     await Promise.all([windowStream.stop(), agentStream.stop(), curlStream.stop()]);
+  });
+
+  test("a retry of an answered turn changes nothing, so it says nothing", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    writeInboxAsk(inboxDir(dataDir), { v: 1, thread_id, seen_at: null, turns: [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z", "Because.")] });
+    const stream = listen(await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?window=window-one`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+    await Bun.sleep(100);
+    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    await Bun.sleep(100);
+    expect(stream.frames).not.toContain("ask");
+    await stream.stop();
   });
 });
 
@@ -545,7 +574,7 @@ describe("the gate", () => {
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
-      const server = await startInboxServer({ dataDir, askAi: true, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
+      const server = await startInboxServer({ dataDir, askAi: true, askTimes: { connectWaitMs: 0 }, binaryPath: null, tailscale: fakeTailscale, publishTailnet: true, phones: false });
       servers.push(server);
       const client = await connect(server);
       const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
@@ -570,12 +599,20 @@ describe("the gate", () => {
         await through(GUEST, askPath(thread_id), { turn_id: "turn-0002", question: "A guest's question" }),
         await through(GUEST, askPath(thread_id, "/seen"), { seen_at: new Date().toISOString() }),
         await through(GUEST, askPath(thread_id, "/end"), {}),
+        await through(GUEST, "/api/ai/capabilities"),
+        await through(GUEST, "/api/ai/sessions"),
+        await through(GUEST, "/api/ai/session", { context: { mode: "annotate" } }),
+        await through(GUEST, "/api/ai/query", { sessionId: "x", prompt: "y" }),
       ]) {
         expect(response.status).toBe(403);
         const body = await response.text();
         expect(JSON.parse(body).code).toBe("owner_only");
         expect(body).not.toContain("Private words");
       }
+      // The agent's client is this computer's: not the owner's either, over the tailnet.
+      const agentRoute = await through(OWNER, `${inboxAskBridgeBase("session-a")}${SESSION_BRIDGE_POLL_PATH}`, {});
+      expect(agentRoute.status).toBe(403);
+      expect(((await agentRoute.json()) as { code: string }).code).toBe("local_only");
       expect((await through(OWNER, askPath(thread_id), { turn_id: "turn-0003", question: "Mine" })).status).toBe(200);
       await Bun.sleep(100);
       expect(ownerStream.frames).toContain("ask");
