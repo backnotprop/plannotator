@@ -279,10 +279,11 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(session.host.submits).toHaveLength(1)
     const text = session.host.submits[0]!
     const lines = text.split('\n')
-    expect(lines[0]).toBe(`Plannotator Inbox: What should the worker do on a Stripe 409? (${replyId})`)
+    // A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+    expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`)
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(text).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: 'What should the worker do on a Stripe 409?', body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
+    expect(text).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
     // The closing line names the thread and the tool by the full name the engine registered.
     expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: mcp__plannotator__plannotator_inbox read_thread · how it works: plannotator inbox --help]`)
     // The body sits whole above the closing line, after the first lines.
@@ -718,7 +719,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const ownerTurn = await waitFor('the owner turn', () => owner.turns.find((t) => t.text.includes(reply.id)))
     await Bun.sleep(3_000)
     expect(owner.host.submits).toEqual([
-      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: reply.body, also_tagged: ['Claude Code'] }, CLAUDE_INBOX_TOOL_NAME),
+      inboxWakeText({ id: reply.id, subject: null, thread_id: asked.thread_id, body: reply.body, also_tagged: ['Claude Code'] }, CLAUDE_INBOX_TOOL_NAME),
     ])
     expect(owner.host.submits[0]!.split('\n')[2]).toBe(inboxAlsoTaggedLine(['Claude Code']))
     // Each woken once, no more.
@@ -817,7 +818,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`> the person presses Send now on ${replyId}`)
     const row = await waitFor('the row in the running turn', () => session.host.appended[0])
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(row).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: 'What should the worker do on a Stripe 409?', body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
+    expect(row).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
     expect(session.host.notices).toHaveLength(1)
     expect(session.host.submits).toEqual([])
     w.proof(`$.session.append (user row, into the running turn):\n${row}\n`)
@@ -862,7 +863,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     // The turn ends with no model request after the row.
     session.endTurn()
     const follow = await waitFor('the follow-up turn', () => session.host.submits[0])
-    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: 'What should the worker do on a Stripe 409?', type: 'reply' }))
+    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: null, type: 'reply' }))
     await Bun.sleep(2_000)
     expect(session.host.submits).toHaveLength(1)
     w.proof(`the turn ended before reading it: one follow-up turn:\n${follow}\n`)
@@ -906,7 +907,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const turn = await waitFor('the wake turn', () => session.turns.find((t) => t.text.includes(replyId)))
     expect(session.host.appended).toEqual([])
     expect(session.host.submits).toHaveLength(1)
-    expect(session.host.submits[0]!.startsWith(`Plannotator Inbox: What should the worker do on a Stripe 409? (${replyId})`)).toBe(true)
+    expect(session.host.submits[0]!.startsWith(`Plannotator Inbox: a reply (${replyId})`)).toBe(true)
     w.proof(`the turn ended before the append: delivered as turn ${turn.id}, 0 rows`)
   }, 120_000)
 
@@ -924,7 +925,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     await pressSendNow(w, replyId)
     const follow = await waitFor('the pointer turn', () => session.host.submits[0])
     expect(session.host.appended).toHaveLength(1)
-    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: 'What should the worker do on a Stripe 409?', type: 'reply' }))
+    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: null, type: 'reply' }))
     // A later turn's step does not swallow it, and nothing is sent twice.
     await session.startTurn('Next thing.')
     session.step()
