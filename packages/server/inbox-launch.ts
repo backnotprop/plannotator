@@ -865,26 +865,27 @@ export function createInboxLaunch(options: {
     if (!offer) throw new InboxError("trust_failed", `${host.name} can't trust this folder from here.`);
     return offer;
   };
-  const saveTrust = async (offer: LaunchTrustOffer): Promise<void> => {
+  const saveTrust = async (offer: LaunchTrustOffer, allowed?: () => boolean): Promise<void> => {
     try {
-      await offer.accept();
+      await offer.accept(allowed);
     } catch (error) {
       throw new InboxError("trust_failed", error instanceof Error ? error.message : String(error));
     }
   };
 
   /**
-   * Whether a Send has a trust to save, from the reading it was pressed on. A folder that changed since the reading
-   * saves and sends nothing (`trust_warning_changed`: the window reads it again and opens the details). A folder
-   * trusted since has nothing to save. Reads the folder's files now, so a scratch root is read before anything is made.
+   * The trust a Send has to save, from the reading it was pressed on: the offer compared, so what is saved is what
+   * was compared. A folder that changed since the reading saves and sends nothing (`trust_warning_changed`: the window
+   * reads it again and opens the details). A folder trusted since has nothing to save. Reads the folder's files now, so
+   * a scratch root is read before anything is made.
    */
-  const pressedTrust = (host: LaunchHost, folder: string, reading: InboxLaunchTrust | undefined): boolean => {
-    if (!reading || host.trusts(folder)) return false;
+  const pressedTrust = (host: LaunchHost, folder: string, reading: InboxLaunchTrust | undefined): LaunchTrustOffer | null => {
+    if (!reading || host.trusts(folder)) return null;
     const offer = trustOfferOf(host, { folder, scratch: false });
     const { facts } = offer.read();
     const same = offer.folder === reading.folder && facts.length === reading.facts.length && facts.every((fact, i) => fact === reading.facts[i]);
     if (!same) throw new InboxError("trust_warning_changed", "This folder changed. Nothing was trusted or sent.");
-    return true;
+    return offer;
   };
 
   /** The start or restart waiting on Try again was refused for trust, and nothing is under way. */
@@ -977,7 +978,7 @@ export function createInboxLaunch(options: {
     async prepare(
       target: InboxLaunchTarget,
       input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject> },
-    ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: boolean }> {
+    ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
       const chosen = "project_id" in target ? store.project(target.project_id) : null;
@@ -1023,14 +1024,10 @@ export function createInboxLaunch(options: {
     },
 
     /**
-     * Trust and start: saves the trust a Send was pressed for, after every check and before the thread is written,
-     * so `trust_failed` sends nothing. A scratch launch's folder is made by now: it trusts the root's real path.
+     * Trust and start: saves `prepare`'s `trust`, after every check and before the thread is written, so `trust_failed`
+     * sends nothing. `allowed`: the checks that can go stale during the host's lock wait, asked again once it holds it.
      */
-    async acceptTrust(launch: InboxLaunchRecord): Promise<void> {
-      const host = hostOf(launch);
-      if (!host) throw new InboxError("trust_failed", `${launch.agent} can't be started here.`);
-      await saveTrust(trustOfferOf(host, launch));
-    },
+    acceptTrust: saveTrust,
 
     /**
      * The thread was not written after `prepare` (a failed write, or a replay that landed meanwhile): the scratch

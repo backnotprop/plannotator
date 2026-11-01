@@ -13,23 +13,40 @@
  * here under it survives Claude's next save.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmdirSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { describeFsError, placeKey, readAgentFile, withBom, writeAgentFileAtomic } from "./agent-files";
 import { CLAUDE_JSON_MAX_BYTES } from "./inbox-agents";
 import type { LaunchTrustReading } from "./inbox-launch-host";
 import { setJsonMember } from "./json-edit";
 
+/** A file's words, or a throw: `readAgentFile` opens regular files only, and a FIFO would block the Inbox here. */
+function regularText(path: string): string {
+  const read = readAgentFile(path);
+  if (read.kind !== "file") throw new Error(`${path} can't be read`);
+  return read.text.trim();
+}
+
+/** A `.git` git would take: a file or a folder, never a FIFO or a socket of that name. */
+function hasGit(dir: string): boolean {
+  try {
+    const stat = statSync(join(dir, ".git"));
+    return stat.isFile() || stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** A repository's main checkout for a linked worktree at `root`, as Claude resolves it; any other `root` stays. */
 function claudeCheckoutRoot(root: string): string {
   try {
-    const file = readFileSync(join(root, ".git"), "utf8").trim();
+    const file = regularText(join(root, ".git"));
     if (!file.startsWith("gitdir:")) return root;
     const gitDir = resolve(root, file.slice("gitdir:".length).trim());
-    const common = resolve(gitDir, readFileSync(join(gitDir, "commondir"), "utf8").trim());
+    const common = resolve(gitDir, regularText(join(gitDir, "commondir")));
     if (dirname(gitDir) !== join(common, "worktrees")) return root;
     // The worktree must point back at this folder: a copied `.git` file does not.
-    const back = resolve(gitDir, readFileSync(join(gitDir, "gitdir"), "utf8").trim());
+    const back = resolve(gitDir, regularText(join(gitDir, "gitdir")));
     if (placeKey(back) !== join(placeKey(root), ".git")) return root;
     if (basename(common) === ".git") return dirname(common);
     // A bare repository is its own root; a repository's `.git` elsewhere names no checkout.
@@ -44,7 +61,7 @@ function claudeCheckoutRoot(root: string): string {
 export function claudeTrustKey(folder: string): string {
   const physical = placeKey(folder);
   for (let dir = physical; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) return claudeCheckoutRoot(dir).normalize("NFC");
+    if (hasGit(dir)) return claudeCheckoutRoot(dir).normalize("NFC");
     if (dirname(dir) === dir) return physical.normalize("NFC");
   }
 }
@@ -102,11 +119,13 @@ async function withClaudeConfigLock(config: string, waitMs: number, work: () => 
  * Save `key` as trusted in the global config at `config`: that one value, every other byte as it was, in an atomic
  * write that keeps the file's mode, flushed to disk before the rename as Claude's own save is. Throws with a short
  * reason, the file untouched, when it can't be read as JSON. An empty file counts: Claude treats one as corrupted and
- * repairs it from its cache, which a file holding only this key would stop.
+ * repairs it from its cache, which a file holding only this key would stop. `allowed`: asked once the lock is held,
+ * after a wait that can run to `waitMs`; no saves nothing.
  */
-export async function acceptClaudeTrust(config: string, key: string, waitMs: number = CLAUDE_LOCK_WAIT_MS): Promise<void> {
+export async function acceptClaudeTrust(config: string, key: string, waitMs: number = CLAUDE_LOCK_WAIT_MS, allowed: () => boolean = () => true): Promise<void> {
   try {
     await withClaudeConfigLock(config, waitMs, () => {
+      if (!allowed()) return;
       const read = readAgentFile(config, CLAUDE_JSON_MAX_BYTES);
       if (read.kind === "refused") throw new Error(read.reason);
       const file = read.kind === "file" ? read : null;

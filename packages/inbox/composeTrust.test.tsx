@@ -36,6 +36,10 @@ let offered: Record<string, InboxLaunchUntrusted | undefined>;
 let scratchUntrusted: boolean;
 /** Holds an answer back, to catch a press before the facts arrive. */
 let sessionsGate: Promise<void> | null;
+/** How long a read takes: over the 5 s refresh, every answer has a newer read behind it. */
+let sessionsMs: number;
+/** Holds back the answers for one pick, which then land after the next pick's. */
+let heldPick: { project: string; gate: Promise<void> } | null;
 let sends: { launch: Record<string, unknown>; body: string }[];
 let sendAnswer: (() => Promise<never>) | null;
 let sentOk: unknown[];
@@ -64,6 +68,8 @@ beforeEach(() => {
   offered = {};
   scratchUntrusted = false;
   sessionsGate = null;
+  sessionsMs = 0;
+  heldPick = null;
   sends = [];
   sendAnswer = null;
   sentOk = [];
@@ -89,8 +95,8 @@ const flush = () =>
     await new Promise((r) => setTimeout(r, 0));
   });
 
-async function until(check: () => boolean, what: string) {
-  for (let i = 0; i < 100; i++) {
+async function until(check: () => boolean, what: string, tries = 100) {
+  for (let i = 0; i < tries; i++) {
     if (check()) return;
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -118,6 +124,8 @@ async function open(phone = false) {
         transport={{
           sessions: async (pick) => {
             await sessionsGate;
+            if (sessionsMs) await new Promise((r) => setTimeout(r, sessionsMs));
+            if (heldPick && pick?.project === heldPick.project) await heldPick.gate;
             return model(pick);
           },
           startThread: async (input) => {
@@ -131,12 +139,16 @@ async function open(phone = false) {
       />,
     );
   });
-  await until(() => inDialog('button[data-compose-to]:not([data-loading])') !== null, 'To');
+  await until(() => inDialog('button[data-compose-to]:not([data-loading])') !== null, 'To', sessionsMs ? 900 : 100);
 }
 
 /** New Claude Code session in the current project, as a person picks it. */
 async function pickStart(phone = false) {
   await open(phone);
+  await chooseStart();
+}
+
+async function chooseStart() {
   act(() => inDialog('button[data-compose-to]')!.click());
   await until(() => inDialog(`[data-compose-start="${AGENT}"]`) !== null, 'the start row');
   act(() => inDialog(`[data-compose-start="${AGENT}"]`)!.click());
@@ -305,6 +317,31 @@ test.skipIf(!hasDom)('a press before the facts arrived still says what it saw: n
   await press(SEND);
   expect(sends[0]!.launch.trust).toEqual({ folder: FOLDER, facts: [] });
   openGate();
+});
+
+test.skipIf(!hasDom)('a read slower than the refresh still lands: New message loads and Send sends', async () => {
+  sessionsMs = 6_000;
+  await open();
+  sessionsMs = 0;
+  await chooseStart();
+  type('Tidy the readme.');
+  await press(SEND);
+  expect(sends).toHaveLength(1);
+}, 15_000);
+
+test.skipIf(!hasDom)('an answer for the folder picked before is dropped: it never takes the new folder its facts', async () => {
+  offered = { p1: hooks(), scratch: { folder: '/data/scratch', facts: ['Runs 1 hook'], warns: true } };
+  await open();
+  let release = () => {};
+  heldPick = { project: 'p1', gate: new Promise((r) => (release = r)) };
+  await chooseStart();
+  await press('[data-compose-folder]');
+  await press('[data-compose-folder-option="scratch"]');
+  await until(() => inDialog(CIRCLE) !== null, 'the scratch facts');
+  release();
+  await flush();
+  await flush();
+  expect(inDialog(CIRCLE)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the folder changed: nothing sent, the new facts are read and shown, the words stay, and the next press is on the new reading', async () => {

@@ -113,7 +113,7 @@ A launch that still stops on trust (a Send with no press, a folder that lost its
 - **A line that went stale.** The click sends the line the person read. If the server's fresh reading differs, it saves nothing and answers `409 trust_warning_changed` with the new line, the window draws it, and the next click goes through. A window that sent no line read none.
 - **Once.** A double click waits for the first and answers the same; a click with nothing refused any more (another window got there, or it is starting) answers the line as it stands and starts nothing.
 
-Only Claude Code has this: the host seam is the optional `trustOffer(target)` (`target`: a folder and whether it is a scratch launch's), `{ folder, read(), accept() }` or null for no offer. `folder` is where the trust lands; making the offer reads nothing, `read()` reads the files and answers `{ warning, facts, warns }`.
+Only Claude Code has this: the host seam is the optional `trustOffer(target)` (`target`: a folder and whether it is a scratch launch's), `{ folder, read(), accept(allowed?) }` or null for no offer (`allowed`, asked under the host's own lock just before the write, can still call it off: Send asks it about the thread's name, which can go during the lock wait). `folder` is where the trust lands; making the offer reads nothing, `read()` reads the files and answers `{ warning, facts, warns }`.
 
 ### Startup prompts
 

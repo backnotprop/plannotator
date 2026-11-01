@@ -53,8 +53,8 @@ export interface LaunchTrustOffer {
   folder: string;
   /** Reads the folder's files now. */
   read(): LaunchTrustReading;
-  /** Saves the trust; throws with words for the person, nothing changed. */
-  accept(): Promise<void>;
+  /** Saves the trust; throws with words for the person, nothing changed. `allowed`: asked under the host's own lock, just before the write; no saves nothing. */
+  accept(allowed?: () => boolean): Promise<void>;
 }
 
 /** The session connected to the Inbox now: its turn state, and a count that rises whenever it shows new life. */

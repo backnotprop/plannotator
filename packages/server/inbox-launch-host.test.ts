@@ -407,6 +407,15 @@ describe("Trust folder (`trustOffer`)", () => {
     await until(() => store.message(root.id)!.launch!.session_ref === "f1");
   });
 
+  test("Open in Terminal is this computer's: over the tailnet the owner and a guest are refused alike", async () => {
+    const { post, id } = await refused();
+    for (const owner of [true, false, undefined]) {
+      const answer = (await post(id, "open", "tailnet", owner))!;
+      expect(answer.status).toBe(403);
+      expect(await answer.json()).toMatchObject({ code: "owner_only" });
+    }
+  });
+
   test("the owner's window alone: an agent's bare local call, with or without this run's session, saves nothing and starts nothing", async () => {
     const { fake, launch, id, accepts } = await refused();
     const warning = fake.faults.offer!.read().warning;

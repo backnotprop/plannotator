@@ -252,6 +252,19 @@ describe("Claude's lock", () => {
     expect(readFileSync(config, "utf8")).toBe("{}");
   });
 
+  test("`allowed` is asked with the lock held: no saves nothing, and the lock is let go", async () => {
+    const { config } = sandbox();
+    writeFileSync(config, '{"numStartups":1}');
+    let held = false;
+    await acceptClaudeTrust(config, "/a", undefined, () => {
+      held = existsSync(`${config}.lock`);
+      return false;
+    });
+    expect(held).toBe(true);
+    expect(readFileSync(config, "utf8")).toBe('{"numStartups":1}');
+    expect(existsSync(`${config}.lock`)).toBe(false);
+  });
+
   test("writers in separate processes at once lose no entry", async () => {
     const { root, config } = sandbox();
     writeFileSync(config, '{"numStartups":1}');
@@ -269,6 +282,23 @@ describe("Claude's lock", () => {
 });
 
 describe("the key, as Claude Code uses it", () => {
+  // In a process of its own: a read that blocks on a FIFO can't be timed out from inside this one.
+  test.skipIf(process.platform === "win32")("a FIFO named .git, or one a .git file points at, never blocks the Inbox: it counts for nothing", () => {
+    const { root } = sandbox();
+    const repo = join(root, "repo");
+    const named = join(repo, "named");
+    const pointed = join(root, "pointed");
+    const gitDir = join(root, "gitdir");
+    for (const dir of [join(repo, ".git"), named, pointed, gitDir]) mkdirSync(dir, { recursive: true });
+    writeFileSync(join(pointed, ".git"), `gitdir: ${gitDir}\n`);
+    for (const fifo of [join(named, ".git"), join(gitDir, "commondir")]) expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+    const probe = join(root, "probe.ts");
+    writeFileSync(probe, `import { claudeTrustKey } from ${JSON.stringify(join(import.meta.dir, "inbox-launch-claude-trust.ts"))};\nconsole.log(JSON.stringify(process.argv.slice(2).map((f) => claudeTrustKey(f))));\n`);
+    const run = Bun.spawnSync([process.execPath, probe, named, pointed], { timeout: 15_000, env: { PATH: "/usr/bin:/bin", HOME: root, PLANNOTATOR_DATA_DIR: join(root, "data") } });
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.stdout.toString())).toEqual([repo, pointed]);
+  }, 20_000);
+
   test("a folder outside a repository is its own key, physical; a repository's subfolder is its root; a link leads to the real path", () => {
     const { root } = sandbox();
     const plain = join(root, "plain", "deep");

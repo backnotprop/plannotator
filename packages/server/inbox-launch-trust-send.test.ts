@@ -52,7 +52,7 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
   const fake = fakeLaunchHost();
   fake.faults.trusted = () => false;
   /** What the folder holds now, and the steps in order: each says how many threads there were when it ran. */
-  const offer = { reading: HOOKS, reads: 0, accepted: 0, acceptFails: null as string | null, steps: [] as string[] };
+  const offer = { reading: HOOKS, reads: 0, accepted: 0, acceptFails: null as string | null, steps: [] as string[], duringLockWait: null as null | (() => Promise<unknown>) };
   const server: InboxServer = await startInboxServer({
     dataDir,
     binaryPath: null,
@@ -72,9 +72,11 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
       offer.reads++;
       return offer.reading;
     },
-    async accept() {
+    async accept(allowed) {
       offer.steps.push(`trust ${threads()}`);
       if (offer.acceptFails) throw new Error(offer.acceptFails);
+      await offer.duringLockWait?.();
+      if (allowed && !allowed()) return;
       offer.accepted++;
       fake.faults.trusted = () => true;
     },
@@ -282,6 +284,30 @@ describe("the order, and what stops it", () => {
     expect(await codeOf(await world.press({ thread_name: "Readme" }))).toEqual([409, "thread_name_taken"]);
     expect(world.offer.accepted).toBe(0);
     expect(world.fake.calls.length).toBe(before);
+  });
+
+  test("a thread name taken during the lock wait saves nothing: the folder is not trusted for a thread that was refused", async () => {
+    const world = await setup();
+    world.offer.duringLockWait = async () => {
+      world.offer.duringLockWait = null;
+      world.fake.faults.trusted = () => true;
+      expect((await world.press({ thread_name: "Readme" })).status).toBe(200);
+      world.fake.faults.trusted = () => false;
+    };
+    expect(await codeOf(await world.press({ thread_name: "Readme" }))).toEqual([409, "thread_name_taken"]);
+    expect(world.offer.accepted).toBe(0);
+    expect(world.threads()).toBe(1);
+  });
+
+  test("the trust saved is the offer the press was compared with: one made after it is never used", async () => {
+    const world = await setup();
+    const compared = world.fake.faults.offer!;
+    let offers = 0;
+    let later = 0;
+    world.fake.host.trustOffer = () => (offers++ === 0 ? compared : { ...compared, accept: async () => void later++ });
+    expect((await world.press()).status).toBe(200);
+    expect(world.offer.accepted).toBe(1);
+    expect(later).toBe(0);
   });
 
   test("an upload that isn't there refuses before the folder is trusted", async () => {

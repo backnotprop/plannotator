@@ -478,10 +478,10 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
             [target.folder, claudeRepositoryAbove(target.folder), folder, key].filter((f) => f !== null),
             key === placeKey(folder).normalize("NFC") ? null : { shown: ctx.displayFolder(key), folder: basename(folder) },
           ),
-        accept: async () => {
+        accept: async (allowed) => {
           const config = claudeGlobalConfigPath(claudeFiles());
           try {
-            await acceptClaudeTrust(config, key);
+            await acceptClaudeTrust(config, key, undefined, allowed);
           } catch (error) {
             throw new Error(`Could not update ${ctx.displayFolder(config)}: ${(error as Error).message}. Nothing was changed.`);
           }

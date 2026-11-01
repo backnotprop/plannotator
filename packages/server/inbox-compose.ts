@@ -167,8 +167,18 @@ export function createInboxCompose(options: {
       // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
       // refused must not leave the folder trusted, and `trust_failed` sends nothing.
       if (prepared?.trust) {
-        store.checkPersonThreadName({ project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
-        await options.launch!.acceptTrust(prepared.launch);
+        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto };
+        store.checkPersonThreadName(name);
+        // Again under the agent's lock, whose wait can run to 12 s: a name taken meanwhile saves nothing, and the write
+        // below refuses the thread as usual.
+        await options.launch!.acceptTrust(prepared.trust, () => {
+          try {
+            store.checkPersonThreadName(name);
+            return true;
+          } catch {
+            return false;
+          }
+        });
       }
       result = store.startPersonThread({
         project_id: project.id,
