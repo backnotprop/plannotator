@@ -471,7 +471,7 @@ describe("the Pi and OpenCode wake (agent-link) for a reply that tags", () => {
       piBusy = false;
       for (let i = 0; i < 200 && toPi.length === 0; i++) await Bun.sleep(50);
       expect(toPi).toHaveLength(1);
-      expect(toPi[0]!.text).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: "Should the queue own retries?", body: sent.body, also_tagged: ["OpenCode"] }));
+      expect(toPi[0]!.text).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: null, body: sent.body, also_tagged: ["OpenCode"] }));
       let message: InboxThread["messages"][number] | undefined;
       for (let i = 0; i < 100; i++) {
         message = (await thread(server, asked.thread_id)).messages.find((m) => m.id === sent.id);

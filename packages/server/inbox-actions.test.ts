@@ -151,7 +151,7 @@ describe("the person's Done", () => {
       "Note: Approved. I also fixed the preview env var while I was there.",
     ].join("\n");
     expect(command).toMatchObject({ type: "reply", reply_to: sent.message_id, body });
-    expect(inboxWakeText(command)).toBe(`Plannotator Inbox: Approve the production deploy on Vercel (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n\n${body}\n\n[thread ${command.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
+    expect(inboxWakeText(command)).toBe(`Plannotator Inbox: a reply (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n\n${body}\n\n[thread ${command.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
 
     const replied = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: SESSION } })) as {
       content: { text: string }[];

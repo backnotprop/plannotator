@@ -1295,6 +1295,78 @@ export class InboxStore {
   }
 
   /**
+   * A thread's short name as it stands now (a name given later counts), or
+   * null when it has none. Served like a subject: it goes into an agent's
+   * prompt, and a name stored earlier is not checked again.
+   */
+  threadShortName(threadId: string): string | null {
+    return displayInboxSubject(this.messages.get(threadId)?.thread_name);
+  }
+
+  /**
+   * The title a person's message shows the agent it reaches, the one place
+   * this is decided (#2464, approval "inbox-reply-title"): the wake's first
+   * line (the bridge command's `subject`, so Codex and Qwen too). A subject
+   * can carry status that goes stale, and a plain reply repeated it every
+   * time, so a plain reply takes the thread's short name, or null with none
+   * (the connection then says `a reply`).
+   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   */
+  agentTitle(message: InboxMessage, session: string | null): string | null {
+    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+  }
+
+  /**
+   * Whether `message` reaches `session` as the person's own reply in a thread
+   * that session already has. Not one: a root or a New message (no `reply_to`);
+   * the Inbox's own notes and a Re-ask, which are not an answer from the
+   * person; and a wake that is the session's first sight of the thread
+   * (tagged, added, handed the thread, a reply sent on from an ended session,
+   * words moved from another session), where the subject is what places it.
+   * A session added to the thread gets the person's later replies as tags too:
+   * those are plain replies, only the one that added it is a first sight.
+   * An action report is a reply: it reaches the agent as one, in the same words.
+   */
+  private plainReplyFor(message: InboxMessage, session: string | null): boolean {
+    if (message.author.kind !== "person" || !message.reply_to) return false;
+    if (isInboxNote(message) || (message.reask?.length ?? 0) > 0) return false;
+    const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
+    if (tag) {
+      if (!tag.joined) return false;
+      const added = this.threadMessages(message.thread_id).find((m) => m.author.kind === "person" && tagOf(m, session!)?.joined);
+      return added?.id !== message.id;
+    }
+    return !handoffActive(message) && !this.redirectedFrom(message) && !this.continuesThread(message);
+  }
+
+  /**
+   * The agent that asked, when the person sent this reply to another session
+   * because the session that asked had ended; else null.
+   */
+  redirectedFrom(reply: InboxMessage) {
+    const asked = reply.to && reply.reply_to ? this.messages.get(reply.reply_to) : null;
+    return asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? asked.author : null;
+  }
+
+  /**
+   * More words in a thread the person started, handed to a session that has
+   * seen nothing of it (the person moved them there): it reads the thread
+   * first. The root going to that session too (not taken yet, maybe in the
+   * same poll) opens the thread, so that is not this.
+   */
+  continuesThread(reply: InboxMessage): boolean {
+    const root = this.messages.get(reply.thread_id);
+    return (
+      !!reply.to &&
+      reply.thread_id !== reply.id &&
+      !!root?.started_by_person &&
+      root.delivery?.session !== reply.to.session &&
+      root.to?.session !== reply.to.session &&
+      !this.threadMessages(reply.thread_id).some((m) => m.author.kind === "agent" && m.author.session === reply.to!.session)
+    );
+  }
+
+  /**
    * The agent sessions that may still name a thread the person started
    * (approval "inbox-agent-names-own-thread"): the session it is addressed to
    * and, once the address moved, also the first agent that replied in it.

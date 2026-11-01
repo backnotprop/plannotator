@@ -187,7 +187,7 @@ describe("a reply to a Codex thread", () => {
     expect(argOf(calls[0]!.args, "thread")).toBe(THREAD);
     const message = argOf(calls[0]!.args, "message")!;
     const lines = message.split("\n");
-    expect(lines[0]).toBe(`Plannotator Inbox: Ship the worker today? (${replyId})`);
+    expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
     expect(lines[1]).toBe(asCodex(INBOX_WAKE_INSTRUCTION));
     expect(message).toContain("Yes, ship it.");
     // Every value goes as --name=value, so text that starts with "-" is never read as a flag.
@@ -215,6 +215,21 @@ describe("a reply to a Codex thread", () => {
     expect(existsSync(join(w.dataDir, "inbox", "codex-queue"))).toBe(true);
     expect(readdirSync(join(w.dataDir, "inbox", "codex-queue")).filter((name) => name !== "dead")).toEqual([]);
     expect(queues(w.fake)).toHaveLength(1);
+  });
+
+  test("a reply in a named thread is queued under the thread's short name, never its subject", async () => {
+    const w = await world();
+    const sent = (await w.client.callTool({
+      name: "send_message",
+      arguments: { body: "Quota is climbing.", subject: "Quota 93% used", thread: "Latest triage", project_path: w.project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex" },
+      _meta: codexMeta(THREAD),
+    })).structuredContent as { message_id: string };
+    const response = await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Check the cache." });
+    const replyId = ((await response.json()) as { reply: { id: string } }).reply.id;
+    await w.server.codexWake.sweep();
+    const message = argOf(queues(w.fake)[0]!.args, "message")!;
+    expect(message.split("\n")[0]).toBe(`Plannotator Inbox: Latest triage (${replyId})`);
+    expect(message).not.toContain("Quota 93% used");
   });
 
   test("the next turn's first Inbox tool call records the delivery", async () => {

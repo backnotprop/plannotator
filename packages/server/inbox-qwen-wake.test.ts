@@ -237,7 +237,7 @@ describe("a reply to a running Qwen Code session", () => {
     expect(frame.msgId).toMatch(/^[0-9a-f-]{36}$/);
     expect(typeof frame.replyToken).toBe("string");
     const content = (frame.message as { content: string }).content;
-    expect(content.split("\n")[0]).toBe(`Plannotator Inbox: Ship the worker today? (${replyId})`);
+    expect(content.split("\n")[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
     expect(content.split("\n")[1]).toBe(INBOX_WAKE_INSTRUCTION.split("plannotator_inbox ").join(""));
     expect(content).toContain("Yes, ship it.");
 
@@ -261,6 +261,20 @@ describe("a reply to a running Qwen Code session", () => {
     await again.qwenWake.sweep();
     expect(claims(w)).toEqual([]);
     expect(w.session.received).toHaveLength(1);
+  });
+
+  test("a reply in a named thread goes in under the thread's short name, never its subject", async () => {
+    const w = await world();
+    const sent = (await w.client.callTool({
+      name: "send_message",
+      arguments: { body: "Quota is climbing.", subject: "Quota 93% used", thread: "Latest triage", project_path: w.project, agent_session: SESSION, agent_host: "qwen", agent_name: "Qwen Code" },
+    })).structuredContent as { message_id: string };
+    const replyId = await reply(w.server, sent.message_id, "Check the cache.");
+    await w.server.qwenWake.sweep();
+    await until(() => w.session.received.length > 0);
+    const content = (w.session.received[0]!.frame.message as { content: string }).content;
+    expect(content.split("\n")[0]).toBe(`Plannotator Inbox: Latest triage (${replyId})`);
+    expect(content).not.toContain("Quota 93% used");
   });
 
   test("with no trusted-sender token nothing wakes: the agent is told to wait, and nothing is sent", async () => {
