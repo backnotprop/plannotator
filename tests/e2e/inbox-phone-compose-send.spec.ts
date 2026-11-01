@@ -16,6 +16,8 @@
  * - No gap: the message field runs to the foot, and the foot to the keyboard (or the sheet's bottom).
  * - The head steps aside for the words, but a Thread row in use or saying something, and a refused file, do not.
  * - Save draft is at the top right only while nothing can be sent. Delete draft is off the sheet and on the Drafts page.
+ * - A draft to an ended session keeps To's chevron clear of Save draft and says "ended" whole.
+ * - Under the fold's threshold Send still stays on screen: a strip of 78 px, and a browser that resizes the layout.
  * - While dictating the row stays one row with the clip and mic where they were.
  * - Chromium at 1440 x 900: none of it applies.
  *
@@ -51,7 +53,7 @@ const MESSAGE = 'Rename the Quiet section to Done? Quiet reads like muted to me.
 const LINES = Array.from({ length: 14 }, (_, i) => `Line ${i + 1}: the promo field moves under the order summary.`).join('\n');
 const LONG_NAME = 'Keep the checkout total from jumping when the promo field opens on the smallest phones';
 
-let world: { url: string; agent: SimAgent; stop: boolean; loop: Promise<void> | null };
+let world: { url: string; agent: SimAgent; project: string; port: number; token: string; stop: boolean; loop: Promise<void> | null };
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -79,10 +81,10 @@ test.beforeAll(async () => {
   const project = scratchProject(join(root, 'src'), 'fernway-checkout-platform');
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   await agent.send({ project_path: project, subject: 'Checkout: the sticky footer', body: 'The checkout on a phone.' }, { wakes: true });
-  world = { url: started.stdout.trim(), agent, stop: false, loop: null };
+  const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+  world = { url: started.stdout.trim(), agent, project, port, token, stop: false, loop: null };
 
   // One live session, as the mod's connection holds it.
-  const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
   const startedAt = Date.now() - 45 * 60_000;
   world.loop = (async () => {
     while (!world.stop) {
@@ -194,7 +196,7 @@ async function openWorstDraft(page: Page): Promise<void> {
     draftKept = true;
   }
   await page.goto(`${world.url}#drafts`);
-  await page.locator('[data-draft-id] .ib-draft-open').first().click();
+  await page.locator('[data-draft-id]', { hasText: /Line 1|Keep the checkout total/ }).locator('.ib-draft-open').click();
   await expect(sheetOf(page).locator(`.ib-cp-tobtn[data-compose-to="${SESSION}"]`)).toBeVisible();
   await expect(sheetOf(page).locator('[data-compose-saved]')).toBeVisible();
   await expect(sheetOf(page).locator('[data-voice-mic]')).toBeVisible();
@@ -216,6 +218,7 @@ interface Layout {
   bar: Box;
   cancel: Box | null;
   to: Box | null;
+  chevron: Box | null;
   thread: Box | null;
   text: Box | null;
   foot: Box;
@@ -248,6 +251,7 @@ async function read(page: Page): Promise<Layout> {
       bar: rect('.ib-cp-bar')!,
       cancel: rect('[data-compose-cancel]'),
       to: rect('.ib-cp-tobtn, .ib-cp-none-to'),
+      chevron: rect('.ib-cp-tobtn > svg.ib-ic'),
       thread: rect('.ib-cp-thread'),
       text: rect('[data-compose-text] textarea'),
       foot: rect('.ib-cp-foot')!,
@@ -289,6 +293,9 @@ function headFolded(l: Layout, name: string): void {
   expect(l.to!.bottom, `${name}: To is on the top bar's line`).toBeLessThanOrEqual(l.bar.bottom + 0.5);
   expect(l.to!.left, `${name}: To clears Cancel`).toBeGreaterThanOrEqual(l.cancel!.right - 0.5);
   if (l.save) expect(l.to!.right, `${name}: To clears Save draft`).toBeLessThanOrEqual(l.save.left + 0.5);
+  // The button's box can stay clear while what it holds runs out of it: the chevron is what would land on Save draft.
+  if (l.chevron) expect(l.chevron.right, `${name}: the chevron stays in To`).toBeLessThanOrEqual(l.to!.right + 0.5);
+  if (l.chevron && l.save) expect(l.chevron.right, `${name}: the chevron clears Save draft`).toBeLessThanOrEqual(l.save.left + 0.5);
 }
 
 /** The owner's gap: the field runs to the foot, the foot to the keyboard or the sheet's bottom. */
@@ -473,7 +480,149 @@ for (const engine of ENGINES) {
         noGap(open, 'no agent, keyboard open');
         await page.context().close();
       });
+
+      test(`${at}: a draft to an ended session, Save draft beside To: To keeps its chevron and says "ended" whole`, async () => {
+        const page = await phone(size);
+        const words = `To an ended session, ${engine.name} ${size.width}`;
+        await openCompose(page);
+        const sheet = sheetOf(page);
+        const field = sheet.locator('[data-compose-text] textarea');
+        await field.fill(words);
+        await sheet.locator('[data-compose-cancel]').click();
+        await sheet.locator('[data-compose-keep]').click();
+        await expect(sheet).toHaveCount(0);
+
+        // The session is gone when the draft comes back.
+        await page.route('**/api/inbox/sessions*', (route) => route.fulfill({ json: { projects: [] } }));
+        await page.goto(`${world.url}#drafts`);
+        await page.locator('[data-draft-id]', { hasText: words }).locator('.ib-draft-open').click();
+        const to = sheet.locator('.ib-cp-tobtn[data-compose-to="ended"]');
+        await expect(to).toBeVisible();
+        await expect(sheet.locator('[data-compose-note="ended"]')).toBeVisible();
+        await field.focus();
+        await field.fill(`${words}, and one more thought`);
+        await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toBeVisible();
+        await shot(page, `${engine.name}-${size.width}-ended-keyboard-closed`, false);
+
+        await keyboardUp(page, engine.up, size.keyboard);
+        await expect(sheet.locator('[data-compose-note="ended"]')).toBeHidden();
+        const open = await read(page);
+        sendInReach(open, 'ended, keyboard open');
+        headFolded(open, 'ended, keyboard open');
+        const detail = to.locator('[data-compose-detail]');
+        await expect(detail).toHaveText('· ended', { useInnerText: true });
+        const ended = await detail.evaluate((el) => ({ whole: el.scrollWidth <= el.clientWidth, right: el.getBoundingClientRect().right }));
+        expect(ended.whole, '"ended" is not cut').toBe(true);
+        expect(ended.right, '"ended" stops short of the chevron').toBeLessThanOrEqual(open.chevron!.left + 0.5);
+        if (size.width === 320) await expect(to.locator('s'), 'no sliver of a name at 320').toBeHidden();
+        await expect(to).toHaveAttribute('aria-label', /ended/);
+        await shot(page, `${engine.name}-${size.width}-ended-keyboard-open`, true);
+
+        await keyboardDown(page);
+        await expect(sheet.locator('[data-compose-note="ended"]')).toBeVisible();
+        await page.context().close();
+      });
+
+      test(`${at}: a strip too small to fold for (a hardware keyboard's bar): the sheet ends above it with Send in reach`, async () => {
+        const page = await phone(size);
+        await openCompose(page);
+        const sheet = sheetOf(page);
+        const field = sheet.locator('[data-compose-text] textarea');
+        await field.focus();
+        await field.fill(MESSAGE);
+        await engine.up(page, 78);
+        await expect.poll(async () => (await sheet.boundingBox())!.height).toBe(size.height - 78);
+        await expect(root(page)).not.toHaveAttribute('data-ib-keyboard', /.*/);
+        const strip = await read(page);
+        sendInReach(strip, 'a strip');
+        toOnScreen(strip, 'a strip');
+        expect(strip.thread, 'nothing folds for a strip').toBeTruthy();
+
+        await keyboardDown(page);
+        await expect.poll(async () => (await sheet.boundingBox())!.height).toBe(size.height);
+        await page.context().close();
+      });
     }
+
+    test('844 x 200, a browser that resizes the layout for the keyboard: the head folds with Send in reach', async () => {
+      const page = await phone({ width: 844, height: 390, keyboard: 0 });
+      await openCompose(page);
+      const sheet = sheetOf(page);
+      const field = sheet.locator('[data-compose-text] textarea');
+      await field.focus();
+      await field.fill(MESSAGE);
+      await page.setViewportSize({ width: 844, height: 200 });
+      await expect(root(page)).toHaveAttribute('data-ib-keyboard', '');
+      const short = await read(page);
+      sendInReach(short, 'a short window');
+      headFolded(short, 'a short window');
+      await page.setViewportSize({ width: 844, height: 390 });
+      await expect(root(page)).not.toHaveAttribute('data-ib-keyboard', /.*/);
+      await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
+      await page.context().close();
+    });
+
+    test('320 px: a failed send says so on screen with the keyboard up, To and Send in reach', async () => {
+      const size = SIZES[1];
+      const page = await phone(size);
+      await openCompose(page);
+      await page.route('**/api/inbox/messages*', (route) =>
+        route.request().method() === 'POST' ? route.fulfill({ status: 500, json: { error: { code: 'server_error', message: 'The Inbox could not take it.' } } }) : route.fallback(),
+      );
+      const sheet = sheetOf(page);
+      const field = sheet.locator('[data-compose-text] textarea');
+      await field.fill(MESSAGE);
+      await field.focus();
+      await keyboardUp(page, engine.up, size.keyboard);
+      await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
+      const error = sheet.locator('[data-compose-error]');
+      await expect(error).toBeVisible();
+      const l = await read(page);
+      sendInReach(l, 'a failed send');
+      headFolded(l, 'a failed send');
+      const box = (await error.boundingBox())!;
+      expect(box.y, 'the error is under the head').toBeGreaterThanOrEqual(l.bar.bottom - 0.5);
+      expect(box.y + box.height, 'the error is over the foot').toBeLessThanOrEqual(l.foot.top + 0.5);
+      expect(box.height, 'the error has room to say it').toBeGreaterThanOrEqual(18);
+      await page.context().close();
+    });
+
+    test('320 px: the Board card line steps aside with the keyboard up and is back when it closes', async () => {
+      const size = SIZES[1];
+      const post = (path: string, body: object) =>
+        fetch(`http://127.0.0.1:${world.port}/api/inbox/${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${world.token}` },
+          body: JSON.stringify(body),
+        });
+      const board = (on: boolean) => post('settings', { board: { on } });
+      // Only for this test: with the Board on the Thread row grows a chip the others do not expect.
+      expect((await board(true)).ok).toBe(true);
+      try {
+        // The first visit's dialog, claimed here so no page waits on it.
+        expect((await post('board/intro', {})).ok).toBe(true);
+        const made = await world.agent.card({ op: 'create', project_path: world.project, title: `The promo field, ${engine.name}` });
+        const id = (made.card as { id: string }).id;
+        const page = await phone(size);
+        await page.goto(`${world.url}#board`);
+        await page.locator(`[data-card-id="${id}"] [data-card-open]`).filter({ visible: true }).first().tap();
+        await page.locator('[data-card-create-thread]').filter({ visible: true }).first().tap();
+        const sheet = sheetOf(page);
+        const line = sheet.locator(`[data-compose-card="${id}"]`);
+        await expect(line).toBeVisible();
+        await sheet.locator('[data-compose-text] textarea').focus();
+        await keyboardUp(page, engine.up, size.keyboard);
+        await expect(line).toBeHidden();
+        const open = await read(page);
+        sendInReach(open, 'a card, keyboard open');
+        headFolded(open, 'a card, keyboard open');
+        await keyboardDown(page);
+        await expect(line).toBeVisible();
+        await page.context().close();
+      } finally {
+        expect((await board(false)).ok).toBe(true);
+      }
+    });
 
     test('320 px: what needs saying does not step aside: Thread in use, a name refused, a file refused', async () => {
       const size = SIZES[1];

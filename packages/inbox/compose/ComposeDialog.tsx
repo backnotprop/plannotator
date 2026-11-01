@@ -440,6 +440,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
+  // Back from the picker: to the message. In the tour on a phone, to To: a focused message raises the keyboard, and in
+  // the room it leaves "Press Send" would have no card to read.
+  const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
+
   const toRow = (
     <div className="ib-cp-to">
       <span className="ib-cp-tol">To</span>
@@ -565,12 +569,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             setChosen(picked.session);
             setPicker(false);
             setError(null);
-            textRef.current?.focus();
+            afterPicker();
           }}
           onClose={() => {
             setPicker(false);
             // Still nobody in To: back on To, where the choice is made.
-            (target ? textRef.current : (toRef.current ?? textRef.current))?.focus();
+            if (target) afterPicker();
+            else (toRef.current ?? textRef.current)?.focus();
           }}
         />
       )}

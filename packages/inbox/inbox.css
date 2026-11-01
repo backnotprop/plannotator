@@ -3915,7 +3915,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-drafts .ib-dh .ib-lhead-compose { margin-left: auto; }
   .ib-sp-entryrow { margin-bottom: 8px; }
   .pn-inbox .ib-compose-btn { width: 44px; height: 44px; }
-  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, 100%); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, var(--ib-cp-vvh, 100%)); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   dialog.ib-cp[data-phone]::backdrop { animation: none; }
   .ib-cp-head { flex: none; }
   /* Two equal sides, so the title stays centred with Save draft at the right or nothing there. */
@@ -3977,6 +3977,14 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   :root[data-ib-keyboard] .ib-cp-bar h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   :root[data-ib-keyboard] .ib-cp-to { grid-area: 1 / 2; min-height: 0; padding: 0; border: 0; align-items: center; justify-content: flex-end; }
   :root[data-ib-keyboard] .ib-cp-to .ib-cp-tol { display: none; }
+  /* A session that ended has Save draft beside it: To stays in its box with its chevron, the name gives way, and "ended" replaces the detail, whole. */
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] s { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] .ib-cp-tod { flex: none; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] :is(.ib-cp-tdsep, .ib-cp-tdw) { display: none; }
+  /* The narrowest phones, Save draft beside it: a struck letter says nothing. The mark says who, the button's name the rest. */
+  @media (max-width: 359px) {
+    :root[data-ib-keyboard] .ib-cp-head:has([data-compose-save]) .ib-cp-tobtn[data-compose-to="ended"] s { display: none; }
+  }
   /* One line whatever the room: the narrowest phone has Save draft beside it. */
   :root[data-ib-keyboard] .ib-cp-none-to { display: block; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
@@ -5467,6 +5475,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-tour-chip { padding: 0 10px; }
   .ib-tour-coach { left: 10px; right: 10px; width: auto; max-width: none; bottom: calc(10px + env(safe-area-inset-bottom)); top: auto; }
   .ib-tour-coach[data-at="top"] { top: calc(var(--ib-tour-bar-h, 52px) + 8px); bottom: auto; }
+  /* "Press Send" with the keyboard up (a tap on the message): the room left is Send's; the card is back when it closes. */
+  :root[data-ib-keyboard] .ib-tour-coach[data-tour-coach="9-to"] { display: none; }
   .pn-inbox .ib-tc-next, .pn-inbox .ib-tc-back { height: 44px; min-width: 44px; }
   .ib-te-paths { grid-template-columns: minmax(0, 1fr); }
   .ib-te-pic { aspect-ratio: 16 / 6; }
