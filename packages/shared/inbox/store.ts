@@ -127,6 +127,7 @@ import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachm
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
+import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { INBOX_CARD_PR_HINT } from "./cards";
@@ -4657,6 +4658,8 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
     }
+    // So does its Ask AI conversation.
+    pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
     // A person's sent uploads are files under inbox/uploads/<att_id>/: they go with their message.
     removeUnusedInboxUploadFiles(this.dir, attachmentIds);
     const stillNamed = this.markupsOf(() => true);
