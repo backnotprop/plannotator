@@ -17,12 +17,12 @@
  */
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { execSync, spawn, type ChildProcess } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -56,7 +56,6 @@ process.exit(2);
 
 let root = '';
 let dataDir = '';
-let inbox: ChildProcess;
 let inboxErr = '';
 let inboxPort = 0;
 let url = '';
@@ -111,7 +110,9 @@ test.beforeAll(async () => {
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ latestRelease: { tag: NEXT, fetchedAt: Date.now(), publishedAt: '2026-10-09T15:00:00Z' } }));
   mkdirSync(join(dataDir, 'update-notes'));
   writeFileSync(join(dataDir, 'update-notes', `${NEXT}.json`), JSON.stringify({ version: NEXT, notes: 'A patch release for the Inbox.\n\n### Update notices\n\nOne click.', highlights: [] }));
-  inbox = spawn(bun, ['--define', '__CLI_VERSION__="0.28.10"', entry, 'inbox', '--no-open'], {
+  const inbox = spawn(bun, ['--define', '__CLI_VERSION__="0.28.10"', entry, 'inbox', '--no-open'], {
+    // Inside the scratch folder: tests/helpers/inbox-process.ts proves an Inbox by its working directory.
+    cwd: root,
     env: {
       // A PATH of its own: no real tailscale or agent can answer.
       PATH: bin,
@@ -135,6 +136,7 @@ test.beforeAll(async () => {
   while (!/Plannotator Inbox: (\S+)/.test(inboxErr) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
   url = /Plannotator Inbox: (\S+)/.exec(inboxErr)?.[1] ?? '';
   expect(url, inboxErr).not.toBe('');
+  rememberInboxOf(dataDir);
   inboxPort = Number(new URL(url).port);
   while (!existsSync(join(root, 'serve.json')) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
   expect(mapping(), 'published').toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
@@ -158,8 +160,8 @@ test.afterAll(async () => {
   try {
     for (const proxy of proxies) proxy.closeAllConnections();
     for (const proxy of proxies) proxy.close();
-    inbox?.kill('SIGTERM');
   } finally {
+    // SIGTERM through tests/helpers/inbox-process.ts, so the clean stop takes the mapping down.
     await removeInboxScratch();
   }
 });
