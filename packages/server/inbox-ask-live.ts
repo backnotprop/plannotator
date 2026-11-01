@@ -23,6 +23,13 @@
  * none starts. A busy answer ends the query, so a retry claims the slot again
  * with the same turn id. A bridge idle for 10 minutes is closed, which tells
  * the host to stop its client, and the next question makes a new one.
+ *
+ * A question's end can be lost: a post too large for the Inbox, a dropped post,
+ * or a second process of the agent that never heard of the question. Polls keep
+ * the bridge alive and nothing sends an end twice, so a host's own status is
+ * what ends it: every host reports `busy` while it has a question, so `ready`
+ * with no word for 20 seconds, past the hosts' own 15 second delivery checks,
+ * means it has none. The words so far are saved as `gone`.
  */
 
 import { createAIEndpoints } from "@plannotator/ai/endpoints";
@@ -36,7 +43,8 @@ import {
 } from "@plannotator/ai/session-bridge";
 import { createPullSessionBridge, SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH, type PullSessionBridge } from "@plannotator/ai/session-bridge-pull";
 import { SessionManager } from "@plannotator/ai/session-manager";
-import { INBOX_ASK_TEXT_MAX, updateInboxAskTurn, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
+import type { AISession, CreateSessionOptions } from "@plannotator/ai/types";
+import { INBOX_ASK_CUT_NOTE, INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, updateInboxAskTurn, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { INBOX_ASK_BRIDGE_PREFIX } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
@@ -52,9 +60,10 @@ export interface InboxAskTimes {
   writeRetryMs?: number;
   /** Silence after which the host is gone (the bridge's 30 s). */
   goneAfterMs?: number;
+  /** How long a host with a question may say `ready`, with no word of it, before the question counts as lost. */
+  readyGraceMs?: number;
 }
 
-const ANSWER_CUT_NOTE = "\n\n… (the rest of the answer was cut)";
 const WRITE_TRIES = 30;
 const BRIDGE_HOSTS: ReadonlySet<string> = new Set(["pi", "opencode", "claude-code", "t3"]);
 const HOST_PATH = new RegExp(`^${INBOX_ASK_BRIDGE_PREFIX}([^/]+)(${SESSION_BRIDGE_POLL_PATH}|${SESSION_BRIDGE_EVENT_PATH})$`);
@@ -68,6 +77,8 @@ interface Slot {
   timer: ReturnType<typeof setTimeout> | null;
   /** The answer so far; null until the question went to the host. */
   text: string | null;
+  /** Looks for a lost end while the question is with the host. */
+  watch: ReturnType<typeof setInterval> | null;
   /** How it ended is settled, and written. */
   settled: boolean;
 }
@@ -88,11 +99,17 @@ export interface InboxAskClaim {
 
 /** Ask this session's provider, with the slot's say over which query may run. */
 class InboxAskProvider extends SessionBridgeProvider {
-  private readonly slotHooks: { take(query: SessionBridgeSession): boolean; ended(query: SessionBridgeSession): void };
+  private readonly slotHooks: { made(query: SessionBridgeSession): void; take(query: SessionBridgeSession): boolean; ended(query: SessionBridgeSession): void };
 
   constructor(bridge: SessionBridge, slotHooks: InboxAskProvider["slotHooks"]) {
     super(bridge);
     this.slotHooks = slotHooks;
+  }
+
+  override async createSession(options: CreateSessionOptions): Promise<AISession> {
+    const query = await super.createSession(options);
+    this.slotHooks.made(query as SessionBridgeSession);
+    return query;
   }
 
   override claim(query: SessionBridgeSession): boolean {
@@ -120,6 +137,7 @@ export function createInboxAskLive(options: {
   const slotMs = options.times?.slotMs ?? 30_000;
   const idleMs = options.times?.idleMs ?? 10 * 60_000;
   const writeRetryMs = options.times?.writeRetryMs ?? 1_000;
+  const readyGraceMs = options.times?.readyGraceMs ?? 20_000;
 
   const bridges = new Map<string, LiveBridge>();
   const registry = new ProviderRegistry();
@@ -149,8 +167,9 @@ export function createInboxAskLive(options: {
   const settle = (slot: Slot, code: SessionBridgeErrorCode | null, finalAnswer?: string): void => {
     if (slot.settled) return;
     slot.settled = true;
+    if (slot.watch) clearInterval(slot.watch);
     const text = finalAnswer || slot.text || "";
-    const answer = text.length > INBOX_ASK_TEXT_MAX ? `${text.slice(0, INBOX_ASK_TEXT_MAX)}${ANSWER_CUT_NOTE}` : text;
+    const answer = text.length > INBOX_ASK_TEXT_MAX ? `${text.slice(0, INBOX_ASK_TEXT_MAX)}${INBOX_ASK_CUT_NOTE}` : text;
     const words: Partial<InboxAskTurn> = answer ? { answer, answered_at: new Date().toISOString() } : {};
     if (code === "aborted") write(slot, { ...words, stopped: true });
     else if (answer) write(slot, { ...words, ...(code ? { failure: code === "gone" || code === "taken_over" ? code : "failed" } : {}) });
@@ -182,9 +201,13 @@ export function createInboxAskLive(options: {
       token,
       host,
       modes: { turn: true, transient: false },
+      // A `done` repeats the answer beside its last words, and JSON can double both: an answer at its limit has to arrive.
+      maxBodyChars: INBOX_ASK_FILE_MAX,
       ...(options.times?.goneAfterMs !== undefined ? { goneAfterMs: options.times.goneAfterMs } : {}),
     });
     const live: LiveBridge = { session, providerId: `inbox-ask:${session}`, pull, slot: null, idle: null };
+    /** The turn each AI session was made for: a late window's query can't answer a later turn. */
+    const madeFor = new WeakMap<SessionBridgeSession, string>();
     const inner = pull.bridge;
     const wrapped: SessionBridge = {
       host: inner.host,
@@ -202,15 +225,31 @@ export function createInboxAskLive(options: {
           return;
         }
         slot.text = "";
+        // Stops the host's side: the person's Stop, or a lost end, which has to clear the bridge too.
+        const stopHost = new AbortController();
+        signal.addEventListener("abort", () => stopHost.abort(), { once: true });
+        let heardAt = Date.now();
+        slot.watch = setInterval(() => {
+          if (inner.status() !== "ready") heardAt = Date.now();
+          if (Date.now() - heardAt < readyGraceMs) return;
+          settle(slot, "gone");
+          sink.error("gone");
+          stopHost.abort();
+        }, Math.min(1_000, readyGraceMs / 4));
+        (slot.watch as { unref?: () => void }).unref?.();
         inner.ask(
           request,
           {
             delta(text) {
+              heardAt = Date.now();
               // One past the limit is what marks an answer as cut.
               if (slot.text!.length <= INBOX_ASK_TEXT_MAX) slot.text += text;
               sink.delta(text);
             },
-            tool: (name) => sink.tool?.(name),
+            tool(name) {
+              heardAt = Date.now();
+              sink.tool?.(name);
+            },
             done(answer) {
               settle(slot, null, answer);
               sink.done(answer);
@@ -220,15 +259,18 @@ export function createInboxAskLive(options: {
               sink.error(code, message);
             },
           },
-          signal,
+          stopHost.signal,
         );
       },
     };
     const provider = new InboxAskProvider(wrapped, {
-      // A query needs a turn to answer: POST /ask made one, and it is not taken.
+      made(query) {
+        if (live.slot) madeFor.set(query, live.slot.turnId);
+      },
+      // A query needs a turn to answer: POST /ask made one, this session was made for it, and it is not taken.
       take(query) {
         const slot = live.slot;
-        if (!slot || (slot.query && slot.query !== query)) return false;
+        if (!slot || madeFor.get(query) !== slot.turnId || (slot.query && slot.query !== query)) return false;
         slot.query = query;
         if (slot.timer) clearTimeout(slot.timer);
         slot.timer = null;
@@ -252,21 +294,24 @@ export function createInboxAskLive(options: {
 
   /**
    * Take the session's slot for a turn, before anything is saved. The same turn
-   * finds the slot it holds, wherever it is: a doubled POST, or an owner who
-   * changed while it ran. A thread runs one turn at a time, whoever owns it.
+   * finds the slot it holds: a doubled POST, or an owner who changed while it
+   * ran. One no query started leaves the old owner, so the owner of now answers.
+   * A thread runs one turn at a time, whoever owns it.
    */
   const claim = (turn: { threadId: string; turnId: string; session: string }): InboxAskClaim => {
     const held = slotOf(turn.threadId);
-    if (held?.slot.turnId === turn.turnId) return held;
     const existing = bridges.get(turn.session);
-    if (held || existing?.slot) throw new InboxError("ask_busy", "This agent is answering another question. Ask again when it finishes.");
+    const sameTurn = held?.slot.turnId === turn.turnId;
+    if (sameTurn && (held.slot.query || held.bridge === existing)) return held;
+    if ((held && !sameTurn) || existing?.slot) throw new InboxError("ask_busy", "This agent is answering another question. Ask again when it finishes.");
+    if (held) free(held.bridge, held.slot);
     const host = hostOf(turn.session);
     if (!host || !BRIDGE_HOSTS.has(host)) throw new InboxError("ask_no_live_path", "This agent can't answer live.");
     if (existing && existing.pull.bridge.status() === "gone") close(existing);
     const bridge = bridges.get(turn.session) ?? makeBridge(turn.session, host as SessionBridgeHost);
     if (bridge.idle) clearTimeout(bridge.idle);
     bridge.idle = null;
-    const slot: Slot = { threadId: turn.threadId, turnId: turn.turnId, query: null, timer: null, text: null, settled: false };
+    const slot: Slot = { threadId: turn.threadId, turnId: turn.turnId, query: null, timer: null, text: null, watch: null, settled: false };
     bridge.slot = slot;
     slot.timer = setTimeout(() => free(bridge, slot), slotMs);
     (slot.timer as { unref?: () => void }).unref?.();

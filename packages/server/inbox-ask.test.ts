@@ -498,6 +498,18 @@ describe("the event stream", () => {
     expect(curlStream.frames).not.toContain("ask");
     await Promise.all([windowStream.stop(), agentStream.stop(), curlStream.stop()]);
   });
+
+  test("a retry of an answered turn changes nothing, so it says nothing", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    writeInboxAsk(inboxDir(dataDir), { v: 1, thread_id, seen_at: null, turns: [answeredTurn("turn-0001", "2026-11-01T10:00:00.000Z", "Because.")] });
+    const stream = listen(await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?window=window-one`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+    await Bun.sleep(100);
+    expect((await ask(server, thread_id, "turn-0001", "Why?")).status).toBe(200);
+    await Bun.sleep(100);
+    expect(stream.frames).not.toContain("ask");
+    await stream.stop();
+  });
 });
 
 describe("the gate", () => {

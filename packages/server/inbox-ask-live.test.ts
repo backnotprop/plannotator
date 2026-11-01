@@ -3,20 +3,23 @@
  * is requests shaped as the window's. The agent is a fake modeled on what the
  * Claude Code mod does (inbox-bridge.test.ts is the model for the connection):
  * it long-polls the connection route saying it can answer, starts the pull
- * client when told a question waits, and posts the client's real events.
+ * client when told a question waits, and posts the client's real events. Where
+ * the size or shape of a post matters, the client is the real one, with a host
+ * that is `busy` while it has a question, as the mod is.
  *
  * Guards the moments the plan names: first question to a busy agent, no poll in
  * time, agent gone, taken over, older plugin, browser drops and comes back,
  * and that words are neither lost nor sent twice in any of them.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { SESSION_ASK_HEADER } from "@plannotator/ai/session-bridge";
+import { SESSION_ASK_HEADER, type SessionBridge, type SessionBridgeAskRequest, type SessionBridgeSink, type SessionBridgeStatus } from "@plannotator/ai/session-bridge";
 import { SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH } from "@plannotator/ai/session-bridge-pull";
-import { INBOX_ASK_TEXT_MAX, type InboxAskConversation, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
+import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
+import { INBOX_ASK_CUT_NOTE, INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, writeInboxAsk, type InboxAskConversation, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { INBOX_ASK_POLL_FIELD, INBOX_ASK_WAITS_FIELD, INBOX_BRIDGE_POLL_PATH, inboxAskBridgeBase, parseInboxAskWaits } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -63,6 +66,29 @@ interface AskCommand {
   mode: string;
 }
 
+/** A session for the real pull client: `busy` from the moment it has a question until the test ends it. */
+function scriptedHost() {
+  let status: SessionBridgeStatus = "ready";
+  const asks: { request: SessionBridgeAskRequest; sink: SessionBridgeSink }[] = [];
+  const bridge: SessionBridge = {
+    host: "claude-code",
+    modes: { turn: true, transient: false },
+    status: () => status,
+    ask(request, sink, signal) {
+      status = "busy";
+      asks.push({ request, sink });
+      signal.addEventListener("abort", () => {
+        status = "ready";
+        sink.error("aborted");
+      }, { once: true });
+    },
+  };
+  return { bridge, asks, idle: () => void (status = "ready") };
+}
+
+const realClient = (server: InboxServer, session: string, host: ReturnType<typeof scriptedHost>, signal: AbortSignal) =>
+  runPullSessionBridgeClient({ baseUrl: `http://127.0.0.1:${server.port}${inboxAskBridgeBase(session)}`, token: server.token, bridge: host.bridge, signal, pollWaitMs: 100, statusIntervalMs: 20, deltaFlushMs: 5 });
+
 /** What a connection with the Ask AI client does, with the parts a test wants to go wrong. */
 interface FakeAgent {
   session: string;
@@ -85,7 +111,7 @@ async function fakeAgent(
   server: InboxServer,
   project: string,
   session: string,
-  options: { status?: "ready" | "busy"; olderPlugin?: boolean; noClient?: boolean; clientDelayMs?: number; clientPollMs?: number } = {},
+  options: { status?: "ready" | "busy"; olderPlugin?: boolean; noClient?: boolean; clientDelayMs?: number; clientPollMs?: number; host?: ReturnType<typeof scriptedHost> } = {},
 ): Promise<FakeAgent> {
   const stopped = new AbortController();
   let clientStop = new AbortController();
@@ -114,7 +140,8 @@ async function fakeAgent(
     const signal = clientStop.signal;
     if (options.clientDelayMs) await Bun.sleep(options.clientDelayMs);
     try {
-      while (!signal.aborted && !stopped.signal.aborted) {
+      if (options.host) await realClient(server, session, options.host, signal);
+      while (!options.host && !signal.aborted && !stopped.signal.aborted) {
         const response = await post(`${base}${SESSION_BRIDGE_POLL_PATH}`, { status, modes: { turn: true, transient: false }, waitMs: options.clientPollMs ?? 400 }, signal);
         if (response.status !== 200) {
           end = response.status;
@@ -229,9 +256,16 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 4_00
 
 /** What the window does after POST /ask: a fresh AI session on the named provider, then the query. */
 async function query(server: InboxServer, providerId: string, threadId: string, question = "Why?", busyPolicy?: "wait" | "interrupt") {
+  return run(server, await aiSession(server, providerId, threadId), question, busyPolicy);
+}
+
+async function aiSession(server: InboxServer, providerId: string, threadId: string): Promise<string> {
   const created = await fromWindow(server, "/api/ai/session", { providerId, context: { mode: "annotate", annotate: { filePath: `Inbox thread "Ship it?" (${threadId})`, content: "" } } });
   expect(created.status).toBe(200);
-  const { sessionId } = (await created.json()) as { sessionId: string };
+  return ((await created.json()) as { sessionId: string }).sessionId;
+}
+
+function run(server: InboxServer, sessionId: string, question = "Why?", busyPolicy?: "wait" | "interrupt") {
   const browser = new AbortController();
   const messages: { type: string; code?: string; delta?: string }[] = [];
   const decoder = new TextDecoder();
@@ -358,23 +392,164 @@ describe("a question and its answer", () => {
     expect(await turnsOf(server, thread_id)).toHaveLength(1);
   });
 
-  test("an answer past the limit is cut, and says so", async () => {
+});
+
+describe("a long answer, through the real client", () => {
+  /** Streams it in chunks as a host does, then a real `done` with the whole answer. Returns what was saved, once the next question is free to go. */
+  async function answered(answer: string, chunk: number): Promise<string> {
     const { server, client, project } = await setup();
     const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
-    const agent = await fakeAgent(server, project, "session-a");
+    const host = scriptedHost();
+    await fakeAgent(server, project, "session-a", { host });
     const posted = await ask(server, thread_id, "turn-0001");
     const answering = await query(server, posted.provider_id!, thread_id);
-    await waitFor(() => agent.asks.length === 1);
-    const askId = agent.asks[0]!.askId;
-    const chunk = "x".repeat(900_000);
-    await agent.event({ type: "delta", askId, text: chunk });
-    await agent.event({ type: "delta", askId, text: chunk });
-    await agent.event({ type: "delta", askId, text: chunk });
-    await agent.event({ type: "done", askId, answer: "" });
+    await waitFor(() => host.asks.length === 1);
+    const { sink } = host.asks[0]!;
+    for (let at = 0; at < answer.length; at += chunk) {
+      sink.delta(answer.slice(at, at + chunk));
+      await Bun.sleep(10);
+    }
+    sink.done(answer);
+    host.idle();
     await answering.finished;
-    const answer = (await turnsOf(server, thread_id))[0]!.answer!;
-    expect(answer.startsWith("x".repeat(INBOX_ASK_TEXT_MAX))).toBe(true);
-    expect(answer.endsWith("the rest of the answer was cut)")).toBe(true);
+    expect((await read(server, thread_id)).running).toBeNull();
+    expect((await ask(server, thread_id, "turn-0002")).provider_id).toBeString();
+    return (await turnsOf(server, thread_id))[0]!.answer!;
+  }
+
+  test("just under the limit, it is saved whole, and the session is free", async () => {
+    const answer = "x".repeat(INBOX_ASK_TEXT_MAX - 50);
+    expect((await answered(answer, 200_000)) === answer).toBe(true);
+  });
+
+  test("words JSON makes twice as long are saved whole", async () => {
+    const answer = '"\n'.repeat(450_000);
+    expect((await answered(answer, 100_000)) === answer).toBe(true);
+  });
+
+  test("one burst, where the last words and the `done` share a post, is saved whole", async () => {
+    const answer = "x".repeat(INBOX_ASK_TEXT_MAX);
+    expect((await answered(answer, answer.length)) === answer).toBe(true);
+  });
+
+  test("past the limit it is cut, and says so", async () => {
+    const saved = await answered("x".repeat(INBOX_ASK_TEXT_MAX + 200_000), 300_000);
+    expect(saved === `${"x".repeat(INBOX_ASK_TEXT_MAX)}${INBOX_ASK_CUT_NOTE}`).toBe(true);
+  });
+
+  test("an end too large to arrive still ends it: the words so far stay, marked, and the session is free", async () => {
+    const { server, client, project } = await setup({ readyGraceMs: 200 });
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const host = scriptedHost();
+    await fakeAgent(server, project, "session-a", { host });
+    const posted = await ask(server, thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, thread_id);
+    await waitFor(() => host.asks.length === 1);
+    host.asks[0]!.sink.delta("Words so far");
+    await waitFor(() => answering.messages.length > 0);
+
+    host.asks[0]!.sink.done("x".repeat(INBOX_ASK_FILE_MAX + 1));
+    host.idle();
+    await answering.finished;
+    expect(answering.messages.at(-1)?.code).toBe("session_gone");
+    expect(await turnsOf(server, thread_id)).toMatchObject([{ answer: "Words so far", failure: "gone" }]);
+    expect((await ask(server, thread_id, "turn-0002")).provider_id).toBeString();
+  });
+
+  test("an answer takes only the room the file has left, and no earlier word goes", async () => {
+    const { server, client, project, dataDir } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const host = scriptedHost();
+    await fakeAgent(server, project, "session-a", { host });
+    const unanswered = (id: string, question: string) => ({ id, at: "2026-11-01T10:00:00.000Z", session: "session-a", host: "claude-code", question });
+    const planted: InboxAskConversation = { v: 1, thread_id, seen_at: null, turns: [unanswered("turn-0000", ""), unanswered("turn-0001", "Why?"), unanswered("turn-0002", "And?")] };
+    const earlier = "x".repeat(INBOX_ASK_FILE_MAX - JSON.stringify(planted).length - 1_000);
+    planted.turns[0]!.question = earlier;
+    writeInboxAsk(inboxDir(dataDir), planted);
+    const file = join(inboxDir(dataDir), "ask", `${thread_id}.json`);
+
+    const answerTurn = async (turnId: string, index: number, answer: string) => {
+      const answering = await query(server, (await ask(server, thread_id, turnId)).provider_id!, thread_id);
+      await waitFor(() => host.asks.length === index + 1);
+      host.asks[index]!.sink.done(answer);
+      host.idle();
+      await answering.finished;
+    };
+    // Multi-byte, and escaped: the room is bytes of JSON, not characters.
+    const answer = 'é"'.repeat(300_000);
+    await answerTurn("turn-0001", 0, answer);
+    expect(statSync(file).size).toBeLessThanOrEqual(INBOX_ASK_FILE_MAX);
+    expect(statSync(file).size).toBeGreaterThan(INBOX_ASK_FILE_MAX - 16);
+    const cut = (JSON.parse(readFileSync(file, "utf8")) as InboxAskConversation).turns[1]!.answer!;
+    expect(cut.endsWith(INBOX_ASK_CUT_NOTE)).toBe(true);
+    expect(answer.startsWith(cut.slice(0, -INBOX_ASK_CUT_NOTE.length))).toBe(true);
+
+    // With no room left, a retried turn adds the note and not an answer.
+    await answerTurn("turn-0002", 1, answer);
+    expect(statSync(file).size).toBeLessThan(INBOX_ASK_FILE_MAX + 200);
+    const saved = JSON.parse(readFileSync(file, "utf8")) as InboxAskConversation;
+    expect(saved.turns[0]!.question === earlier).toBe(true);
+    expect(saved.turns[1]!.answer === cut).toBe(true);
+    expect(saved.turns[2]!.answer).toBe(INBOX_ASK_CUT_NOTE);
+  });
+});
+
+describe("a question whose end is lost", () => {
+  test("a host that no longer has it says `ready`: the words so far stay, marked, and the session is free", async () => {
+    const { server, client, project } = await setup({ readyGraceMs: 200 });
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const first = scriptedHost();
+    const agent = await fakeAgent(server, project, "session-a", { host: first });
+    const posted = await ask(server, thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, thread_id);
+    await waitFor(() => first.asks.length === 1);
+    first.asks[0]!.sink.delta("So far");
+    await waitFor(() => answering.messages.length > 0);
+
+    // A second process of the agent polls now, and never heard of the question. The person has left.
+    agent.dropClient();
+    answering.drop();
+    const second = scriptedHost();
+    const stopSecond = new AbortController();
+    void realClient(server, "session-a", second, stopSecond.signal);
+    try {
+      await waitFor(async () => (await read(server, thread_id)).running === null);
+      expect(await turnsOf(server, thread_id)).toMatchObject([{ answer: "So far", failure: "gone" }]);
+
+      // The bridge let go of it too: the next question reaches whoever polls.
+      const next = await ask(server, thread_id, "turn-0002");
+      const answeringNext = await query(server, next.provider_id!, thread_id);
+      await waitFor(() => second.asks.length === 1);
+      second.asks[0]!.sink.done("Back.");
+      second.idle();
+      await answeringNext.finished;
+      expect((await turnsOf(server, thread_id)).map((turn) => turn.answer)).toEqual(["So far", "Back."]);
+    } finally {
+      stopSecond.abort();
+    }
+  });
+
+  test("a host that is busy, or still sending words, keeps its question however long it takes", async () => {
+    const { server, client, project } = await setup({ readyGraceMs: 800 });
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const host = scriptedHost();
+    await fakeAgent(server, project, "session-a", { host });
+    const posted = await ask(server, thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, thread_id);
+    await waitFor(() => host.asks.length === 1);
+    await Bun.sleep(1_100);
+    expect((await read(server, thread_id)).running).toBe("turn-0001");
+
+    host.idle();
+    for (let word = 0; word < 8; word += 1) {
+      host.asks[0]!.sink.delta("word ");
+      await Bun.sleep(150);
+    }
+    expect((await read(server, thread_id)).running).toBe("turn-0001");
+    host.asks[0]!.sink.done("word ".repeat(8));
+    await answering.finished;
+    expect(await turnsOf(server, thread_id)).toMatchObject([{ answer: "word ".repeat(8) }]);
+    expect((await turnsOf(server, thread_id))[0]!.failure).toBeUndefined();
   });
 });
 
@@ -472,6 +647,67 @@ describe("the agent is not free", () => {
     expect(late.messages.map((message) => message.code)).toEqual(["ask_in_flight"]);
     expect(agent.asks).toEqual([]);
     expect((await ask(server, thread_id, "turn-0002")).provider_id).toBeString();
+  });
+
+  test("a late window's query can't take a later turn's slot, so an answer never lands on another question", async () => {
+    const { server, client, project } = await setup({ slotMs: 200 });
+    const one = await agentSends(client, project, "session-a", "One?");
+    const two = await agentSends(client, project, "session-b", "Two?");
+    await agentSends(client, project, "session-a", "I have this.", two.message_id);
+    const agent = await fakeAgent(server, project, "session-a");
+
+    // Window one makes its AI session, then stalls past the slot's limit.
+    const first = await ask(server, one.thread_id, "turn-0001", "About one?");
+    const stalled = await aiSession(server, first.provider_id!, one.thread_id);
+    await waitFor(async () => (await read(server, one.thread_id)).running === null);
+    const second = await ask(server, two.thread_id, "turn-0002", "About two?");
+
+    const late = run(server, stalled, "About one?");
+    await late.finished;
+    expect(late.messages.map((message) => message.code)).toEqual(["ask_in_flight"]);
+    expect(agent.asks).toEqual([]);
+
+    const answering = await query(server, second.provider_id!, two.thread_id, "About two?");
+    await waitFor(() => agent.asks.length === 1);
+    expect(agent.asks[0]!.text).toContain("About two?");
+    await agent.answer(agent.asks[0]!.askId, ["Two."]);
+    await answering.finished;
+    expect((await turnsOf(server, one.thread_id))[0]!.answer).toBeUndefined();
+    expect((await turnsOf(server, two.thread_id))[0]!.answer).toBe("Two.");
+  });
+
+  test("a late event is not a connection: the wait goes on, and a query can't skip the busy check", async () => {
+    const { server, client, project } = await setup({ connectWaitMs: 400 });
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const agent = await fakeAgent(server, project, "session-a", { noClient: true });
+
+    const posted = ask(server, thread_id, "turn-0001");
+    await waitFor(async () => (await read(server, thread_id)).running === "turn-0001");
+    expect((await agent.event({ type: "done", askId: "an-earlier-question", answer: "Late." })).status).toBe(409);
+    expect(await posted).toMatchObject({ provider_id: null, reason: "no_connection" });
+  });
+
+  test("a retry after a hand-off, with no query started, goes to the new owner and not the old", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id, message_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const old = await fakeAgent(server, project, "session-a");
+    const posted = await ask(server, thread_id, "turn-0001");
+
+    await agentSends(client, project, "session-b", "I took this over.", message_id);
+    const owner = await fakeAgent(server, project, "session-b");
+    const retry = await ask(server, thread_id, "turn-0001");
+    expect(retry.turn.session).toBe("session-b");
+    expect(retry.provider_id).not.toBe(posted.provider_id);
+
+    const late = await query(server, posted.provider_id!, thread_id);
+    await late.finished;
+    expect(late.messages.map((message) => message.code)).toEqual(["ask_in_flight"]);
+    expect(old.asks).toEqual([]);
+    const answering = await query(server, retry.provider_id!, thread_id);
+    await waitFor(() => owner.asks.length === 1);
+    await owner.answer(owner.asks[0]!.askId, ["Mine now."]);
+    await answering.finished;
+    expect(await turnsOf(server, thread_id)).toMatchObject([{ id: "turn-0001", session: "session-b", answer: "Mine now." }]);
   });
 
   test("after a hand-off, a retry of the saved turn goes to the new owner", async () => {
