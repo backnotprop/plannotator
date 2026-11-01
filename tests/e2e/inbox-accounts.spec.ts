@@ -134,7 +134,9 @@ const section = (page: Page) => page.locator('[data-settings-accounts]');
 const usageBoxes = (page: Page) => page.locator('[data-account-use]');
 
 async function shot(page: Page, name: string) {
-  await page.mouse.move(0, 0);
+  // Off the left edge's 20 px strip, which slides the sidebar in over the page.
+  await page.mouse.move(40, 0);
+  await expect(page.locator('.ib-peek[data-visible]')).toHaveCount(0);
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
     await page.waitForTimeout(200);
@@ -145,9 +147,13 @@ async function shot(page: Page, name: string) {
 /** Puts the state in place and reads it with Refresh. */
 async function show(page: Page, state: (typeof STATES)[number]) {
   state.apply(world.bin);
+  const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/accounts');
   await page.locator('[data-accounts-refresh]').click();
+  await answered;
   await expect(page.locator('[data-accounts-refresh]')).toBeEnabled();
   await expect(section(page)).toHaveAttribute('data-settings-accounts', state.state);
+  // A failed Refresh keeps `accounts`, so only the line can tell a good answer from a bad one.
+  if (state.state !== 'failed') await expect(page.locator('[data-accounts-failed]')).toHaveCount(0);
 }
 
 /** Nothing in the window or a row runs past its edge. */
@@ -221,12 +227,16 @@ async function walk(page: Page, prefix: string, errors: string[]) {
       const color = (usage: string) => page.locator(`[data-account="2"] [data-usage="${usage}"] b`).evaluate((b) => getComputedStyle(b).color);
       expect(await color('5h')).not.toBe(await color('week'));
       await shotOpen(page, 2, `${prefix}-row-open`);
+      // This picture goes before the failed Refresh below, which would leave its line in it.
+      await expect(page.locator('[data-accounts-failed]')).toHaveCount(0);
+      await shot(page, `${prefix}-normal`);
       // A Refresh that fails keeps the list, with the line above it.
       writeFakeCswap(world.bin, { stdout: 'Traceback' });
       await page.locator('[data-accounts-refresh]').click();
       await expect(page.locator('[data-accounts-failed]')).toBeVisible();
       await expect(page.locator('[data-account]')).toHaveCount(4);
       await shot(page, `${prefix}-refresh-failed`);
+      continue;
     }
     if (state.name === 'same-name') {
       await expect(page.locator('.ib-spg')).not.toContainText('@');

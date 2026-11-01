@@ -7,9 +7,10 @@
  * node). POSIX only, like the specs.
  *
  * Each run appends its arguments to `calls.log` in the folder. The answer can
- * change between reads: call `writeFakeCswap` again.
+ * change between reads: call `writeFakeCswap` again. Its files are replaced by
+ * rename, so a run never reads one half-written.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export interface FakeCswapAnswer {
@@ -24,14 +25,21 @@ export interface FakeCswapAnswer {
 
 const quoted = (path: string) => `'${path.replaceAll("'", `'\\''`)}'`;
 
+/** The whole of `content` appears at `file` at once. */
+function replaceFile(file: string, content: string, mode: number) {
+  const temp = `${file}.tmp`;
+  writeFileSync(temp, content);
+  chmodSync(temp, mode);
+  renameSync(temp, file);
+}
+
 /** Write (or replace) the fake in `dir`, made if missing. Returns `dir`, the PATH to give the Inbox. */
 export function writeFakeCswap(dir: string, answer: FakeCswapAnswer): string {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'stdout'), answer.stdout ?? '');
-  writeFileSync(join(dir, 'stderr'), answer.stderr ?? '');
-  const file = join(dir, 'cswap');
-  writeFileSync(
-    file,
+  replaceFile(join(dir, 'stdout'), answer.stdout ?? '', 0o644);
+  replaceFile(join(dir, 'stderr'), answer.stderr ?? '', 0o644);
+  replaceFile(
+    join(dir, 'cswap'),
     [
       '#!/bin/sh',
       `printf '%s\\n' "$*" >> ${quoted(join(dir, 'calls.log'))}`,
@@ -43,8 +51,8 @@ export function writeFakeCswap(dir: string, answer: FakeCswapAnswer): string {
       `exit ${answer.exit ?? 0}`,
       '',
     ].join('\n'),
+    0o755,
   );
-  chmodSync(file, 0o755);
   return dir;
 }
 
