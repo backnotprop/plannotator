@@ -22,10 +22,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
 import { SWIPE_HANDOFF_MAX_MS, SWIPE_SLIDE_MS } from './fileSwipe';
-import { optionSetId, optionSetOf, type OptionSet } from './optionSets';
+import { LAST_OPTION_NOTE, optionSetId, optionSetOf, type OptionSet } from './optionSets';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { OptionCaption, OPTION_NOTE_MS } = (hasDom ? await import('./components/OptionCaption') : {}) as typeof import('./components/OptionCaption');
+const { peekFit } = (hasDom ? await import('./components/ImageSwipePeek') : {}) as typeof import('./components/ImageSwipePeek');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -250,7 +252,7 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
   // The last choice: the caption says where the thread's other files are.
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe("Last option · the thread's 2 other files are under 4/4");
+  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('Last option · 2 other files under 4/4');
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
@@ -267,6 +269,84 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await settle(40);
   expect(opened).toHaveLength(5);
   expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('First option');
+});
+
+/** The caption on its own, with its note's timer in the test's hands. */
+async function captionAlone(at: number, phone: boolean) {
+  const realTimeout = globalThis.setTimeout;
+  const noteEnds: (() => void)[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+    if (ms === OPTION_NOTE_MS) {
+      noteEnds.push(fn);
+      return 0;
+    }
+    return realTimeout(fn, ms);
+  }) as typeof globalThis.setTimeout;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const draw = (index: number, note: string | null = null) => <OptionCaption set={SET} index={index} otherFiles={2} note={note} phone={phone} />;
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(draw(at));
+  });
+  return {
+    show: (index: number, note: string | null = null) => act(async () => root!.render(draw(index, note))),
+    noteTimeUp: () => act(async () => noteEnds.splice(0).forEach((fn) => fn())),
+    done: () => {
+      globalThis.setTimeout = realTimeout;
+    },
+  };
+}
+
+test.skipIf(!hasDom)('on a phone the end note takes the question\'s line for its time, so the card keeps one height, and comes back with a step or a swipe past the end', async () => {
+  const card = await captionAlone(3, true);
+  try {
+    const line = () => caption()!.querySelector('.ib-optcap-prompt')!;
+    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+    expect(line().hasAttribute('data-option-end')).toBe(true);
+    expect(caption()!.querySelector('.ib-optcap-end')).toBeNull();
+
+    await card.noteTimeUp();
+    expect(line().textContent).toBe(QUESTION.prompt);
+    expect(caption()!.querySelector('[data-option-end]')).toBeNull();
+
+    // A swipe past the last choice says it again, for as long as the pane's note shows.
+    await card.show(3, LAST_OPTION_NOTE);
+    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+    await card.show(3, null);
+    expect(line().textContent).toBe(QUESTION.prompt);
+
+    // A step away and back says it again, even before the step away had its own time.
+    await card.show(2);
+    expect(line().textContent).toBe(QUESTION.prompt);
+    await card.show(3);
+    expect(line().textContent).toBe('Last option · 2 other files under 4/4');
+  } finally {
+    card.done();
+  }
+});
+
+test.skipIf(!hasDom)('off a phone the end note stays in its own row, under the question', async () => {
+  const card = await captionAlone(3, false);
+  try {
+    await card.noteTimeUp();
+    expect(caption()!.querySelector('.ib-optcap-prompt')!.textContent).toBe(QUESTION.prompt);
+    expect(caption()!.querySelector('.ib-optcap-end')!.textContent).toBe("Last option · the thread's 2 other files are under 4/4");
+  } finally {
+    card.done();
+  }
+});
+
+test.skipIf(!hasDom)('a neighbour is drawn at the Fit its image will have, between the rows the image keeps clear', () => {
+  const stage = { left: 0, top: 0, width: 400, height: 660, pad: 12 };
+  // No rows: as the stage fits it. Rows: the same width, moved below the top row.
+  expect(peekFit({ width: 1600, height: 1000 }, stage)).toEqual({ left: 12, top: 212.5, width: 376, height: 235 });
+  expect(peekFit({ width: 1600, height: 1000 }, stage, { top: 62, bottom: 248 })).toEqual({ left: 12, top: 62 + 57.5, width: 376, height: 235 });
+  // A picture that has to shrink to fit between them.
+  const portrait = peekFit({ width: 1000, height: 1600 }, stage, { top: 62, bottom: 248 });
+  expect(portrait.height).toBe(350 - 24);
+  expect(portrait.top).toBe(62 + 12);
+  expect(portrait.top + portrait.height).toBe(660 - 248 - 12);
 });
 
 test.skipIf(!hasDom)('choices labeled with their own letters out of order (C, A, B) are captioned by that letter, with no chip of a position letter', async () => {

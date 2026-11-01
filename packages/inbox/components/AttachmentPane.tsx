@@ -2316,7 +2316,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       )}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
-        <OptionCaption set={optionSet} index={index} otherFiles={Math.max(0, allSteps.length - steps.length)} note={endNote} />
+        <OptionCaption set={optionSet} index={index} otherFiles={Math.max(0, allSteps.length - steps.length)} note={endNote} phone={phone} />
       )}
       {full && !optionSet && (
         // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
