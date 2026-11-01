@@ -10,8 +10,9 @@
  * swipe between pictures and a drag down to close. A zoomed picture still
  * slides under the bars. Hide takes the card too and gives the picture the
  * whole screen. The card keeps one height, its "Last option" note showing for
- * its time in the question's place. Desktop and a phone on its side stay as
- * they were.
+ * its time in the question's place, measured to fit with its pill never cut,
+ * and said in the live region on the step onto it. Desktop and a phone on its
+ * side stay as they were.
  *
  * Chromium: real touches, through the DevTools protocol. WebKit has no way to
  * send them from Playwright (phone-touch.ts): its checks use the mouse for a
@@ -253,6 +254,8 @@ for (const { name, width, height } of [
   { name: 'a phone at full height', width: 390, height: 844 },
 ])
   test(`real touches, ${name} (${width} × ${height}): a picture is never left under the card, and every gesture still works`, async () => {
+    // Every gesture, one finger at a time: about two minutes on a laptop, longer on a CI runner.
+    test.setTimeout(480_000);
     const { root, url, agent, thread } = await world();
     const browser: Browser = await chromium.launch();
     try {
@@ -567,6 +570,7 @@ for (const [width, height] of [
   });
 
 test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, the pan stops, a pinch and Hide', async () => {
+  test.setTimeout(480_000);
   const { root, url, agent, thread } = await world();
   // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
   const browser: Browser = await webkit.launch({ args: [] });
