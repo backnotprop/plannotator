@@ -194,21 +194,29 @@ export function ChatFrame({
   const fullscreen = (allowFullscreen && store.fullscreen) || forcedFullscreen;
 
   // What is on screen. Gestures start from this and write the person's choice
-  // to the store; a value the gesture left alone keeps the store's own, so a
-  // window drawn smaller than it was chosen does not get saved smaller.
+  // to the store. A value back where the gesture started is the choice from that
+  // moment, taken at the press: mid-gesture the store holds the last move, and a
+  // window drawn smaller than it was chosen must not get saved smaller.
   const chosen = store.geometry();
   const drawn: ChatWindowGeometry = frameSize === null ? chosen : fitChatWindow(chosen, frameSize);
 
-  const resizeFrom = (from: ChatWindowGeometry, width: number, height: number): void => {
-    store.setWindowSize(
-      width === from.w ? store.winW : width,
-      height === from.h ? store.winH : height,
-    );
+  const resizeFrom = (
+    from: ChatWindowGeometry,
+    start: ChatWindowGeometry,
+    width: number,
+    height: number,
+  ): void => {
+    store.setWindowSize(width === from.w ? start.w : width, height === from.h ? start.h : height);
   };
-  const moveFrom = (from: ChatWindowGeometry, right: number, bottom: number): void => {
+  const moveFrom = (
+    from: ChatWindowGeometry,
+    start: ChatWindowGeometry,
+    right: number,
+    bottom: number,
+  ): void => {
     store.setWindowOffsets(
-      right === from.right ? store.winRight : right,
-      bottom === from.bottom ? store.winBottom : bottom,
+      right === from.right ? start.right : right,
+      bottom === from.bottom ? start.bottom : bottom,
     );
   };
 
@@ -229,10 +237,12 @@ export function ChatFrame({
     const startX = event.clientX;
     const startY = event.clientY;
     const from = drawn;
+    const start = store.geometry();
     const max = maxSize();
     followPointer(event.currentTarget, event.pointerId, (move) => {
       resizeFrom(
         from,
+        start,
         Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, from.w + (startX - move.clientX))),
         Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, from.h + (startY - move.clientY))),
       );
@@ -261,6 +271,7 @@ export function ChatFrame({
     const max = maxSize();
     resizeFrom(
       drawn,
+      chosen,
       Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, drawn.w + deltaW)),
       Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, drawn.h + deltaH)),
     );
@@ -274,10 +285,12 @@ export function ChatFrame({
     const startX = event.clientX;
     const startY = event.clientY;
     const from = drawn;
+    const start = store.geometry();
     const frame = frameBox();
     followPointer(event.currentTarget, event.pointerId, (move) => {
       moveFrom(
         from,
+        start,
         Math.max(0, Math.min(frame.width - from.w, from.right - (move.clientX - startX))),
         Math.max(0, Math.min(frame.height - from.h, from.bottom - (move.clientY - startY))),
       );

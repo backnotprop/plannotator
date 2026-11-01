@@ -73,7 +73,11 @@ async function open(page: Page) {
   return seen;
 }
 
-const say = (id: string, role: string, text: string) => ({ id, role, parts: [{ type: 'text', text }] });
+const say = (id: string, role: string, text: string, state?: 'streaming' | 'done') => ({
+  id,
+  role,
+  parts: [{ type: 'text', text, state }],
+});
 
 const show = (page: Page, messages: unknown[]) =>
   page.evaluate((next) => {
@@ -200,6 +204,72 @@ test.describe('text that would stop the page', () => {
       expect(await hostStanding(page)).toBe(true);
     });
   }
+
+  const table = (columns: number, rows: number) =>
+    `${'| a '.repeat(columns)}|\n${'| - '.repeat(columns)}|\n${'x\n'.repeat(rows)}`;
+  const tables: [string, string][] = [
+    ['1M cells', table(500, 2_000)],
+    ['2M cells', table(800, 2_500)],
+    ['72M cells, which crashed the renderer', table(6_000, 12_000)],
+    ['200M cells, which crashed the renderer', table(10_000, 20_000)],
+    ['1M cells on lone carriage returns', table(500, 2_000).replaceAll('\n', '\r')],
+  ];
+  for (const [name, text] of tables) {
+    test(`a table of ${name} goes out as text`, async ({ page }) => {
+      await open(page);
+      const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
+      expect(took).toBeLessThan(1_000);
+      await expect(page.locator('[data-text-part] td')).toHaveCount(0);
+      await expect(page.locator('[data-chat-window]')).toContainText('still here');
+    });
+  }
+
+  test('a reference link repeated thousands of times is not written out', async ({ page }) => {
+    await open(page);
+    const target = `[a]: https://example.test/${'a'.repeat(7_900)}\n\n`;
+    for (const uses of ['[a] '.repeat(5_000), '[a] '.repeat(60_000), `${'[a] '.repeat(15_000)}\n\n`.repeat(4)]) {
+      const took = await show(page, [say('a', 'assistant', target + uses)]);
+      expect(took).toBeLessThan(3_000);
+      await expect(page.locator('[data-text-part] a')).toHaveCount(0);
+    }
+  });
+
+  test('a line of nothing but line ends draws a bounded number of elements', async ({ page }) => {
+    await open(page);
+    const took = await show(page, [say('a', 'assistant', '\n'.repeat(3_000_000))]);
+    expect(took).toBeLessThan(3_000);
+    expect(await hostStanding(page)).toBe(true);
+  });
+});
+
+test.describe('a stream', () => {
+  const delta = (page: Page, text: string, state: 'streaming' | 'done') => show(page, [say('a', 'assistant', text, state)]);
+
+  test('that spends its budget pays once, not on every delta', async ({ page }) => {
+    await open(page);
+    const text = '**a '.repeat(60_000);
+    await delta(page, text.slice(0, 200_000), 'streaming');
+    const later: number[] = [];
+    for (let size = 200_064; size < 200_640; size += 64) later.push(await delta(page, text.slice(0, size), 'streaming'));
+    expect(Math.max(...later)).toBeLessThan(150);
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(0);
+  });
+
+  test('that lost its budget to a busy page ends formatted', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => {
+      const real = Date.now;
+      let now = 0;
+      Date.now = () => (now += 1_000);
+      (window as any).__chat.show([{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: '**one**', state: 'streaming' }] }]);
+      Date.now = real;
+    });
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(0);
+    await delta(page, '**one** and **two**', 'streaming');
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(0);
+    await delta(page, '**one** and **two**', 'done');
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(2);
+  });
 });
 
 test('a long ordinary answer stays markdown', async ({ page }) => {
@@ -207,6 +277,30 @@ test('a long ordinary answer stays markdown', async ({ page }) => {
   const answer = 'A sentence with **weight** and `code` in it.\n\n- a point\n- another\n\n'.repeat(1_000);
   await show(page, [say('a', 'assistant', answer)]);
   await expect(page.locator('[data-text-part] strong')).toHaveCount(1_000);
+});
+
+test.describe('a long line in an ordinary message', () => {
+  const intro = '## Result\n\nThe **cause**:\n\n- one\n\n';
+  const lines: [string, string][] = [
+    ['a fence holding minified JSON', `${intro}\`\`\`json\n{"k":"${'a'.repeat(8_100)}"}\n\`\`\`\n`],
+    ['a long URL', `${intro}See https://example.test/${'b'.repeat(8_100)} for it.\n`],
+    ['a paragraph of Chinese with no spaces', `${intro}${'这是一个很长的段落。'.repeat(810)}\n`],
+  ];
+  for (const [name, text] of lines) {
+    test(`${name} leaves the rest formatted`, async ({ page }) => {
+      await open(page);
+      await show(page, [say('a', 'assistant', text)]);
+      await expect(page.locator('[data-text-part] h2')).toHaveText('Result');
+      await expect(page.locator('[data-text-part] strong')).toHaveText('cause');
+    });
+  }
+
+  test('a fence an HTML block swallows cannot hide a long word', async ({ page }) => {
+    await open(page);
+    const took = await show(page, [say('a', 'assistant', `<div>\n\`\`\`\n\n${'a'.repeat(200_000)}@\n`)]);
+    expect(took).toBeLessThan(3_000);
+    expect(await hostStanding(page)).toBe(true);
+  });
 });
 
 test.describe('the window against a real frame', () => {
@@ -228,6 +322,20 @@ test.describe('the window against a real frame', () => {
 
     expect(await page.evaluate(() => (window as any).__chat.store.geometry())).toEqual({ w: 800, h: 700, right: 100, bottom: 100 });
     expect(await page.evaluate(() => (window as any).__chat.reports)).toEqual([]);
+  });
+
+  test('a drag with a real mouse can come back to where it started', async ({ page }) => {
+    await frameSize(page, 1000, 700);
+    await open(page);
+    const start = await box(page);
+    const x = start!.x + 120;
+    const y = start!.y + 14;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 200, y - 100);
+    await page.mouse.move(x, y);
+    await page.mouse.up();
+    expect(await page.evaluate(() => (window as any).__chat.store.geometry())).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
   });
 
   test('Home on the grip from the top-left corner keeps the window on the frame', async ({ page }) => {

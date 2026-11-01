@@ -94,6 +94,14 @@ function drag(el: HTMLElement, from: [number, number], to: [number, number]) {
   pointer(el, 'pointerup', ...to);
 }
 
+/** One gesture through several points: the press, each move, and the release on the last. */
+function sweep(el: HTMLElement, from: [number, number], ...moves: [number, number][]) {
+  capturable(el);
+  pointer(el, 'pointerdown', ...from);
+  for (const point of moves) pointer(el, 'pointermove', ...point);
+  pointer(el, 'pointerup', ...moves.at(-1)!);
+}
+
 describe.if(hasDom)('window limits', () => {
   test('dragging the grip grows the window, up to the frame minus margins', () => {
     const store = openStore();
@@ -121,6 +129,32 @@ describe.if(hasDom)('window limits', () => {
     expect([store.winRight, store.winBottom]).toEqual([1200 - 420, 800 - 560]);
     drag(handle()!, [500, 500], [5000, 5000]);
     expect([store.winRight, store.winBottom]).toEqual([0, 0]);
+  });
+
+  test('a gesture can come back to where it started', () => {
+    const reports: unknown[] = [];
+    const store = openStore({ onGeometryChange: (geometry) => reports.push(geometry) });
+    mount(store);
+    sweep(handle()!, [500, 500], [300, 400], [500, 500]);
+    expect(store.geometry()).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
+    expect(reports.at(-1)).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
+
+    sweep(grip()!, [500, 500], [495, 500], [500, 500]);
+    expect(store.geometry()).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
+  });
+
+  test('from a corner, a drag out and past the edge lands back in the corner', () => {
+    const store = openStore({ initialGeometry: { w: 420, h: 560, right: 0, bottom: 0 } });
+    mount(store);
+    sweep(handle()!, [500, 500], [200, 300], [900, 900]);
+    expect([store.winRight, store.winBottom]).toEqual([0, 0]);
+  });
+
+  test('from the minimum, a grow and then a shrink past it lands on the minimum', () => {
+    const store = openStore({ initialGeometry: { w: 360, h: 420, right: 16, bottom: 16 } });
+    mount(store);
+    sweep(grip()!, [500, 500], [250, 300], [900, 900]);
+    expect([store.winW, store.winH]).toEqual([360, 420]);
   });
 
   test('a press on a header button is not a drag', () => {
@@ -322,6 +356,17 @@ describe.if(hasDom)('a frame that changes size changes the picture, not the choi
     mount(store, {}, resizableFrame(700, 500).frame);
     press(grip()!, { key: 'ArrowRight' });
     expect(reports).toEqual([{ w: 652, h: 700, right: 500, bottom: 100 }]);
+  });
+
+  test('a fitted window taken out and back keeps the place and size the person chose', () => {
+    const reports: unknown[] = [];
+    const store = floating(reports);
+    mount(store, {}, resizableFrame(700, 500).frame);
+    const chosen = store.geometry();
+    sweep(handle()!, [300, 300], [310, 320], [300, 300]);
+    expect(store.geometry()).toEqual(chosen);
+    sweep(grip()!, [300, 300], [320, 320], [300, 300]);
+    expect(store.geometry()).toEqual(chosen);
   });
 
   test('a saved value taken while open redraws at once', () => {

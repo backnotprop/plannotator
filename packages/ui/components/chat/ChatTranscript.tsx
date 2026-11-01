@@ -3,7 +3,7 @@ import type * as React from 'react';
 
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
 import { cn } from '../../lib/utils';
-import { chatMarkdownHtml, personMarkdownHtml } from './chatMarkdown';
+import { chatTextRenderer } from './chatMarkdown';
 import { FOCUS_RING } from './chatRecipes';
 
 /** The status of the turn in progress. */
@@ -48,14 +48,16 @@ export function clipAtSentenceBoundary(text: string): string {
 /**
  * Has this assistant turn painted anything yet? A `step-start` part draws
  * nothing and a text part is empty until its first delta, so "the message has
- * parts" is not "the person can see an answer". Any other part counts the
- * moment it exists.
+ * parts" is not "the person can see an answer". Under reduced motion a text part
+ * still streaming paints nothing before its first sentence ends. Any other part
+ * counts the moment it exists.
  */
-export function chatTurnHasOutput(message: ChatMessage): boolean {
+export function chatTurnHasOutput(message: ChatMessage, reducedMotion = false): boolean {
   return message.parts.some((part) => {
     if (part.type === 'step-start') return false;
-    if (isTextPart(part)) return part.text.length > 0;
-    return true;
+    if (!isTextPart(part)) return true;
+    const clipped = reducedMotion && part.state === 'streaming';
+    return (clipped ? clipAtSentenceBoundary(part.text) : part.text).length > 0;
   });
 }
 
@@ -102,12 +104,10 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 }) {
   const reducedMotion = usePrefersReducedMotion();
   const shown = streaming && reducedMotion ? clipAtSentenceBoundary(text) : text;
+  const render = useMemo(() => chatTextRenderer(literalHtml), [literalHtml]);
+  const html = useMemo(() => render(shown, streaming), [render, shown, streaming]);
   // One `{__html}` object per html string: React re-sets innerHTML whenever
   // that prop's identity changes, which would collapse a live selection.
-  const html = useMemo(
-    () => (literalHtml ? personMarkdownHtml(shown) : chatMarkdownHtml(shown)),
-    [shown, literalHtml],
-  );
   const inner = useMemo(() => ({ __html: html }), [html]);
   return (
     <div
@@ -181,7 +181,8 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   stoppedLabel?: string;
   /** Indent the parts under the name, past a mark. */
   indentContent?: boolean;
-  /** Draw a part. `undefined` falls through: text as markdown, anything else as nothing. */
+  /** Draw a part. `undefined` falls through: text as markdown, anything else as
+   * nothing. `null` draws nothing. */
   renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
   /** Under the parts. */
   footer?: React.ReactNode;
@@ -201,6 +202,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
       <div className={cn('flex min-w-0 flex-col gap-2', indentContent && 'pl-7')}>
         {message.parts.map((part, index) => {
           const custom = renderPart?.(part, { message, index });
+          if (custom === null) return null;
           if (custom !== undefined) return <div key={index}>{custom}</div>;
           if (!isTextPart(part)) return null;
           return (
@@ -248,8 +250,9 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
   /** The line held while the reply has no parts yet. `false` hides it, for a
    * host that says so in `statusLine`. */
   readonly pending?: React.ReactNode | false;
-  /** Draw a part. `undefined` falls through to the transcript's own drawing. To
-   * paint into a text part, return a `ChatMarkdown` of your own. */
+  /** Draw a part. `undefined` falls through to the transcript's own drawing;
+   * `null` draws nothing. To paint into a text part, return a `ChatMarkdown` of
+   * your own, with the same props the transcript gives its own. */
   readonly renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
   /** Draw a whole row. `undefined` falls through; `null` draws nothing. */
   readonly renderMessage?: (message: ChatMessage<Part>, index: number) => React.ReactNode | undefined;
@@ -287,10 +290,13 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   // `submitted` is set the moment a message is sent, and a stream's start can
   // push an assistant message with no parts without changing the status. The
   // whole blank gap is "a run is active and the answer shows nothing yet".
+  const running = status === 'submitted' || status === 'streaming';
+  const clipping = usePrefersReducedMotion() && running;
   const lastMessage = messages[messages.length - 1];
   const answerStarted =
-    lastMessage !== undefined && lastMessage.role === 'assistant' && chatTurnHasOutput(lastMessage);
-  const running = status === 'submitted' || status === 'streaming';
+    lastMessage !== undefined &&
+    lastMessage.role === 'assistant' &&
+    chatTurnHasOutput(lastMessage, clipping);
   const pending = running && !answerStarted && pendingLine !== false;
 
   // Follow the output: stick to the live edge, released by scrolling away,
@@ -316,7 +322,8 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   // An assistant turn that has painted nothing yet would be a bare name row,
   // so it is dropped and the pending turn stands in its place.
   const drawn = (message: ChatMessage<Part>): boolean =>
-    message.role === 'user' || (message.role === 'assistant' && chatTurnHasOutput(message));
+    message.role === 'user' ||
+    (message.role === 'assistant' && chatTurnHasOutput(message, clipping));
 
   return (
     <div

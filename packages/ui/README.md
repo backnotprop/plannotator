@@ -587,8 +587,23 @@ const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: sa
 - **Geometry.** The store holds what the person chose. What is drawn is fitted to the frame at render, so a frame that narrows for a moment changes neither the store nor what you save. `onGeometryChange` runs for each step of a person's drag or resize, so debounce it and flush on unload. It does not run for `initialGeometry`, for `restore`, or when the frame changes size. The store never touches storage.
 - **Keys.** The frame listens to no key. `useChatFrameKeys` is the opt-in map (Mod+J, Shift+Mod+J, Escape). `useChatFrameFocusReturn` returns focus to the element wearing `data-chat-launcher` when focus was in the window.
 - **Composer.** It is controlled and set `onChange` synchronously, or typing and IME input are lost. `onSend` runs while `busy` and with an empty box, so guard those. Enter does not bubble past the React root, so a bubble listener on `window` or `document` does not hear it; capture listeners and native listeners on ancestors still do. Other keys bubble as usual, so an app's own Escape handling still sees them. On a touch keyboard pass `sendOnEnter={false}`: it has no Shift, so otherwise no message can have a second line.
-- **Text.** `ChatTranscript` draws text parts as sanitized markdown. Nothing in message text can carry a class, a `data-*` or `aria-*` attribute, an image or a script, and links open in a new tab with `noopener`. Where the sanitizer fails its check on first use, or the text is too large or too slow to parse, the message goes out as plain text. Rendering never throws.
-- **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through. To paint into a text part, return your own `<ChatMarkdown annotatable rootRef={ref} ... />`. `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
+- **Text.** `ChatTranscript` draws text parts as sanitized markdown. Nothing in message text can carry a class, a `data-*` or `aria-*` attribute, an image or a script, and links open in a new tab with `noopener`. Where the sanitizer fails its check on first use, or the text is past a work limit (length, table cells, parse time, or the size of the HTML it makes), the message goes out as plain text. The time limit is a check, not a wall, and it is wall-clock, so a text near it can draw either way. A run of text too costly to parse, such as one holding a very long word, is local: it goes out as literal text and the rest stays formatted. Long lines in code blocks cost nothing. Mark a part `state: 'streaming'` while it grows: a text that spends its budget then stays plain until the part stops streaming, and renders in full once it does. Rendering never throws.
+- **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through, or `null` to draw nothing. To paint into a text part, return your own `ChatMarkdown`, with the props the transcript gives its own plus yours. Leave out `literalHtml` and a person's `<b>` draws bold:
+
+  ```tsx
+  <ChatMarkdown
+    text={part.text}
+    streaming={part.state === "streaming"}
+    literalHtml={message.role === "user"}
+    messageId={message.id}
+    role={message.role}
+    partIndex={index}
+    annotatable
+    rootRef={ref}
+  />
+  ```
+
+  `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
 - **Styles.** Nine tokens are not in `theme.css`; `components/chat/index.ts` lists them, and a host defines them in its own `@theme`. Add this folder and `components/ui/{button,textarea}.tsx` to your `@source`. Recipes live in `chatRecipes.tsx` so a `*.tsx` glob reaches them.
 
 ### Inbox thread parts (`components/inbox-thread`; unreleased, in progress)

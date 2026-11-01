@@ -191,6 +191,27 @@ describe.if(hasDom)('reduced motion', () => {
     render({ messages: [say('1', 'assistant', part, 'done')] });
     expect(view.textContent).toContain('Second sent');
   });
+
+  test('before the first sentence ends, the turn holds its place and shows no bare name', () => {
+    reduced();
+    const asked = [say('1', 'user', 'Why?')];
+    const view = render({ messages: [...asked, say('2', 'assistant', 'First sent', 'streaming')], status: 'streaming' });
+    expect(pendingRow()).not.toBeNull();
+    expect(roles()).toEqual(['user', 'assistant']);
+
+    render({ messages: [...asked, say('2', 'assistant', 'First sentence. Sec', 'streaming')], status: 'streaming' });
+    expect(pendingRow()).toBeNull();
+    expect(view.textContent).toContain('First sentence.');
+  });
+
+  test('a turn stopped before its first sentence ended still says so', () => {
+    reduced();
+    const view = render({
+      messages: [say('1', 'user', 'Why?'), say('2', 'assistant', 'First sent', 'streaming')],
+      stopped: new Set(['2']),
+    });
+    expect(view.textContent).toContain('Stopped');
+  });
 });
 
 describe.if(hasDom)('following the output', () => {
@@ -256,6 +277,15 @@ describe.if(hasDom)('what a host can add', () => {
     expect(view.querySelector('[data-tool]')).not.toBeNull();
     expect(view.textContent).toContain('Words');
     expect(view.textContent).not.toContain('mystery');
+  });
+
+  test('renderPart returning null leaves no empty box to take up a gap', () => {
+    const view = render({
+      messages: [{ id: '1', role: 'assistant', parts: [{ type: 'tool-read' }, { type: 'tool-write' }] }],
+      renderPart: (part) => (part.type === 'tool-read' ? null : <em data-tool>Wrote</em>),
+    });
+    const box = view.querySelector('[data-tool]')!.parentElement!;
+    expect(box.parentElement!.children.length).toBe(1);
   });
 
   test('renderPart is told which message and which part it is drawing', () => {
