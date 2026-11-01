@@ -344,6 +344,10 @@ export interface InboxProjectUsage {
   root: string;
   bytes: number;
   threads: { thread_id: string; subject: string | null; bytes: number }[];
+  /** The project this folder was combined into, by name. */
+  combined_into?: string;
+  /** The projects combined into this one, by name: deleting it leaves them, as their own projects again. */
+  combined?: string[];
 }
 
 /** An attachment found by its id: the record and the message that carries it. */
@@ -549,6 +553,7 @@ export class InboxStore {
   private readonly projectsByRoot = new Map<string, InboxProject>();
   /** Each project's display name (`inboxProjectLabels`), worked out again when the projects change. */
   private projectLabels: Map<string, string> | null = null;
+  private projectGroups: { heads: Map<string, string>; members: Map<string, string[]> } | null = null;
   private readonly messages = new Map<string, InboxMessage>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
@@ -710,6 +715,7 @@ export class InboxStore {
         this.projectsById.set(line.record.id, line.record);
         this.projectsByRoot.set(line.record.root, line.record);
         this.projectLabels = null;
+        this.projectGroups = null;
         break;
       case "message": {
         // The archive line: the root line whose resolved_at differs from the one before it.
@@ -787,9 +793,16 @@ export class InboxStore {
     }
   }
 
-  /** The roots a name routes to (agents' names: a name, once there, never changes), oldest first. */
+  /**
+   * The roots a name routes to (agents' names: a name, once there, never
+   * changes), oldest first, across a combined project: one name, one thread,
+   * from either folder. The keys stay per folder, so an undo leaves each as it was.
+   */
   private rootsNamed(projectId: string, name: string): string[] {
-    return this.namedThreads.get(`${projectId}\0${inboxThreadNameKey(name)}`) ?? [];
+    const key = inboxThreadNameKey(name);
+    const group = this.projectGroup(projectId);
+    if (group.length === 1) return this.namedThreads.get(`${projectId}\0${key}`) ?? [];
+    return group.flatMap((id) => this.namedThreads.get(`${id}\0${key}`) ?? []).sort((a, b) => (this.messageSeq.get(a) ?? 0) - (this.messageSeq.get(b) ?? 0));
   }
 
   /** Add a root under a thread name; the last one added is the newest of that name. */
@@ -808,14 +821,23 @@ export class InboxStore {
    * starts anew). No session and no name: always a new thread.
    */
   private routeThread(projectId: string, session: string | null, name: string | null): string | null {
-    if (name !== null) {
-      const roots = this.rootsNamed(projectId, name);
-      for (let i = roots.length - 1; i >= 0; i--) if (!this.isResolved(roots[i]!)) return roots[i]!;
-      return null;
-    }
-    const rootId = session ? this.sessionThreads.get(`${projectId}\0${session}`) : undefined;
-    if (!rootId || this.isResolved(rootId)) return null;
-    return rootId;
+    if (name !== null) return this.newestOpen(projectId, this.rootsNamed(projectId, name));
+    if (!session) return null;
+    const roots = this.projectGroup(projectId)
+      .map((id) => this.sessionThreads.get(`${id}\0${session}`))
+      .filter((rootId): rootId is string => rootId !== undefined)
+      .sort((a, b) => (this.messageSeq.get(a) ?? 0) - (this.messageSeq.get(b) ?? 0));
+    return this.newestOpen(projectId, roots);
+  }
+
+  /**
+   * The newest open thread of `roots` (oldest first): in `projectId`'s own
+   * folder when it has one, so a combine never moves a live conversation;
+   * else the newest in the rest of a combined project.
+   */
+  private newestOpen(projectId: string, roots: readonly string[]): string | null {
+    const open = roots.filter((rootId) => !this.isResolved(rootId));
+    return open.filter((rootId) => this.messages.get(rootId)!.project_id === projectId).at(-1) ?? open.at(-1) ?? null;
   }
 
   /** The highest seq written: the event-log cursor "now". */
@@ -983,13 +1005,127 @@ export class InboxStore {
    * stays its folder key. The record on disk is unchanged.
    */
   private labeled(project: InboxProject): InboxProject {
-    this.projectLabels ??= inboxProjectLabels([...this.projectsById.values()]);
-    const name = this.projectLabels.get(project.id);
+    // A combined project reads the name of the project it went into, and takes no part in the others' clashes.
+    this.projectLabels ??= inboxProjectLabels([...this.projectsById.values()].filter((p) => this.canonicalProjectId(p.id) === p.id));
+    const name = this.projectLabels.get(this.canonicalProjectId(project.id));
     return name && name !== project.name ? { ...project, name } : project;
   }
 
+  /** Each project's group head and each head's members (itself first, then oldest first). Built once per project change. */
+  private groups(): { heads: Map<string, string>; members: Map<string, string[]> } {
+    if (this.projectGroups) return this.projectGroups;
+    const headOf = (id: string): string => {
+      const seen = new Set([id]);
+      let at = this.projectsById.get(id)!;
+      for (;;) {
+        const next = typeof at.merged_into === "string" ? this.projectsById.get(at.merged_into) : undefined;
+        if (!next) return at.id;
+        // A loop has no end: every project on it stands alone, so none is hidden.
+        if (seen.has(next.id)) return id;
+        seen.add(next.id);
+        at = next;
+      }
+    };
+    const heads = new Map<string, string>();
+    const members = new Map<string, string[]>();
+    const oldestFirst = [...this.projectsById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    for (const project of oldestFirst) {
+      const head = headOf(project.id);
+      heads.set(project.id, head);
+      if (head === project.id) members.set(head, [head, ...(members.get(head) ?? [])]);
+      else members.set(head, [...(members.get(head) ?? []), project.id]);
+    }
+    this.projectGroups = { heads, members };
+    return this.projectGroups;
+  }
+
+  /** The project whose name and list `projectId`'s threads show under: itself, unless it was combined. */
+  canonicalProjectId(projectId: string): string {
+    return this.groups().heads.get(projectId) ?? projectId;
+  }
+
+  /** Every project of `projectId`'s group, the head first. A project nothing was combined with is alone in it. */
+  projectGroup(projectId: string): string[] {
+    return this.groups().members.get(this.canonicalProjectId(projectId)) ?? [projectId];
+  }
+
+  /** Whether two projects read as one. */
+  sameProject(a: string, b: string): boolean {
+    return a === b || this.canonicalProjectId(a) === this.canonicalProjectId(b);
+  }
+
+  /**
+   * The projects combined into `projectId`, each named by its own folder or
+   * given name: the name an undo gives it back. Oldest first. Named beside the
+   * project they are in, so a clone of it keeps its parent ("billing-svc · old"),
+   * never a second "billing-svc".
+   */
+  combinedInto(projectId: string): InboxProject[] {
+    if (this.canonicalProjectId(projectId) !== projectId) return [];
+    const members = this.projectGroup(projectId)
+      .slice(1)
+      .map((id) => this.projectsById.get(id)!);
+    const head = this.projectsById.get(projectId);
+    const names = inboxProjectLabels(head ? [head, ...members] : members);
+    return members.map((project) => ({ ...project, name: names.get(project.id) ?? project.name }));
+  }
+
+  /**
+   * Combine `projectId` into `intoId`, or undo that (null). One new project line,
+   * the pattern of `renameProject`: no message, question, card or file moves, so
+   * an undo restores everything, what was sent since included. Messages stay where
+   * they were written: a thread stays in its own project, whoever joined it.
+   * A project that others were combined into takes them along and brings them back,
+   * because they keep pointing at it. `intoId` may be a combined project: its head
+   * is what is stored. Refuses a project already inside this one (the two would loop).
+   */
+  combineProject(projectId: string, intoId: string | null): InboxProject {
+    const project = this.projectsById.get(projectId);
+    if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
+    const { merged_into: previous, separated_from: _separated, ...rest } = project;
+    let record: InboxProject;
+    if (intoId === null) {
+      if (typeof previous !== "string") return this.labeled(project);
+      record = { ...rest, separated_from: previous };
+    } else {
+      if (intoId === projectId) throw new InboxError("validation_error", "into: a project cannot be combined into itself.", { field: "into" });
+      if (!this.projectsById.has(intoId)) throw new InboxError("project_not_found", `No project ${intoId}.`, { field: "into" });
+      const head = this.canonicalProjectId(intoId);
+      if (head === projectId) throw new InboxError("validation_error", "into: that project is already combined into this one.", { field: "into" });
+      if (head === this.canonicalProjectId(projectId)) return this.labeled(project);
+      record = { ...rest, merged_into: head };
+    }
+    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+      v: INBOX_RECORD_VERSION,
+      seq: this.seq + 1,
+      at: this.stamp(),
+      kind: "project",
+      id: project.id,
+      record,
+    });
+    return this.labeled(record);
+  }
+
+  /** The projects a person sees: one for each group. */
   listProjects(): InboxProject[] {
+    return this.allProjects().filter((project) => this.canonicalProjectId(project.id) === project.id);
+  }
+
+  /** Every project folder, combined ones included: what is on disk (`listProjects` is what a person sees). */
+  allProjects(): InboxProject[] {
     return [...this.projectsById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((project) => this.labeled(project));
+  }
+
+  /**
+   * A thread's project as readers see it: the group's id and name, with the
+   * folder it was written from. `root` stays the thread's own, because readers
+   * resolve its files from there and its `origin` is that folder's.
+   */
+  private shownProject(projectId: string): InboxProject | null {
+    const own = this.projectsById.get(projectId);
+    if (!own) return null;
+    const head = this.project(this.canonicalProjectId(projectId))!;
+    return head.id === projectId ? head : { ...head, key: own.key, root: own.root };
   }
 
   project(id: string): InboxProject | null {
@@ -1193,16 +1329,16 @@ export class InboxStore {
   private threadNameTaken(projectId: string, name: string, exceptRoot: string | null): boolean {
     const key = inboxThreadNameKey(name);
     // Threads the person started that still carry their compose name (an agent may have replaced a suggestion).
-    const personRoots = (this.personNamed.get(`${projectId}\0${key}`) ?? []).filter(
-      (rootId) => inboxThreadNameKey(this.messages.get(rootId)?.thread_name ?? "") === key,
-    );
+    const personRoots = this.projectGroup(projectId)
+      .flatMap((id) => this.personNamed.get(`${id}\0${key}`) ?? [])
+      .filter((rootId) => inboxThreadNameKey(this.messages.get(rootId)?.thread_name ?? "") === key);
     return [...this.rootsNamed(projectId, name), ...personRoots].some((rootId) => rootId !== exceptRoot && !this.isResolved(rootId));
   }
 
   thread(threadId: string): InboxThread | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return null;
-    const project = this.project(root.project_id);
+    const project = this.shownProject(root.project_id);
     if (!project) return null;
     return {
       thread_id: threadId,
@@ -1273,11 +1409,11 @@ export class InboxStore {
     };
   }
 
-  /** A project's threads, the newest activity first. */
+  /** A project's threads (a combined project's, all of them), the newest activity first. */
   threadsOf(projectId: string): InboxThreadSummary[] {
     const out: InboxThreadSummary[] = [];
     for (const message of this.messages.values()) {
-      if (message.project_id !== projectId || message.thread_id !== message.id) continue;
+      if (message.thread_id !== message.id || !this.sameProject(message.project_id, projectId)) continue;
       const summary = this.threadSummary(message.id);
       if (summary) out.push(summary);
     }
@@ -1289,7 +1425,8 @@ export class InboxStore {
     const summary = this.threadSummary(threadId);
     if (!summary) return null;
     const root = this.messages.get(threadId)!;
-    const project = this.projectsById.get(root.project_id);
+    // A combined project's rows read the project it went into.
+    const project = this.projectsById.get(this.canonicalProjectId(root.project_id));
     if (!project) return null;
     const messages = this.threadMessages(threadId);
     const seqOf = (m: InboxMessage) => this.messageSeq.get(m.id) ?? 0;
@@ -1601,7 +1738,7 @@ export class InboxStore {
     for (const [threadId, members] of this.threadMembers) {
       const root = this.messages.get(threadId);
       if (!root || root.thread_id !== threadId) continue;
-      if (filter.projectId && root.project_id !== filter.projectId) continue;
+      if (filter.projectId && !this.sameProject(root.project_id, filter.projectId)) continue;
       if (filter.session) {
         const session = filter.session;
         const took = members.some((id) => {
@@ -1631,7 +1768,7 @@ export class InboxStore {
     for (const [threadId] of this.threadMembers) {
       const root = this.messages.get(threadId);
       if (!root || root.thread_id !== threadId) continue;
-      if (filter.projectId && root.project_id !== filter.projectId) continue;
+      if (filter.projectId && !this.sameProject(root.project_id, filter.projectId)) continue;
       const waiting: { message: InboxMessage; question: InboxQuestion }[] = [];
       // What a waiting Re-ask note lists is about to be asked again: left out, per note (so per session).
       const reasked = this.reaskListedIds(threadId);
@@ -2591,7 +2728,10 @@ export class InboxStore {
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes();
-    for (const project of this.listProjects()) {
+    // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
+    for (const stored of this.allProjects()) {
+      const head = this.canonicalProjectId(stored.id);
+      const project = head === stored.id ? stored : (this.combinedInto(head).find((member) => member.id === stored.id) ?? stored);
       const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
       let bytes = 0;
@@ -2629,7 +2769,17 @@ export class InboxStore {
       const threads = [...perThread.entries()]
         .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.threadSubject(threadId), bytes: threadBytes }))
         .sort((a, b) => b.bytes - a.bytes || a.thread_id.localeCompare(b.thread_id));
-      projects.push({ id: project.id, name: project.name, root: project.root, bytes, threads });
+      // The ones a Delete leaves on their own: a project deeper in the chain stays in the one it went into.
+      const combined = this.combinedInto(project.id).flatMap((member) => (member.merged_into === project.id ? [member.name] : []));
+      projects.push({
+        id: project.id,
+        name: project.name,
+        root: project.root,
+        bytes,
+        threads,
+        ...(head === project.id ? {} : { combined_into: stored.name }),
+        ...(combined.length > 0 ? { combined } : {}),
+      });
     }
     projects.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
     return { dir: this.dir, bytes: total, projects };
@@ -2809,7 +2959,8 @@ export class InboxStore {
     const key = input.idempotency_key?.trim() || null;
     if (key) {
       for (const message of this.messages.values()) {
-        if (message.project_id !== projectId || message.idempotency_key !== key || message.author.kind !== "agent") continue;
+        // Across a combined project: a retry from either folder is the same call.
+        if (message.idempotency_key !== key || message.author.kind !== "agent" || !this.sameProject(message.project_id, projectId)) continue;
         // A retry is the same call: the same body, reply target, thread
         // name (a reply's `thread` included; compared as routing compares
         // names) and superseded ids. The thread it joined is the first
@@ -2841,6 +2992,12 @@ export class InboxStore {
     }
 
     if (!replyTo) threadId = this.routeThread(projectId, input.author.session, threadName);
+    // A send across a combined project can land in the other folder's thread. Every message of a thread
+    // stays in its root's project (deleting a thread reads one folder), so this one is written there, and
+    // its relative files keep starting at the folder it came from.
+    let basePath = input.base_path;
+    if (threadId && !replyTo) projectId = this.messages.get(threadId)!.project_id;
+    if (projectId !== input.project_id && this.sameProject(projectId, input.project_id)) basePath ??= this.projectsById.get(input.project_id)!.root;
 
     // A reply into a thread the person started may name it, once (approval
     // "inbox-agent-names-own-thread"): its `thread`, checked by the
@@ -2899,7 +3056,7 @@ export class InboxStore {
         : {}),
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
-      ...(input.base_path ? { base_path: input.base_path } : {}),
+      ...(basePath ? { base_path: basePath } : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
@@ -4459,6 +4616,7 @@ export class InboxStore {
     this.projectsById.clear();
     this.projectsByRoot.clear();
     this.projectLabels = null;
+    this.projectGroups = null;
     this.messages.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
@@ -5160,7 +5318,8 @@ export class InboxStore {
   /** A card as readers get it: only the linked threads that still exist, and the seq of its last write. */
   cardWire(card: InboxCard): InboxCardWire {
     const threads = card.threads.filter((id) => this.messages.get(id)?.thread_id === id);
-    return { ...card, threads, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
+    // A combined project's cards read the project it went into, as its rows do. The record keeps its own.
+    return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
   }
 
   /**
@@ -5188,8 +5347,9 @@ export class InboxStore {
    */
   listCards(filter: { projectIds?: ReadonlySet<string> | null; columns?: ReadonlySet<InboxCardColumn> | null; agentSession?: string | null } = {}): InboxCard[] {
     const out: InboxCard[] = [];
+    const heads = filter.projectIds ? new Set([...filter.projectIds].map((id) => this.canonicalProjectId(id))) : null;
     for (const card of this.cards.values()) {
-      if (filter.projectIds && !filter.projectIds.has(card.project_id)) continue;
+      if (heads && !heads.has(this.canonicalProjectId(card.project_id))) continue;
       if (filter.columns && !filter.columns.has(card.column)) continue;
       if (filter.agentSession && !(card.agent?.kind === "agent" && card.agent.session === filter.agentSession)) continue;
       out.push(card);
@@ -5201,7 +5361,7 @@ export class InboxStore {
 
   /** An agent's create is idempotent on its key, per project. */
   private cardByKey(projectId: string, key: string): InboxCard | null {
-    for (const card of this.cards.values()) if (card.project_id === projectId && card.idempotency_key === key) return card;
+    for (const card of this.cards.values()) if (card.idempotency_key === key && this.sameProject(card.project_id, projectId)) return card;
     return null;
   }
 
@@ -5231,7 +5391,7 @@ export class InboxStore {
       if (typeof id !== "string" || !id.trim()) throw new InboxError("validation_error", "thread_id: a thread or message id.", { field: "thread_id" });
       const message = this.messages.get(id.trim());
       if (!message) throw new InboxError("thread_not_found", `No thread or message ${id.trim()}.`);
-      if (message.project_id !== projectId) {
+      if (!this.sameProject(message.project_id, projectId)) {
         const project = this.project(message.project_id);
         throw new InboxError(
           "card_other_project",
@@ -5315,6 +5475,8 @@ export class InboxStore {
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
     const threads = this.cardThreads(input.threads ?? [], project.id);
     if (target && !threads.includes(target.thread)) threads.push(target.thread);
+    // Made for a thread of a combined project: filed in that thread's folder, so an undo takes the card along.
+    const owner = threads.length > 0 ? this.messages.get(threads[0]!)!.project_id : project.id;
     let titleValue = input.title;
     if ((titleValue === undefined || titleValue === null || titleValue === "") && threads.length > 0) {
       // The agent did not write the subject: characters a title refuses (bidi controls) are dropped, not refused.
@@ -5354,7 +5516,7 @@ export class InboxStore {
     const at = this.stamp();
     const card: InboxCard = {
       id: inboxId("crd"),
-      project_id: project.id,
+      project_id: owner,
       title,
       column,
       you,
@@ -5541,7 +5703,7 @@ export class InboxStore {
   sendCard(id: string, input: { thread_id: unknown }): InboxCard {
     const card = this.cards.get(id);
     if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
-    const { thread, to } = this.cardSendTarget(card.project_id, input.thread_id);
+    const { thread, to } = this.cardSendTarget(card.project_id, input.thread_id, card.threads);
     // A retry of the same send (the window's Send or Start, after an answer that was lost) changes nothing.
     if (isInboxCardSentWaiting(card) && card.sent!.thread_id === thread && card.sent!.to.kind === "agent" && to.kind === "agent" && card.sent!.to.session === to.session) {
       return card;
@@ -5566,12 +5728,14 @@ export class InboxStore {
   /**
    * Where a card goes when the person sends it: `threadId` is the person's
    * message for it (a thread they started, or a New message in the card's
-   * thread), in `projectId`, addressed to one agent session. Checked before
-   * anything is written, so a refused send leaves no card and no line.
+   * thread), in `projectId` or already on the card (`linked`: a thread linked
+   * while two projects were combined stays linked after an undo), addressed
+   * to one agent session. Checked before anything is written, so a refused
+   * send leaves no card and no line.
    */
-  private cardSendTarget(projectId: string, threadId: unknown): { thread: string; to: InboxAuthor } {
-    const [thread] = this.cardThreads([threadId], projectId);
+  private cardSendTarget(projectId: string, threadId: unknown, linked: readonly string[] = []): { thread: string; to: InboxAuthor } {
     const sentMessage = typeof threadId === "string" ? this.messages.get(threadId.trim()) : undefined;
+    const [thread] = sentMessage && linked.includes(sentMessage.thread_id) ? [sentMessage.thread_id] : this.cardThreads([threadId], projectId);
     if (!sentMessage || sentMessage.author.kind !== "person" || !sentMessage.to || (sentMessage.id === sentMessage.thread_id && !sentMessage.started_by_person)) {
       throw new InboxError("validation_error", "thread_id: the person's message for this card (a thread they started, or a message in its thread), addressed to one agent session.", { field: "thread_id" });
     }

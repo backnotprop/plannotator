@@ -245,6 +245,15 @@ export interface InboxProject {
    * slug) and root never change with it.
    */
   display_name?: string;
+  /**
+   * The project this one was combined into (approval "project-combine"). Every
+   * reader shows this project's threads under the end of that chain; nothing of
+   * this project moves, and an older reader ignores the field. A target that is
+   * gone, or a loop, counts as not combined, so a project can only reappear.
+   */
+  merged_into?: string;
+  /** The project this one's last undone combine went into: Tidy does not suggest the pair again. */
+  separated_from?: string;
 }
 
 /**
@@ -2204,6 +2213,8 @@ export interface InboxComposeSession {
   idle_since: string | null;
   /** The thread it last wrote in, or null when it has not written in the Inbox. */
   last_thread: { id: string; subject: string | null; at: string } | null;
+  /** Where it works, when that is another folder of a combined project than the group's `root`. */
+  root?: string;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */

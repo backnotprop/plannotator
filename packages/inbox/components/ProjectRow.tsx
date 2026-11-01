@@ -199,7 +199,13 @@ type ProjectMenuAction = ProjectAction | 'rename' | 'reset';
  * The items, no descriptions: the two batches, then (this machine's projects) Rename… and, once a name is
  * set, Reset name. The phone's sheet draws its title (the project) above them.
  */
-function ProjectMenuItems(props: { name: string; readable: boolean; rename: boolean; named: boolean; onAction: (action: ProjectMenuAction) => void }) {
+function ProjectMenuItems(props: {
+  name: string;
+  readable: boolean;
+  rename: boolean;
+  named: boolean;
+  onAction: (action: ProjectMenuAction) => void;
+}) {
   const { name, readable, onAction } = props;
   return (
     <>
