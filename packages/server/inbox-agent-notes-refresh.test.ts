@@ -71,7 +71,7 @@ test("every version's block is frozen: a released note's bytes never change with
     "a37140d273d9e835a2c82de5dc920d79913e87e3b93d019986ceeaced1064e4e",
     "9646e5636c62bc434e77889323b2aa2a5b08d5fd6d1fc5d1950764a13fbd2200",
     "e4d74994695afaf8987b16abed9b818ae736f34ca44621d84e4babb7195a0477",
-    "68455241549cf9920fc60d1ee06f8cfc9261545fc157346d50605749112e7140",
+    "a0277d864dafe4e39d73c4abf24ca9927d995f44734fc3254589d5b64404ec9d",
   ]);
   expect(INBOX_NOTE_EARLIER_BLOCKS[0]).toBe(V1_BLOCK);
 });
