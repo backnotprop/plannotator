@@ -2825,6 +2825,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
      keyboard is the card (the reply foot, the compose and search sheets), so the canvas is the card too, and no
      dark band shows there. theme.css's `body` paints --background; the desktop keeps it. */
   html:has(.pn-inbox), body:has(.pn-inbox) { background-color: var(--card); }
+  /* iOS with the keyboard up (phone.ts trackKeyboard, `data-ib-keyboard-pin`): the page itself is no taller than the
+     part the keyboard leaves, so Safari has nothing to pan to (the window's top above the bars, blank canvas under
+     its bottom), and the root does not rubber-band. body and #root follow html's 100%. Android is not pinned. */
+  :root[data-ib-keyboard-pin]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
   .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { border-radius: 0; box-shadow: none; }
@@ -2946,6 +2950,21 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-pfoot [data-new-message] { width: 44px; padding: 0; justify-content: center; margin-left: auto; flex: none; }
   .pn-inbox .ib-pfoot [data-new-message] .ib-btn-l { display: none; }
   .ib-rtext, .ib-rmirror { font-size: var(--ib-fs-16-in, 16px); max-height: min(32vh, 30dvh); }
+  /* The reply's words scroll in their own box, and their ends never drag the page. */
+  .ib-rtext { overscroll-behavior: contain; }
+  /* iOS with the keyboard up: Safari no longer pans to what the keyboard covers (phone.ts), so everything that must
+     be reached fits above it. The foot shrinks and scrolls in its own box, with Send's row held at its bottom
+     (attached files, picks, a notice or an error line scroll above it; the skill picker is portalled out of it; the scroll to the caret clears that row);
+     the home bar's gap goes, since the keyboard covers it. Under 400 px left (`tight`: an iPhone's ~257 in
+     portrait, ~140 on its side) the thread's padding also closes and the reply's words scroll past a third of the
+     visible height (about two and a half lines). */
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot > .ib-acts { position: sticky; bottom: 0; z-index: 2; padding-bottom: 10px; background: var(--card); }
+  :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
+  :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
+  /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
+     has the room above the keyboard. The draft stays as it was and comes back with the foot. */
+  :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input, [contenteditable="true"]):focus) .ib-pfoot { display: none; }
   /* The skill picker: full width directly above the reply box, which sits on the keyboard; never a
      sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing,
      the description under the name; a tap inserts on pointerdown, so the keyboard stays up. */

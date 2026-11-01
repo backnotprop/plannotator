@@ -135,7 +135,7 @@ import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
-import { pageOffersUpdates, sidebarUpdateNotice, updateForPage } from './updateNotice';
+import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
@@ -759,6 +759,8 @@ function Inbox() {
   const [restarting, setRestarting] = useState(false);
   // What this page may offer: nothing to a tailnet guest, whom the update routes refuse.
   const pageUpdate = updateForPage(update, settings);
+  // What's new only reads release notes: this computer's pages and the owner's over the tailnet, never a guest's.
+  const pageWhatsNew = pageOffersWhatsNew(settings);
   // Checking for updates has failed for hours (packages/server/inbox-updates.ts): the sidebar's quiet row,
   // About's dot and the General row's line. Not on a tailnet guest's page.
   const [checkFailing, setCheckFailing] = useState<UpdateCheckFailing | null>(null);
@@ -4220,8 +4222,10 @@ function Inbox() {
             onCheckNow={() => void checkNow()}
             onToggle={(change) => void saveUpdateSwitches(change)}
             update={pageUpdate}
+            updates={pageOffersUpdates(settings)}
+            whatsNewRunning={settings?.via === 'tailnet'}
             onUpdate={pressUpdate}
-            onWhatsNew={openWhatsNew}
+            onWhatsNew={pageWhatsNew ? openWhatsNew : undefined}
             where={
               settings
                 ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: shellLine(settings.mcp_command) }
@@ -4252,7 +4256,7 @@ function Inbox() {
       <WhatsNewPage
         model={whatsNew}
         error={whatsNewError}
-        update={update}
+        update={pageUpdate}
         onBack={() => pageBackRef.current()}
         onUpdate={pressUpdate}
         onTakeTour={
@@ -4666,7 +4670,8 @@ function Inbox() {
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
             restarting={restarting}
-            updated={updated}
+            // The quiet "What's new in X" link: this computer's pages and the owner's over the tailnet, not a guest's.
+            updated={pageWhatsNew ? updated : null}
             onSearch={(opener) => openSearch(opener)}
             onCompose={(opener) => openCompose({}, opener)}
             pins={pinRows}
