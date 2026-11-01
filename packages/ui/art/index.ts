@@ -11,7 +11,7 @@ export {
 	type ArtBackgroundProviderProps,
 	type ArtWorkerFactory,
 } from "./ArtBackgroundProvider";
-export { ArtLayer, artAllowedAt, type ArtGround } from "./ArtLayer";
+export { ArtLayer, artAllowedAt, type ArtGround, type ArtLayerProps } from "./ArtLayer";
 export { ART_DEFAULT_ASSETS } from "./assets";
 export { ART_KEEP_SELECTOR } from "./collect-rects";
 export type { ArtAssets, ArtConfig, ArtLayout, FromArtWorker, ToArtWorker } from "./protocol";

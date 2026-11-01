@@ -37,11 +37,22 @@ export function artAllowedAt(pathname: string): boolean {
 
 export type ArtGround = "scroll" | "frame";
 
-export function ArtLayer({ ground = "scroll" }: { readonly ground?: ArtGround } = {}) {
+export interface ArtLayerProps {
+	readonly ground?: ArtGround;
+	/**
+	 * The layer gives its ground `isolation: isolate` (and, for a frame that is
+	 * not positioned, `position: relative`) while it is mounted, and puts the
+	 * ground's own values back when it goes. For a host whose grounds do not
+	 * carry those styles themselves, so a ground with no art is untouched.
+	 */
+	readonly isolateGround?: boolean;
+}
+
+export function ArtLayer({ ground = "scroll", isolateGround = false }: ArtLayerProps = {}) {
 	const art = useArtBackground();
 	if (art === null || art.theme === "none" || !artAllowedAt(window.location.pathname))
 		return null;
-	return <ArtLayerHost art={art} frame={ground === "frame"} />;
+	return <ArtLayerHost art={art} frame={ground === "frame"} isolate={isolateGround} />;
 }
 
 // Inline styles, not utility classes, so a host's CSS build need not scan
@@ -75,7 +86,15 @@ const FRAME_HOST_STYLE: CSSProperties = {
 	overflow: "hidden",
 };
 
-function ArtLayerHost({ art, frame }: { art: ArtBackgroundApi; frame: boolean }) {
+function ArtLayerHost({
+	art,
+	frame,
+	isolate,
+}: {
+	art: ArtBackgroundApi;
+	frame: boolean;
+	isolate: boolean;
+}) {
 	const hostRef = useRef<HTMLDivElement>(null);
 	const artRef = useRef(art);
 	useEffect(() => {
@@ -92,6 +111,13 @@ function ArtLayerHost({ art, frame }: { art: ArtBackgroundApi; frame: boolean })
 		const host = hostRef.current;
 		const ground = host?.parentElement;
 		if (host === null || ground === null || ground === undefined) return;
+		const kept = { isolation: ground.style.isolation, position: ground.style.position };
+		if (isolate) {
+			ground.style.isolation = "isolate";
+			const position = getComputedStyle(ground).position;
+			// "" where no stylesheet applies (a test DOM): the initial value, static.
+			if (frame && (position === "static" || position === "")) ground.style.position = "relative";
+		}
 		// The canvas is made here, not rendered: a transferred canvas cannot be
 		// handed over twice, and each mount needs its own.
 		const canvas = document.createElement("canvas");
@@ -165,8 +191,12 @@ function ArtLayerHost({ art, frame }: { art: ArtBackgroundApi; frame: boolean })
 			artRef.current.unmount(id);
 			canvas.remove();
 			canvasRef.current = null;
+			if (isolate) {
+				ground.style.isolation = kept.isolation;
+				ground.style.position = kept.position;
+			}
 		};
-	}, [frame]);
+	}, [frame, isolate]);
 
 	return (
 		<div
