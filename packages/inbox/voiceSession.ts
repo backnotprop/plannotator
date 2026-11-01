@@ -46,8 +46,6 @@ export interface VoiceView {
   slow: boolean;
   /** Null until the press resolves into a hold or a tap. */
   mode: 'hold' | 'tap' | null;
-  /** A hold slid off the button: letting go cancels. */
-  armed: boolean;
   trouble: VoiceTrouble | null;
   /** The engine that answered, for words that name it. */
   engine: InboxVoiceEngine | null;
@@ -114,7 +112,7 @@ export interface VoiceSession extends VoicePressTarget {
   discard(): void;
 }
 
-const IDLE: VoiceView = { phase: 'idle', prompting: false, slow: false, mode: null, armed: false, trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '' };
+const IDLE: VoiceView = { phase: 'idle', prompting: false, slow: false, mode: null, trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '' };
 
 const TROUBLE: Record<InboxVoiceFailure, { trouble: VoiceTrouble; keeps: boolean }> = {
   voice_expired: { trouble: 'expired', keeps: true },
@@ -201,7 +199,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     if (recording === handle) recording = null;
   };
 
-  /** Esc, Cancel, or a slide off: the box is as it was. Words typed meanwhile stay; only then does the caret stay too. */
+  /** Esc or Cancel: the box is as it was. Words typed meanwhile stay; only then does the caret stay too. */
   const cancel = (refocus = true) => {
     if (view.phase === 'idle') return;
     run++;
@@ -255,7 +253,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     lastBar = startedAt;
     lastVoiceAt = Number.NEGATIVE_INFINITY;
     // The prompt took the press away, or the finger came up while the mic opened: a tap.
-    set({ phase: 'listening', prompting: false, slow: false, mode: view.prompting || !pressed ? 'tap' : null, armed: false, said: 'Listening' });
+    set({ phase: 'listening', prompting: false, slow: false, mode: view.prompting || !pressed ? 'tap' : null, said: 'Listening' });
     stopTicking = deps.every(TICK_MS, tick);
   };
 
@@ -305,11 +303,6 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   };
 
   const stop = () => {
-    // Slid off: whatever ends the take (the cap, the mic going away), the person said no to sending it.
-    if (view.armed) {
-      cancel();
-      return;
-    }
     if (view.phase !== 'listening' || !recorder) return;
     const mine = run;
     const taken = recorder;
@@ -324,7 +317,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       set({ ...IDLE, trouble: 'notheard', said: 'Nothing was sent' });
       return;
     }
-    set({ phase: 'sending', mode: null, armed: false, clipMs: meter.elapsedMs, said: 'Transcribing' });
+    set({ phase: 'sending', mode: null, clipMs: meter.elapsedMs, said: 'Transcribing' });
     void taken.stop().then((chunks) => {
       if (mine !== run) return;
       clip = encodeWav(chunks, taken.rate);
@@ -409,13 +402,9 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       if (!pressed) return;
       pressed = false;
       if (view.phase !== 'listening') return;
-      if (view.armed) cancel();
       // Held from the moment it was listening: the time the mic took to open was no talking.
-      else if (deps.now() - Math.max(pressedAt, startedAt) < HOLD_MS) set({ mode: 'tap' });
+      if (deps.now() - Math.max(pressedAt, startedAt) < HOLD_MS) set({ mode: 'tap' });
       else stop();
-    },
-    slide: (off) => {
-      if (pressed && view.phase === 'listening' && view.mode !== 'tap' && off !== view.armed) set({ armed: off });
     },
     lost: () => {
       secondPress = false;

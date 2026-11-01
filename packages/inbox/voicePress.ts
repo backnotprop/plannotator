@@ -1,7 +1,6 @@
 /**
- * The mic button's gesture, on its own so it can change without touching the rest: press and let go quickly to
- * toggle, hold to talk, and while holding slide off the button to arm a cancel. The owner judges the slide by testing
- * it on a phone: `DRAG_OFF_PX` and `slidOff` are all of it.
+ * The mic button's gesture: press and let go quickly to toggle, hold to talk. The pointer is captured, so a hold ends
+ * where the finger comes up, on the button or off it.
  *
  * Space or Enter on the focused button toggles, as a button does. That is the button's own activation, not a shortcut.
  */
@@ -9,27 +8,13 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 
 /** Let go sooner than this and it was a tap. */
 export const HOLD_MS = 300;
-/** This far outside the button arms the cancel. */
-export const DRAG_OFF_PX = 56;
 
 export interface VoicePressTarget {
   press(): void;
   release(): void;
-  slide(off: boolean): void;
   /** The system took the pointer away. */
   lost(): void;
   toggle(): void;
-}
-
-interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
-export function slidOff(box: Box, x: number, y: number): boolean {
-  return Math.hypot(Math.max(box.left - x, 0, x - box.right), Math.max(box.top - y, 0, y - box.bottom)) > DRAG_OFF_PX;
 }
 
 export function voicePressProps(target: VoicePressTarget) {
@@ -39,9 +24,6 @@ export function voicePressProps(target: VoicePressTarget) {
       event.preventDefault();
       event.currentTarget.setPointerCapture?.(event.pointerId);
       target.press();
-    },
-    onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => {
-      target.slide(slidOff(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY));
     },
     onPointerUp: () => target.release(),
     onPointerCancel: () => target.lost(),

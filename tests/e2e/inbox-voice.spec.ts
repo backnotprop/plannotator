@@ -10,7 +10,8 @@
  *  - Failures: a 403 and a challenge page post once and stop; Retry is a press, and resends the same clip; a network
  *    failure keeps the clip; an expired login says so; not signed in dims the mic with a line and a link.
  *  - Phones only uses the touch query: no mic on a narrow desktop window, a mic on a touch screen.
- *  - A touch hold, and a slide off to cancel.
+ *  - A hold ends where the pointer comes up, on the button or off it, with one transcription. Cancel stays on screen,
+ *    and a touch the system takes away ends the take with nothing sent.
  *  - Reply box, compose, and full screen's composer.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
  *  - A file or the artifacts opening over the box closes the microphone.
@@ -617,7 +618,22 @@ test('Phones only is the touch query: a narrow desktop window has no mic, a touc
   await phone.context.close();
 });
 
-test('a phone: hold to talk, the keyboard stays down, slide off to cancel', async () => {
+test('a hold let go off the button transcribes once, as one let go on it does', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w);
+  const box = await openReply(page, w, w.threads[6]!);
+  const before = w.upstreamCalls().length;
+  w.send({ upstream: [{ text: 'Let go elsewhere.' }] });
+  await hold(page, 1000);
+  await page.mouse.move(200, 200, { steps: 5 });
+  await expect(line(pane(page), 'hold').locator('[data-voice-cancel]')).toBeVisible();
+  await page.mouse.up();
+  await expect(box).toHaveValue('Let go elsewhere.');
+  expect(w.upstreamCalls()).toHaveLength(before + 1);
+  await context.close();
+});
+
+test('a phone: hold to talk, the keyboard stays down, Cancel on screen, and a take ends however the finger does', async () => {
   const w = await mainWorld();
   const { context, page } = await open(speech, w, { phone: true });
   const cdp: CDPSession = await context.newCDPSession(page);
@@ -631,7 +647,7 @@ test('a phone: hold to talk, the keyboard stays down, slide off to cancel', asyn
 
   w.send({ upstream: [{ text: 'From the phone.', hold: true }] });
   await touch('touchStart', [x, y]);
-  await expect(line(pane(page), 'hold')).toContainText('Slide to cancel');
+  await expect(line(pane(page), 'hold').locator('[data-voice-cancel]')).toBeVisible();
   await page.waitForTimeout(1000);
   await shot(page, 'phone-listening');
   expect(await box.evaluate((el) => el === document.activeElement)).toBe(false);
@@ -645,21 +661,46 @@ test('a phone: hold to talk, the keyboard stays down, slide off to cancel', asyn
   await expect(box).toHaveValue('From the phone.');
   await shot(page, 'phone-landed');
 
+  // The finger comes up well off the button: the words land, once.
   const before = w.upstreamCalls().length;
+  w.send({ upstream: [{ text: 'Off the button.' }] });
+  await touch('touchStart', [x, y]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await page.waitForTimeout(1000);
+  await touch('touchMove', [x - 120, y - 120]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await touch('touchEnd');
+  await expect(box).toHaveValue('From the phone. Off the button.');
+  expect(w.upstreamCalls()).toHaveLength(before + 1);
+
+  // Cancel with the finger still down: nothing goes, and the finger coming up after it changes nothing.
   await touch('touchStart', [x, y]);
   await expect(line(pane(page), 'hold')).toBeVisible();
   await page.waitForTimeout(600);
-  await touch('touchMove', [x, y - 120]);
-  await expect(line(pane(page), 'armed')).toBeVisible();
-  await shot(page, 'phone-slide-to-cancel');
-  await touch('touchMove', [x, y]);
-  await expect(line(pane(page), 'hold')).toBeVisible();
-  await touch('touchMove', [x - 120, y - 120]);
-  await expect(line(pane(page), 'armed')).toBeVisible();
+  await line(pane(page), 'hold').locator('[data-voice-cancel]').click();
+  await expect(mic(pane(page))).toHaveAttribute('data-state', 'idle');
   await touch('touchEnd');
-  await expect(line(pane(page), 'armed')).toHaveCount(0);
-  await expect(box).toHaveValue('From the phone.');
-  expect(w.upstreamCalls()).toHaveLength(before);
+  await page.waitForTimeout(400);
+  expect(w.upstreamCalls()).toHaveLength(before + 1);
+
+  // The system takes the touch (pointercancel): no take is left running, nothing goes, and the mic works again.
+  await touch('touchStart', [x, y]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await page.waitForTimeout(600);
+  await touch('touchCancel');
+  await expect(mic(pane(page))).toHaveAttribute('data-state', 'idle');
+  await expect(line(pane(page), 'hold')).toHaveCount(0);
+  await page.waitForTimeout(400);
+  expect(w.upstreamCalls()).toHaveLength(before + 1);
+  await expect(box).toHaveValue('From the phone. Off the button.');
+
+  w.send({ upstream: [{ text: 'Still free.' }] });
+  await touch('touchStart', [x, y]);
+  await expect(line(pane(page), 'hold')).toBeVisible();
+  await page.waitForTimeout(1000);
+  await touch('touchEnd');
+  await expect(box).toHaveValue('From the phone. Off the button. Still free.');
+  expect(w.upstreamCalls()).toHaveLength(before + 2);
   await context.close();
 });
 

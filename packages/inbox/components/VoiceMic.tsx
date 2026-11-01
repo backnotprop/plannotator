@@ -50,14 +50,12 @@ function VoiceStatus({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const now = line();
   if (!now) return null;
   return (
-    <span className={`ib-vline${now.danger ? ' ib-vdanger' : ''}`} data-voice-line={now.state}>
+    <span className="ib-vline" data-voice-line={now.state}>
       <b>{now.word}</b>
       {now.hint && <span className="ib-vhint">{now.hint}</span>}
-      {now.cancel && (
-        <button type="button" className="ib-dtlink" data-voice-cancel="" onClick={session.cancel}>
-          Cancel
-        </button>
-      )}
+      <button type="button" className="ib-dtlink" data-voice-cancel="" onClick={session.cancel}>
+        Cancel
+      </button>
       <span className="ib-vsp" />
       {now.bars && <Bars session={session} count={phone ? 10 : VOICE_BARS} />}
       {now.time && <span className="ib-dttime">{now.time}</span>}
@@ -75,13 +73,13 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
     <button
       type="button"
       className="ib-vmic"
-      data-state={view.armed ? 'armed' : live ? 'live' : view.phase === 'sending' ? 'sending' : 'idle'}
+      data-state={live ? 'live' : view.phase === 'sending' ? 'sending' : 'idle'}
       aria-disabled={block ? true : undefined}
       aria-label={label}
       data-voice-mic=""
       {...(block ? {} : voicePressProps(session))}
     >
-      {view.phase === 'sending' ? <span className="ib-spin" /> : view.armed ? <Icon name="x" size={iconSize} /> : tapped ? <Icon name="stop" size={iconSize} /> : <Icon name="mic" size={iconSize} />}
+      {view.phase === 'sending' ? <span className="ib-spin" /> : tapped ? <Icon name="stop" size={iconSize} /> : <Icon name="mic" size={iconSize} />}
     </button>
   );
 }

@@ -6335,7 +6335,6 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
 .ib-vline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-vline b { flex: none; font-weight: 600; color: var(--foreground); }
-.ib-vline.ib-vdanger b { color: var(--destructive); }
 .ib-vhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-vsp { flex: 1; }
 .ib-dttime { flex: none; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--foreground); }
@@ -6347,7 +6346,6 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 @media (hover: hover) { .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
 .pn-inbox .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .pn-inbox .ib-vmic[data-state="live"], .pn-inbox .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
-.pn-inbox .ib-vmic[data-state="armed"], .pn-inbox .ib-vmic[data-state="armed"]:hover { background: var(--muted); color: var(--destructive); }
 .pn-inbox .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
 .pn-inbox .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
 .pn-inbox .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }

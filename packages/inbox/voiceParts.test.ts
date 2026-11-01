@@ -1,8 +1,8 @@
 /**
- * Voice dictation's small parts: the WAV the Inbox receives, the gate, the spacing at the cursor, the gesture's reach,
- * the announcement's gate, and the transcribe call's address. What regresses: a clip the endpoint can't read (wrong
- * rate or a truncated header), speech missed or silence taken for speech, words glued to their neighbours, a slide that
- * cancels from too near, the announcement sharing a load with another dialog, audio sent to a linked machine.
+ * Voice dictation's small parts: the WAV the Inbox receives, the gate, the spacing at the cursor, the announcement's
+ * gate, and the transcribe call's address. What regresses: a clip the endpoint can't read (wrong rate or a truncated
+ * header), speech missed or silence taken for speech, words glued to their neighbours, the announcement sharing a load
+ * with another dialog, audio sent to a linked machine.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { inboxApi } from './api';
@@ -12,7 +12,6 @@ import { createVoiceGate, encodeWav, voiceClock } from './voiceAudio';
 import { spaced } from './voiceField';
 import { voiceIntroMayAsk, voiceIntroWanted, type VoiceIntroLoad } from './voiceIntro';
 import { voiceLine } from './voiceLine';
-import { DRAG_OFF_PX, slidOff } from './voicePress';
 import { VOICE_BARS, VOICE_COUNTDOWN_MS, type VoiceMeter, type VoiceView } from './voiceSession';
 
 describe('encodeWav', () => {
@@ -100,14 +99,6 @@ describe('spaces at the cursor', () => {
   });
 });
 
-test('the slide arms only well outside the button', () => {
-  const box = { left: 100, right: 136, top: 100, bottom: 136 };
-  expect(slidOff(box, 120, 120)).toBe(false);
-  expect(slidOff(box, 136 + DRAG_OFF_PX, 120)).toBe(false);
-  expect(slidOff(box, 136 + DRAG_OFF_PX + 1, 120)).toBe(true);
-  expect(slidOff(box, 120, 100 - DRAG_OFF_PX - 1)).toBe(true);
-});
-
 test('the mic dims only for what a press cannot get past', () => {
   expect(voiceBlock('ready', false)).toBe('nomic');
   expect(voiceBlock('ready', true)).toBeNull();
@@ -117,14 +108,8 @@ test('the mic dims only for what a press cannot get past', () => {
 });
 
 describe('the status line', () => {
-  const view = (over: Partial<VoiceView>): VoiceView => ({ phase: 'listening', prompting: false, slow: false, mode: 'hold', armed: false, trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '', ...over });
+  const view = (over: Partial<VoiceView>): VoiceView => ({ phase: 'listening', prompting: false, slow: false, mode: 'hold', trouble: null, engine: null, kept: false, clipMs: 0, caret: 0, wash: null, said: '', ...over });
   const meter = (over: Partial<VoiceMeter>): VoiceMeter => ({ elapsedMs: 3000, level: 0.5, voice: true, voiceSeen: true, quietMs: 0, bars: Array.from({ length: VOICE_BARS }, () => ({ height: 0.1, voice: false })), ...over });
-
-  test('a held recording has no Cancel, a running one does: its finger is on the button, and nothing else stops it', () => {
-    expect(voiceLine(view({ mode: 'hold' }), meter({}), false)).toMatchObject({ state: 'hold', cancel: false });
-    expect(voiceLine(view({ mode: 'tap' }), meter({}), false)).toMatchObject({ state: 'tap', cancel: true });
-    expect(voiceLine(view({ phase: 'sending', mode: null }), meter({}), false)).toMatchObject({ state: 'sending', cancel: true });
-  });
 
   test('says no voice only after a moment of nothing, and never once it heard some', () => {
     expect(voiceLine(view({}), meter({ elapsedMs: 800, voice: false, voiceSeen: false }), false)?.state).toBe('hold');
@@ -142,14 +127,10 @@ describe('the status line', () => {
     expect(voiceLine(view({ mode: 'tap' }), meter({ elapsedMs: VOICE_COUNTDOWN_MS + 3000 }), false)).toMatchObject({ state: 'nearcap', time: '0:12 left' });
   });
 
-  test('armed wins over everything', () => {
-    expect(voiceLine(view({ armed: true }), meter({ elapsedMs: VOICE_COUNTDOWN_MS + 1 }), true)).toMatchObject({ state: 'armed', cancel: false, danger: true });
-  });
-
-  test('says nothing in the moment the mic opens, then a stuck mic gets a line with Cancel', () => {
+  test('says nothing in the moment the mic opens, then a stuck mic gets a line', () => {
     expect(voiceLine(view({ phase: 'opening', mode: null }), meter({}), false)).toBeNull();
     expect(voiceLine(view({ phase: 'opening', mode: null, prompting: true }), meter({}), false)?.state).toBe('asking');
-    for (const phone of [false, true]) expect(voiceLine(view({ phase: 'opening', mode: null, slow: true }), meter({}), phone)).toMatchObject({ state: 'opening', cancel: true });
+    for (const phone of [false, true]) expect(voiceLine(view({ phase: 'opening', mode: null, slow: true }), meter({}), phone)?.state).toBe('opening');
     expect(voiceLine(view({ phase: 'opening', mode: null, slow: true, prompting: true }), meter({}), false)?.state).toBe('asking');
   });
 });

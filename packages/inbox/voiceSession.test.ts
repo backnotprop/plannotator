@@ -224,57 +224,41 @@ describe('hold and tap', () => {
     expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap', prompting: false });
   });
 
-  test('slide off and let go cancels; slide back first and it stops as usual', async () => {
+  test('one letting go is one transcription, whatever the pointer does after it', async () => {
     const w = world();
     await held(w);
-    w.session.slide(true);
-    expect(w.session.view().armed).toBe(true);
     w.session.release();
-    expect(w.session.view().phase).toBe('idle');
-    expect(w.posted).toHaveLength(0);
-
-    const back = world();
-    await held(back);
-    back.session.slide(true);
-    back.session.slide(false);
-    back.session.release();
-    expect(back.session.view().phase).toBe('sending');
-  });
-
-  test('slid off and still holding at 2:00: nothing goes out, and the text stands', async () => {
-    const w = world();
-    await held(w);
-    w.session.slide(true);
-    w.pass(VOICE_CAP_MS);
+    w.session.release();
+    w.session.lost();
     await settle();
-    expect(w.session.view().phase).toBe('idle');
-    expect(w.posted).toHaveLength(0);
-    expect(w.value()).toBe('Draft ');
-    expect(w.log).toContain('mic aborted');
-    expect(w.log).not.toContain('mic stopped');
+    expect(w.posted).toHaveLength(1);
   });
 
-  test('slid off and still holding when the mic goes away: nothing goes out', async () => {
-    const w = world();
-    await held(w);
-    w.session.slide(true);
-    w.micEnded();
-    await settle();
-    expect(w.session.view().phase).toBe('idle');
-    expect(w.posted).toHaveLength(0);
-    expect(w.value()).toBe('Draft ');
-  });
-
-  test('the system taking the pointer cancels a hold, and leaves a tap running', async () => {
+  test('the system taking the pointer ends a hold with nothing sent, and leaves a tap running with its Cancel', async () => {
     const w = world();
     await held(w);
     w.session.lost();
     expect(w.session.view().phase).toBe('idle');
+    await settle();
     expect(w.posted).toHaveLength(0);
     const tap = world();
     await tapped(tap);
     tap.session.lost();
     expect(tap.session.view().phase).toBe('listening');
+    // Pressed again to stop, and the system took that pointer: still a tap, not a press waiting for a release.
+    tap.session.press();
+    tap.session.lost();
+    expect(tap.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('the system taking the pointer while the microphone opens: a tap, not a hold waiting for a release', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.lost();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
   });
 
   test('from the keyboard: starts and stops by toggle, and leaves focus on the button', async () => {
