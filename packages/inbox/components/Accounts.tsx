@@ -13,7 +13,9 @@ const CSWAP_URL = 'https://github.com/realiti4/claude-swap';
 /** The read's answer, or why there is none: a tailnet guest, or an Inbox that did not answer. */
 type View = InboxAccountsRead | { state: 'owner_only' } | { state: 'unreachable' };
 
-const FAILURE_TEXT: Record<InboxAccountsFailure | 'unreachable', string> = {
+type FailureCode = InboxAccountsFailure | 'unreachable';
+
+const FAILURE_TEXT: Record<FailureCode, string> = {
   timed_out: 'claude-swap timed out.',
   run_failed: 'claude-swap failed.',
   bad_output: 'claude-swap gave an unreadable answer.',
@@ -21,14 +23,47 @@ const FAILURE_TEXT: Record<InboxAccountsFailure | 'unreachable', string> = {
   unreachable: 'The Inbox did not answer.',
 };
 
+function failureOf(view: View): FailureCode | null {
+  if (view.state === 'failed') return view.reason;
+  return view.state === 'unreachable' ? view.state : null;
+}
+
 /** What an account is called: its alias, else the start of its address (the whole address waits in the open row), else it has neither and is an API key. */
 function accountLabel(account: InboxAccount): string {
   return account.alias || account.email?.split('@')[0] || 'API key';
 }
 
-/** One address can be saved under two organizations: only then does a name need its organization. */
-function sharesName(accounts: InboxAccount[], account: InboxAccount): boolean {
-  return accounts.filter((other) => accountLabel(other) === accountLabel(account)).length > 1;
+/** A personal Claude organization is named after the address: it says nothing, and showing it would show the address. */
+function accountOrganization(account: InboxAccount): string | null {
+  const { organizationName: name, email } = account;
+  return name && !(email && name.toLowerCase().includes(email.toLowerCase())) ? name : null;
+}
+
+/** A row's name among the others. */
+interface RowName {
+  label: string;
+  /** Only when another row has the same label: one address can be saved under two organizations. */
+  organization: string | null;
+  /** `cswap`'s number, only when the rows would still read alike. */
+  number: number | null;
+}
+
+function rowName(accounts: InboxAccount[], account: InboxAccount): RowName {
+  const label = accountLabel(account);
+  const organization = accountOrganization(account);
+  const namesakes = accounts.filter((other) => accountLabel(other) === label);
+  const alike = namesakes.filter((other) => accountOrganization(other) === organization);
+  return { label, organization: namesakes.length > 1 ? organization : null, number: alike.length > 1 ? account.number : null };
+}
+
+/** Past this, `cswap` could not refresh the reading: its normal serve age is 3 minutes. */
+const STALE_AFTER_SECONDS = 600;
+const isStale = (account: InboxAccount) => (account.usageAgeSeconds ?? 0) > STALE_AFTER_SECONDS;
+
+function ageText(seconds: number): string {
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 172_800) return `${Math.floor(seconds / 3_600)}h`;
+  return `${Math.floor(seconds / 86_400)}d`;
 }
 
 /** A limit as a row shows it. `week` holds the right-hand column. */
@@ -50,15 +85,17 @@ function accountMeters(account: InboxAccount): Meter[] {
 }
 
 /** What an open row adds. An organization a row already shows is not said twice. */
-function accountMore(account: InboxAccount, meters: Meter[], repeated: boolean): string[] {
+function accountMore(account: InboxAccount, meters: Meter[], name: RowName): string[] {
   const resets = meters.flatMap(({ label, window }) => {
     const when = window.clock ?? (window.countdown && `in ${window.countdown}`);
     return when ? [`${label} ${when}`] : [];
   });
+  const organization = accountOrganization(account);
   const lines: string[] = [];
   if (account.email) lines.push(account.email);
-  if (account.organizationName && !repeated) lines.push(account.organizationName);
+  if (organization && !name.organization) lines.push(organization);
   if (resets.length > 0) lines.push(`Resets ${resets.join(' · ')}`);
+  if (meters.length > 0 && isStale(account)) lines.push(`Last read ${ageText(account.usageAgeSeconds!)} ago`);
   return lines;
 }
 
@@ -91,10 +128,10 @@ function noReadingReason(account: InboxAccount): string {
   return retry && retry.getTime() > Date.now() ? `${reason}. Try again after ${retry.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : reason;
 }
 
-function UsageBar({ meter, lone }: { meter: Meter; lone: boolean }) {
+function UsageBar({ meter, lone, stale }: { meter: Meter; lone: boolean; stale: boolean }) {
   const shown = Math.round(meter.window.pct);
   return (
-    <span className="ib-acct-bar" data-usage={meter.label} data-high={shown >= 90 ? '' : undefined} data-week={meter.week ? '' : undefined} data-lone={lone ? '' : undefined}>
+    <span className="ib-acct-bar" data-usage={meter.label} data-high={shown >= 90 && !stale ? '' : undefined} data-week={meter.week ? '' : undefined} data-lone={lone ? '' : undefined}>
       <span className="ib-acct-bar-l">
         <span className="ib-acct-bar-n">{meter.label}</span>
         <b>{shown}%</b>
@@ -121,24 +158,33 @@ function AccountUsage({ account, meters }: { account: InboxAccount; meters: Mete
     );
   }
   const others = meters.filter((meter) => !meter.week).length;
+  const stale = isStale(account);
   return (
-    <span className="ib-acct-use" data-account-use="bars" data-windows={meters.length > 2 ? 'many' : undefined}>
+    <span className="ib-acct-use" data-account-use="bars" data-windows={meters.length > 2 ? 'many' : undefined} data-stale={stale ? '' : undefined}>
       {meters.map((meter, index) => (
-        <UsageBar key={index} meter={meter} lone={!meter.week && others === 1} />
+        <UsageBar key={index} meter={meter} lone={!meter.week && others === 1} stale={stale} />
       ))}
     </span>
   );
 }
 
-function AccountRow({ account, repeated }: { account: InboxAccount; repeated: boolean }) {
+function AccountRow({ account, name }: { account: InboxAccount; name: RowName }) {
   const [open, setOpen] = useState(false);
   const meters = accountMeters(account);
-  const more = accountMore(account, meters, repeated);
+  const more = accountMore(account, meters, name);
   const head = (
     <>
       <span className="ib-acct-who">
-        <span className="ib-acct-name">{accountLabel(account)}</span>
-        {repeated && account.organizationName && <span className="ib-acct-org">{account.organizationName}</span>}
+        <span className="ib-acct-l">
+          <span className="ib-acct-name">{name.label}</span>
+          {name.number !== null && (
+            <>
+              {' '}
+              <span className="ib-acct-num">#{name.number}</span>
+            </>
+          )}
+        </span>
+        {name.organization && <span className="ib-acct-org">{name.organization}</span>}
         {account.usageStatus !== 'api_key' && meters.length === 0 && <span className="ib-acct-why">{noReadingReason(account)}</span>}
       </span>
       <AccountUsage account={account} meters={meters} />
@@ -177,7 +223,7 @@ function AccountList({ accounts, reading }: { accounts: InboxAccount[]; reading:
   return (
     <ul className="ib-card ib-acct-list" aria-label="Claude Code accounts" aria-busy={reading}>
       {accounts.map((account) => (
-        <AccountRow key={account.number} account={account} repeated={sharesName(accounts, account)} />
+        <AccountRow key={account.number} account={account} name={rowName(accounts, account)} />
       ))}
     </ul>
   );
@@ -185,7 +231,8 @@ function AccountList({ accounts, reading }: { accounts: InboxAccount[]; reading:
 
 /** This machine and the account it is using. Its Switch comes here in a later step. */
 function MachineGroup({ machine, active, accounts }: { machine: string; active: InboxAccount; accounts: InboxAccount[] }) {
-  const name = accountLabel(active);
+  const { label, organization, number } = rowName(accounts, active);
+  const name = number === null ? label : `${label} #${number}`;
   return (
     <section className="ib-sgroup ib-sgroup-first" data-accounts-machine="" aria-labelledby="ib-g-machines">
       <div className="ib-acct-h">
@@ -201,7 +248,7 @@ function MachineGroup({ machine, active, accounts }: { machine: string; active: 
           </span>
           <span className="ib-acct-ro">
             <HostMark host="claude-code" />
-            <span>{sharesName(accounts, active) && active.organizationName ? `${name} · ${active.organizationName}` : name}</span>
+            <span>{organization ? `${name} · ${organization}` : name}</span>
           </span>
         </div>
       </div>
@@ -217,23 +264,30 @@ function MachineGroup({ machine, active, accounts }: { machine: string; active: 
  */
 export function AccountsSection({ machine }: { /** This machine's name, when this Inbox knows it. */ machine?: string }) {
   const [view, setView] = useState<View | null>(null);
+  /** A Refresh that failed over a good list, which stays up. */
+  const [refreshFailed, setRefreshFailed] = useState<FailureCode | null>(null);
   const [reading, setReading] = useState(true);
 
   const read = async () => {
     setReading(true);
+    let next: View;
     try {
-      setView(await inboxApi.accounts());
+      next = await inboxApi.accounts();
     } catch (cause) {
-      setView({ state: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' });
-    } finally {
-      setReading(false);
+      next = { state: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
     }
+    const failure = failureOf(next);
+    const keepList = failure !== null && view?.state === 'accounts';
+    setRefreshFailed(keepList ? failure : null);
+    if (!keepList) setView(next);
+    setReading(false);
   };
   useEffect(() => {
     void read();
   }, []);
 
   const active = view?.state === 'accounts' ? view.accounts.find((account) => account.active) : undefined;
+  const failure = refreshFailed ?? (view ? failureOf(view) : null);
   return (
     <>
       {active && view?.state === 'accounts' && <MachineGroup machine={machine ?? 'This machine'} active={active} accounts={view.accounts} />}
@@ -257,6 +311,11 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
             </div>
           </div>
         )}
+        {failure && (
+          <p role="alert" data-accounts-failed={failure}>
+            {FAILURE_TEXT[failure]}
+          </p>
+        )}
         {view?.state === 'accounts' && <AccountList accounts={view.accounts} reading={reading} />}
         {view?.state === 'not_installed' && (
           <div className="ib-card ib-acct-install">
@@ -268,12 +327,9 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
               to see usage and switch accounts
             </span>
             <CodeBox text={CSWAP_INSTALL_COMMAND} />
+            {/* The Inbox looks only on the PATH it started with, so a Refresh can't find what was installed after that. */}
+            <small>Already installed? Restart the Inbox.</small>
           </div>
-        )}
-        {(view?.state === 'failed' || view?.state === 'unreachable') && (
-          <p role="alert" data-accounts-failed={view.state === 'failed' ? view.reason : view.state}>
-            {FAILURE_TEXT[view.state === 'failed' ? view.reason : view.state]}
-          </p>
         )}
         {view?.state === 'owner_only' && <p data-accounts-owner-only="">Owner only.</p>}
       </section>

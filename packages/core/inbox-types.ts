@@ -1860,6 +1860,8 @@ export interface InboxAccount {
   usageRetryAt: string | null;
   /** Null: no reading. */
   usage: InboxAccountUsage | null;
+  /** How old `cswap` says the reading is. It serves the last good one when a fetch fails. */
+  usageAgeSeconds: number | null;
 }
 
 /** Why a read of the accounts failed: a fixed code, never `cswap`'s own words. */

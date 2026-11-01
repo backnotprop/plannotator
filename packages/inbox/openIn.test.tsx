@@ -163,7 +163,8 @@ const itemsOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[
 const checkedOf = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLElement>('[data-open-in-item]')].filter((item) => item.querySelector('.ib-openin-check')).map((item) => item.getAttribute('data-open-in-item'));
 const launches = () => {
   const file = join(dir!, 'data', 'launches.jsonl');
-  return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { app: string; path: string }) : [];
+  // The server process creates this file, then writes to it: a read between the two sees it empty.
+  return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as { app: string; path: string }) : [];
 };
 
 async function openMenu(el: ParentNode, trigger: string, id: string): Promise<HTMLElement> {

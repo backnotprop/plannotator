@@ -1,6 +1,6 @@
 {
-  "pro_max": {"fiveHour": {"pct": 41.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}, "sevenDay": {"pct": 58.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}},
-  "ultra_five_hour_null": {"sevenDay": {"pct": 30.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}, "scoped": [{"pct": 22.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00", "name": "Fable"}]},
-  "ultra_five_hour_absent": {"sevenDay": {"pct": 30.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}},
-  "hollow_five_hour": {"fiveHour": {"pct": 0}, "sevenDay": {"pct": 30.0, "resetsAt": "2026-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}}
+  "pro_max": {"fiveHour": {"pct": 41.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}, "sevenDay": {"pct": 58.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}},
+  "ultra_five_hour_null": {"sevenDay": {"pct": 30.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}, "scoped": [{"pct": 22.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00", "name": "Fable"}]},
+  "ultra_five_hour_absent": {"sevenDay": {"pct": 30.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}},
+  "hollow_five_hour": {"fiveHour": {"pct": 0}, "sevenDay": {"pct": 30.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}}
 }

@@ -39,6 +39,7 @@ export function writeFakeCswap(dir: string, answer: FakeCswapAnswer): string {
       ...(answer.delay ? [`/bin/sleep ${answer.delay}`] : []),
       `/bin/cat ${quoted(join(dir, 'stdout'))}`,
       `/bin/cat ${quoted(join(dir, 'stderr'))} >&2`,
+      `printf . >> ${quoted(join(dir, 'finished'))}`,
       `exit ${answer.exit ?? 0}`,
       '',
     ].join('\n'),
@@ -58,8 +59,14 @@ export function fakeCswapCalls(dir: string): string[] {
   return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
 }
 
+const count = (file: string) => (existsSync(file) ? readFileSync(file, 'utf8').length : 0);
+
 /** How many ticks a hanging fake has made. */
 export function fakeCswapTicks(dir: string): number {
-  const file = join(dir, 'ticks');
-  return existsSync(file) ? readFileSync(file, 'utf8').length : 0;
+  return count(join(dir, 'ticks'));
+}
+
+/** How many runs got to the end by themselves. */
+export function fakeCswapFinished(dir: string): number {
+  return count(join(dir, 'finished'));
 }

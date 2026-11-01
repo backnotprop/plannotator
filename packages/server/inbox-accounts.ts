@@ -3,24 +3,36 @@
  * Claude accounts and their usage, read through claude-swap (`cswap`, which
  * the person installs). Plannotator never reads, stores or moves credentials.
  *
- * `cswap list --json` reads the Keychain and fetches usage from Anthropic, so
- * it is a read that takes seconds and whose output sits next to secrets:
+ * `cswap list --json` reads the Keychain and fetches usage from Anthropic. To
+ * fetch usage it may refresh an expired login: it spends the old one-time
+ * token and writes the new one back, all inside claude-swap, as typing
+ * `cswap list` does. The Inbox itself touches no credential, but killing that
+ * run between the spend and the write would lose the login, so:
+ *
+ *  - A run is never killed for being slow, and the Inbox stopping leaves it to
+ *    finish. A person waits `INBOX_ACCOUNTS_TIMEOUT_MS`; only a run still going
+ *    at `INBOX_ACCOUNTS_HARD_LIMIT_MS` is killed, as truly stuck.
+ *  - One run at a time, until it has really ended. Whoever asks while it runs
+ *    joins it, even after an earlier caller was told it timed out. Nothing
+ *    polls: a run starts when the page opens or on Refresh.
+ *
+ * Its output sits next to secrets:
  *
  *  - Named fields only: every value below is picked by name, so a field a later
  *    `cswap` adds cannot reach the window.
- *  - Its output, stderr and error text are never logged, stored or passed on.
- *    A failure is a fixed reason code.
- *  - One read at a time, shared by whoever asks while it runs. Nothing polls:
- *    a read happens when the page opens or on Refresh.
+ *  - Its output and error text are never logged, stored or passed on. A
+ *    failure is a fixed reason code.
  */
 
 import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxUsageWindow } from "@plannotator/core/inbox-types";
-import { runWithTimeout, type AgentEnvironment } from "./inbox-agents";
+import { runUntilExit, type AgentEnvironment } from "./inbox-agents";
 
 /** The `schemaVersion` of `cswap list --json` this build reads. Extra fields are fine; another version is not. */
 const CSWAP_SCHEMA_VERSION = 1;
-/** The Keychain and Anthropic's usage endpoint are behind this read. */
+/** How long a person waits. The Keychain and Anthropic's usage endpoint are behind this read. The run goes on. */
 export const INBOX_ACCOUNTS_TIMEOUT_MS = 20_000;
+/** Last resort for a run that is truly stuck; a slow login refresh ends long before this. */
+export const INBOX_ACCOUNTS_HARD_LIMIT_MS = 120_000;
 /** The address `cswap` gives an API-key account (`api-key-3@token.local`). */
 const PLACEHOLDER_EMAIL = /@token\.local$/i;
 
@@ -29,9 +41,17 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
 /** A status or error kind (`api_key`, `http-429`): a word, or nothing, so a sentence of `cswap`'s never travels in it. */
 const word = (value: unknown): string | null => (typeof value === "string" && /^[\w-]{1,40}$/.test(value) ? value : null);
 
+/** A reset time gone by: `cswap` serves its last good reading when a fetch fails, so the figure is from before that reset. */
+function hasPassed(resetsAt: string | null): boolean {
+  const at = resetsAt ? Date.parse(resetsAt) : Number.NaN;
+  return Number.isFinite(at) && at <= Date.now();
+}
+
 function usageWindow(value: unknown): InboxUsageWindow | null {
   if (!isRecord(value) || typeof value.pct !== "number" || !Number.isFinite(value.pct)) return null;
-  return { pct: value.pct, resetsAt: text(value.resetsAt), countdown: text(value.countdown), clock: text(value.clock) };
+  const resetsAt = text(value.resetsAt);
+  if (hasPassed(resetsAt)) return null;
+  return { pct: value.pct, resetsAt, countdown: text(value.countdown), clock: text(value.clock) };
 }
 
 function accountUsage(value: unknown): InboxAccountUsage | null {
@@ -61,6 +81,7 @@ function account(row: unknown): InboxAccount | null {
     usageError: word(row.usageError),
     usageRetryAt: text(row.usageRetryAt),
     usage: accountUsage(row.usage),
+    usageAgeSeconds: typeof row.usageAgeSeconds === "number" && Number.isFinite(row.usageAgeSeconds) && row.usageAgeSeconds >= 0 ? row.usageAgeSeconds : null,
   };
 }
 
@@ -86,26 +107,32 @@ export interface InboxAccountsOptions {
   environment: AgentEnvironment;
   /** Default `INBOX_ACCOUNTS_TIMEOUT_MS`; tests give a short one. */
   timeoutMs?: number;
-  /** The Inbox stopping ends a read still going. */
-  signal?: AbortSignal;
+  /** Default `INBOX_ACCOUNTS_HARD_LIMIT_MS`; tests give a short one. */
+  hardLimitMs?: number;
 }
 
-export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, signal }: InboxAccountsOptions) {
-  const readOnce = async (): Promise<InboxAccountsRead> => {
+export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS }: InboxAccountsOptions) {
+  const runOnce = async (): Promise<InboxAccountsRead> => {
     const cswap = environment.which("cswap");
     if (!cswap) return { state: "not_installed" };
-    const run = await runWithTimeout([cswap, "list", "--json"], environment.env, timeoutMs, signal);
+    const run = await runUntilExit([cswap, "list", "--json"], environment.env, hardLimitMs);
     if (run.timedOut) return failed("timed_out");
     if (run.exitCode !== 0) return failed("run_failed");
     return parseCswapList(run.stdout);
   };
-  let reading: Promise<InboxAccountsRead> | null = null;
+  /** The run going now, until it has really ended. */
+  let running: Promise<InboxAccountsRead> | null = null;
   return {
     read(): Promise<InboxAccountsRead> {
-      reading ??= readOnce().finally(() => {
-        reading = null;
+      running ??= runOnce().finally(() => {
+        running = null;
       });
-      return reading;
+      // Each caller waits its own limit, so a Refresh during a slow run can still get that run's answer.
+      let limit: ReturnType<typeof setTimeout>;
+      const tooLong = new Promise<InboxAccountsRead>((done) => {
+        limit = setTimeout(() => done(failed("timed_out")), timeoutMs);
+      });
+      return Promise.race([running, tooLong]).finally(() => clearTimeout(limit));
     },
   };
 }

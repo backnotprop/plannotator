@@ -13,10 +13,11 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { doorRouteNames } from "./inbox-devices";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
-import { fakeCswapCalls, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer } from "../../tests/helpers/fake-cswap";
+import { fakeCswapCalls, fakeCswapFinished, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer } from "../../tests/helpers/fake-cswap";
 
 const FIXTURES = resolve(import.meta.dir, "../../tests/fixtures/cswap");
 const LIST = readFileSync(join(FIXTURES, "list.json"), "utf8");
+const STALE = readFileSync(join(FIXTURES, "stale.json"), "utf8");
 const WINDOWS = JSON.parse(readFileSync(join(FIXTURES, "usage-windows.json"), "utf8")) as Record<string, unknown>;
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
@@ -37,10 +38,11 @@ interface WorldOptions {
   /** Null: no `cswap` at all. */
   cswap?: FakeCswapAnswer | null;
   timeoutMs?: number;
+  hardLimitMs?: number;
   tailnet?: boolean;
 }
 
-async function world({ cswap = { stdout: LIST }, timeoutMs, tailnet }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, tailnet }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -72,7 +74,7 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, tailnet }: WorldOpti
     version: "dev",
     // The fake's folder and nothing else.
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: bin } }),
-    accounts: { timeoutMs },
+    accounts: { timeoutMs, hardLimitMs },
     ...(tailnet ? { tailscale: run, publishTailnet: true } : {}),
   });
   servers.push(server);
@@ -130,6 +132,7 @@ describe.skipIf(process.platform === "win32")("the sample output", () => {
           usageError: "network",
           usageRetryAt: "2026-11-01T12:48:33Z",
           usage: null,
+          usageAgeSeconds: null,
         },
         {
           number: 2,
@@ -142,9 +145,10 @@ describe.skipIf(process.platform === "win32")("the sample output", () => {
           usageError: "network",
           usageRetryAt: "2026-11-01T12:48:33Z",
           usage: null,
+          usageAgeSeconds: null,
         },
         // An API-key row never carries its placeholder address.
-        { number: 3, alias: null, email: null, organizationName: null, isOrganization: false, active: false, usageStatus: "api_key", usageError: null, usageRetryAt: null, usage: null },
+        { number: 3, alias: null, email: null, organizationName: null, isOrganization: false, active: false, usageStatus: "api_key", usageError: null, usageRetryAt: null, usage: null, usageAgeSeconds: null },
       ],
     });
   });
@@ -162,7 +166,7 @@ describe.skipIf(process.platform === "win32")("the sample output", () => {
       return listed(await w.read())[0]!.usage!;
     };
     const proMax = await usageOf("pro_max");
-    expect(proMax.fiveHour).toEqual({ pct: 41, resetsAt: "2026-11-05T12:00:00+00:00", countdown: "3d 23h", clock: "Nov 5 12:00" });
+    expect(proMax.fiveHour).toEqual({ pct: 41, resetsAt: "2099-11-05T12:00:00+00:00", countdown: "3d 23h", clock: "Nov 5 12:00" });
     expect(proMax.sevenDay?.pct).toBe(58);
     expect(proMax.scoped).toEqual([]);
 
@@ -179,6 +183,31 @@ describe.skipIf(process.platform === "win32")("the sample output", () => {
   test("a usage with no usable window is no reading", async () => {
     const w = await world({ cswap: { stdout: withUsage({ fiveHour: { pct: "41" }, sevenDay: {}, scoped: [{ pct: 12 }] }) } });
     expect(listed(await w.read())[0]!.usage).toBeNull();
+  });
+
+  test("an old reading: its age passes by name, and a window past its reset reads as not reported", async () => {
+    const w = await world({ cswap: { stdout: STALE } });
+    const [old, fresh] = listed(await w.read());
+    expect(old!.usageAgeSeconds).toBe(7320);
+    expect(old!.usage!.fiveHour).toBeNull();
+    expect(old!.usage!.sevenDay?.pct).toBe(92);
+    expect(fresh!.usageAgeSeconds).toBe(120);
+    expect(fresh!.usage!.fiveHour?.pct).toBe(94);
+    expect(JSON.stringify(old)).not.toContain("usageFetchedAt");
+  });
+
+  test("every window past its reset is no reading; a reset time that isn't one keeps its window", async () => {
+    const gone = { pct: 80, resetsAt: "2020-01-01T00:00:00Z" };
+    const w = await world({ cswap: { stdout: withUsage({ fiveHour: gone, sevenDay: gone, scoped: [{ ...gone, name: "Fable" }] }) } });
+    expect(listed(await w.read())[0]!.usage).toBeNull();
+    writeFakeCswap(w.bin, { stdout: withUsage({ fiveHour: { pct: 80, resetsAt: "soon" } }) });
+    expect(listed(await w.read())[0]!.usage!.fiveHour?.pct).toBe(80);
+  });
+
+  test.each([["a word", "old"], ["below zero", -1]])("an age that is not one is no age (%s)", async (_, usageAgeSeconds) => {
+    const stdout = JSON.stringify({ schemaVersion: 1, accounts: [{ number: 1, usageStatus: "ok", usage: null, usageAgeSeconds }] });
+    const w = await world({ cswap: { stdout } });
+    expect(listed(await w.read())[0]!.usageAgeSeconds).toBeNull();
   });
 });
 
@@ -211,27 +240,86 @@ describe.skipIf(process.platform === "win32")("a failed read answers a fixed rea
     expect(await w.read()).toEqual({ state: "failed", reason: "unknown_schema" });
   });
 
-  test("a cswap that hangs is killed at the timeout, its children too, and the answer says so", async () => {
-    const w = await world({ cswap: { hang: true }, timeoutMs: 300 });
-    const started = Date.now();
+  test("output over the 64 KiB cap is cut, and cut JSON reads as bad output", async () => {
+    const stdout = JSON.stringify({ schemaVersion: 1, accounts: [{ number: 1, usageStatus: "ok", usage: null, extra: "x".repeat(70 * 1024) }] });
+    const w = await world({ cswap: { stdout } });
+    expect(await w.read()).toEqual({ state: "failed", reason: "bad_output" });
+  });
+});
+
+/**
+ * `cswap list --json` can spend a one-time refresh token and write the new one
+ * back, so a run killed partway can lose a login. The limits here are short;
+ * the shipped ones are 20 s to answer and 2 minutes to kill.
+ */
+describe.skipIf(process.platform === "win32")("a cswap run is never stopped for being slow", () => {
+  const untilFinished = async (bin: string, runs: number) => {
+    for (let i = 0; i < 200 && fakeCswapFinished(bin) < runs; i++) await Bun.sleep(20);
+    return fakeCswapFinished(bin);
+  };
+
+  test("a slow run answers timed_out at the limit, goes on to finish, and a Refresh joins it instead of starting another", async () => {
+    const w = await world({ cswap: { stdout: LIST, delay: 1.4 }, timeoutMs: 1_000 });
     expect(await w.read()).toEqual({ state: "failed", reason: "timed_out" });
-    expect(Date.now() - started).toBeLessThan(5_000);
-    expect(liveAgentRunCount()).toBe(0);
-    // Killed: it stops ticking.
-    await Bun.sleep(120);
-    const ticks = fakeCswapTicks(w.bin);
-    expect(ticks).toBeGreaterThan(0);
-    await Bun.sleep(200);
-    expect(fakeCswapTicks(w.bin)).toBe(ticks);
+    // Still running: not finished, and only the one run.
+    expect(fakeCswapFinished(w.bin)).toBe(0);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    // The Refresh gets the answer of the run already going.
+    expect(listed(await w.read())).toHaveLength(3);
+    expect(fakeCswapFinished(w.bin)).toBe(1);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    // Only once it has really ended does a read run it again.
+    writeFakeCswap(w.bin, { stdout: LIST });
+    await w.read();
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
   });
 
-  test("the Inbox stopping ends a read still going", async () => {
-    const w = await world({ cswap: { hang: true } });
+  test("a run truly stuck is killed only at the hard limit, its children too, and until then nothing starts", async () => {
+    const started = Date.now();
+    const w = await world({ cswap: { hang: true }, timeoutMs: 100, hardLimitMs: 1_500 });
+    expect(await w.read()).toEqual({ state: "failed", reason: "timed_out" });
+    // Answered, and still alive: it keeps ticking.
+    for (let i = 0; i < 100 && fakeCswapTicks(w.bin) === 0; i++) await Bun.sleep(20);
+    const ticking = fakeCswapTicks(w.bin);
+    expect(ticking).toBeGreaterThan(0);
+    await Bun.sleep(150);
+    expect(fakeCswapTicks(w.bin)).toBeGreaterThan(ticking);
+    expect(await w.read()).toEqual({ state: "failed", reason: "timed_out" });
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    // Past the hard limit: killed, so it stops ticking, and a read may run again.
+    await Bun.sleep(Math.max(0, 2_000 - (Date.now() - started)));
+    const last = fakeCswapTicks(w.bin);
+    await Bun.sleep(200);
+    expect(fakeCswapTicks(w.bin)).toBe(last);
+    writeFakeCswap(w.bin, { stdout: LIST });
+    await w.read();
+    expect(await untilFinished(w.bin, 1)).toBe(1);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+  });
+
+  test("the Inbox stopping leaves a run to finish", async () => {
+    const w = await world({ cswap: { stdout: LIST, delay: 0.5 } });
     const reading = w.read();
     for (let i = 0; i < 100 && fakeCswapCalls(w.bin).length === 0; i++) await Bun.sleep(20);
+    expect(liveAgentRunCount()).toBe(0);
     servers.splice(0)[0]!.stop();
     await reading.catch(() => {});
-    expect(liveAgentRunCount()).toBe(0);
+    expect(await untilFinished(w.bin, 1)).toBe(1);
+  });
+
+  test("a process with a run going ends by itself, and the run still finishes", async () => {
+    const w = await world({ cswap: { stdout: LIST, delay: 1 } });
+    const agents = resolve(import.meta.dir, "inbox-agents.ts");
+    // Nothing here calls exit: this process ends once the run has started, or the check below that the run is unfinished fails.
+    const script = `import { existsSync } from "node:fs";
+import { runUntilExit } from ${JSON.stringify(agents)};
+void runUntilExit([${JSON.stringify(join(w.bin, "cswap"))}, "list", "--json"], {}, 60000);
+const started = setInterval(() => { if (existsSync(${JSON.stringify(join(w.bin, "calls.log"))})) clearInterval(started); }, 10);`;
+    const exited = await Bun.spawn([process.execPath, "-e", script], { stdout: "ignore", stderr: "ignore", env: { ...process.env, PATH: w.bin } }).exited;
+    expect(exited).toBe(0);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    expect(fakeCswapFinished(w.bin)).toBe(0);
+    expect(await untilFinished(w.bin, 1)).toBe(1);
   });
 });
 

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 1,
+  "accounts": [
+    {"number": 1, "alias": "work", "email": "a@fake.test", "organizationName": "North", "isOrganization": true, "active": true, "usageStatus": "ok", "usageFetchedAt": "2026-11-01T10:00:00Z", "usageAgeSeconds": 7320, "usage": {"fiveHour": {"pct": 41.0, "resetsAt": "2020-01-01T12:00:00+00:00", "countdown": "0m", "clock": "Jan 1 12:00"}, "sevenDay": {"pct": 92.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}}},
+    {"number": 2, "alias": "personal", "email": "b@fake.test", "organizationName": "South", "isOrganization": true, "active": false, "usageStatus": "ok", "usageFetchedAt": "2026-11-01T12:00:00Z", "usageAgeSeconds": 120, "usage": {"fiveHour": {"pct": 94.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "1h 02m", "clock": "13:02"}, "sevenDay": {"pct": 30.0, "resetsAt": "2099-11-05T12:00:00+00:00", "countdown": "3d 23h", "clock": "Nov 5 12:00"}}}
+  ]
+}

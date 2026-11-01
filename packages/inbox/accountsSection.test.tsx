@@ -194,17 +194,131 @@ test.skipIf(!hasDom)('Machines comes first and says which account this machine i
   expect(group.querySelector('button, select, [role="menu"]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Machines shows only with an account in use: not when none is active, not when the read failed', async () => {
+test.skipIf(!hasDom)('Machines shows only with an account in use: not when none is active, not when the first read failed', async () => {
   answer({ stdout: listOf({ alias: 'one' }) });
   const el = await open('accounts');
   expect(machineGroup(el)).toBeNull();
   answer({ stdout: LIST });
   act(() => refresh(el).click());
   await until(() => machineGroup(el) !== null, 'the machine');
+  act(() => root?.unmount());
+  host?.remove();
+  answer({ stdout: 'Traceback' });
+  const failed = await open('failed');
+  expect(machineGroup(failed)).toBeNull();
+  expect(failed.querySelector('[data-account]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a failed Refresh keeps the good list and says so above it; the next good read clears the line', async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  const line = () => el.querySelector('[data-accounts-failed]');
   answer({ stdout: 'Traceback' });
   act(() => refresh(el).click());
-  await until(() => stateOf(el) === 'failed', 'the failure');
-  expect(machineGroup(el)).toBeNull();
+  await until(() => line() !== null, 'the failure line');
+  expect(line()?.getAttribute('data-accounts-failed')).toBe('bad_output');
+  expect(stateOf(el)).toBe('accounts');
+  expect(nameOf(row(el, 1))).toBe('personal');
+  expect(machineGroup(el)).not.toBeNull();
+  expect(line()!.compareDocumentPosition(el.querySelector('.ib-acct-list')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  accountsRoute = async () => {
+    throw new TypeError('Failed to fetch');
+  };
+  act(() => refresh(el).click());
+  await until(() => line()?.getAttribute('data-accounts-failed') === 'unreachable', 'the Inbox not answering');
+  expect(nameOf(row(el, 1))).toBe('personal');
+
+  accountsRoute = null;
+  answer({ stdout: LIST });
+  act(() => refresh(el).click());
+  await until(() => line() === null, 'the line gone');
+  expect(nameOf(row(el, 1))).toBe('personal');
+});
+
+const fullName = (rowEl: Element) => rowEl.querySelector('.ib-acct-l')?.textContent;
+const openLines = (rowEl: Element) => [...rowEl.querySelectorAll('.ib-acct-more > div')].map((line) => line.textContent);
+
+test.skipIf(!hasDom)('an organization named after the address is no organization: not on a closed row, the machine or an open row', async () => {
+  answer({
+    stdout: listOf(
+      { email: 'mira@a.test', organizationName: "mira@a.test's Organization", active: true },
+      { email: 'mira@b.test', organizationName: 'Fake MIRA@B.TEST' },
+      { email: 'solo@c.test', organizationName: 'Fake solo@c.test' },
+    ),
+  });
+  const el = await open('accounts');
+  // The rows then read alike, so those two, and only those, carry cswap's number.
+  expect(fullName(row(el, 1))).toBe('mira #1');
+  expect(fullName(row(el, 2))).toBe('mira #2');
+  expect(fullName(row(el, 3))).toBe('solo');
+  expect(el.querySelector('.ib-acct-org')).toBeNull();
+  expect(machineGroup(el)?.querySelector('.ib-acct-ro')?.textContent).toBe('mira #1');
+  expect(el.querySelector('.ib-spg')?.textContent).not.toContain('@');
+  act(() => toggle(row(el, 1))!.click());
+  // The address once, and no organization line.
+  expect(openLines(row(el, 1))).toEqual(['mira@a.test']);
+});
+
+test.skipIf(!hasDom)('the number shows only while rows read alike: a real organization tells them apart, the same one does not', async () => {
+  answer({
+    stdout: listOf(
+      { email: 'a@fake.test', organizationName: 'Fake a@fake.test' },
+      { email: 'a@fake.test', organizationName: 'North' },
+      { alias: 'team', email: 'b@fake.test', organizationName: 'South' },
+      { alias: 'team', email: 'c@fake.test', organizationName: 'South' },
+    ),
+  });
+  const el = await open('accounts');
+  expect(fullName(row(el, 1))).toBe('a');
+  expect(row(el, 1).querySelector('.ib-acct-org')).toBeNull();
+  expect(fullName(row(el, 2))).toBe('a');
+  expect(row(el, 2).querySelector('.ib-acct-org')?.textContent).toBe('North');
+  expect(fullName(row(el, 3))).toBe('team #3');
+  expect(fullName(row(el, 4))).toBe('team #4');
+  expect(row(el, 4).querySelector('.ib-acct-org')?.textContent).toBe('South');
+});
+
+test.skipIf(!hasDom)('an old reading: muted, never amber, "Last read" only in the open row; a reading under 10 minutes is left alone', async () => {
+  answer({ stdout: readFileSync(join(FIXTURES, 'stale.json'), 'utf8') });
+  const el = await open('accounts');
+  const stale = row(el, 1).querySelector('[data-account-use]')!;
+  expect(stale.hasAttribute('data-stale')).toBe(true);
+  // 92% and old is not amber. Its 5h has passed its reset, so it reads as not reported.
+  expect(bars(row(el, 1))).toEqual(['week 92%']);
+  expect(row(el, 1).querySelector('[data-high]')).toBeNull();
+  expect(row(el, 1).textContent).not.toContain('Last read');
+  act(() => toggle(row(el, 1))!.click());
+  expect(openLines(row(el, 1)).at(-1)).toBe('Last read 2h ago');
+
+  const fresh = row(el, 2).querySelector('[data-account-use]')!;
+  expect(fresh.hasAttribute('data-stale')).toBe(false);
+  expect(row(el, 2).querySelector('[data-usage="5h"]')?.hasAttribute('data-high')).toBe(true);
+  act(() => toggle(row(el, 2))!.click());
+  expect(openLines(row(el, 2)).join()).not.toContain('Last read');
+});
+
+test.skipIf(!hasDom)('how old an old reading says it is, the 10 minute line, and no age with nothing to date', async () => {
+  const usage = { sevenDay: { pct: 40 } };
+  answer({
+    stdout: listOf(
+      { usage, usageAgeSeconds: 600 },
+      { usage, usageAgeSeconds: 601 },
+      { usage, usageAgeSeconds: 7_200 },
+      { usage, usageAgeSeconds: 300_000 },
+      { usage: null, usageAgeSeconds: 7_200 },
+    ),
+  });
+  const el = await open('accounts');
+  const said = (number: number) => {
+    act(() => toggle(row(el, number))!.click());
+    return openLines(row(el, number)).find((line) => line?.startsWith('Last read'));
+  };
+  expect(said(1)).toBeUndefined();
+  expect(said(2)).toBe('Last read 10m ago');
+  expect(said(3)).toBe('Last read 2h ago');
+  expect(said(4)).toBe('Last read 3d ago');
+  expect(said(5)).toBeUndefined();
 });
 
 test.skipIf(!hasDom)('two rows with one name: the machine says which one it is using', async () => {
@@ -214,7 +328,7 @@ test.skipIf(!hasDom)('two rows with one name: the machine says which one it is u
 });
 
 test.skipIf(!hasDom)('the address, organization and reset times stay out until a row is opened, and go again when it closes', async () => {
-  const later = { pct: 41, resetsAt: '2026-11-05T12:00:00+00:00', countdown: '3d 23h', clock: 'Nov 5 12:00' };
+  const later = { pct: 41, resetsAt: '2099-11-05T12:00:00+00:00', countdown: '3d 23h', clock: 'Nov 5 12:00' };
   answer({ stdout: listOf({ alias: 'work', email: 'hidden@fake.test', organizationName: 'North', usage: { fiveHour: later, sevenDay: { ...later, clock: null } } }) });
   const el = await open('accounts');
   const shut = row(el, 1).textContent;
@@ -330,6 +444,8 @@ test.skipIf(!hasDom)('not installed: one line and the install command to copy; o
   expect(el.querySelector('.ib-cbox pre')?.textContent).toBe(INSTALL_COMMAND);
   expect(el.querySelector('.ib-cbox button')?.textContent).toBe('Copy');
   expect(el.querySelector('[data-account]')).toBeNull();
+  // The Inbox looks only on the PATH it started with, so Refresh can't fix this one.
+  expect(el.textContent).toContain('Restart the Inbox');
   answer({ stdout: LIST });
   act(() => refresh(el).click());
   await until(() => stateOf(el) === 'accounts', 'the accounts');

@@ -403,8 +403,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
-  /** Tests: how long `cswap list --json` may take (packages/server/inbox-accounts.ts). */
-  accounts?: { timeoutMs?: number };
+  /** Tests: how long a read of `cswap list --json` waits, and when a stuck run is killed (packages/server/inbox-accounts.ts). */
+  accounts?: { timeoutMs?: number; hardLimitMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -2508,7 +2508,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
-  const accounts = createInboxAccounts({ environment: agentEnvironment, signal: connectStop.signal, ...options.accounts });
+  const accounts = createInboxAccounts({ environment: agentEnvironment, ...options.accounts });
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({

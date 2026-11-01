@@ -4,18 +4,18 @@
  * Inbox's whole PATH is a fake `cswap`'s folder (tests/helpers/fake-cswap.ts),
  * so no real claude-swap can be reached: that one goes to the Keychain.
  *
- * What only a browser can show: week holds the right-hand column, a third
- * window wraps to a second line, long names shorten instead of pushing the
- * bars, and nothing scrolls sideways, at 1440 and on a phone, with 12 accounts
- * of long addresses, aliases and organizations. The states themselves are
- * packages/inbox/accountsSection.test.tsx.
+ * What only a browser can show: week holds the right-hand column, three
+ * windows sit on one line (under the name on a phone), long names shorten
+ * instead of pushing the bars, and nothing scrolls sideways, at 1440, 780, a
+ * phone and 320, with 12 accounts of long addresses, aliases and organizations.
+ * The states themselves are packages/inbox/accountsSection.test.tsx.
  *
  * PNGs, light, dark and phone, land in .local/proof/inbox-accounts-step1/.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fakeCswapCalls, removeFakeCswap, writeFakeCswap } from '../helpers/fake-cswap';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -26,7 +26,7 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'inbox-accounts-step1');
 
-const usageWindow = (pct: number) => ({ pct, resetsAt: '2026-11-05T12:00:00+00:00', countdown: '3d 23h', clock: 'Nov 5 12:00' });
+const usageWindow = (pct: number) => ({ pct, resetsAt: '2099-11-05T12:00:00+00:00', countdown: '3d 23h', clock: 'Nov 5 12:00' });
 const list = (accounts: Record<string, unknown>[]) => JSON.stringify({ schemaVersion: 1, activeAccountNumber: 2, accounts });
 
 const NORMAL = list([
@@ -48,6 +48,14 @@ const NO_READING = list([
   { number: 3, alias: 'side', email: 'c@fake.test', active: false, usageStatus: 'unavailable', usage: null, usageError: 'http-429', usageRetryAt: '2099-11-01T12:48:33Z' },
   { number: 4, email: 'api-key-4@token.local', active: false, usageStatus: 'api_key', usage: null },
 ]);
+
+/** Personal Claude organizations are named after the address, so nothing here may show one until a row opens. */
+const SAME_NAME = list([
+  { number: 1, email: 'mira@hollowfield.dev', organizationName: "mira@hollowfield.dev's Organization", isOrganization: true, active: false, usageStatus: 'ok', usage: { fiveHour: usageWindow(41), sevenDay: usageWindow(58) } },
+  { number: 2, email: 'mira@northwind.io', organizationName: 'Fake mira@northwind.io', isOrganization: true, active: true, usageStatus: 'ok', usage: { fiveHour: usageWindow(12), sevenDay: usageWindow(22) } },
+]);
+
+const STALE = readFileSync(join(repo, 'tests/fixtures/cswap/stale.json'), 'utf8');
 
 const LONG_EMAIL = 'mira.okafor.engineering.platform.oncall.rotation+claude-code-max@hollowfield-and-northwind-consulting-partners.example.com';
 const LONG_ALIAS = 'the personal account I use for the long weekend research projects and everything else';
@@ -78,6 +86,8 @@ const STATES: { name: string; state: string; apply: (bin: string) => void; tall?
   { name: 'normal', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: NORMAL }) },
   { name: 'three-windows', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: THREE_WINDOWS }) },
   { name: 'no-reading', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: NO_READING }) },
+  { name: 'same-name', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: SAME_NAME }) },
+  { name: 'stale', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: STALE }) },
   { name: 'not-installed', state: 'not_installed', apply: (bin) => removeFakeCswap(bin) },
   { name: 'failed', state: 'failed', apply: (bin) => writeFakeCswap(bin, { stdout: JSON.stringify({ schemaVersion: 1, error: { type: 'CswapError', message: 'words-of-cswap' } }), stderr: 'words-of-cswap', exit: 1 }) },
   { name: 'worst-case', state: 'accounts', apply: (bin) => writeFakeCswap(bin, { stdout: WORST }), tall: true },
@@ -211,6 +221,22 @@ async function walk(page: Page, prefix: string, errors: string[]) {
       const color = (usage: string) => page.locator(`[data-account="2"] [data-usage="${usage}"] b`).evaluate((b) => getComputedStyle(b).color);
       expect(await color('5h')).not.toBe(await color('week'));
       await shotOpen(page, 2, `${prefix}-row-open`);
+      // A Refresh that fails keeps the list, with the line above it.
+      writeFakeCswap(world.bin, { stdout: 'Traceback' });
+      await page.locator('[data-accounts-refresh]').click();
+      await expect(page.locator('[data-accounts-failed]')).toBeVisible();
+      await expect(page.locator('[data-account]')).toHaveCount(4);
+      await shot(page, `${prefix}-refresh-failed`);
+    }
+    if (state.name === 'same-name') {
+      await expect(page.locator('.ib-spg')).not.toContainText('@');
+      await expect(page.locator('[data-account="1"] .ib-acct-l')).toHaveText('mira #1');
+      await expect(page.locator('[data-accounts-machine] .ib-acct-ro')).toHaveText('mira #2');
+    }
+    if (state.name === 'stale') {
+      await expect(page.locator('[data-account="1"] [data-stale]')).toBeVisible();
+      await expect(page.locator('[data-account="1"] [data-high]')).toHaveCount(0);
+      await shotOpen(page, 1, `${prefix}-stale-open`);
     }
     if (state.name === 'three-windows') await expectThreeOnOneLine(page, 1, prefix === 'phone');
     if (state.name === 'no-reading') {
@@ -270,5 +296,19 @@ test('phone: through the list of sections, every state, light and dark', async (
   await page.locator('[data-settings-list] [data-settings-link="accounts"]').tap();
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
   await walk(page, 'phone', errors);
+  await context.close();
+});
+
+test('320 px: a three-window row stays inside its card and lines up', async ({ browser }: { browser: Browser }) => {
+  writeFakeCswap(world.bin, { stdout: THREE_WINDOWS });
+  const context: BrowserContext = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  await page.goto(`${world.url}#settings/accounts`);
+  await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
+  await expect(page.locator('[data-account]')).toHaveCount(3);
+  await expectNoOverflow(page);
+  await expectColumns(page);
+  await expectThreeOnOneLine(page, 1, true);
+  await shot(page, 'phone-320-three-windows');
   await context.close();
 });
