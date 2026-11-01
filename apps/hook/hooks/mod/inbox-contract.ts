@@ -335,7 +335,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
+  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <title> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
 
 /**
  * Fixed text, the description's last line: where everything the tool's short
@@ -748,7 +748,12 @@ export interface InboxReplyCommand {
   thread_id: string
   /** The agent message a reply answers; null for a message. */
   reply_to: string | null
-  /** The thread's subject. */
+  /**
+   * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
+   * on a plain reply the thread's short name, or null when it has none, which
+   * every connection words `a reply`; on everything else the thread's
+   * subject. An older Inbox always sends the subject here.
+   */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
   body: string
@@ -1115,8 +1120,9 @@ export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX
 }
 
 /**
- * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
- * the fixed instruction line for its type (a reply, a New message, or a
+ * The turn a reply or a message becomes: `Plannotator Inbox: <title> (<id>)`
+ * (the title is the command's `subject`, or `a reply` / `a message` without
+ * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
  * saying so under it), then the words verbatim, then the closing line
  * (`inboxWakeClosingLine`, naming `toolName`, the tool as the host
