@@ -15,7 +15,8 @@
  *    which every worker inherits, so a spec that passes the runner's PATH on
  *    finds a stub before any real agent CLI. When the run ends, any stub that
  *    was called fails the run: a spec reached for an agent CLI and would have
- *    run the real one without this folder. A spec that builds its own PATH
+ *    run the real one without this folder. `cswap list --json` alone is let
+ *    through, because every Inbox window makes it. A spec that builds its own PATH
  *    gets none of this: it gives its Inbox PLANNOTATOR_TEST_SANDBOX (no agent
  *    lookups at all), or fakes of its own and no system folder that holds
  *    agents (tests/agent-cli-stubs.test.ts checks).
@@ -44,7 +45,7 @@ export const AGENT_CLIS = [
   'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen',
   // The agent terminal's built-in agents not listed above.
   'openclaude', 'autohand', 'agy', 'aider', 'goose', 'kilo', 'crush', 'auggie', 'codebuff', 'command-code', 'cn', 'kimi', 'vibe', 'qwen-code', 'rovo', 'hermes', 'openclaw', 'grok',
-  // Not an agent: claude-swap, which Settings → Accounts runs, and which goes to the Keychain.
+  // Not an agent: claude-swap, which every Inbox window reads usage through, and which goes to the Keychain.
   'cswap',
 ] as const;
 
@@ -81,7 +82,7 @@ export function agentCliCalls(dir: string): string[] {
   return readFileSync(file, 'utf8').split('\n').filter(Boolean);
 }
 
-/** Playwright globalSetup: stubs first on the runner's PATH; the returned teardown fails the run if any was called. */
+/** Playwright globalSetup: stubs first on the runner's PATH; the returned teardown fails the run if any was called, but for a window's `cswap list --json`. */
 export default async function guardAgentClis(): Promise<() => Promise<void>> {
   const existing = process.env[AGENT_CLI_STUBS_ENV];
   if (existing && (process.env.PATH ?? '').split(delimiter)[0] === existing) return async () => {};
@@ -89,7 +90,8 @@ export default async function guardAgentClis(): Promise<() => Promise<void>> {
   process.env.PATH = [dir, process.env.PATH ?? ''].filter(Boolean).join(delimiter);
   process.env[AGENT_CLI_STUBS_ENV] = dir;
   return async () => {
-    const calls = agentCliCalls(dir);
+    // Every Inbox window reads usage when it opens, and on the runner's PATH that read lands here and answers "not installed". The stub comes first, so no real one ran.
+    const calls = agentCliCalls(dir).filter((call) => call !== 'cswap list --json');
     // Only the log goes: the stubs stay (in the OS temp dir), so an Inbox a crashed spec left running still finds a stub.
     rmSync(join(dir, LOG), { force: true });
     if (calls.length > 0) {

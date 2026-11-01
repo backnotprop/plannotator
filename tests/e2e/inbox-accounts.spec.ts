@@ -313,6 +313,8 @@ test('320 px: a three-window row stays inside its card and lines up', async ({ b
   writeFakeCswap(world.bin, { stdout: THREE_WINDOWS });
   const context: BrowserContext = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await context.newPage();
+  // The Inbox keeps the last test's answer 30 s: this read replaces it.
+  expect((await (await page.request.get(new URL('api/inbox/accounts?fresh=1', world.url).href)).json()).state).toBe('accounts');
   await page.goto(`${world.url}#settings/accounts`);
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
   await expect(page.locator('[data-account]')).toHaveCount(3);

@@ -63,6 +63,8 @@ import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
+import { UsagePeek } from './components/Usage';
+import { AccountsProvider, useAccounts } from './useAccounts';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
@@ -2136,6 +2138,9 @@ function Inbox() {
 
   // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
   const phone = usePhone();
+  const { read: readAccounts } = useAccounts();
+  /** The Usage row the peek hangs from; null is closed. */
+  const [usageRow, setUsageRow] = useState<HTMLElement | null>(null);
   useEffect(() => (phone ? trackKeyboard() : undefined), [phone]);
   // A ⌘V with focus on something that takes no text (a question's choice, the page) goes to the text
   // field the person was writing in: dictation apps paste with a synthetic ⌘V (pasteTarget.ts).
@@ -4686,12 +4691,28 @@ function Inbox() {
             mcpCommand={settings?.mcp_command ?? null}
             onShortcuts={() => setMapOpen(true)}
             onFeedback={() => setFeedbackOpen(true)}
+            onUsage={(row) => {
+              setUsageRow(usageRow ? null : row);
+              if (!usageRow) void readAccounts();
+            }}
+            usageOpen={usageRow !== null}
+            usageInstalled={settings?.cswap === true}
+            footHeld={settings === null && !settingsReadFailed && !settingsLate}
           />
           )
         }
       >
         <main className="ib-main">{main}</main>
       </SidebarShell>
+      <UsagePeek
+        anchor={usageRow}
+        phone={phone}
+        onClose={() => setUsageRow(null)}
+        onSettings={() => {
+          setUsageRow(null);
+          leave({ page: 'settings', project: null, thread: null, section: 'accounts' });
+        }}
+      />
       {mapOpen && (
         <ShortcutMap
           onClose={() => setMapOpen(false)}
@@ -5003,7 +5024,9 @@ export function InboxApp() {
     <ThemeProvider defaultTheme="system">
       {/* Every tooltip in the window (Tip): 150 ms to open, and the next one at once within 400 ms. */}
       <TooltipProvider delayDuration={TIP_DELAY_MS} skipDelayDuration={TOOLTIP_SKIP_DELAY_MS} disableHoverableContent>
-        <Inbox />
+        <AccountsProvider>
+          <Inbox />
+        </AccountsProvider>
       </TooltipProvider>
     </ThemeProvider>
   );

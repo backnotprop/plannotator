@@ -39,10 +39,12 @@ interface WorldOptions {
   cswap?: FakeCswapAnswer | null;
   timeoutMs?: number;
   hardLimitMs?: number;
+  /** 0 unless a test is about the kept answer: the others change the fake between reads. */
+  cacheMs?: number;
   tailnet?: boolean;
 }
 
-async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, tailnet }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -74,22 +76,23 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, tailnet
     version: "dev",
     // The fake's folder and nothing else.
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: bin } }),
-    accounts: { timeoutMs, hardLimitMs },
+    accounts: { timeoutMs, hardLimitMs, cacheMs },
     ...(tailnet ? { tailscale: run, publishTailnet: true } : {}),
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const accounts = (init?: RequestInit) => fetch(`${base}/api/inbox/accounts`, init);
-  const read = async () => {
-    const answer = await accounts();
+  const read = async (query = "") => {
+    const answer = await fetch(`${base}/api/inbox/accounts${query}`);
     expect(answer.status).toBe(200);
     return (await answer.json()) as InboxAccountsRead;
   };
-  const through = (login: string) =>
-    fetch(`http://127.0.0.1:${server.tailscale.listenerPort()!}/api/inbox/accounts`, {
+  const through = (login: string, path = "/api/inbox/accounts") =>
+    fetch(`http://127.0.0.1:${server.tailscale.listenerPort()!}${path}`, {
       headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` },
     });
-  return { root, bin, dataDir, read, accounts, through };
+  const settings = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as { cswap: boolean };
+  return { root, bin, dataDir, read, accounts, through, settings };
 }
 
 function listed(read: InboxAccountsRead) {
@@ -222,6 +225,11 @@ describe.skipIf(process.platform === "win32")("a failed read answers a fixed rea
     expect(text).not.toContain("words-of-cswap");
   });
 
+  test("exit 127 is the shell's command not found: a shim whose tool is gone reads as not installed", async () => {
+    const w = await world({ cswap: { stderr: "bad interpreter", exit: 127 } });
+    expect(await w.read()).toEqual({ state: "not_installed" });
+  });
+
   test.each([
     ["not JSON", "Traceback (most recent call last):"],
     ["cut off", LIST.slice(0, 80)],
@@ -334,11 +342,46 @@ describe.skipIf(process.platform === "win32")("one read at a time", () => {
     expect(fakeCswapCalls(w.bin)).toHaveLength(2);
   });
 
-  test("opening an Inbox runs nothing: only a read does", async () => {
+  test("a good answer serves the reads after it, and fresh=1 runs again", async () => {
+    const w = await world({ cacheMs: 60_000 });
+    const first = await w.read();
+    writeFakeCswap(w.bin, { stdout: withUsage({ fiveHour: { pct: 12 } }) });
+    expect(await w.read()).toEqual(first);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    expect(await w.read("?fresh=1")).not.toEqual(first);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+    expect(listed(await w.read())).toHaveLength(1);
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+  });
+
+  test("a good answer stops serving when its time is up", async () => {
+    const w = await world({ cacheMs: 50 });
+    await w.read();
+    await Bun.sleep(80);
+    await w.read();
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+  });
+
+  test("a failure and not installed are never kept, and drop the good answer, so a change shows at once", async () => {
+    const w = await world({ cacheMs: 60_000, cswap: { stdout: "Traceback" } });
+    await w.read();
+    await w.read();
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+
+    writeFakeCswap(w.bin, { stdout: LIST });
+    expect(listed(await w.read())).toHaveLength(3);
+    rmSync(join(w.bin, "cswap"));
+    expect(await w.read("?fresh=1")).toEqual({ state: "not_installed" });
+    expect(await w.read()).toEqual({ state: "not_installed" });
+  });
+
+  test("settings say whether cswap is on PATH and run nothing, so opening an Inbox does not", async () => {
     const w = await world();
-    await fetch(`http://127.0.0.1:${servers[0]!.port}/api/inbox/settings`);
+    expect((await w.settings()).cswap).toBe(true);
     await Bun.sleep(100);
     expect(fakeCswapCalls(w.bin)).toEqual([]);
+    rmSync(join(w.bin, "cswap"));
+    expect((await w.settings()).cswap).toBe(false);
   });
 });
 
@@ -352,6 +395,13 @@ describe.skipIf(process.platform === "win32")("who may read", () => {
     const owner = await w.through(OWNER);
     expect(owner.status).toBe(200);
     expect(listed((await owner.json()) as InboxAccountsRead)).toHaveLength(3);
+  });
+
+  test("settings tell a tailnet guest cswap is not here; the owner is told it is", async () => {
+    const w = await world({ tailnet: true });
+    const asked = async (login: string) => ((await (await w.through(login, "/api/inbox/settings")).json()) as { cswap: boolean }).cswap;
+    expect(await asked(GUEST)).toBe(false);
+    expect(await asked(OWNER)).toBe(true);
   });
 
   test("another site gets nothing and starts nothing", async () => {
