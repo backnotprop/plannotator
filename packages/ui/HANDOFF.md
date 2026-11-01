@@ -2581,7 +2581,7 @@ The parts in `components/inbox-thread/` draw with the Inbox's `ib-` classes. `pa
 | `@keyframes tp-draw` | a global name without the prefix | `ib-tp-draw`, with its use |
 | `:root` and `:root.light` token blocks | `--ib-*` only, checked rule by rule | kept |
 
-Scoping prefixes `:where(.pn-inbox)`, after any leading page element (`:root.light :where(.pn-inbox) .ib-linknote`). It adds no specificity, so the sheet's own cascade is the source's, rule for rule. The sheet has no `@font-face`, no `@import` and no `url()` but one inline `data:` mask. It names two layers, Tailwind's `base` and its own `ib-type`. A new at-rule in `inbox.css` that the generator does not know fails `prepack`, so someone decides what it does in a host first.
+Scoping prefixes `:where(.pn-inbox)`, after any leading page element (`:root.light :where(.pn-inbox) .ib-linknote`). It adds no specificity, so the sheet's own cascade is the source's, rule for rule. The sheet has no `@font-face`, no `@import` and no `url()` but one inline `data:` mask. It names two layers, Tailwind's `base` and its own `ib-type`. A new at-rule in `inbox.css` that the generator does not know fails `prepack`, so someone decides what it does in a host first. So do nested CSS, `body > x`, and a renamed keyframe name held in a custom property, which the rename cannot follow. The generator reads the sheet with postcss, a devDependency of this package only: it runs at `prepack` and nothing at runtime needs it.
 
 **What a host does.**
 

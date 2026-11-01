@@ -1,21 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import {
-  INBOX_CSS_PATH,
-  parseCss,
-  renderInboxThreadCss,
-  stripComments,
-  type CssNode,
-} from '../packages/ui/scripts/build-inbox-thread-css';
+import { INBOX_CSS_PATH, parseSheet, renderInboxThreadCss, topLevel } from '../packages/ui/scripts/build-inbox-thread-css';
 
 // @plannotator/ui/inbox-thread.css is generated from the Inbox's own stylesheet
 // and loaded into another app's page. A rule in inbox.css that styles the
 // window as a whole (`body`, `html:has(.pn-inbox)`, `body:has(.pn-inbox) input`)
 // is right in the Inbox and wrong in a host, where it restyles pages that have
 // nothing to do with a thread, and only on some screens. These checks run the
-// generator over the real inbox.css and read the output from the outside, so a
-// new rule in inbox.css cannot reach a host page unnoticed.
+// generator over the real inbox.css and read the output from the outside, with
+// postcss, so a new rule in inbox.css cannot reach a host page unnoticed.
 
 const PARTS = resolve(import.meta.dir, '../packages/ui/components/inbox-thread');
 const source = readFileSync(INBOX_CSS_PATH, 'utf8');
@@ -25,64 +19,56 @@ interface FlatRule {
   selector: string;
   /** The at-rules around the rule, outermost first. */
   within: string[];
+  props: string[];
   body: string;
 }
 
-function flatRules(nodes: readonly CssNode[], within: string[] = []): FlatRule[] {
-  return nodes.flatMap((node) => {
-    if (node.kind === 'rule') return node.selectors.map((selector) => ({ selector, within, body: node.body }));
-    if (node.kind === 'group') return flatRules(node.children, [...within, node.prelude]);
-    return [];
+const atRuleName = (rule: { name: string; params: string }) => `@${rule.name} ${rule.params}`.replace(/\s+/g, ' ').trim();
+
+/** Every selector of every style rule, keyframe steps aside. */
+function flatRules(css: string): FlatRule[] {
+  const out: FlatRule[] = [];
+  parseSheet(css).walkRules((rule) => {
+    const within: string[] = [];
+    for (let at = rule.parent; at && at.type === 'atrule'; at = at.parent) within.unshift(atRuleName(at as never));
+    if (within.some((name) => name.startsWith('@keyframes'))) return;
+    const declarations = rule.nodes.flatMap((node) => (node.type === 'decl' ? [node] : []));
+    const body = declarations.map((decl) => `${decl.prop}:${decl.value}${decl.important ? '!' : ''}`).join(';');
+    const props = declarations.map((decl) => decl.prop);
+    for (const selector of rule.selectors) out.push({ selector: selector.replace(/\s+/g, ' '), within, props, body });
   });
+  return out;
 }
 
-function atRules(nodes: readonly CssNode[]): string[] {
-  return nodes.flatMap((node) => {
-    if (node.kind === 'rule') return [];
-    return node.kind === 'group' ? [node.prelude, ...atRules(node.children)] : [node.prelude];
+function atRules(css: string): string[] {
+  const out: string[] = [];
+  parseSheet(css).walkAtRules((rule) => {
+    out.push(atRuleName(rule));
   });
-}
-
-/** A selector as compounds and combinators, with bracketed arguments emptied and the scope kept. */
-function topLevelTokens(selector: string): string[] {
-  let flat = selector.replace(/\\./g, '_').replaceAll(':where(.pn-inbox)', '.pn-inbox');
-  for (let previous = ''; previous !== flat; ) {
-    previous = flat;
-    flat = flat.replace(/\([^()]*\)/g, '').replace(/\[[^[\]]*\]/g, '');
-  }
-  return flat
-    .replace(/\s*([>+~])\s*/g, ' $1 ')
-    .trim()
-    .split(/\s+/);
+  return out;
 }
 
 const isPageElement = (compound: string) => /^(:root|html|body|#root)(?![\w-])/.test(compound);
 
 /** True unless what the selector matches has to be `.pn-inbox` or inside it. */
 function reachesOutside(selector: string): boolean {
-  const tokens = topLevelTokens(selector);
+  const tokens = topLevel(selector);
   return !tokens.some((token, i) => /\.pn-inbox(?![\w-])/.test(token) && tokens[i + 1] !== '+' && tokens[i + 1] !== '~');
 }
 
 /** A rule for the page's root that only sets the sheet's own tokens paints nothing there. */
-function onlySetsTokens(body: string): boolean {
-  return body
-    .replace(/\([^()]*\)/g, '')
-    .split(';')
-    .map((declaration) => declaration.split(':')[0]!.trim())
-    .filter(Boolean)
-    .every((name) => name.startsWith('--ib-'));
-}
+const onlySetsTokens = ({ props }: FlatRule) => props.every((name) => name.startsWith('--ib-'));
 
 function leaksOf(css: string): FlatRule[] {
-  return flatRules(parseCss(css)).filter(({ selector, body }) => {
-    if (!reachesOutside(selector)) return false;
-    const tokens = topLevelTokens(selector);
-    return !(tokens.length === 1 && isPageElement(tokens[0]!) && onlySetsTokens(body));
+  return flatRules(css).filter((rule) => {
+    if (!reachesOutside(rule.selector)) return false;
+    const tokens = topLevel(rule.selector);
+    return !(tokens.length === 1 && isPageElement(tokens[0]!) && onlySetsTokens(rule));
   });
 }
 
-const rules = flatRules(parseCss(generated.css));
+const rules = flatRules(generated.css);
+const at = atRules(generated.css);
 
 describe('the guard can see a leak', () => {
   test.each([
@@ -97,8 +83,10 @@ describe('the guard can see a leak', () => {
     'body:has(.pn-inbox) input',
     '.ib-row:not(.pn-inbox)',
     '.pn-inbox + .ib-row',
+    '.pn-inbox+.ib-row',
     '.pn-inbox ~ div .ib-row',
     '.pn-inbox-other .ib-row',
+    '[data-x=".pn-inbox"] .ib-row',
   ])('%s reaches outside', (selector) => {
     expect(reachesOutside(selector)).toBe(true);
   });
@@ -121,25 +109,20 @@ describe('nothing in inbox-thread.css can style outside .pn-inbox', () => {
   });
 
   test('no rule for html, body or #root remains', () => {
-    const page = rules.filter(({ selector }) => {
-      const tokens = topLevelTokens(selector);
-      const subject = tokens[tokens.length - 1]!;
-      return /^(html|body|#root)(?![\w-])/.test(subject);
-    });
+    const page = rules.filter(({ selector }) => /^(html|body|#root)(?![\w-])/.test(topLevel(selector).at(-1)!));
     expect(page.map(({ selector }) => selector)).toEqual([]);
   });
 
   test('what stays on :root is --ib-* tokens only', () => {
     const roots = rules.filter(({ selector }) => {
-      const tokens = topLevelTokens(selector);
+      const tokens = topLevel(selector);
       return tokens.length === 1 && isPageElement(tokens[0]!);
     });
     expect(roots.length).toBeGreaterThan(0);
-    expect(roots.filter(({ body }) => !onlySetsTokens(body)).map(({ selector, body }) => `${selector} { ${body} }`)).toEqual([]);
+    expect(roots.filter((rule) => !onlySetsTokens(rule)).map(({ selector, body }) => `${selector} { ${body} }`)).toEqual([]);
   });
 
   test('every name the sheet makes global carries the ib- prefix', () => {
-    const at = atRules(parseCss(generated.css));
     const named = (pattern: RegExp) => at.flatMap((rule) => pattern.exec(rule)?.[1] ?? []);
     expect(named(/^@keyframes\s+(\S+)/).length).toBeGreaterThan(0);
     expect(named(/^@keyframes\s+(\S+)/).filter((name) => !name.startsWith('ib-'))).toEqual([]);
@@ -150,50 +133,55 @@ describe('nothing in inbox-thread.css can style outside .pn-inbox', () => {
   });
 
   test('only Tailwind base and the sheet\'s own layer are named, so a host\'s layer order stays its own', () => {
-    const layers = new Set(atRules(parseCss(generated.css)).flatMap((rule) => /^@layer\s+(.+)/.exec(rule)?.[1] ?? []));
+    const layers = new Set(at.flatMap((rule) => /^@layer\s+(.+)/.exec(rule)?.[1] ?? []));
     expect([...layers].sort()).toEqual(['base', 'ib-type']);
   });
 
   test('the sheet declares no fonts, imports nothing and asks for no file', () => {
-    const kinds = new Set(atRules(parseCss(generated.css)).map((rule) => /^@[\w-]+/.exec(rule)![0]));
+    const kinds = new Set(at.map((rule) => /^@[\w-]+/.exec(rule)![0]));
     expect([...kinds].filter((kind) => !['@media', '@supports', '@container', '@layer', '@keyframes', '@property'].includes(kind))).toEqual([]);
     const urls = [...generated.css.matchAll(/url\(\s*["']?([^"')]{0,12})/g)].map((match) => match[1]!);
     expect(urls.filter((url) => !url.startsWith('data:'))).toEqual([]);
   });
 
   test('every animation in the sheet names keyframes the sheet declares', () => {
-    const declared = new Set(atRules(parseCss(generated.css)).flatMap((rule) => /^@keyframes\s+(\S+)/.exec(rule)?.[1] ?? []));
-    const used = rules.flatMap(({ body }) => [...body.matchAll(/(?:^|[;\s])animation(?:-name)?\s*:\s*([^;]+)/g)].flatMap((match) => match[1]!.match(/\bib-[\w-]+|\btp-[\w-]+/g) ?? []));
+    const declared = new Set(at.flatMap((rule) => /^@keyframes\s+(\S+)/.exec(rule)?.[1] ?? []));
+    const used: string[] = [];
+    parseSheet(generated.css).walkDecls(/^(?:-[a-z]+-)?animation(?:-name)?$/i, (decl) => {
+      used.push(...(decl.value.match(/(?<![\w-])(?:ib|tp)-[\w-]+/g) ?? []));
+    });
     expect(used.length).toBeGreaterThan(0);
     expect(used.filter((name) => !declared.has(name))).toEqual([]);
   });
 
   test('the file carries no comment', () => {
-    expect(stripComments(generated.css)).toBe(generated.css);
+    let comments = 0;
+    parseSheet(generated.css).walkComments(() => {
+      comments++;
+    });
+    expect(comments).toBe(0);
+    expect(generated.css).not.toContain('/*');
   });
 });
 
 describe('the host gets the Inbox\'s cascade', () => {
   const unscoped = (text: string) => text.replaceAll(':where(.pn-inbox) ', '');
-  const keyed = ({ selector, within, body }: FlatRule) => `${within.join(' / ')} ## ${unscoped(selector)} ## ${body}`;
+  const where = ({ selector, within }: { selector: string; within: string[] }) => `${within.join(' / ')} ## ${selector}`;
+  const keyed = (rule: FlatRule) => `${where({ ...rule, selector: unscoped(rule.selector) })} ## ${rule.body}`;
 
   test('every rule ships in the source\'s order, with no specificity added, but for the page\'s own', () => {
-    const droppedKeys = new Set(generated.dropped.map((rule) => keyed({ selector: rule.selector, within: rule.within, body: rule.body })));
-    const renames = [...generated.renamedKeyframes];
-    const renamed = (body: string) => renames.reduce((text, [from, to]) => text.replaceAll(` ${from} `, ` ${to} `), body);
-    const expected = flatRules(parseCss(stripComments(source)))
-      .filter((rule) => !droppedKeys.has(keyed(rule)))
+    const droppedKeys = new Set(generated.dropped.map(where));
+    const renamed = (body: string) => [...generated.renamedKeyframes].reduce((text, [from, to]) => text.replace(new RegExp(`(?<![\\w-])${from}(?![\\w-])`, 'g'), to), body);
+    const expected = flatRules(source)
+      .filter((rule) => !droppedKeys.has(where(rule)))
       .map((rule) => keyed({ ...rule, body: renamed(rule.body) }));
     expect(rules.map(keyed)).toEqual(expected);
   });
 
   test('only a rule that ends on the page itself is dropped', () => {
-    expect(generated.dropped.length).toBeGreaterThan(0);
-    const notThePage = generated.dropped.filter(({ selector }) => {
-      const tokens = topLevelTokens(selector);
-      return tokens.length !== 1 || !isPageElement(tokens[0]!);
-    });
-    expect(notThePage.map(({ selector }) => selector)).toEqual([]);
+    expect(generated.dropped.map(({ selector }) => selector).sort()).toEqual(
+      ['#root', ':root[data-ib-keyboard-pin]:has(.pn-inbox)', 'body', 'body:has(.pn-inbox)', 'html', 'html.ib-theme-instant', 'html:has(.pn-inbox)'].sort(),
+    );
   });
 });
 
@@ -259,6 +247,12 @@ describe('the generator, on what the source could grow', () => {
     expect(renderInboxThreadCss('@media (max-width: 767px) { body { margin: 0; } }').css).toBe('');
   });
 
+  test('a comment goes wherever it was written', () => {
+    const { css } = renderInboxThreadCss('.ib-a /* a */ , .ib-b { color /* b */ : /* c */ red /* d */ ; margin: 0; /* e */ } @media /* f */ (width > 1px) /* g */ { .ib-c { color: red } }');
+    expect(css).not.toContain('/*');
+    expect(flatRules(css).map(({ selector, body }) => `${selector} ${body}`)).toEqual([':where(.pn-inbox) .ib-a color:red;margin:0', ':where(.pn-inbox) .ib-b color:red;margin:0', ':where(.pn-inbox) .ib-c color:red']);
+  });
+
   test('keyframes outside the ib- namespace move into it with their uses', () => {
     expect(probed.css).toContain('@keyframes ib-spin');
     expect(probed.css).toContain('animation: ib-spin 1s linear infinite');
@@ -266,11 +260,45 @@ describe('the generator, on what the source could grow', () => {
   });
 
   test.each([
+    ['ANIMATION: spin 1s'],
+    ['Animation-Name: spin'],
+    ['animation-name: other, spin'],
+    ['-webkit-animation: spin 1s'],
+  ])('%s follows the rename, whatever the property\'s case', (declaration) => {
+    const { css } = renderInboxThreadCss(`@keyframes spin { to { opacity: 1; } } .ib-a { ${declaration}; }`);
+    expect(css).toMatch(/\.ib-a \{ [^}]*\bib-spin\b/);
+    expect(css).not.toMatch(/\.ib-a \{ [^}]*(?<![\w-])spin\b/);
+  });
+
+  test('a name that only contains a keyframe name is left alone', () => {
+    const { css } = renderInboxThreadCss('@keyframes spin { to { opacity: 1; } } .ib-a { animation: spinner 1s; --ib-spin: 1; --spin-size: 2px; }');
+    expect(css).toContain('animation: spinner 1s; --ib-spin: 1; --spin-size: 2px;');
+  });
+
+  test('a keyframe name already in the namespace may sit in a custom property', () => {
+    expect(() => renderInboxThreadCss('@keyframes ib-spin { to { opacity: 1; } } .ib-a { --anim: ib-spin 1s; animation: var(--anim); }')).not.toThrow();
+  });
+
+  test.each([
     ['@font-face', '@font-face { font-family: "Host"; src: url("a.woff2"); }'],
     ['@import', '@import "other.css";'],
     ['@view-transition', '@view-transition { navigation: auto; }'],
     ['@page', '@page { margin: 0; }'],
+    ['a statement @layer', '@layer base, ib-type;'],
+    ['an uppercase at-rule', '@MEDIA (width > 1px) { .ib-a { color: red; } }'],
+    ['a declaration outside a rule', 'color: red;'],
+    ['a declaration in a group', '@media (width > 1px) { color: red; }'],
     ['a nested rule', '.ib-row { color: red; .ib-mk { color: blue; } }'],
+    ['a nested at-rule', '.ib-row { @media (width > 1px) { color: blue; } }'],
+    ['body > x', 'body > .ib-row { color: red; }'],
+    ['body>x', 'body>.ib-row { color: red; }'],
+    ['body + x', 'body + .ib-row { color: red; }'],
+    [':root ~ x', ':root ~ .ib-row { color: red; }'],
+    ['html > body x', 'html > body .ib-row { color: red; }'],
+    ['a leading combinator', '> .ib-row { color: red; }'],
+    ['a keyframe name in a custom property', '@keyframes spin { to { opacity: 1; } } .ib-a { --anim: spin 1s; animation: var(--anim); }'],
+    ['a quoted keyframe name', '@keyframes "spin" { to { opacity: 1; } }'],
+    ['an unclosed block', '.ib-a { color: red;'],
   ])('%s fails the build', (_name, css) => {
     expect(() => renderInboxThreadCss(css)).toThrow();
   });
