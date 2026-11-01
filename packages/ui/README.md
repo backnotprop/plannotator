@@ -577,6 +577,29 @@ import { GuideCard } from "@plannotator/ui/components/inbox-thread/GuideCard";
 - **Styles are not shipped yet.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. A later step generates `@plannotator/ui/inbox-thread.css` from that file at `prepack` (the pattern of `bridge-script.asset.js`), and hosts wrap the parts in a `.pn-inbox` root. Until then a part renders here without its look.
 - **Plannotator.** The parts' old paths in `packages/inbox` re-export them, and the Inbox passes nothing new. These parts add no Tailwind output: the built CSS of plan review, code review, the Inbox and `styles.css` does not change.
 
+### Art backgrounds (`@plannotator/ui/art`; unreleased)
+
+The animated art themes drawn behind an app's content, ported from the Workspaces web app (`apps/web/src/art`) so the Inbox and Workspaces draw the same art from one source: the engine, the worker entry, the quiet mask, and the six themes (Weather, Drafting, Plant, Fortress, Slope as `skifree`, Lofi with three cities). The host keeps the choice and starts the worker; the package reads Reduce motion and page visibility itself.
+
+```tsx
+import { ArtBackgroundProvider, ArtLayer } from "@plannotator/ui/art";
+
+const createWorker = () => new Worker(new URL("@plannotator/ui/art/art.worker.ts", import.meta.url), { type: "module", name: "art" });
+
+<ArtBackgroundProvider theme={theme} city={city} dark={mode === "dark"} createWorker={createWorker}>
+  <main className="isolate overflow-y-auto">
+    <ArtLayer />
+    {content}
+  </main>
+</ArtBackgroundProvider>
+```
+
+- **`createWorker`** may return a promise (the Inbox loads a Vite `?worker&inline` import lazily for its single-file page); messages wait until the worker arrives.
+- **`ArtLayer`** is the ground's first child. `ground="scroll"` (the default) is Workspaces' sticky host for a ground that scrolls; `ground="frame"` is an absolute host for a pane whose scrollers are inside it. `isolateGround` gives the ground `isolation: isolate` (and `position: relative` for a frame) only while the layer is mounted. The layer uses inline styles, so a host's Tailwind need not scan the package.
+- **`useArtThumbnails(createWorker)`** draws a picker's still tiles (`thumb(themeId)`, `thumb("city:" + cityId)`, 128 by 80 px).
+- **Assets.** Totman's sprite and Ioskeley Mono (SIL OFL 1.1, `art/ioskeley-mono-OFL.txt`) ship as data URLs (`ART_DEFAULT_ASSETS`), which the worker decodes without fetch, so a `connect-src 'self'` page works; pass `assets` to use served copies.
+- **Ids.** `ART_THEME_IDS` and `ART_CITY_IDS` are Workspaces' stored values; `parseArtTheme` and `parseArtCity` read an unknown value as None and Harbour.
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash
