@@ -51,8 +51,9 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { useReplyDraft } from '../replyDraft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
-import { canToggleRead } from '../markRead';
+import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
+import { debugNote } from '../debugLog';
 import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
@@ -79,9 +80,11 @@ import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField } from './ComposerField';
+import { VoiceFoot } from './VoiceMic';
+import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
-import { actionSavesSettled } from '../actionSaves';
+import { actionSavesPending, actionSavesSettled } from '../actionSaves';
 import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -119,7 +122,7 @@ import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
-import { bareKeyAllowed, keyTarget } from '../shortcuts/guards';
+import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -376,6 +379,8 @@ export function MessageBody({
     onPainted?: () => void;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
     suggest?: (selectedText: string) => string | undefined;
+    /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
+    revealed?: string | null;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -804,7 +809,7 @@ export function MessageBody({
         annotations={commentList}
         onAddAnnotation={comments ? addComment : noop}
         onSelectAnnotation={comments ? selectComment : noop}
-        selectedAnnotationId={comments ? selectedComment : null}
+        selectedAnnotationId={comments ? (comments.revealed ?? selectedComment) : null}
         textComments={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
@@ -859,6 +864,15 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
+  /**
+   * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
+   * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
+   */
+  threadAlone?: boolean;
+  /** The sidebar is open beside the list (the person's choice, not held closed): full screen hides it and brings it back. */
+  fullSidebar?: boolean;
+  /** Enter or leave the thread's full screen; absent where it has none (a thread opened from a Board card). */
+  onFull?: (on: boolean) => void;
   /** A line under the subject, from the window (the tour's notifications ask, once more, in the first real thread). */
   notice?: React.ReactNode;
   thread: InboxThread;
@@ -935,6 +949,12 @@ export interface ThreadPaneProps {
   drawn?: InboxSectionId | null;
   /** Mark read, or move it back (the pressed button). Absent: no Mark read button. */
   onMarkRead?: (read: boolean) => void;
+  /**
+   * Mark unread (markRead.ts `canMarkUnread`): on a thread read by opening it
+   * (not marked read) the header's disabled Mark read becomes Mark unread.
+   * Absent: the button stays Mark read.
+   */
+  onMarkUnread?: () => void;
   /**
    * 👍 Looks good on the agent's latest message (`on`), or take it back:
    * silent, nothing is sent; the thread is marked read. `agent` names the
@@ -1215,7 +1235,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, run: runLine, attachCommand = null, onRunChanged }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1355,7 +1375,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   const [skipArmed, setSkipArmed] = useState<ReadonlySet<string> | null>(null);
   const [sending, setSending] = useState(false);
+  // The debug log's two moments of a Send (debugLog.ts): a press with no clear after it is a Send that never ended.
+  useEffect(() => {
+    if (!sending) return;
+    const id = threadRef.current.thread_id;
+    debugNote('send_press', { thread: id });
+    return () => debugNote('send_clear', { thread: id });
+  }, [sending]);
   const [error, setError] = useState<string | null>(null);
+  const voice = useVoiceSession();
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
   /**
@@ -1444,6 +1472,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
+  const openItemsKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openItems' });
   /** After a fold changes: keep the message the person acted on in place, then move focus. */
   const anchorRef = useRef<{ id: string | null; top: number; focus: string | null; folding: boolean } | null>(null);
   /** Stops holding the place put back after a file (threadPlace.ts `holdPlace`); everything that scrolls the thread calls it first. */
@@ -1829,6 +1858,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [records]);
   /** Comments whose words were not found in their message (the reply box's list marks them). */
   const [unanchoredComments, setUnanchoredComments] = useState<ReadonlySet<string>>(NO_IDS);
+  const [revealedComment, setRevealedComment] = useState<string | null>(null);
   const noteUnanchored = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => {
     setUnanchoredComments((current) => {
       const next = new Set(current);
@@ -1999,17 +2029,21 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       stopHold();
       const show = () => {
         stopHold();
-        const mark = bodyRef.current?.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(record.message_id)}"] [data-bind-id="${CSS.escape(record.id)}"], [data-message-id="${CSS.escape(record.message_id)}"] [data-highlight-id="${CSS.escape(record.id)}"]`,
-        );
-        const target = mark ?? articleOf(record.message_id);
+        const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
+        const id = CSS.escape(record.id);
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
+        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
         target.classList.remove('ib-q-target-out');
         target.classList.add('ib-q-target');
+        if (onDiagram) setRevealedComment(record.id);
         setTimeout(() => {
           target.classList.add('ib-q-target-out');
           target.classList.remove('ib-q-target');
+          if (onDiagram) setRevealedComment((current) => (current === record.id ? null : current));
           setTimeout(() => target.classList.remove('ib-q-target-out'), 700);
         }, 1400);
       };
@@ -2158,6 +2192,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
+  // The status and Cancel go under the cover with the box, and this pane stays mounted: the mic must not go on unseen.
+  useEffect(() => {
+    if (paneCovered) voice.session.covered();
+  }, [paneCovered, voice.session]);
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
   }, [thread.thread_id, paneCovered]);
@@ -2494,6 +2532,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (target.closest('.ib-listcol')) return 'list';
     return null;
   };
+  const [openItemsRequest, setOpenItemsRequest] = useState(0);
   const readKeysOn = !one && !artifactsOn;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
@@ -2576,6 +2615,62 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           return origin === 'thread' || origin === 'row';
         },
         handle: () => openNewestByKey(),
+      },
+      send: {
+        when: (event) => {
+          // The foot's Send (the closed foot's, or the open reply box's), from wherever focus is in the thread: the page,
+          // a question's field or choice, an action row, a file beside it. The one place this is decided; the reply
+          // box's (and compose's) own keydown prevents the default first, so it never doubles here. Not typing-guarded:
+          // Mod+Enter is no character, so a field is where it is most needed. A menu, dialog or popover layer keeps its
+          // keys, a link keeps ⌘Enter (open in a tab), a held key sends once (and `send` ignores a second). Never while
+          // something covers the thread (a file in full screen, a guide, Artifacts): its Send is not on screen.
+          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered || modalOpen()) return false;
+          // The open-items list is up (focus may not have reached its first row yet): its keys are the menu's.
+          if (reaskRef.current?.getAttribute('aria-expanded') === 'true') return false;
+          const target = keyTarget(event);
+          if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, a[href]'))) return false;
+          const origin = keyOrigin(event);
+          if (origin !== 'thread' && origin !== 'row' && origin !== 'file') return false;
+          const button = sendRef.current;
+          if (button && button.isConnected && !button.disabled && button.getClientRects().length > 0) return true;
+          // Typed or picked an instant ago: the Send is drawn once the save has landed. The key waits for it.
+          return pending.size > 0 || actionSavesPending();
+        },
+        // Exactly the click: its guards (stale, route choice, uploads) and its wait for notes and picks still saving.
+        handle: () => {
+          const ready = (b: HTMLButtonElement | null) => !!b && b.isConnected && !b.disabled && b.getClientRects().length > 0;
+          const press = () => {
+            sentByChord.current = true;
+            sendRef.current!.click();
+          };
+          if (ready(sendRef.current)) {
+            press();
+            return;
+          }
+          // Waits for the saves in flight, then the draw that brings the Send; nothing to send then: nothing happens.
+          // The person may have moved on meanwhile (opened the reply box and be typing, a guide or a dialog came up):
+          // then the key is spent, never a Send of half-typed words.
+          const wasOpen = boxRef.current.open;
+          void (async () => {
+            await actionSavesSettled();
+            await pickChain.current;
+            for (let i = 0; i < 8 && !ready(sendRef.current); i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            if (boxRef.current.open !== wasOpen || !showingRef.current || modalOpen()) return;
+            if (ready(sendRef.current)) press();
+          })();
+        },
+      },
+      openItems: {
+        when: (event) => {
+          // Only where the button shows (nothing open, or the reply box, route choice or stale guard hides it), and not
+          // with its list open: then Q is the menu's type-ahead. A key from a file beside the thread is the file's own.
+          if (!bareKeyAllowed(event) || paneCovered) return false;
+          const origin = keyOrigin(event);
+          if (origin !== 'thread' && origin !== 'row') return false;
+          const trigger = reaskRef.current;
+          return !!trigger && trigger.isConnected && trigger.getAttribute('aria-expanded') !== 'true' && trigger.getClientRects().length > 0;
+        },
+        handle: () => setOpenItemsRequest((n) => n + 1),
       },
       fullScreen: {
         when: (event) => {
@@ -2902,6 +2997,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   /** Write a reply from an open file (the strip's button, R): full screen goes back beside the thread, the box opens. */
   /** A Send went: focus moves to the reply once the thread shows it. */
   const focusSent = useRef(false);
+  /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
+  const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
     setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
@@ -3099,7 +3196,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * takes them there, on the device's route.
    */
   const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean } = {}) => {
-    if (sending) return;
+    // Whether this Send came from the ⌘Enter key (it draws no focus ring on the head it focuses): read at once.
+    const byChord = sentByChord.current;
+    sentByChord.current = false;
+    // Dictation still running, in this box: the words are not in it yet (Mod+Enter reaches here with Send off).
+    if (sending || voice.busy) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
       setGuard(true);
@@ -3321,7 +3422,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const active = document.activeElement;
         if (active && active !== document.body && active.isConnected) return;
         const heads = bodyRef.current?.querySelectorAll<HTMLElement>('[data-message-article] [data-fold-head]');
-        (heads?.[heads.length - 1] ?? sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]'))?.focus({ preventScroll: true });
+        const head = heads?.[heads.length - 1];
+        if (head) {
+          // Focus is kept (it holds the person's place). After ⌘Enter the browser counts it :focus-visible, which a
+          // click on Send never does, so that Send alone draws no ring (a Send by Tab and Enter keeps it: the person
+          // is steering by keys). The mark ends with the next key or blur, so Shift+J / Shift+K onto this head draws
+          // the ring as it does on any head, even with focus already there.
+          if (byChord) {
+            head.setAttribute('data-sent-focus', '');
+            const clear = () => {
+              head.removeAttribute('data-sent-focus');
+              head.removeEventListener('blur', clear);
+              head.removeEventListener('keydown', clear);
+            };
+            head.addEventListener('blur', clear);
+            head.addEventListener('keydown', clear);
+          }
+          head.focus({ preventScroll: true });
+          return;
+        }
+        sectionRef.current?.querySelector<HTMLElement>('[data-reply-button]')?.focus({ preventScroll: true });
       });
     } catch (cause) {
       failure = cause;
@@ -3829,7 +3949,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown].join('|');
+  const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
+  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -3908,6 +4029,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
+  // Mark unread takes the place of the disabled Mark read ("Nothing here waits on you") on a thread the person
+  // read by opening it, an agent having written last (markRead.ts `canMarkUnread`). A thread marked read keeps
+  // the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!, drawn);
+  // The header's ⋯ More offers it where that button does not: a thread the list still holds in New, one marked read.
+  // A phone keeps it there too, since its header gives way when short of room (headFit.ts).
+  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
@@ -3915,6 +4043,33 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
   const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  // The thread's full screen: the button pressed goes away (the other one takes its place), so focus follows to it
+  // when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
+  // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
+  // frame, so focus is checked again until the frame ends, and falls back to the stacked ‹ Inbox, then the subject.
+  const aloneWas = useRef(threadAlone);
+  const aloneFocus = useRef(false);
+  useLayoutEffect(() => {
+    if (aloneWas.current !== threadAlone) {
+      aloneWas.current = threadAlone;
+      aloneFocus.current = true;
+      requestAnimationFrame(() => {
+        aloneFocus.current = false;
+      });
+    }
+    if (!aloneFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const section = sectionRef.current;
+    const order = threadAlone ? ['[data-full-back]'] : ['[data-full-in]', '[data-stack-back]', 'h2.ib-subject'];
+    for (const selector of order) {
+      const el = section?.querySelector<HTMLElement>(selector);
+      if (el) {
+        el.focus({ preventScroll: true });
+        return;
+      }
+    }
+  }, [threadAlone, stacked]);
   const backToList = () => {
     const name = openAttachment?.name ?? null;
     const go = () => {
@@ -3966,7 +4121,23 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         }
       });
   };
-  const markReadButton = markReadOffered ? (
+  const markReadButton = markUnreadOffered ? (
+    <Tip content="Back to New, bold, as if you had not opened it. Nothing is sent.">
+      <button
+        type="button"
+        className="ib-hbtn"
+        data-mark-unread=""
+        onClick={(event) => {
+          // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
+          if (event.detail > 1) return;
+          onMarkUnread!();
+        }}
+      >
+        <Icon name="envelope" size={16} />
+        <span className="ib-hbtn-l">Mark unread</span>
+      </button>
+    </Tip>
+  ) : markReadOffered ? (
     <Tip
       content={
         readAt !== null
@@ -3988,7 +4159,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // then Mark read's words, then the way back's label; the scrolled-away subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4024,6 +4195,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     <section
       ref={sectionRef}
       className={`ib-pane${fileOpen ? ' ib-withfile' : ''}`}
+      data-full={threadAlone && !fileOpen ? '' : undefined}
       aria-label={thread.subject ?? 'Thread'}
       data-thread-id={thread.thread_id}
       {...paneDrop.handlers}
@@ -4071,6 +4243,29 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   <button type="button" className="ib-pback" onClick={onClose} aria-label={`Back to ${backLabel}`} data-stack-back="">
                     <Icon name="chevL" size={16} />
                     <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {/* The thread in full screen (approval "inbox-files-tabs", amendment 2026-10-30, B): the button that hid
+                the sidebar and the list becomes the way back to them. A file beside the thread leads with its own. */}
+            {threadAlone && !stacked && !backBesideFile && (
+              <>
+                <Tip content={fullSidebar ? 'Show the sidebar and the list' : 'Show the list'}>
+                  <button type="button" className="ib-pback" onClick={() => onFull?.(false)} aria-label={`Back to ${backLabel}`} data-full-back="">
+                    <Icon name="chevL" size={16} />
+                    <span className="ib-pback-l">{backLabel}</span>
+                  </button>
+                </Tip>
+                <span className="ib-vsep" aria-hidden="true" />
+              </>
+            )}
+            {!threadAlone && !stacked && !backBesideFile && onFull && (
+              <>
+                <Tip content={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'}>
+                  <button type="button" className="ib-iconbtn" onClick={() => onFull(true)} aria-label={fullSidebar ? 'Hide the sidebar and the list' : 'Hide the list'} data-full-in="">
+                    <Icon name="panelsHide" size={17} />
                   </button>
                 </Tip>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -4133,13 +4328,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   onClick={expandAll}
                   aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
                 >
-                  <Icon name={allOpen ? 'collapse' : 'expand'} size={16} />
+                  <Icon name={allOpen ? 'fold' : 'unfold'} size={16} />
                 </button>
               </Tip>
             )}
             {archiveButton}
-            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} launch={launchMenu} />
-            {phone || stacked || backBesideFile ? null : (
+            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} markUnread={markUnreadInMenu ? onMarkUnread : undefined} launch={launchMenu} />
+            {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">
@@ -4634,6 +4829,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
                           onUnanchored: noteUnanchored,
                           onPainted: () => repaintHits(message.id),
+                          revealed: revealedComment,
                         }
                       : undefined
                   }
@@ -4899,6 +5095,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             >
               <InboxComposerField
                 textareaRef={textRef}
+                voice={voice}
                 ariaLabel={`Reply to ${replyName ?? asker}`}
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
@@ -4909,9 +5106,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
+                    // The chord is spent here: the thread's own Send key (a window listener) never sees it, whether or not
+                    // the event is cancelable (a synthetic one is not, and `defaultPrevented` would stay false).
+                    event.stopPropagation();
                     // With the choice open, the shortcut goes to it.
                     if (route.open) setRoute((current) => ({ ...current, focus: current.focus + 1 }));
-                    else void send();
+                    else {
+                      sentByChord.current = true;
+                      void send();
+                    }
                   } else if (event.key === 'Escape') {
                     event.preventDefault();
                     event.stopPropagation();
@@ -4973,6 +5176,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     unanchored={unanchoredComments}
                   />
                 )}
+                <VoiceFoot voice={voice} phone={phone} />
               </div>
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
@@ -4990,7 +5194,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               <>
               {error && errorLine}
               <div className="ib-acts">
-                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending}>
+                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
                   <Icon name="send" size={15} />
                   Send
                 </button>
@@ -5060,6 +5264,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   onPickAction={(a) => jumpTo({ kind: 'action', messageId: a.messageId, key: a.key })}
                   onSetSkipped={setSkippedFromList}
                   rowForm={rowFit && footStatusShown ? footRowOpenQuestionsForm(rowFit.level, rowFit.max) : null}
+                  openRequest={openItemsRequest}
+                  keyShortcuts={openItemsKeys}
+                  keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
                 />
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}

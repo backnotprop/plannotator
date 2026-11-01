@@ -139,6 +139,8 @@
     "./plannotator-ports": "./plannotator-ports.ts",
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/schema": "./inbox/schema.ts",
+    "./inbox/ask": "./inbox/ask.ts",
+    "./inbox/debug-log": "./inbox/debug-log.ts",
     "./inbox/store": "./inbox/store.ts",
     "./inbox/board-seen": "./inbox/board-seen.ts",
     "./inbox/card-refs": "./inbox/card-refs.ts",

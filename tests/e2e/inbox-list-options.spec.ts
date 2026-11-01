@@ -409,6 +409,9 @@ test('the wide one-line list: the pill, compact changes nothing, the marks go; o
     await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"] .ib-subj > .ib-rowkey > .ib-title`)).toBeVisible();
     expect((await ledger.boundingBox())!.height).toBe(before);
     expect((await page.locator(`.ib-row[data-thread-id="${threads.ledger}"] .ib-ags`).boundingBox())!.width).toBeLessThanOrEqual(1);
+    // The marks gone, the project starts its cell again: no empty slot where the marks were.
+    const [cellBox, projectBox] = await Promise.all([ledger.locator('.ib-from').boundingBox(), ledger.locator('.ib-p').boundingBox()]);
+    expect(Math.abs(projectBox!.x - cellBox!.x)).toBeLessThanOrEqual(0.5);
     await agentsAnnounced(page, 'ib-row');
     await page.screenshot({ path: join(proofDir, 'wide-all-three.png') });
 

@@ -462,7 +462,7 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     for (const part of [":::question-multi", ":::question-text", "never add an Other choice", "`Stopped: <why>`", "never `Stopped: no`", "`Holds up: <work>`", "Recommended:"]) expect(agentBody).toContain(part);
     const [example] = parseInboxQuestionBlocks(agentBody);
     expect(example).toMatchObject({ stopped: null, holds_up: ["sync release"] });
-    expect(example!.parsed.choices.map((choice) => choice.recommended)).toEqual([true, false]);
+    expect(example!.parsed.choices.map((choice) => choice.recommended)).toEqual([false, true, false]);
     expect(agentTool.description).toContain("plannotator inbox --help");
     expect(agentTool.description.length).toBeLessThan(2048);
     // Where a ref links (a bare #104 meant for another repo once linked into the thread's project):

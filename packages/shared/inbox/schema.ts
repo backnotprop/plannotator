@@ -3,7 +3,9 @@
  *
  *   inbox/
  *     inbox.json                       the registry (registry.ts)
- *     projects/<key>/project.json      one line: the project snapshot
+ *     projects/<key>/project.json      the project's snapshots, one line each:
+ *                                      the first, then one per rename or
+ *                                      reset (renameProject); the last wins
  *     projects/<key>/messages.jsonl    messages and replies
  *     projects/<key>/questions.jsonl   one record per question block
  *     projects/<key>/decisions.jsonl   an older store's decisions: never applied,

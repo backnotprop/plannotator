@@ -16,7 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { InboxList, WIDE_ROWS_MIN_LIST_WIDTH } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { InboxList, ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH, WIDE_ROWS_MIN_LIST_WIDTH } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_a', name: null };
@@ -181,6 +181,18 @@ describe.if(hasDom)('the wide list', () => {
       host?.remove();
       el = render(true);
       expect(el.querySelectorAll('.ib-row').length).toBe(4);
+      act(() => root?.unmount());
+      host?.remove();
+      // One project's list, past what its columns can give up (only a wide sidebar gets here): three-line rows too.
+      width = ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH;
+      el = render(true);
+      expect(el.querySelectorAll('.ib-row').length).toBe(4);
+      act(() => root?.unmount());
+      host?.remove();
+      width = ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH - 1;
+      el = render(true);
+      expect(el.querySelectorAll('.ib-row').length).toBe(0);
+      expect(el.querySelectorAll('.ib-nrow').length).toBe(4);
       act(() => root?.unmount());
       host?.remove();
       width = WIDE_ROWS_MIN_LIST_WIDTH;

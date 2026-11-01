@@ -446,6 +446,10 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
                   event.preventDefault();
                   event.stopPropagation();
                   setComposing(null);
+                } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  // The reason counts only once "Can't do it" is pressed: a thread-wide Send from here would go with the
+                  // pick and leave the reason behind. The key stands down (the default is taken, so the thread's Send passes).
+                  event.preventDefault();
                 }
               }}
             />

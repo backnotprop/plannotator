@@ -311,6 +311,13 @@ describe("the device door, on the binary", () => {
       // A reply draft is read only on the door (7.62): the phone writes none.
       ["POST", "threads/msg_x/draft"],
       ["POST", "threads/msg_x/draft/delete"],
+      // Ask AI answers only the person's own window: never a phone's door.
+      ["GET", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask/seen"],
+      ["POST", "threads/msg_x/ask/end"],
+      ["POST", "ask/session-a/api/ai/bridge/poll"],
+      ["POST", "ask/session-a/api/ai/bridge/event"],
       // Shared drafts stay the window's (never seen by phones) until that is ruled otherwise.
       ["GET", "drafts"],
       ["POST", "drafts/drf_x"],

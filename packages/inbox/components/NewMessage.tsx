@@ -5,6 +5,9 @@ import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { InboxComposerField } from './ComposerField';
+import { VoiceFootRow } from './VoiceMic';
+import { usePhone } from '../phone';
+import { useVoiceSession } from '../voice';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -193,10 +196,12 @@ export function NewMessageComposer({
   const key = useRef(crypto.randomUUID());
   const textRef = useRef<HTMLTextAreaElement>(null);
   const name = hostName(target.host);
+  const phone = usePhone();
+  const voice = useVoiceSession();
   useEffect(() => textRef.current?.focus(), []);
 
   const send = async () => {
-    if (sending) return;
+    if (sending || voice.busy) return;
     const body = text.trim();
     if (!body) {
       setError('Write a message first.');
@@ -225,6 +230,7 @@ export function NewMessageComposer({
       <div className="ib-rbox">
         <InboxComposerField
           textareaRef={textRef}
+          voice={voice}
           ariaLabel={`New message to ${name}`}
           placeholder="Write a message"
           destination="your message"
@@ -240,9 +246,10 @@ export function NewMessageComposer({
             }
           }}
         />
+        <VoiceFootRow voice={voice} phone={phone} />
       </div>
       <div className="ib-acts">
-        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
+        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || voice.busy}>
           <Icon name="send" size={15} />
           Send
         </button>

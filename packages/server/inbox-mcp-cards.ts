@@ -125,7 +125,7 @@ const OP_COMMON = new Set<keyof CardCallInput>(["op", "project_path", "agent_ses
  */
 async function cardScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject | null; projectIds: Set<string>; unresolved: boolean }> {
   const found = context.findProjects ? await context.findProjects(path) : { projects: [], unresolved: false };
-  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.map((p) => p.id)), unresolved: found.unresolved };
+  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => context.store.projectGroup(p.id))), unresolved: found.unresolved };
 }
 
 /** Run one card call; throws InboxError on a refusal. */

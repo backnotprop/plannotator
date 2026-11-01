@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const { Sidebar, CONNECT_COPIED_MS, CONNECT_COPY_FAILED_MS } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
+const { PHONE_QUERY } = (hasDom ? await import('./phone') : {}) as typeof import('./phone');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 const BIN = '/Users/ada/.local/bin/plannotator';
@@ -137,6 +138,31 @@ test.skipIf(!hasDom)("the pill sits above What's new, which sits above Settings"
     .filter(Boolean);
   expect(order).toEqual(['pill', 'whats-new', 'settings']);
   expect(row().parentElement).toBe(foot);
+});
+
+test.skipIf(!hasDom)('the pill is drawn on a desktop window and not in a phone sidebar', () => {
+  const phoneAt = (phone: boolean) =>
+    override(window, 'matchMedia', (query: string) => ({
+      matches: phone && query === PHONE_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent: () => false,
+    }));
+  phoneAt(false);
+  const desktop = render([BIN, 'inbox', 'mcp']);
+  expect(desktop.row()).not.toBeNull();
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+
+  phoneAt(true);
+  const phone = render([BIN, 'inbox', 'mcp']);
+  expect(phone.host.querySelector('.ib-side-foot .ib-setrow')).not.toBeNull();
+  expect(phone.host.querySelector('[data-connect-prompt]')).toBeNull();
+  expect(phone.host.querySelector('[data-connect-prompt-live]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('before the settings load it copies bare plannotator, and the path once they arrive', async () => {

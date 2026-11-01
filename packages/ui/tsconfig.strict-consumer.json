@@ -73,6 +73,13 @@
     "utils/headingScrollSpy.ts",
     "hooks/useScrollViewport.ts",
     "utils/annotationHelpers.ts",
-    "config/index.ts"
+    "config/index.ts",
+    "components/inbox-thread/icons.tsx",
+    "components/inbox-thread/Tip.tsx",
+    "components/inbox-thread/FileName.tsx",
+    "components/inbox-thread/GuideCard.tsx",
+    "components/inbox-thread/SkillsLine.tsx",
+    "components/inbox-thread/ReaskNote.tsx",
+    "components/inbox-thread/reask.ts"
   ]
 }

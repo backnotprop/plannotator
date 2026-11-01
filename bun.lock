@@ -469,6 +469,7 @@
         "@types/bun": "^1.2.0",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
+        "postcss": "8.5.28",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
         "tailwindcss": "^4.1.18",
