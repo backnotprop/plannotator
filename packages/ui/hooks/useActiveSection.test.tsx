@@ -1,11 +1,4 @@
-/**
- * What regresses if this fails: a heading rendered inside a question card's
- * context (no block id) is observed as a TOC section. It can never become the
- * active id (it has none), so while it is the topmost heading in view the
- * table of contents stops following the scroll.
- *
- * DOM-gated (DOM_TESTS=1).
- */
+/** Document headings, not headings in question context, drive Contents. DOM_TESTS=1. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -15,30 +8,21 @@ const hasDom = typeof document !== 'undefined';
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
-const original = hasDom ? globalThis.IntersectionObserver : undefined;
 
 afterEach(async () => {
   if (root) await act(async () => root!.unmount());
   host?.remove();
   root = null;
   host = null;
-  if (hasDom) globalThis.IntersectionObserver = original!;
 });
 
 describe.if(hasDom)('useActiveSection', () => {
-  test('observes document headings only, never a heading inside a question context', async () => {
+  test('tracks document headings only, never a heading inside a question context', async () => {
     const { useActiveSection } = await import('./useActiveSection');
-    const observed: Element[] = [];
-    globalThis.IntersectionObserver = class {
-      observe(el: Element) { observed.push(el); }
-      unobserve() {}
-      disconnect() {}
-      takeRecords() { return []; }
-    } as unknown as typeof IntersectionObserver;
-
+    let active: string | null = null;
     function Doc() {
       const ref = useRef<HTMLDivElement>(null);
-      useActiveSection(ref, 2);
+      active = useActiveSection(ref, 2);
       return (
         <div ref={ref}>
           <h2 data-block-id="block-0" data-block-type="heading">Plan</h2>
@@ -54,6 +38,15 @@ describe.if(hasDom)('useActiveSection', () => {
     document.body.appendChild(host);
     root = createRoot(host);
     await act(async () => root!.render(<Doc />));
-    expect(observed.map((el) => el.textContent)).toEqual(['Plan']);
+    for (const heading of host.querySelectorAll('h2, h3')) {
+      const rect = new DOMRect(0, heading.tagName === 'H2' ? 0 : 40, 600, 30);
+      heading.getBoundingClientRect = () => rect;
+      heading.getClientRects = () => Object.assign([rect], { item: (index: number) => index === 0 ? rect : null });
+    }
+    await act(async () => {
+      host!.firstElementChild!.dispatchEvent(new Event('scroll'));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    });
+    expect(active).toBe('block-0');
   });
 });

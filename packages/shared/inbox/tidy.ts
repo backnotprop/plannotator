@@ -133,7 +133,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       return {
         thread_id: threadId,
         subject: store.threadSubject(threadId) ?? "(no subject)",
-        project: { id: root.project_id, name: projectName(root.project_id) },
+        project: { id: store.canonicalProjectId(root.project_id), name: projectName(root.project_id) },
         reasons: [],
         reply_to: last.id,
         lines: [],
@@ -154,7 +154,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   for (const threadId of store.threadIds()) {
     const root = store.message(threadId);
     if (!root || root.resolved_at !== null) continue;
-    if (projectId && root.project_id !== projectId) continue;
+    if (projectId && !store.sameProject(root.project_id, projectId)) continue;
     if (options.surface === "board" && !boardThreads.has(threadId)) continue;
     const messages = store.threadMessageIds(threadId).map((id) => store.message(id)!).filter(Boolean);
     const reasked = store.reaskListedIds(threadId);
@@ -235,7 +235,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       const item = itemOf(session, card.agent.host, name, reach, `card:${card.id}`, () => ({
         thread_id: null,
         subject: card.title,
-        project: { id: card.project_id, name: projectName(card.project_id) },
+        project: { id: store.canonicalProjectId(card.project_id), name: projectName(card.project_id) },
         reasons: [],
         reply_to: null,
         lines: [],
@@ -257,7 +257,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
 
 function openThreadInScope(store: InboxStore, threadId: string, projectId: string | null): boolean {
   const root = store.message(threadId);
-  return !!root && root.thread_id === threadId && root.resolved_at === null && (!projectId || root.project_id === projectId);
+  return !!root && root.thread_id === threadId && root.resolved_at === null && (!projectId || store.sameProject(root.project_id, projectId));
 }
 
 function cardLine(card: InboxCard, idle: number): string {

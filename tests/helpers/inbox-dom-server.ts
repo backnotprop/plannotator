@@ -237,7 +237,9 @@ const pairingProbes = {
  */
 const whatsNewMode = extra === "whats-new";
 if (whatsNewMode) {
-  writeUpdateState({ inboxVersion: "0.28.18" }, dataDir);
+  // WHATS_NEW_LATEST (a test's env): a newer release already known, so the Inbox offers an update next to the notes.
+  const newer = process.env.WHATS_NEW_LATEST;
+  writeUpdateState({ inboxVersion: "0.28.18", ...(newer ? { latestRelease: { tag: newer, fetchedAt: Date.now() } } : {}) }, dataDir);
   const releaseApi = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,

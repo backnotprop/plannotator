@@ -39,6 +39,6 @@ export default defineConfig({
     // Every spec but the WebKit-only ones, in Chromium. A project's testIgnore replaces the top-level one, so it repeats OWN_CONFIG.
     { name: 'chromium', testIgnore: [...OWN_CONFIG, WEBKIT_ONLY] },
     // The WebKit-only specs, and the toolstrip's right-to-left check in WebKit too. No Chromium flags here: WebKit refuses them.
-    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
+    { name: 'webkit', testMatch: [WEBKIT_ONLY, 'toolstrip-rtl.spec.ts', 'inbox-inline-html.spec.ts', 'inbox-debug-log.spec.ts'], use: { browserName: 'webkit', launchOptions: { args: [] } } },
   ],
 });

@@ -299,6 +299,12 @@ released 0.27.25 and 0.27.10 binaries as processes:
   mod's bridge stops, and Ask AI offers only its providers.
 - A CLI before 0.19.24 writes no ready file: commands wait their full 45 s /
   15 s and say "Starting…", and decisions still arrive at exit.
+- Inbox reply title (#2464): the title is the Inbox's call, not the mod's. A
+  newer Inbox sends `subject: null` on a plain reply in a thread with no name,
+  which every mod since the first Inbox connection words `a reply` (its notices
+  `(a thread)`); an older Inbox sends the subject, and a newer mod prints it as
+  before. Either way the reply is delivered. See "The title on the wake's first
+  line" in `inbox-notifications-and-agents.md`.
 - The tool's `list` and `close` (contract v2): a CLI without
   `/api/host/status` lists its reviews with `unsent: unknown`. `close` counts as
   closed ONLY a JSON answer with a numeric `unsentAnnotations`

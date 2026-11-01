@@ -156,6 +156,14 @@ test('a 390 px phone: the tiles before the project, one line for a long project 
     await page.evaluate(() => document.fonts.ready);
     expectLead(await measure(page, 'ib-mrow', crowd), await measure(page, 'ib-mrow', lone), 'phone');
     await page.screenshot({ path: join(proofDir, 'phone-390.png') });
+    // Its menu held, the row takes the hover ground, which is the tile's own grey at 50%: the tile takes the hover step
+    // too, as a hovered desktop row's does (inbox.spec.ts proves the contrast). Colours ease, so polled.
+    const row = page.locator(`.ib-mrow[data-thread-id="${lone}"]`);
+    const tile = row.locator('.ib-atile').first();
+    const fill = () => tile.evaluate((t) => getComputedStyle(t).backgroundColor);
+    await expect.poll(fill).toMatch(/^oklch\(0\.92 /);
+    await row.evaluate((r) => r.setAttribute('data-menu', ''));
+    await expect.poll(fill).toMatch(/^oklch\(0\.9 /);
   } finally {
     await context.close();
   }

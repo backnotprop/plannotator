@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxDecisionsModel, InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -185,6 +185,27 @@ describe("GET /api/inbox/decisions", () => {
     }
     expect(repo).toEqual({ display: "acme/billing", host: "gitlab.example.com" });
     expect(seen).toContain(project);
+  });
+
+  test("a decision in the other folder of a combined project carries that folder's repo, as its thread does", async () => {
+    const { server, client, project } = await setup({
+      on: true,
+      readProjectRepo: async (root) => ({ display: `acme/${basename(root)}`, host: "github.com" }),
+    });
+    const site = join(dirname(project), "site");
+    mkdirSync(site, { recursive: true });
+    const here = (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses-a", body: "Billing." } })) as { structuredContent: { project: { id: string } } };
+    await send(client, site, "ses-b", "claude-code", { body: block("Ship the site?") });
+    const from = server.store.projectByRoot(site)!;
+    expect(server.store.project(here.structuredContent.project.id)?.root).toBe(project);
+    server.store.combineProject(from.id, here.structuredContent.project.id);
+    let shown: Awaited<ReturnType<typeof decisions>>["decisions"][number]["thread"]["project"] | undefined;
+    for (let i = 0; i < 50 && !shown?.repo; i++) {
+      shown = (await decisions(server)).decisions[0]?.thread.project;
+      if (!shown?.repo) await Bun.sleep(20);
+    }
+    expect(shown?.id).toBe(here.structuredContent.project.id);
+    expect(shown?.repo).toEqual({ display: "acme/site", host: "github.com" });
   });
 
   test("follows the existing picks and reply routes: a pick stays with its revision, a Send takes it out", async () => {
