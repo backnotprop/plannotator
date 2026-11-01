@@ -35,15 +35,17 @@ import { delimiter, join } from 'node:path';
  * Every agent CLI a Plannotator server looks up on PATH or spawns: the Inbox's agents (inbox-agents.ts
  * AGENT_SPECS) and Codex wake, the review servers' AI engines (ai-runtime.ts, review.ts, agent-jobs.ts,
  * marker-review.ts MARKER_ENGINES, `agent` being Cursor's other name), uninstall's plugin removals
- * (uninstall.ts, `code` being VS Code's), and the agent terminal's BUILT_IN_AGENTS
- * (@plannotator/webtui/core). tests/agent-cli-stubs.test.ts fails when one of those gains a name
- * missing here.
+ * (uninstall.ts, `code` being VS Code's), the agent terminal's BUILT_IN_AGENTS
+ * (@plannotator/webtui/core), and `cswap` (inbox-accounts.ts). tests/agent-cli-stubs.test.ts fails
+ * when one of those gains a name missing here.
  */
 export const AGENT_CLIS = [
   // The Inbox's agents, the review engines and uninstall.
   'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen',
   // The agent terminal's built-in agents not listed above.
   'openclaude', 'autohand', 'agy', 'aider', 'goose', 'kilo', 'crush', 'auggie', 'codebuff', 'command-code', 'cn', 'kimi', 'vibe', 'qwen-code', 'rovo', 'hermes', 'openclaw', 'grok',
+  // Not an agent: claude-swap, which Settings → Accounts runs, and which goes to the Keychain.
+  'cswap',
 ] as const;
 
 /** Marks the runner's PATH as already guarded (the folder), so a second config load adds nothing. */

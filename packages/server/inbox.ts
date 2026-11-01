@@ -150,6 +150,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { createInboxAccounts } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -409,6 +410,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
+  /** Tests: how long a read of `cswap list --json` waits, and when a stuck run is killed (packages/server/inbox-accounts.ts). */
+  accounts?: { timeoutMs?: number; hardLimitMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -1794,8 +1797,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** What Settings and the connect snippets read. */
-  /** Voice spends the owner's ChatGPT login or key: a tailnet guest's page gets no use of them, as with Feedback. */
-  const voiceGuest = (req: Request, via: RequestVia) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
+  /** A login let in over the tailnet that isn't the owner's. Voice spends the owner's ChatGPT login or key: a guest's page gets no use of them, as with Feedback. */
+  const tailnetGuest = (req: Request, via: RequestVia) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
   const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
@@ -2541,6 +2544,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.voice,
   });
 
+  /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  const accounts = createInboxAccounts({ environment: agentEnvironment, ...options.accounts });
+
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
     store,
@@ -2878,7 +2884,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, voiceGuest(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, tailnetGuest(req, via)));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -2903,7 +2909,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         // The Board changes what agents on this computer are offered (the card tool): changed only here.
         if (body.board !== undefined && via === "tailnet") return localOnly();
-        if (body.voice !== undefined && voiceGuest(req, via)) throw voiceOwnerOnly();
+        if (body.voice !== undefined && tailnetGuest(req, via)) throw voiceOwnerOnly();
         // Updating changes this computer: never from a page that came through the tailnet.
         if (updateSwitches && via === "tailnet") return localOnly();
         // The reminder goes to every agent session on this computer: changed only here, like Settings → Agents.
@@ -2960,16 +2966,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, voiceGuest(req, via)), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, tailnetGuest(req, via)), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        if (voiceGuest(req, via)) throw voiceOwnerOnly();
+        if (tailnetGuest(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
+      }
+      // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,
+      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. Never on the device door.
+      if (path === "/api/inbox/accounts") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (tailnetGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
+        return json(await accounts.read());
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
