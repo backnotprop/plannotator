@@ -67,6 +67,12 @@ const TIPS = [
 ];
 /** A list row's delivery tick, by state: "Delivered …", "Sent …" (the list's tooltips). */
 const LIST_TIPS = ['delivered', 'sent', 'saved', 'undelivered', 'queued'].map((state) => ({ name: `tick-${state}`, selector: `.ib-lbody .ib-tick[data-tick="${state}"]` }));
+/**
+ * A row's hover action (Mark read, Mark unread, Send now) covers the row's time and hides it, tick included, so a
+ * pointer cannot rest on the tick of such a row. Held out of the way while the ticks' tooltips are captured, the
+ * same in both runs, so every tick's tooltip is still compared.
+ */
+const ROW_ACTION_OFF = '.pn-inbox .ib-rw .ib-ract { display: none !important; } .pn-inbox .ib-rw:hover .ib-t { visibility: visible !important; }';
 const TOOLTIP = '[data-pn-tooltip]';
 
 interface Run {
@@ -375,7 +381,11 @@ test('every seeded thread', async ({ page }, info) => {
       await page.mouse.move(0, 0);
       await capture(page, info, 'list', 'end-quiet', '.ib-lbody');
     }
-    if (hover) await tooltips(page, info, 'list', LIST_TIPS);
+    if (hover) {
+      const rowActionOff = await page.addStyleTag({ content: ROW_ACTION_OFF });
+      await tooltips(page, info, 'list', LIST_TIPS);
+      await rowActionOff.evaluate((tag) => tag.remove());
+    }
   });
 
   // Later clocks: the other-day and other-year branches of every time.
