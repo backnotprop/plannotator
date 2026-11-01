@@ -1800,6 +1800,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
   const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
+    /** A tailnet login other than the owner's: the window offers it no What's new. */
+    guest,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
@@ -2805,32 +2807,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
-      // The update control (packages/server/inbox-updates.ts). Updating changes
-      // this computer, so none of it answers a page that came through the tailnet;
-      // nor does the What's new page, nor its images (inbox-whats-new-images.ts).
-      if (
-        path === "/api/inbox/update" ||
-        path.startsWith("/api/inbox/update/") ||
-        path === "/api/inbox/whats-new" ||
-        path === INBOX_WHATS_NEW_IMAGE_PATH
-      ) {
-        if (via === "tailnet") return localOnly();
+      // What's new and its images (inbox-whats-new-images.ts) only read release
+      // notes, so the computer's owner can read them over the tailnet too; any
+      // other tailnet login is refused (`owner_only`, as voice and Feedback do).
+      // Fetching missing notes by a release's tag is limited to the versions
+      // this Inbox knows (inbox-updates.ts fetchableVersion) and stays inside
+      // the update-notes folder of the data directory.
+      if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_IMAGE_PATH) {
+        if (via === "tailnet" && !tailscale.isOwnerRequest(req.headers)) {
+          throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
+        }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
-        if (path === "/api/inbox/whats-new") {
-          if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-          // Notes this machine never saved (a version installed outside the
-          // Inbox) are fetched by the release's tag, waited for at most 3 s;
-          // past that the page is told to ask again (503 notes_loading).
-          const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
-          if (answer.kind === "notes") return json(answer.notes);
-          if (answer.kind === "loading") {
-            const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
-            res.headers.set("Retry-After", "1");
-            return res;
-          }
-          return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        // Notes this machine never saved (a version installed outside the
+        // Inbox) are fetched by the release's tag, waited for at most 3 s;
+        // past that the page is told to ask again (503 notes_loading).
+        const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
+        if (answer.kind === "notes") return json(answer.notes);
+        if (answer.kind === "loading") {
+          const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
+          res.headers.set("Retry-After", "1");
+          return res;
         }
+        return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+      }
+      // The update control (packages/server/inbox-updates.ts). Updating changes
+      // this computer, so none of it answers a page that came through the tailnet.
+      if (path === "/api/inbox/update" || path.startsWith("/api/inbox/update/")) {
+        if (via === "tailnet") return localOnly();
         if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
