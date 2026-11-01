@@ -32,7 +32,8 @@
     "./types": "./types.ts",
     "./theme": "./theme.css",
     "./styles.css": "./styles.css",
-    "./contents-rail.css": "./contents-rail.css"
+    "./contents-rail.css": "./contents-rail.css",
+    "./inbox-thread.css": "./inbox-thread.css"
   },
   "files": [
     "components",
@@ -55,6 +56,7 @@
     "print.css",
     "styles.css",
     "contents-rail.css",
+    "inbox-thread.css",
     "plannotator.webp",
     "HANDOFF.md",
     "!**/*.test.ts",
@@ -111,6 +113,7 @@
     "@types/bun": "^1.2.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "postcss": "8.5.28",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.1.18",
@@ -121,7 +124,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:css": "vite build --config vite.css.config.ts && rm -f styles.js",
     "build:bridge-assets": "bun run scripts/build-bridge-assets.ts",
+    "build:inbox-thread-css": "bun run scripts/build-inbox-thread-css.ts",
     "smoke:package": "bun run scripts/package-smoke.ts",
-    "prepack": "bun run build:css && bun run build:bridge-assets"
+    "prepack": "bun run build:css && bun run build:bridge-assets && bun run build:inbox-thread-css"
   }
 }
