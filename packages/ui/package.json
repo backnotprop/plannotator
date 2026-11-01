@@ -29,12 +29,15 @@
     "./config": "./config/index.ts",
     "./configure": "./configure.ts",
     "./theme-modes": "./components/themeModes.tsx",
+    "./art": "./art/index.ts",
+    "./art/*": "./art/*.ts",
     "./types": "./types.ts",
     "./theme": "./theme.css",
     "./styles.css": "./styles.css",
     "./contents-rail.css": "./contents-rail.css"
   },
   "files": [
+    "art",
     "components",
     "config",
     "hooks",

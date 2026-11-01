@@ -80,6 +80,8 @@
     "components/inbox-thread/GuideCard.tsx",
     "components/inbox-thread/SkillsLine.tsx",
     "components/inbox-thread/ReaskNote.tsx",
-    "components/inbox-thread/reask.ts"
+    "components/inbox-thread/reask.ts",
+    "art/index.ts",
+    "art/art.worker.ts"
   ]
 }
