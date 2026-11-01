@@ -25,12 +25,14 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * quiet line under the latest message, in place of the delivery line, saying
  * what the agent the person started is doing. It goes away while the agent
  * rests (`run` null: the thread draws nothing). Stop is a text button; the
- * one bordered button is Open in Terminal, where something is blocked on the
- * person (a permission prompt, an untrusted folder). No keyboard shortcuts.
+ * bordered buttons are where something is blocked on the person: Open in
+ * Terminal (a permission prompt, an untrusted folder), and for an untrusted
+ * folder the owner's Trust folder, which also works on a phone. No keyboard
+ * shortcuts.
  */
 /** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). */
 export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; onChanged: () => void }) {
-  const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
+  const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ticking = run.state === 'working' || run.state === 'waiting_answer' || run.state === 'waiting_terminal';
@@ -38,12 +40,13 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
   const name = hostLabel(run.agent);
   const minutes = ticking ? minutesSince(run.since, now) : null;
 
-  const act = async (what: 'stop' | 'open' | 'retry') => {
+  const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id);
+      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id);
       else await inboxApi.launchOpen(run.launch_id);
       if (what !== 'open') onChanged();
     } catch (cause) {
@@ -142,10 +145,20 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       text = (
         <>
           <b>{name} didn't start.</b> {run.cause ?? ''} Your message is kept.
+          {run.trust?.warning ? (
+            <span className="ib-run-sub" data-run-trust-warning="">
+              {run.trust.warning}
+            </span>
+          ) : null}
         </>
       );
       actions = (
         <>
+          {run.trust && (
+            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('trust')} data-run-trust="">
+              Trust folder
+            </button>
+          )}
           {run.untrusted && !phone && openTerminal}
           <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
             Try again

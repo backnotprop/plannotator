@@ -349,7 +349,7 @@ test('a moved root is used for the next launch; untrusted, the row reads "trust 
   await expect(row).toContainText('~/Plannotator/scratch');
   await expect(row).not.toContainText('onboarding-checklist');
   await expect(dialog(page).locator('[data-compose-scratch-hint]')).toHaveText(
-    "Claude Code doesn't trust ~/Plannotator/scratch yet. Your first Send asks you to open it in Terminal once; after that every scratch folder there starts.",
+    "Claude Code doesn't trust ~/Plannotator/scratch yet. Your first Send asks you to trust it once; after that every scratch folder there starts.",
   );
   await row.hover();
   await shot(page, 'trust-once-row');
@@ -361,7 +361,7 @@ test('a moved root is used for the next launch; untrusted, the row reads "trust 
   // The start fails as untrusted, naming the root; Open in Terminal runs claude there, so one trust covers every scratch folder.
   await openThread(page, sent.thread_id);
   const line = pane(page).locator('[data-run="failed"]');
-  await expect(line).toContainText("~/Plannotator/scratch isn't a trusted folder yet. Open it once in Terminal and accept Claude Code's trust prompt, then try again.");
+  await expect(line).toContainText("~/Plannotator/scratch isn't a trusted folder yet.");
   const opened = fake.osascript().length;
   await line.locator('[data-run-open]').click();
   const ran = await waitFor('osascript', () => fake.osascript()[opened]);

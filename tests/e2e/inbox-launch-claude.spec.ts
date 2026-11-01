@@ -521,7 +521,7 @@ test('an untrusted folder (14): the cause, the not-delivered tick, Open in Termi
   const p = pane(page);
   const line = p.locator('[data-run="failed"]');
   await expect(line).toContainText("Claude Code didn't start.");
-  await expect(line).toContainText("~/oss/side-project isn't a trusted folder yet. Open it once in Terminal and accept Claude Code's trust prompt, then try again. Your message is kept.");
+  await expect(line).toContainText("~/oss/side-project isn't a trusted folder yet. Your message is kept.");
   await expect(page.locator(`[data-thread-id="${threadId}"] [data-tick="undelivered"]`)).toBeVisible();
   await shot(page, '14-fail-did-not-start');
   const opened = fake.osascript().length;

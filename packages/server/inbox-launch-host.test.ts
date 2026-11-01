@@ -6,8 +6,9 @@
  * and withdraws through its transport, Delete calls its remove), so Claude Code is not wired into the engine; and a
  * record whose agent has no host here (after a downgrade) shows no line, is skipped by the sweep and answers
  * `launch_not_found`, never a crash. The optional seams: a host's own login-shell read (`context.loginEnv`),
- * `close` when the Inbox stops, a per-launch `stoppedNote`, and a `resume` that throws (a failed restart, never
- * an unhandled rejection).
+ * `close` when the Inbox stops, a per-launch `stoppedNote`, a `resume` that throws (a failed restart, never
+ * an unhandled rejection), and `trustOffer`: Trust folder starts a launch refused for trust once and only once,
+ * for the owner alone, and a failed write leaves the message kept and says why.
  *
  * `fakeLaunchHost` is the engine's test fake: an in-memory agent whose sessions the test connects, works and
  * idles by hand. Claude Code's host is there too and stays out of the way: no `claude` is on the sandbox PATH.
@@ -20,7 +21,7 @@ import type { InboxLaunchAgent, InboxLaunchRecord, InboxMessage } from "@plannot
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
-import type { LaunchHost, LaunchHostContext, LaunchLive } from "./inbox-launch-host";
+import type { LaunchHost, LaunchHostContext, LaunchLive, LaunchTrustOffer } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 
 const restore: (() => void)[] = [];
@@ -44,7 +45,7 @@ const FAKE = "fake-agent" as InboxLaunchAgent;
 function fakeLaunchHost() {
   const calls: string[] = [];
   /** What the test makes go wrong. */
-  const faults: { resumeThrows: boolean; gate: Promise<void> | null } = { resumeThrows: false, gate: null };
+  const faults: { resumeThrows: boolean; gate: Promise<void> | null; untrusted: boolean; resumeUntrusted: boolean; offer: LaunchTrustOffer | null } = { resumeThrows: false, gate: null, untrusted: false, resumeUntrusted: false, offer: null };
   let questions: ReturnType<typeof createLaunchQuestions> | null = null;
   const sessions = new Map<string, { ref: string; live: LaunchLive | null; state: "running" | "stopped" }>();
   const byRef = (ref: string) => [...sessions.values()].find((s) => s.ref === ref);
@@ -55,8 +56,10 @@ function fakeLaunchHost() {
     available: async () => ({ ok: true, version: "1.0.0" }),
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
     trusts: () => true,
+    trustOffer: () => faults.offer,
     async start(launch, input) {
       calls.push(`start ${input.name}`);
+      if (faults.untrusted) return { ok: false, code: "untrusted", text: "The folder isn't trusted yet." };
       const ref = `f${sessions.size + 1}`;
       sessions.set(`session-${ref}`, { ref, live: null, state: "running" });
       return { ok: true, session: `session-${ref}`, ref };
@@ -69,6 +72,7 @@ function fakeLaunchHost() {
     async resume(launch) {
       calls.push(`resume ${launch.session_ref}`);
       if (faults.resumeThrows) throw new Error("the host broke");
+      if (faults.resumeUntrusted) return { exitCode: 1, text: "", failure: { code: "untrusted", text: "The folder isn't trusted yet." } };
       byRef(launch.session_ref!)!.state = "running";
       return { exitCode: 0, text: "", failure: null };
     },
@@ -152,8 +156,8 @@ function setup() {
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
-  const post = (id: string, action: string) =>
-    launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv" }) }), `/api/inbox/launch/${id}/${action}`, "local");
+  const post = (id: string, action: string, via = "local", owner?: boolean) =>
+    launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", body: JSON.stringify({ serverSession: "srv" }) }), `/api/inbox/launch/${id}/${action}`, via, owner);
   return { store, clock, project, fake, launch, post, logins, context: () => context! };
 }
 
@@ -375,5 +379,146 @@ describe("a second agent behind LaunchHost", () => {
     await expect(launch.permissionRoute(hook, `/api/inbox/launch/${record.id}/permission`)).rejects.toMatchObject({ code: "launch_not_found" });
     // A Send naming it is refused before anything is written.
     expect(() => launch.target({ launch: { agent: "gone-agent", project_id: project.id } })).toThrow(/to\.launch/);
+  });
+});
+
+describe("Trust folder (`trustOffer`)", () => {
+  /** A launch whose start was refused for trust, and an offer that counts its writes and starts the host trusting. */
+  async function refused() {
+    const world = setup();
+    const { store, project, fake, launch } = world;
+    fake.faults.untrusted = true;
+    const accepts = { count: 0 };
+    fake.faults.offer = {
+      warning: "This folder has 1 hook that will run once you trust it.",
+      accept: async () => {
+        accepts.count += 1;
+        await fake.faults.gate;
+        fake.faults.untrusted = false;
+      },
+    };
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-trust", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.error?.code === "untrusted");
+    return { ...world, root, id: prepared.launch.id, accepts };
+  }
+  const startsOf = (calls: string[]) => calls.filter((call) => call.startsWith("start ")).length;
+  const refusal = (promise: Promise<Response | null>) => promise.then(() => null, (error: { code?: string; message?: string }) => error);
+
+  test("one click saves the trust, then starts the launch; the kept message goes to the new session with no second click", async () => {
+    const { store, fake, post, root, id, accepts } = await refused();
+    expect(startsOf(fake.calls)).toBe(1);
+    expect((await post(id, "trust"))!.status).toBe(200);
+    expect(accepts.count).toBe(1);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    expect(startsOf(fake.calls)).toBe(2);
+    expect(store.message(root.id)!.to).toEqual({ host: FAKE, session: "session-f1" });
+    expect(store.message(root.id)!.launch!.error ?? null).toBeNull();
+  });
+
+  test("a double click saves once and starts once; a click from a stale window after that does nothing", async () => {
+    const { store, fake, post, root, id, accepts } = await refused();
+    let open = () => {};
+    fake.faults.gate = new Promise((done) => (open = done));
+    const clicks = [post(id, "trust"), post(id, "trust")];
+    await Bun.sleep(10);
+    // Try again during the write would be a second start.
+    expect(await refusal(post(id, "retry"))).toMatchObject({ code: "validation_error" });
+    open();
+    const answers = await Promise.all(clicks.map(async (click) => (await click)!.json()));
+    expect(answers[0]).toEqual(answers[1]);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    expect((await post(id, "trust"))!.status).toBe(200);
+    await Bun.sleep(20);
+    expect(accepts.count).toBe(1);
+    expect(startsOf(fake.calls)).toBe(2);
+  });
+
+  test("a failed write says why; the message stays kept, nothing starts, and the button can be pressed again", async () => {
+    const { store, fake, post, launch, root, id } = await refused();
+    const before = store.message(root.id)!;
+    const offer = fake.faults.offer!;
+    fake.faults.offer = {
+      warning: null,
+      accept: async () => {
+        throw new Error("Could not update ~/.claude.json: it is not plain JSON. Nothing was changed.");
+      },
+    };
+    expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed", message: "Could not update ~/.claude.json: it is not plain JSON. Nothing was changed." });
+    expect(startsOf(fake.calls)).toBe(1);
+    expect(store.message(root.id)).toEqual(before);
+    expect(await launch.runOf(root.id, true)).toMatchObject({ state: "failed", untrusted: true, trust: { warning: null } });
+    fake.faults.offer = offer;
+    await post(id, "trust");
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+  });
+
+  test("the owner alone: a guest's read has no offer and the route refuses it; the owner over the tailnet clicks like the window", async () => {
+    const { store, post, launch, root, id, accepts } = await refused();
+    expect((await launch.runOf(root.id, false))!.trust).toBeUndefined();
+    expect(await refusal(post(id, "trust", "tailnet", false))).toMatchObject({ code: "owner_only" });
+    // The default for a tailnet request is no owner, too.
+    expect(await refusal(post(id, "trust", "tailnet"))).toMatchObject({ code: "owner_only" });
+    expect(accepts.count).toBe(0);
+    expect((await launch.runOf(root.id, true))!.trust).toEqual({ warning: "This folder has 1 hook that will run once you trust it." });
+    expect((await post(id, "trust", "tailnet", true))!.status).toBe(200);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+  });
+
+  test("a restart refused for trust goes through resume, not a new start", async () => {
+    const { store, clock, project, fake, launch, post } = setup();
+    const accepts = { count: 0 };
+    fake.faults.offer = {
+      warning: null,
+      accept: async () => {
+        accepts.count += 1;
+        fake.faults.resumeUntrusted = false;
+      },
+    };
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-respawn", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const answer = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: FAKE, session: "session-f1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-respawn" }).message;
+    await post(prepared.launch.id, "stop");
+    fake.faults.resumeUntrusted = true;
+    clock.now += 1_000;
+    store.sendReply(answer.id, { words: "One more thing.", idempotency_key: "reply-respawn" });
+    await until(() => fake.calls.includes("resume f1"));
+    await Bun.sleep(10);
+    clock.now += 120_000;
+    expect(await launch.runOf(root.id, true)).toMatchObject({ state: "failed", untrusted: true, trust: { warning: null } });
+    expect((await post(prepared.launch.id, "trust"))!.status).toBe(200);
+    await until(() => fake.calls.filter((call) => call === "resume f1").length === 2);
+    expect(accepts.count).toBe(1);
+    expect(fake.calls.filter((call) => call.startsWith("start "))).toHaveLength(1);
+  });
+
+  test("deleted while the write waited: nothing starts", async () => {
+    const { store, fake, post, root, id } = await refused();
+    let open = () => {};
+    fake.faults.gate = new Promise((done) => (open = done));
+    const click = post(id, "trust");
+    await Bun.sleep(10);
+    fake.faults.gate = null;
+    await post(id, "delete");
+    open();
+    expect((await click)!.status).toBe(200);
+    await Bun.sleep(20);
+    expect(startsOf(fake.calls)).toBe(1);
+    expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("a folder the host can't trust (the home folder) shows no button and refuses the route", async () => {
+    const { fake, post, launch, root, id } = await refused();
+    fake.faults.offer = null;
+    expect((await launch.runOf(root.id, true))!.trust).toBeUndefined();
+    expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed" });
+    expect(startsOf(fake.calls)).toBe(1);
   });
 });

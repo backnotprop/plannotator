@@ -51,6 +51,7 @@
  *   POST /api/inbox/launch/:id/open      Terminal: the host's attach command (or what trusts the folder); macOS
  *   POST /api/inbox/launch/:id/delete    stop, remove, and the launch folder; the thread stays
  *   POST /api/inbox/launch/:id/retry     Try again after a failed start, restart or connection
+ *   POST /api/inbox/launch/:id/trust     Trust folder: the host saves the trust, then Try again (owner only, tailnet too)
  *   POST /api/inbox/launch/settings      `{ full_permissions }` or `{ scratch_dir }` (Settings → Agents)
  *   GET  /api/inbox/launch/settings      the switch as it stands (never set: what the login shell says)
  *
@@ -572,6 +573,8 @@ export function createInboxLaunch(options: {
   const starting = new Set<string>();
   /** A Delete under way, by launch id: a second one (a double click) waits for it and answers the same. */
   const deleting = new Map<string, Promise<Record<string, unknown>>>();
+  /** A Trust folder under way, by launch: a double click waits for it and answers the same. */
+  const trusting = new Map<string, Promise<Record<string, unknown>>>();
   /** A Stop under way, by launch id: no reply starts the session again until it is done. */
   const stopping = new Set<string>();
 
@@ -684,8 +687,9 @@ export function createInboxLaunch(options: {
     scratch_dir: scratchRoot(),
     scratch_dir_shown: options.displayFolder(scratchRoot()),
   });
-  const route = async (req: Request, path: string, via: "local" | "tailnet" | string): Promise<Response | null> => {
-    const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry))?$/.exec(path);
+  /** `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). */
+  const route = async (req: Request, path: string, via: "local" | "tailnet" | string, owner: boolean = via === "local"): Promise<Response | null> => {
+    const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
@@ -803,29 +807,70 @@ export function createInboxLaunch(options: {
         }
       }
       case "retry": {
-        if (starting.has(launch.id) || respawning.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
+        if (starting.has(launch.id) || respawning.has(launch.id) || trusting.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
         if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
-        const memo = memoOf(launch);
-        // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
-        if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
-          respawn(root, host, memo.respawn!.for);
-          return json({ run: runOfRoot(store.message(root.id)!) });
+        tryAgain(root, host);
+        return json({ run: runOfRoot(store.message(root.id)!) });
+      }
+      case "trust": {
+        if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
+        // A click under way (a double click): the same answer, once it is done.
+        const under = trusting.get(launch.id);
+        if (under) return json(await under);
+        const done = (async (): Promise<Record<string, unknown>> => {
+          const runNow = () => ({ run: runOfRoot(store.message(root.id)!) });
+          // Nothing refused now (a second click, a stale window): the line as it stands, never a second start.
+          if (!refusedForTrust(root)) return runNow();
+          if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
+          const offer = host.trustOffer?.(launch);
+          if (!offer) throw new InboxError("trust_failed", `${host.name} can't trust this folder from here.`);
+          try {
+            await offer.accept();
+          } catch (error) {
+            throw new InboxError("trust_failed", error instanceof Error ? error.message : String(error));
+          }
+          // The write can wait on the agent's own lock: a Delete may have come through meanwhile.
+          const current = store.message(root.id)!;
+          if (refusedForTrust(current)) tryAgain(current, host);
+          return runNow();
+        })();
+        trusting.set(launch.id, done);
+        try {
+          return json(await done);
+        } finally {
+          trusting.delete(launch.id);
         }
-        if (!launch.error) {
-          // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
-          if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
-          if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
-          // No session was made: a first start, not "again".
-          else void run(root, host, false);
-          return json({ run: runOfRoot(store.message(root.id)!) });
-        }
-        const cleared = store.settleLaunch(root.id, { error: null });
-        // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
-        void run(cleared, host, false);
-        return json({ run: runOfRoot(cleared) });
       }
     }
     return null;
+  };
+
+  /** The start or restart waiting on Try again was refused for trust, and nothing is under way. */
+  const refusedForTrust = (root: InboxMessage): boolean => {
+    const launch = root.launch!;
+    if (launch.deleted_at || starting.has(launch.id) || respawning.has(launch.id)) return false;
+    return launch.error ? launch.error.code === "untrusted" : respawnUntrustedOf(memoOf(launch));
+  };
+
+  /** Try again, for a launch that failed. */
+  const tryAgain = (root: InboxMessage, host: LaunchHost): void => {
+    const launch = root.launch!;
+    const memo = memoOf(launch);
+    // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
+    if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
+      respawn(root, host, memo.respawn!.for);
+      return;
+    }
+    if (!launch.error) {
+      // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
+      if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
+      if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
+      // No session was made: a first start, not "again".
+      else void run(root, host, false);
+      return;
+    }
+    // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
+    void run(store.settleLaunch(root.id, { error: null }), host, false);
   };
 
   const isFolder = (path: string) => {
@@ -973,8 +1018,11 @@ export function createInboxLaunch(options: {
       return { agents: offered.flat(), projects, scratch: { root } };
     },
 
-    /** The thread route's `run`: waits for a host read when one is due. Null (no line) for an agent with no host here. */
-    async runOf(threadId: string): Promise<InboxRun | null | undefined> {
+    /**
+     * The thread route's `run`: waits for a host read when one is due. Null (no line) for an agent with no host here.
+     * `owner`: the machine's owner reads it, so a line refused for trust carries the host's offer.
+     */
+    async runOf(threadId: string, owner: boolean = false): Promise<InboxRun | null | undefined> {
       if (!enabled()) return undefined;
       const root = store.message(threadId);
       if (!root?.launch || root.thread_id !== root.id) return undefined;
@@ -983,7 +1031,9 @@ export function createInboxLaunch(options: {
       const state = stateOf(host);
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
-      return runOfRoot(store.message(threadId)!);
+      const line = runOfRoot(store.message(threadId)!);
+      const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
+      return offer ? { ...line!, trust: { warning: offer.warning } } : line;
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */

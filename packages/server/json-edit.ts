@@ -350,6 +350,26 @@ export function addJsonMember(text: string, path: readonly string[], key: string
   return { ok: true, text: prep.bom + out, changed: true };
 }
 
+/** `text` with `key` at `path` set to `value`: a member there has only its value replaced, a missing one is added (`addJsonMember`). */
+export function setJsonMember(text: string, path: readonly string[], key: string, value: unknown, options: JsonEditOptions = {}): JsonEdit {
+  const added = addJsonMember(text, path, key, value, options);
+  if (!added.ok || added.changed) return added;
+  const comments = options.comments === true;
+  const prep = prepare(text, comments);
+  if ("error" in prep) return { ok: false, reason: prep.error };
+  const found = walk(prep.body, prep.start, path);
+  if ("error" in found) return { ok: false, reason: found.error };
+  const member = found.chain[found.chain.length - 1]!.members.find((m) => m.key === key)!;
+  const before = parseText(prep.body, comments) as Record<string, unknown>;
+  let parent = before;
+  for (const name of path) parent = parent[name] as Record<string, unknown>;
+  if (sameJson(parent[key], value)) return { ok: true, text, changed: false };
+  parent[key] = value;
+  const out = `${prep.body.slice(0, member.valueStart)}${JSON.stringify(value)}${prep.body.slice(member.valueEnd)}`;
+  if (!sameJson(parseText(out, comments), before)) return { ok: false, reason: "the edit would change more than one entry" };
+  return { ok: true, text: prep.bom + out, changed: true };
+}
+
 /** `text` without `key` at `path`; unchanged when it is not there. */
 export function removeJsonMember(text: string, path: readonly string[], key: string, options: JsonEditOptions = {}): JsonEdit {
   const comments = options.comments === true;

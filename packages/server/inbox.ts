@@ -523,6 +523,8 @@ const ERROR_STATUS: Record<string, number> = {
   launch_not_found: 404,
   launch_off: 404,
   open_unavailable: 409,
+  // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
+  trust_failed: 409,
   // Send now: the session's connection does not poll now, or cannot deliver into a running turn.
   send_now_unavailable: 409,
   // Tags: a live session whose Plannotator is too old to word a tag truthfully.
@@ -2428,7 +2430,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     live,
     dataDir,
     serverSession,
-    homeDir: homedir(),
+    // The sandbox's own home: Trust folder writes to `<home>/.claude.json`, so a test never reaches the real one.
+    homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(),
     platform: process.platform,
     loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
       ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: "" })
@@ -2534,6 +2537,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody,
     json,
   });
+
+  /** This computer, or the owner's own login over the tailnet: never a guest the allow list let in. */
+  const isOwner = (req: Request, via: RequestVia): boolean => via === "local" || tailscale.isOwnerRequest(req.headers);
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
@@ -2962,8 +2968,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const skills = inboxSkillsRoute(req, url);
       if (skills) return skills;
 
-      // Launch: Stop, Open in Terminal, Delete, Try again and its setting (404 while `inboxLaunch.enabled` is off).
-      const launched = await launch.route(req, path, via);
+      // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its setting (404 while `inboxLaunch.enabled` is off).
+      const launched = await launch.route(req, path, via, isOwner(req, via));
       if (launched) return launched;
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
       const composed = await compose.route(req, url);
@@ -3118,7 +3124,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
         // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
-        const run = await launch.runOf(thread.thread_id);
+        const run = await launch.runOf(thread.thread_id, isOwner(req, via));
         const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
         return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });

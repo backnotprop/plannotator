@@ -15,9 +15,9 @@ import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject 
  * Last, under a line: "New scratch folder" and the folder a Send would make
  * (`<root>/<thread-name slug>`). While the agent does not trust the root yet
  * it reads "New scratch folder · trust it once", shows the root, and says
- * under it that the first start asks to open the root in Terminal once: that
- * start fails as untrusted, and its Open in Terminal runs the agent in the
- * root, so one trust covers every scratch folder after it.
+ * under it that the first start asks to trust the root once: that start fails
+ * as untrusted, and its run line trusts the root (Trust folder, or Open in
+ * Terminal), so one trust covers every scratch folder after it.
  */
 export function FolderMenu({
   projects,
@@ -198,5 +198,5 @@ export function FolderMenu({
 
 /** Under an untrusted "New scratch folder" row: what "trust it once" asks of the person. */
 function untrustedHint(scratch: { root: string; agentName: string }): string {
-  return `${scratch.agentName} doesn't trust ${scratch.root} yet. Your first Send asks you to open it in Terminal once; after that every scratch folder there starts.`;
+  return `${scratch.agentName} doesn't trust ${scratch.root} yet. Your first Send asks you to trust it once; after that every scratch folder there starts.`;
 }

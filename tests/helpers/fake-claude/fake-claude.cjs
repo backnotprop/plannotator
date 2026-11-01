@@ -113,16 +113,30 @@ const updateAgent = (sessionId, patch) => {
   if (current) saveAgent({ ...current, ...patch });
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Claude's global config: `$CLAUDE_CONFIG_DIR/.claude.json`, else HOME's. */
+const globalConfigPath = () => path.join(process.env.CLAUDE_CONFIG_DIR || process.env.HOME || "", ".claude.json");
+/** A linked worktree's main checkout (its `.git` file names `<checkout>/.git/worktrees/<name>`), else the folder. */
+const checkoutOf = (root) => {
+  try {
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(root, ".git"), "utf8"));
+    const common = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(gitdir[1].trim());
+    return common ? common[1] : root;
+  } catch {
+    return root;
+  }
+};
 /**
- * Claude's folder trust (`trustCheck`), keyed as Claude keys it: HOME's ~/.claude.json accepts the folder or a
- * folder above it, but a git repository's root (a `.git` there) counts only through its own entry: a parent's
- * trust never covers a nested repository (the real-CLI smoke and code.claude.com's workspace-trust docs).
+ * Claude's folder trust (`trustCheck`), keyed as Claude keys it: the physical path. The config accepts the folder or
+ * a folder above it, but a git repository's root (a `.git` there) counts only through its own entry, or for a linked
+ * worktree its main checkout's: a parent's trust never covers a nested repository (the real-CLI smoke,
+ * code.claude.com's workspace-trust docs and the 2.1.316 binary).
  */
 const trusted = (folder) => {
-  const projects = (readJson(path.join(process.env.HOME || "", ".claude.json"), {}) || {}).projects || {};
-  for (let dir = folder; ; dir = path.dirname(dir)) {
-    if (projects[dir] && projects[dir].hasTrustDialogAccepted === true) return true;
-    if (fs.existsSync(path.join(dir, ".git"))) return false;
+  const projects = (readJson(globalConfigPath(), {}) || {}).projects || {};
+  const accepted = (dir) => Boolean(projects[dir] && projects[dir].hasTrustDialogAccepted === true);
+  for (let dir = fs.realpathSync(folder); ; dir = path.dirname(dir)) {
+    if (accepted(dir)) return true;
+    if (fs.existsSync(path.join(dir, ".git"))) return accepted(checkoutOf(dir));
     if (path.dirname(dir) === dir) return false;
   }
 };
@@ -212,7 +226,7 @@ function main() {
     // The person's own recorded consent and default mode (never the --settings file's consent).
     const home = process.env.HOME || "";
     const user = readJson(path.join(home, ".claude", "settings.json"), {}) || {};
-    const global = readJson(path.join(home, ".claude.json"), {}) || {};
+    const global = readJson(globalConfigPath(), {}) || {};
     const consent = user.skipDangerousModePermissionPrompt === true || global.bypassPermissionsModeAccepted === true;
     let permissionMode = flag("--permission-mode") || ((settings && settings.permissions) || {}).defaultMode || (user.permissions || {}).defaultMode || "default";
     const bypassAvailable = consent && (args.includes("--allow-dangerously-skip-permissions") || permissionMode === "bypassPermissions");

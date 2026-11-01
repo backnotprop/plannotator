@@ -865,6 +865,8 @@ export interface InboxRun {
   cause: string | null;
   /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
   untrusted: boolean;
+  /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
+  trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
   attach_command: string | null;
 }
