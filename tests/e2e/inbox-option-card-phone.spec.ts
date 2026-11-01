@@ -143,6 +143,26 @@ const inTheClear = (l: Layout) => {
 
 const settled = (page: Page, ms = 320) => page.waitForTimeout(ms);
 
+/**
+ * Nothing is moving: no transition running, and the picture where it was three frames ago. Counted in frames, not
+ * time, so a slow renderer (WebKit on a CI runner) is measured as late as it needs: a fixed wait there reads the
+ * card halfway through its fade.
+ */
+const atRest = (page: Page) =>
+  page.evaluate(async () => {
+    const image = document.querySelector('.ib-imgstage .ib-zoomimg')!;
+    let still = 0;
+    let was = '';
+    while (still < 3) {
+      await new Promise(requestAnimationFrame);
+      const { top, left, width } = image.getBoundingClientRect();
+      const now = `${top} ${left} ${width}`;
+      const moving = document.getAnimations().some((a) => a instanceof CSSTransition && a.playState === 'running');
+      still = !moving && now === was ? still + 1 : 0;
+      was = now;
+    }
+  });
+
 async function openChoice(page: Page, url: string, thread: string, letter: string) {
   await page.goto('about:blank');
   await page.goto(`${url}#thread=${thread}`);
@@ -152,7 +172,7 @@ async function openChoice(page: Page, url: string, thread: string, letter: strin
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
   await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
   await expect(caption(page)).toHaveAttribute('data-option-caption', letter);
-  await settled(page);
+  await atRest(page);
 }
 
 /** The end note as drawn: whether its words are cut, and where the pill it points to ends up. */
@@ -163,11 +183,13 @@ function noteLine(page: Page) {
       const note = line.querySelector<HTMLElement>('.ib-optcap-note')!;
       const pill = line.querySelector<HTMLElement>('.ib-optcap-pill')!.getBoundingClientRect();
       const dots = line.parentElement!.querySelector('.ib-optcap-dots')!.getBoundingClientRect();
+      const room = line.clientWidth - pill.width - parseFloat(getComputedStyle(line).columnGap);
       return {
         text: line.textContent,
         wordsCut: note.scrollWidth > note.clientWidth,
-        wordsRoom: note.clientWidth,
+        wordsRoom: room,
         wordsWant: note.scrollWidth,
+        wordsEllipsis: getComputedStyle(note).textOverflow === 'ellipsis',
         pillOverlapsWords: pill.left < note.getBoundingClientRect().right - 0.5,
         pillPastLine: pill.right > line.getBoundingClientRect().right + 0.5,
         pillOverlapsDots: pill.right > dots.left + 0.5,
@@ -235,10 +257,22 @@ async function doubleTap(page: Page, at: Point) {
   await settled(page);
 }
 
-async function hideTools(page: Page) {
-  await page.locator('[data-full-view-bar] button[aria-label="Hide tools"]').tap();
-  await settled(page);
+/** The size bar's button (Fit to Actual size, anything else to Fit), once the picture has got there. */
+async function tapFit(page: Page) {
+  const was = await zoomStage(page).getAttribute('data-image-zoom-stage');
+  await page.locator('[data-image-fit]').tap();
+  await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', was === 'fit' ? 'actual' : 'fit');
+  await atRest(page);
 }
+
+/** A tap that moves the tools to `state`, once the pane is there and what fades or refits with it has finished. */
+async function tapTools(page: Page, button: string, state: 'tucked' | 'revealed' | 'pinned') {
+  await page.locator(button).tap();
+  await expect(page.locator(`[data-tools="${state}"]`)).toHaveCount(1);
+  await atRest(page);
+}
+
+const hideTools = (page: Page) => tapTools(page, '[data-full-view-bar] button[aria-label="Hide tools"]', 'tucked');
 
 async function shot(page: Page, name: string) {
   mkdirSync(shots, { recursive: true });
@@ -274,13 +308,11 @@ for (const { name, width, height } of [
       await shot(page, `${tag}-A-fit`);
 
       // Actual size: all four stops, exactly at the rows (no gap, no overlap).
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       await panAllFour(page, touch, 'opt-a.png');
       await panTo(page, touch, 'bottom');
       await shot(page, `${tag}-A-actual-bottom-stop`);
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       same((await layout(page)).image, fit.image);
 
       // A pinch in, and the picture slides under the bars.
@@ -320,8 +352,7 @@ for (const { name, width, height } of [
       );
       await settled(page);
       expect((await layout(page)).scale).toBeGreaterThan(fit.scale);
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       same((await layout(page)).image, fit.image);
 
       // A double tap: 2× about the finger, and back.
@@ -403,12 +434,10 @@ for (const { name, width, height } of [
       expect(Math.min(hidden.image.top - hidden.stage.top, hidden.image.left - hidden.stage.left)).toBeLessThan(14);
       await shot(page, `${tag}-C-hidden`);
       // The handle brings the toolbar back for a moment: the picture stays, the card stays away, until the tools are kept out.
-      await page.locator('[data-full-view-handle]').tap();
-      await settled(page);
+      await tapTools(page, '[data-full-view-handle]', 'revealed');
       await expect(caption(page)).toBeHidden();
       same((await layout(page)).image, hidden.image);
-      await page.locator('[data-full-view-bar] button[aria-label="Keep tools out"]').tap();
-      await settled(page);
+      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
       same((await layout(page)).image, tools.image);
 
       // A plain picture gets the same: the toolbar is the floor.
@@ -420,21 +449,17 @@ for (const { name, width, height } of [
       const plain = await layout(page);
       inTheClear(plain);
       await shot(page, `${tag}-plain-fit`);
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       await panAllFour(page, touch, 'plain.png');
       await panTo(page, touch, 'bottom');
       await shot(page, `${tag}-plain-actual-bottom-stop`);
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       await hideTools(page);
       const plainHidden = await layout(page);
       expect(plainHidden.toolbar).toBeNull();
       expect(Math.abs(plainHidden.image.top - plainHidden.stage.top - (plainHidden.stage.bottom - plainHidden.image.bottom))).toBeLessThan(1);
-      await page.locator('[data-full-view-handle]').tap();
-      await settled(page);
-      await page.locator('[data-full-view-bar] button[aria-label="Keep tools out"]').tap();
-      await settled(page);
+      await tapTools(page, '[data-full-view-handle]', 'revealed');
+      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
 
       // A drag down closes, back to the thread.
       const close = await layout(page);
@@ -514,6 +539,8 @@ for (const [width, height] of [
         const note = await noteLine(page);
         expect(note.text).toBe('Last option · 2 files under 5/5');
         expect(note.wordsCut, `the words want ${note.wordsWant} px of ${note.wordsRoom}`).toBe(false);
+        // Fonts differ by platform (159 px on a CI runner, 156 on a Mac): a real margin, not a lucky fit.
+        expect(note.wordsRoom - note.wordsWant, 'spare room beside the words').toBeGreaterThanOrEqual(8);
         expect(note.pillOverlapsWords).toBe(false);
         expect(note.pillPastLine).toBe(false);
         expect(note.pillOverlapsDots).toBe(false);
@@ -551,6 +578,10 @@ for (const [width, height] of [
         for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('i'));
       });
       const longest = await noteLine(page);
+      await shot(page, `${width}x${height}-longest-note`);
+      // Here the words can't fit at 360 px: they end in an ellipsis, and the pill they point to stands whole.
+      if (width === 360) expect(longest.wordsCut).toBe(true);
+      expect(longest.wordsEllipsis).toBe(true);
       expect(longest.pillOverlapsWords).toBe(false);
       expect(longest.pillPastLine).toBe(false);
       expect(longest.pillOverlapsDots).toBe(false);
@@ -587,8 +618,7 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
       inTheClear(fit);
       await shot(page, `${tag}-A-fit`);
 
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       const at = middle(fit);
       const dragBy = async (dx: number, dy: number) => {
         await page.mouse.move(at.x, at.y);
@@ -609,8 +639,7 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
       for (let i = 0; i < 16; i++) await dragBy(120, 0);
       const left = await layout(page);
       expect(Math.abs(left.image.left - left.stage.left)).toBeLessThan(1);
-      await page.locator('[data-image-fit]').tap();
-      await settled(page);
+      await tapFit(page);
       same((await layout(page)).image, fit.image);
 
       // A pinch by hand-made pointer events: in, and out again to Fit.
