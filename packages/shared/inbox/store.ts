@@ -1056,9 +1056,9 @@ export class InboxStore {
 
   /**
    * The projects combined into `projectId`, each named by its own folder or
-   * given name: the name it goes back to, which is what Separate says. Oldest
-   * first. Named beside the project they are in, so a clone of it keeps its parent
-   * ("billing-svc · old"), never a second "billing-svc".
+   * given name: the name an undo gives it back. Oldest first. Named beside the
+   * project they are in, so a clone of it keeps its parent ("billing-svc · old"),
+   * never a second "billing-svc".
    */
   combinedInto(projectId: string): InboxProject[] {
     if (this.canonicalProjectId(projectId) !== projectId) return [];
@@ -1071,9 +1071,10 @@ export class InboxStore {
   }
 
   /**
-   * Combine `projectId` into `intoId`, or separate it again (null). One new
-   * project line, the pattern of `renameProject`: no message, question, card or
-   * file moves, so separating restores everything, what was sent since included.
+   * Combine `projectId` into `intoId`, or undo that (null). One new project line,
+   * the pattern of `renameProject`: no message, question, card or file moves, so
+   * an undo restores everything, what was sent since included. Messages stay where
+   * they were written: a thread stays in its own project, whoever joined it.
    * A project that others were combined into takes them along and brings them back,
    * because they keep pointing at it. `intoId` may be a combined project: its head
    * is what is stored. Refuses a project already inside this one (the two would loop).
@@ -2727,7 +2728,7 @@ export class InboxStore {
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes();
-    // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, named as Separate names it.
+    // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
       const project = head === stored.id ? stored : (this.combinedInto(head).find((member) => member.id === stored.id) ?? stored);

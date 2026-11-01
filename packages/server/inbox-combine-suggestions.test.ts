@@ -63,7 +63,7 @@ describe("combineSuggestions", () => {
     ]);
   });
 
-  test("a separated pair is not offered, either way round, and the other clone still is", () => {
+  test("a pair whose combine was undone is not offered, either way round, and the other clone still is", () => {
     const projects = [project("prj_a", "/a"), project("prj_b", "/b", { separated_from: "prj_a" }), project("prj_c", "/c")];
     expect(pairs({ projects, repoOf: () => repo("acme/app"), threads: (id) => (id === "prj_a" ? 2 : 0) })).toEqual([["prj_c", "prj_a"]]);
     const flipped = [project("prj_a", "/a", { separated_from: "prj_b" }), project("prj_b", "/b")];
@@ -84,7 +84,7 @@ describe("combineSuggestions", () => {
     }
   });
 
-  test("a leftover of a pair the person separated is not offered", () => {
+  test("a leftover whose combine was undone is not offered", () => {
     const projects = [project("prj_app", "/code/app"), project("prj_left", "/code/app/worktrees/fix-y", { separated_from: "prj_app" })];
     expect(pairs({ projects, repoOf: () => null, threads: noThreads })).toEqual([]);
   });

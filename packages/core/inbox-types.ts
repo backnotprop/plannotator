@@ -252,7 +252,7 @@ export interface InboxProject {
    * gone, or a loop, counts as not combined, so a project can only reappear.
    */
   merged_into?: string;
-  /** The project this one was last separated from: Tidy does not suggest the pair again. */
+  /** The project this one's last undone combine went into: Tidy does not suggest the pair again. */
   separated_from?: string;
 }
 

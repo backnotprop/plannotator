@@ -4,13 +4,7 @@
  */
 
 import { inboxProjectDisplayName } from '@plannotator/core/inbox-types';
-import { labelPath, shortProjectNames, type LabeledProject } from './projectLabels';
-
-/** The projects combined into `project`, named beside it: what Separate says, so a clone reads "billing-svc · old", never its head's name. */
-export function memberNames<T extends LabeledProject>(project: LabeledProject, members: readonly T[]): T[] {
-  const names = shortProjectNames([project, ...members]);
-  return members.map((member) => ({ ...member, name: names.get(member.id) ?? member.name }));
-}
+import { labelPath, type LabeledProject } from './projectLabels';
 
 /** Two names are the same as a person reads them: case, Unicode form and spaces aside. */
 export function sameProjectName(a: string, b: string): boolean {

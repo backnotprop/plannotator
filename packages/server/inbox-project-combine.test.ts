@@ -136,14 +136,14 @@ async function combined() {
 }
 
 describe("POST /api/inbox/projects/:id/combine", () => {
-  test("answers the project the rows now show, and null separates it", async () => {
+  test("answers the project the rows now show, and null undoes it", async () => {
     const w = await combined();
     expect(w.server.store.project(w.from)?.merged_into).toBe(w.into);
     expect((await rows(w.server)).map((row) => row.project.id)).toEqual([w.into, w.into]);
     expect((await folders(w.server)).map((folder) => folder.id).sort()).toEqual([w.into].sort());
 
-    const separated = await combine(w.server, w.from, null);
-    expect(separated.status).toBe(200);
+    const undone = await combine(w.server, w.from, null);
+    expect(undone.status).toBe(200);
     expect((await rows(w.server)).map((row) => row.project.id).sort()).toEqual([w.into, w.from].sort());
     expect(w.server.store.project(w.from)).toMatchObject({ separated_from: w.into });
     expect(w.server.store.project(w.from)?.merged_into).toBeUndefined();
@@ -199,7 +199,7 @@ describe("an agent in either folder of a combined project", () => {
       expect(listed.threads.map((row: { id?: string; thread_id?: string }) => row.thread_id ?? row.id).sort()).toEqual([w.inLedger.thread_id, w.inClone.thread_id].sort());
       expect(listed.project.name).toBe("ledger");
     }
-    // Separate: each folder lists its own again.
+    // Undone: each folder lists its own again.
     await combine(w.server, w.from, null);
     const own = await tool(w.client, "read_thread", { project_path: w.clone, asked_by: "anyone" });
     expect(own.threads).toHaveLength(1);
@@ -215,7 +215,7 @@ describe("an agent in either folder of a combined project", () => {
     const everywhere = await tool(w.client, "search", { query: "carried", all_projects: true });
     expect(everywhere.total).toBe(2);
     expect(new Set(everywhere.results.map((row: { project?: string | { name: string } }) => (typeof row.project === "string" ? row.project : row.project?.name)))).toEqual(new Set(["ledger"]));
-    // Separate: a search from one folder stays in it.
+    // Undone: a search from one folder stays in it.
     await combine(w.server, w.from, null);
     expect((await tool(w.client, "search", { query: "heron", project_path: w.clone })).total).toBe(0);
   });
@@ -246,7 +246,7 @@ describe("the window on a combined project", () => {
     expect(sessions.find((session) => session.session === "ses_ledger")?.root).toBeUndefined();
   });
 
-  test("a thread offers the live sessions of either folder, and only its own folder's after Separate", async () => {
+  test("a thread offers the live sessions of either folder, and only its own folder's after an undo", async () => {
     const w = await combined();
     await poll(w.server, "ses_clone", w.clone);
     const offered = async () => ((await (await fetch(url(w.server, `/api/inbox/threads/${w.inLedger.thread_id}/sessions`))).json()) as { sessions: { session: string }[] }).sessions.map((session) => session.session);
@@ -352,7 +352,7 @@ describe("Tidy's Combine projects", () => {
     expect(board.combine).toBeUndefined();
   });
 
-  test("a combined pair stops being offered; a pair the person separated is not offered again", async () => {
+  test("a combined pair stops being offered; a pair whose combine was undone is not offered again", async () => {
     const w = await combined();
     await until(() => tidyPlan(w.server), () => true);
     expect((await tidyPlan(w.server)).combine).toBeUndefined();

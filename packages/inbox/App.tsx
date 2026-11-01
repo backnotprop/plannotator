@@ -2773,13 +2773,12 @@ function Inbox() {
   };
 
   /**
-   * Combine projects (approval "project-combine"), or Separate one again. A
-   * pair is `from` going into `into`, or back out (`into` null). One toast with
-   * one Undo for the whole step (the button and `Z`), whichever of the rename
-   * warning, Tidy or the project menu took it. Pairs that went through stay, and
-   * Undo takes them back, even when a later one was refused.
+   * Combine projects (approval "project-combine"): each `from` goes into its
+   * `into`. One toast with one Undo for the whole step (the button and `Z`),
+   * whichever of the rename warning or Tidy took it. Pairs that went through
+   * stay, and Undo takes them back, even when a later one was refused.
    */
-  const combineProjects = async (pairs: readonly { from: string; fromName: string; into: string | null; intoName: string; undoInto: string | null }[]): Promise<string | null> => {
+  const combineProjects = async (pairs: readonly { from: string; into: string; intoName: string }[]): Promise<string | null> => {
     const write = async (steps: readonly { project: string; into: string | null }[]) => {
       const done: { project: string; into: string | null }[] = [];
       for (const step of steps) {
@@ -2799,9 +2798,8 @@ function Inbox() {
       showToast(errorToast(failed, 'The projects did not change.'));
       return failure;
     }
-    const [first] = pairs;
-    const lead = !first!.into ? `Separated ${first!.fromName}` : done.length === 1 ? `Combined into ${first!.intoName}` : `Combined ${formatCount(done.length)} projects`;
-    const undo = pairs.slice(0, done.length).map((pair) => ({ project: pair.from, into: pair.undoInto }));
+    const lead = done.length === 1 ? `Combined into ${pairs[0]!.intoName}` : `Combined ${formatCount(done.length)} projects`;
+    const undo = done.map((step) => ({ project: step.project, into: null }));
     showToast({
       icon: 'check',
       lead,
@@ -2814,7 +2812,7 @@ function Inbox() {
             return;
           }
           dismissToast();
-          say(first!.into ? (done.length === 1 ? `Separated ${first!.fromName}.` : 'Separated the projects.') : `Combined into ${first!.intoName}.`);
+          say('Combine undone.');
         })();
       },
     });
@@ -4376,7 +4374,7 @@ function Inbox() {
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
-              const failed = await combineProjects(pairs.map((pair) => ({ from: pair.from.id, fromName: pair.from.name, into: pair.into.id, intoName: pair.into.name, undoInto: null })));
+              const failed = await combineProjects(pairs.map((pair) => ({ from: pair.from.id, into: pair.into.id, intoName: pair.into.name })));
               listTidy.refresh();
               return failed;
             },

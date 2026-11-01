@@ -39,10 +39,6 @@ export interface ProjectRowProps {
   others?: readonly LabeledProject[];
   /** The warning's Combine: this project goes into `into`. Resolves true once the list shows it. Absent: no warning. */
   onCombine?: (into: LabeledProject) => Promise<boolean>;
-  /** The projects combined into this one, each named as it goes back to: one Separate for each. */
-  combined?: readonly { id: string; name: string }[];
-  /** The project menu's Separate: one project goes back to being its own. */
-  onSeparate?: (member: { id: string; name: string }) => void;
 }
 
 /**
@@ -100,12 +96,6 @@ export function ProjectRow(props: ProjectRowProps) {
       readable={props.readable}
       rename={onRename !== undefined}
       named={typeof project.display_name === 'string' && project.display_name !== ''}
-      combined={props.onSeparate ? (props.combined ?? []) : []}
-      onSeparate={(member) => {
-        setMenuOpen(false);
-        setContextOpen(false);
-        props.onSeparate?.(member);
-      }}
       onAction={(action) => {
         setMenuOpen(false);
         setContextOpen(false);
@@ -214,8 +204,6 @@ function ProjectMenuItems(props: {
   readable: boolean;
   rename: boolean;
   named: boolean;
-  combined: readonly { id: string; name: string }[];
-  onSeparate: (member: { id: string; name: string }) => void;
   onAction: (action: ProjectMenuAction) => void;
 }) {
   const { name, readable, onAction } = props;
@@ -248,15 +236,6 @@ function ProjectMenuItems(props: {
           )}
         </>
       )}
-      {/* One for each project combined into this one: how a combine is undone later. */}
-      {props.combined.map((member) => (
-        <Menu.Item key={member.id} className="ib-pmi" label={`Separate ${member.name}`} onClick={() => props.onSeparate(member)} data-project-action="separate" data-project-member={member.id}>
-          <Icon name="arrowUpRight" size={15} />
-          <span className="ib-pmi-l" dir="auto">
-            Separate {member.name}
-          </span>
-        </Menu.Item>
-      ))}
     </>
   );
 }

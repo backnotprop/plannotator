@@ -6,7 +6,7 @@
  *  - a project left inside another's root in a `worktrees` folder (what an
  *    Inbox made for each worktree before worktrees folded into their repository).
  *
- * A pair the person separated is not suggested again. Pure.
+ * A pair whose combine was undone is not suggested again. Pure.
  */
 
 import type { InboxProject, InboxProjectRepo, InboxTidyCombine } from "@plannotator/core/inbox-types";
@@ -28,7 +28,7 @@ function isLeftoverWorktree(inner: string, outer: string): boolean {
   return CHECKOUTS.has(between[between.length - 1]!.toLowerCase()) && between.slice(0, -1).every((part) => part.startsWith("."));
 }
 
-/** The person already said no: one of the two was separated from the other. */
+/** The person already said no: a combine of these two was undone. */
 function separated(a: InboxProject, b: InboxProject): boolean {
   return a.separated_from === b.id || b.separated_from === a.id;
 }

@@ -1,7 +1,7 @@
 /**
  * Combining projects (approval "project-combine"): `merged_into` on one more
  * project line, and the group every reader treats as one project. What can
- * regress: a Separate that does not give everything back; the same thread name
+ * regress: an undo that does not give everything back; the same thread name
  * splitting in two across the folders of one project; a retry from the other
  * folder writing twice; a card or a thread hidden from the group; a project that
  * can vanish (a loop, a target that is gone, a half-written line); a folder's
@@ -58,7 +58,7 @@ function code(fn: () => unknown): string {
   return "ok";
 }
 
-describe("combine and Separate", () => {
+describe("combine and undo", () => {
   test("B leaves the projects and its threads read A, and that survives a reload", () => {
     const { store, docs, site, dir } = open();
     const inB = say(store, site.id, "From the site.").thread_id;
@@ -98,7 +98,7 @@ describe("combine and Separate", () => {
     expect(store.listRows({ projectId: docs.id }).map((r) => r.thread_id)).toContain(sent.thread_id);
   });
 
-  test("Separate gives back everything: rows, names, routing, and what was sent since", () => {
+  test("an undo gives back everything: rows, names, routing, and what was sent since", () => {
     const { store, docs, site, dir } = open();
     const named = say(store, site.id, "Named before.", { thread: "search" });
     const plain = say(store, docs.id, "A's own.");
@@ -124,7 +124,7 @@ describe("combine and Separate", () => {
     expect(say(store, docs.id, "Mine.", { thread: "search" }).thread_id).not.toBe(named.thread_id);
   });
 
-  test("Separate and Undo are safe to repeat: no second line, and a combine answers the same", () => {
+  test("a combine and an undo are safe to repeat: no second line, and a combine answers the same", () => {
     const { store, docs, site } = open();
     store.combineProject(site.id, docs.id);
     const count = lines(store, site.key).length;
@@ -148,7 +148,7 @@ describe("combine and Separate", () => {
 });
 
 describe("the group", () => {
-  test("two clashing projects stop clashing once combined, and clash again once separated", () => {
+  test("two clashing projects stop clashing once combined, and clash again after an undo", () => {
     const { store } = open();
     const one = store.ensureProject({ name: "billing", root: "/code/billing" });
     const two = store.ensureProject({ name: "billing", root: "/old/billing" });
@@ -159,7 +159,7 @@ describe("the group", () => {
     expect(store.project(two.id)!.name).toBe("billing · old");
   });
 
-  test("a clone combined into its namesake keeps its parent: Separate and Settings never show two of one name", () => {
+  test("a clone combined into its namesake keeps its parent: Settings never shows two of one name", () => {
     const { store } = open();
     const one = store.ensureProject({ name: "billing", root: "/code/billing" });
     const two = store.ensureProject({ name: "billing", root: "/old/billing" });
@@ -200,7 +200,7 @@ describe("the group", () => {
     expect(say(store, docs.id, "And from A.", { thread: "release" }).base_path).toBeUndefined();
   });
 
-  test("a thread stays whole through a Separate: what joined it stays in it, and the next send starts B's own", () => {
+  test("a thread stays whole through an undo: what joined it stays in it, and the next send starts B's own", () => {
     const { store, docs, site } = open();
     const first = say(store, docs.id, "Started in A.", { thread: "release" });
     store.combineProject(site.id, docs.id);
@@ -229,7 +229,7 @@ describe("the group", () => {
     expect(say(store, docs.id, "Someone else.", { session: "ses_y" }).thread_id).not.toBe(first.thread_id);
   });
 
-  test("a combine takes over no live conversation: a name open in both folders stays each folder's, through a Separate", () => {
+  test("a combine takes over no live conversation: a name open in both folders stays each folder's, through an undo", () => {
     const { store, docs, site } = open();
     const inA = say(store, docs.id, "A's release.", { thread: "release" });
     const inB = say(store, site.id, "B's release.", { thread: "release" });
@@ -264,7 +264,7 @@ describe("the group", () => {
     expect(retry.replayed).toBe(true);
     expect(retry.message.id).toBe(first.message.id);
     expect(code(() => store.sendMessage({ project_id: docs.id, author: agent(), body: "Different.", idempotency_key: "k1" }))).toBe("idempotency_key_reused");
-    // Separated, the key is per project again.
+    // Undone, the key is per project again.
     store.combineProject(site.id, null);
     expect(store.sendMessage({ project_id: docs.id, author: agent(), body: "Different.", idempotency_key: "k1" }).replayed).toBe(false);
   });
@@ -286,12 +286,12 @@ describe("the group", () => {
     expect(store.createCard({ project_id: docs.id, by: agent(), title: "Hero", idempotency_key: "c1" }).replayed).toBe(true);
     const inA = say(store, docs.id, "In A.");
     expect(store.createCard({ project_id: site.id, by: agent(), title: "Linked", threads: [inA.id] }).card.threads).toEqual([inA.thread_id]);
-    // The record keeps its project, so a Separate gives the card back.
+    // The record keeps its project, so an undo gives the card back.
     store.combineProject(site.id, null);
     expect(store.cardWire(store.listCards({ projectIds: new Set([site.id]) }).find((c) => c.id === card.id)!).project_id).toBe(site.id);
   });
 
-  test("a card made for the other folder's thread goes back with that thread, and still sends after a Separate", () => {
+  test("a card made for the other folder's thread goes back with that thread, and still sends after an undo", () => {
     const { store, docs, site } = open();
     const { message } = store.startPersonThread({ project_id: site.id, body: "Hero copy", to: { host: "codex", session: "ses_x" }, idempotency_key: "k1" });
     store.combineProject(site.id, docs.id);
@@ -304,7 +304,7 @@ describe("the group", () => {
     expect(store.sendCard(card.id, { thread_id: message.id }).sent?.thread_id).toBe(message.thread_id);
   });
 
-  test("a card linking threads of both folders still sends into either after a Separate; a thread not on it is refused", () => {
+  test("a card linking threads of both folders still sends into either after an undo; a thread not on it is refused", () => {
     const { store, docs, site } = open();
     const inA = say(store, docs.id, "In A.");
     const { message } = store.startPersonThread({ project_id: site.id, body: "Go", to: { host: "codex", session: "ses_x" }, idempotency_key: "k1" });
@@ -409,7 +409,7 @@ describe("a project can reappear, never vanish", () => {
     expect(InboxStore.open(dir).project(site.id)!.merged_into).toBe(docs.id);
   });
 
-  test("an earlier line appended late (seq lower) does not undo a Separate", () => {
+  test("an earlier line appended late (seq lower) does not take an undo back", () => {
     const { store, docs, site, dir } = open();
     store.combineProject(site.id, docs.id);
     const combineLine = readFileSync(file(store, site.key, "project.json"), "utf8").trim().split("\n").pop()!;
@@ -447,7 +447,7 @@ describe("a project can reappear, never vanish", () => {
 });
 
 describe("disk usage", () => {
-  test("a combined project's files stay counted, on a row of its own, named as Separate names it", () => {
+  test("a combined project's files stay counted, on a row of its own, by its own name", () => {
     const { store, docs, site } = open();
     say(store, docs.id, "A's.");
     say(store, site.id, "B's.");

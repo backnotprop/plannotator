@@ -12,7 +12,6 @@ import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
-import { memberNames } from '../projectCombine';
 import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
 import { selfMachineId } from '../inboxUrl';
@@ -69,7 +68,7 @@ export interface SidebarProps {
    */
   onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
   /** One step of combining: `from` into `into`, or back out (`into` null), with what Undo needs. Resolves true once the list shows it. */
-  onProjectCombine?: (pair: { from: string; fromName: string; into: string | null; intoName: string; undoInto: string | null }) => Promise<boolean>;
+  onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
@@ -180,9 +179,8 @@ export function Sidebar(props: SidebarProps) {
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
   const phone = usePhone();
-  // Another machine's project keeps what that machine gives it: only this machine's are renamed, combined or separated.
+  // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
   const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
-  // A project combined into another reads as it did on its own, which is what Separate gives back.
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
@@ -541,18 +539,9 @@ export function Sidebar(props: SidebarProps) {
                           setOpenMobile(false);
                           // The name it will have: alone again, it loses a clash's parent.
                           const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
-                          const done = await props.onProjectCombine!({ from: project.id, fromName: project.name, into: into.id, intoName, undoInto: null });
+                          const done = await props.onProjectCombine!({ from: project.id, into: into.id, intoName });
                           if (!done) combinedInto.current = null;
                           return done;
-                        }
-                      : undefined
-                  }
-                  combined={local(project) && project.combined ? memberNames(project, project.combined) : []}
-                  onSeparate={
-                    props.onProjectCombine && local(project)
-                      ? (member) => {
-                          setOpenMobile(false);
-                          void props.onProjectCombine!({ from: member.id, fromName: member.name, into: null, intoName: project.name, undoInto: project.id });
                         }
                       : undefined
                   }

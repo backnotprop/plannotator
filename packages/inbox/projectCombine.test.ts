@@ -3,7 +3,7 @@
  * real match, and two clashing clones are still found by the name a person types.
  */
 import { expect, test } from 'bun:test';
-import { memberNames, projectNameMatches, sameProjectName } from './projectCombine';
+import { projectNameMatches, sameProjectName } from './projectCombine';
 
 const DOCS = { id: 'prj_docs', root: '/code/docs', name: 'docs' };
 const CODE = { id: 'prj_code', root: '/code/acme', name: 'acme · code' };
@@ -22,13 +22,6 @@ test('a typed name matches the project that reads it, and only a whole name matc
   expect(ids('DOCS', [DOCS, CODE])).toEqual([DOCS.id]);
   expect(ids('doc', [DOCS, CODE])).toEqual([]);
   expect(ids('notes', [DOCS, CODE])).toEqual([]);
-});
-
-test('a clone combined into its namesake keeps its parent, so Separate never reads the row it is on', () => {
-  const head = { id: 'prj_a', root: '/code/billing-svc', name: 'billing-svc' };
-  const clone = { id: 'prj_b', root: '/old/billing-svc', name: 'billing-svc' };
-  const other = { id: 'prj_c', root: '/code/docs-site', name: 'docs-site' };
-  expect(memberNames(head, [clone, other]).map((member) => member.name)).toEqual(['billing-svc · old', 'docs-site']);
 });
 
 test('two clashing clones are found by their folder, a checkout by its repository', () => {

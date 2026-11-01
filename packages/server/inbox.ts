@@ -951,7 +951,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return store.listProjects().map((project) => {
       const mine = rows.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
-      // The projects combined into this one, for Separate. Additive, and only when there are any.
+      // The projects combined into this one: a link to one opens this project. Additive, and only when there are any.
       const combined = store.combinedInto(project.id).map(({ id, name, root, display_name }) => ({ id, name, root, ...(display_name ? { display_name } : {}) }));
       return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
     });
@@ -3169,7 +3169,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ project: projectFolders().find((p) => p.id === projectId) ?? null });
       }
 
-      // Combine a project into another, or separate it again (approval
+      // Combine a project into another, or undo that (approval
       // "project-combine"): `{ into: prj_… | null }`. One new project line
       // (store.combineProject). The same guards as every window write. Answers
       // the project the person now sees, the Undo the window keeps needs no more.
@@ -3181,7 +3181,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const projectId = projectCombineMatch[1]!;
         if (!isInboxId("prj", projectId)) throw new InboxError("validation_error", "A project id (prj_).", { field: "project" });
         if (!("into" in body) || (body.into !== null && !isInboxId("prj", body.into))) {
-          throw new InboxError("validation_error", "into: the project to combine into, or null to separate.", { field: "into" });
+          throw new InboxError("validation_error", "into: the project to combine into, or null to undo a combine.", { field: "into" });
         }
         store.combineProject(projectId, body.into as string | null);
         const shown = store.canonicalProjectId(projectId);

@@ -76,7 +76,7 @@ export interface ProjectFolder extends InboxProject {
   archived?: number;
   /** The machine whose project it is (`ibx_…`), in the merged view only. */
   machine?: string;
-  /** The projects combined into this one, each named as it goes back to. Absent when there are none. */
+  /** The projects combined into this one: a link to one opens this project. Absent when there are none. */
   combined?: { id: string; name: string; root: string; display_name?: string }[];
 }
 
@@ -1018,7 +1018,7 @@ export const inboxApi = {
   /** The project menu's Rename… (a name) and Reset name (null): the project's `display_name`. */
   renameProject: (projectId: string, name: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/name`), { name }),
-  /** Combine a project into another, or Separate it again (null): answers the project the person now sees. */
+  /** Combine a project into another, or undo that (null): answers the project the person now sees. */
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */

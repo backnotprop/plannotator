@@ -11,7 +11,7 @@
  *  - agents after the combine: a thread name in either folder is one thread, a
  *    retry from the other folder is the same send, and the folder's new threads
  *    and attachments stay its own;
- *  - Separate restores everything, the messages sent since included;
+ *  - an undo, later, restores everything, the messages sent since included;
  *  - the race and the recovery: a second window, two opposite combines at once,
  *    a killed Inbox;
  *  - Tidy's "Combine projects": strong signals, ticks, one Undo, not offered
@@ -229,7 +229,7 @@ test('the rename warning: Cancel changes nothing, Combine folds the two, Undo in
 
   await toast(page).getByRole('button', { name: 'Undo' }).click();
   await expect(row(page, 'docs-site')).toBeVisible();
-  await expect(live(page)).toHaveText('Separated docs-site.');
+  await expect(live(page)).toHaveText('Combine undone.');
   await expect.poll(() => rowProject(page, threads.site)).toBe('docs-site');
   await expect.poll(() => rowProject(page, threads.docs)).toBe('docs');
 });
@@ -274,7 +274,7 @@ test('keyboard only: Enter combines, Escape cancels, Z undoes, focus lands on th
 
   await page.keyboard.press('z');
   await expect(row(page, 'docs-site')).toBeVisible();
-  await expect(live(page)).toHaveText('Separated docs-site.');
+  await expect(live(page)).toHaveText('Combine undone.');
 });
 
 test('one project everywhere: its list, the thread, search, the menu and a reload', async () => {
@@ -304,18 +304,15 @@ test('one project everywhere: its list, the thread, search, the menu and a reloa
   const projects = await get('/api/inbox/search?q=docs');
   expect(Object.values(projects.groups as Record<string, { type: string; name?: string }[]>).flat().filter((found) => found.type === 'project').map((found) => found.name)).toEqual(['docs']);
 
-  // Separate is in the ⋯ menu, under the rest.
+  // The ⋯ menu of a combined project is any project's: undoing later is the agent's, not the window's.
   await page.goto(world.url);
   await row(page, 'docs').locator('.ib-pmore').click({ force: true });
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…', 'Separate docs-site']);
-  await menu(page).locator('[data-project-action="separate"]').hover();
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: join(proofDir, '03-separate-in-menu-light.png') });
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
   await page.keyboard.press('Escape');
   await expect.poll(() => rowProject(page, threads.docs)).toBe('docs');
 });
 
-test('Separate restores everything: the threads, the messages sent since, routing, attachments, the archive', async () => {
+test('an undo after the toast restores everything: the threads, the messages sent since, routing, attachments, the archive', async () => {
   const { page, agent, folders, ids, threads } = world;
   const serverSession = await session();
 
@@ -347,16 +344,7 @@ test('Separate restores everything: the threads, the messages sent since, routin
   expect(await listedIn(siteNew.thread_id)).toBe('docs');
   expect(await listedIn(docsNew.thread_id)).toBe('docs');
 
-  await row(page, 'docs').locator('.ib-proj').click({ button: 'right' });
-  await menu(page).locator('[data-project-action="separate"]').click();
-  await expect(toast(page)).toContainText('Separated docs-site');
-  await expect(row(page, 'docs-site')).toBeVisible();
-  // Z undoes a Separate too, and it can be separated again.
-  await page.keyboard.press('z');
-  await expect(row(page, 'docs-site')).toHaveCount(0);
-  await expect(live(page)).toHaveText('Combined into docs.');
-  await row(page, 'docs').locator('.ib-proj').click({ button: 'right' });
-  await menu(page).locator('[data-project-action="separate"]').click();
+  expect((await combine(ids.site, null, serverSession)).status).toBe(200);
   await expect(row(page, 'docs-site')).toBeVisible();
 
   // Nothing lost, nothing moved: each thread has every message it had.
@@ -437,7 +425,7 @@ test('the race: a window filtered on the folded project follows it; two opposite
   await second.close();
 });
 
-test('recovery: a killed Inbox comes back combined, and Separate still restores it', async () => {
+test('recovery: a killed Inbox comes back combined, and an undo still restores it', async () => {
   const { page, ids, threads, folders, dataDir } = world;
   expect((await combine(ids.site, ids.docs)).status).toBe(200);
   await expect(row(page, 'docs-site')).toHaveCount(0);
@@ -454,8 +442,7 @@ test('recovery: a killed Inbox comes back combined, and Separate still restores 
   expect(sent.project.id).toBe(ids.site);
   expect(await listedIn(sent.thread_id)).toBe('docs');
 
-  await row(page, 'docs').locator('.ib-proj').click({ button: 'right' });
-  await menu(page).locator('[data-project-action="separate"]').click();
+  expect((await combine(ids.site, null)).status).toBe(200);
   await expect(row(page, 'docs-site')).toBeVisible();
   expect(await listedIn(sent.thread_id)).toBe('docs-site');
 });
@@ -601,7 +588,7 @@ test('Settings: each folder keeps its size and says what Delete does', async () 
   expect(world.errors).toEqual([]);
 });
 
-test('dark: the warning, the menu and Tidy', async ({ browser }: { browser: Browser }) => {
+test('dark: the warning and the toast', async ({ browser }: { browser: Browser }) => {
   const { ids } = world;
   const context = await colored(browser, world.url, 'dark');
   const page = await context.newPage();
@@ -617,16 +604,11 @@ test('dark: the warning, the menu and Tidy', async ({ browser }: { browser: Brow
   await page.mouse.move(900, 700);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(proofDir, '02-after-combine-dark.png') });
-  await row(page, 'docs').locator('.ib-proj').click({ button: 'right' });
-  await menu(page).locator('[data-project-action="separate"]').hover();
-  await page.waitForTimeout(250);
-  await page.screenshot({ path: join(proofDir, '03-separate-in-menu-dark.png') });
-  await page.keyboard.press('Escape');
   expect((await combine(ids.site, null)).status).toBe(200);
   await context.close();
 });
 
-test('a phone: the warning in the navigation sheet, 44 px buttons, Combine closes the sheet, Separate in the menu sheet', async ({ browser }: { browser: Browser }) => {
+test('a phone: the warning in the navigation sheet, 44 px buttons, Combine closes the sheet, Undo in the toast', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true, colorScheme: 'light' });
   await context.addCookies([{ name: 'plannotator-theme', value: 'light', url: world.url }]);
   const page = await context.newPage();
@@ -653,15 +635,8 @@ test('a phone: the warning in the navigation sheet, 44 px buttons, Combine close
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(proofDir, '10-phone-after-combine.png') });
 
-  await page.locator('[data-sidebar="trigger"]').first().tap();
-  const docs = row(page, 'docs');
-  await expect(docs.locator('.ib-pmore')).toHaveCSS('opacity', '1');
-  await docs.locator('.ib-pmore').tap();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…', 'Separate docs-site']);
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: join(proofDir, '11-phone-separate.png') });
-  await page.locator('[data-project-action="separate"]').tap();
-  await expect(toast(page)).toContainText('Separated docs-site');
+  await toast(page).getByRole('button', { name: 'Undo' }).tap();
+  await expect(live(page)).toHaveText('Combine undone.');
   expect((await get('/api/inbox/projects')).projects.some((project: { id: string }) => project.id === world.ids.site)).toBe(true);
   expect(errors).toEqual([]);
   await context.close();
