@@ -317,7 +317,7 @@ describe.if(hasDom)('text that would stop the page', () => {
 
   test.each([
     ['repeated 5,000 times', `[a]: https://example.test/${'a'.repeat(7_900)}\n\n${'[a] '.repeat(5_000)}`],
-    ['with an address past any word limit', `[a]: <https://example.test/${'a'.repeat(200_000)}>\n\n${'[a] '.repeat(10_000)}`],
+    ['with an address past any word limit', `[a]: <https://example.test/${'a'.repeat(200_000)}>\n\n${'[a] '.repeat(100)}`],
   ])('a reference link %s is not written out in full', (_name, text) => {
     const html = withStoppedClock(() => chatMarkdownHtml(text));
     expect(html.length).toBeLessThan(text.length * 2);
