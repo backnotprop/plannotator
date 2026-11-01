@@ -142,4 +142,12 @@ describe('option sets', () => {
     expect(optionAnnouncement(set, 0)).toBe('Option A of 3: Gmail-style ⋯, recommended');
     expect(optionAnnouncement(set, 2)).toBe('Option D of 3: Header menu only');
   });
+
+  test('on a phone the step onto the last option says the end note, which the caption shows only for a moment', () => {
+    const set = optionSetOf([MESSAGE], STEPS, optionSetId(M2, 'q-design'))!;
+    expect(optionAnnouncement(set, 2, 2)).toBe('Option D of 3: Header menu only. Last option. 2 other files under the 3/3 button');
+    expect(optionAnnouncement(set, 2, 1)).toBe('Option D of 3: Header menu only. Last option. 1 other file under the 3/3 button');
+    expect(optionAnnouncement(set, 2, 0)).toBe('Option D of 3: Header menu only. Last option');
+    expect(optionAnnouncement(set, 1, 2)).not.toContain('Last option');
+  });
 });

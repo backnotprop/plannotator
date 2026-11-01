@@ -50,3 +50,14 @@ export function updateForPage(update: InboxUpdate, settings: { via?: 'local' | '
 export function pageOffersUpdates(settings: { via?: 'local' | 'tailnet' } | null): boolean {
   return !!settings && settings.via !== 'tailnet';
 }
+
+/**
+ * Whether this page may open What's new (a read of release notes; the
+ * sidebar's quiet link and Settings → About): on this computer, and over the
+ * tailnet for the computer's owner only. A tailnet login that is not the
+ * owner (`guest`, or an Inbox too old to say) gets none, as the routes answer
+ * it 403 owner_only. Only once the settings read says which it is.
+ */
+export function pageOffersWhatsNew(settings: { via?: 'local' | 'tailnet'; guest?: boolean } | null): boolean {
+  return !!settings && (settings.via !== 'tailnet' || settings.guest === false);
+}

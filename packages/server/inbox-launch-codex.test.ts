@@ -340,6 +340,16 @@ function world(options: { config?: FakeCodexConfig; configToml?: string; inboxMc
   return { store, codex, launch, project, home, post, send, restart, logins, daemonDown };
 }
 
+/** A turn ends in the fake's log before the host hears the thread went idle, and until then a delivery answers `queue`. */
+async function deliverWhenIdle(w: World, threadId: string, text: string) {
+  let answer = await w.launch.deliver("codex", threadId, text);
+  for (let i = 0; i < 100 && answer === "queue"; i++) {
+    await Bun.sleep(20);
+    answer = await w.launch.deliver("codex", threadId, text);
+  }
+  return answer;
+}
+
 async function until(check: () => boolean, ms = 5_000) {
   for (let waited = 0; waited < ms && !check(); waited += 20) await Bun.sleep(20);
   expect(check()).toBe(true);
@@ -472,7 +482,7 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
 
     // Again after the interrupt: a turn/start, never the paused queue.
     w.codex.configure({ hold: false });
-    expect(await w.launch.deliver("codex", threadId, reply("Once more.", "reply-2").text)).toBe("delivered");
+    expect(await deliverWhenIdle(w, threadId, reply("Once more.", "reply-2").text)).toBe("delivered");
     await until(() => w.codex.turns().filter((t) => t.how === "turn/start").length === 2);
   });
 
@@ -510,7 +520,7 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
 
     // The next turn asks again; Deny with a reason: decline, and the reason goes into the running turn.
     w.codex.configure({ prompts: [{ kind: "command", command: "rm -rf build" }], hold: true });
-    await w.launch.deliver("codex", threadId, wake(root.id, "Clean up."));
+    expect(await deliverWhenIdle(w, threadId, wake(root.id, "Clean up."))).toBe("delivered");
     await until(() => messagesOf(w.store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${threadId}`).length === 2);
     const second = await card();
     answer(second, "", "Not the build folder.");

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { formatCount, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -90,6 +90,14 @@ export interface OpenQuestionsButtonProps {
    * fitting of its own. Null or absent: the button fits itself among the buttons.
    */
   rowForm?: OpenQuestionsLabelForm | null;
+  /**
+   * A key (Q, shortcuts/thread.shortcuts.ts `openItems`) asks for the list: each increase opens it, as a press does,
+   * with focus on the first row. Absent or unchanged: nothing. Already open: nothing (Q is the menu's type-ahead then).
+   */
+  openRequest?: number;
+  /** The button's keycap and `aria-keyshortcuts`, from the registry (the caller reads them; this draws them). */
+  keyHint?: ReactNode;
+  keyShortcuts?: string;
 }
 
 /**
@@ -100,14 +108,14 @@ export interface OpenQuestionsButtonProps {
  * nothing is answered here. Base UI's Menu carries the keys (arrows,
  * Home/End, type-ahead; Escape and Tab close, focus back to the button) and
  * `aria-haspopup` / `aria-expanded` on the button. On a phone the list is a
- * sheet from the bottom edge, as the project menu's. No keyboard shortcut.
+ * sheet from the bottom edge, as the project menu's. Q opens it (`openRequest`).
  *
  * The label takes the longest form that keeps the foot's buttons on one line
  * ("5 open questions", "5 open", "5"; footFit.ts), trying each on the row's
  * usual spacing and then a tighter one; a phone tries the long form first too.
  * The name always holds the whole count.
  */
-export function OpenQuestionsButton({ questions, actions = [], reask = null, decide = null, triggerRef, phone, measure, onPick, onPickAction, onSetSkipped, rowForm = null }: OpenQuestionsButtonProps) {
+export function OpenQuestionsButton({ questions, actions = [], reask = null, decide = null, triggerRef, phone, measure, onPick, onPickAction, onSetSkipped, rowForm = null, openRequest = 0, keyHint = null, keyShortcuts }: OpenQuestionsButtonProps) {
   const [open, setOpen] = useState(false);
   /** Select mode (approval "oq-skip-select"): rows are checkboxes; ticks save nothing until the bar's button. */
   const [selecting, setSelecting] = useState(false);
@@ -275,6 +283,34 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         Skip all {formatCount(allToSkip.length)}
       </Menu.Item>
     ) : null;
+  // The Q key: open as a press does (the places measured now), and land on the first row so the arrows work at once.
+  const seenRequest = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === seenRequest.current) return;
+    seenRequest.current = openRequest;
+    if (openRef.current) return;
+    resetSelect();
+    picked.current = false;
+    setPlaces(measure());
+    setOpen(true);
+    // The list mounts a frame or two later and the menu then places its own focus: keep putting it on the first row
+    // (a question, else an action item) until it holds, and stop once the person has moved it themselves.
+    let frames = 0;
+    let landed = false;
+    let frame = requestAnimationFrame(function land() {
+      const popup = popupRef.current;
+      const row = popup?.querySelector<HTMLElement>('.ib-oq-row:not([data-disabled])');
+      if (row && document.activeElement !== row) {
+        if (landed) return;
+        row.focus();
+      }
+      if (row && document.activeElement === row) landed = true;
+      frames += 1;
+      if (frames < (landed ? 6 : 30)) frame = requestAnimationFrame(land);
+    });
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
   // Focus follows the mode: the first row on the way in, "Skip…" on the way out (the items remount).
   useLayoutEffect(() => {
     const where = focusAfter.current;
@@ -319,6 +355,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         data-open-questions=""
         // A shorter form ("5 open", "5"): the name keeps the whole count.
         aria-label={form === 'full' ? undefined : label}
+        aria-keyshortcuts={keyShortcuts}
         data-label-form={form}
         data-fit-tight={tight ? '' : undefined}
         // What footFit.ts draws each form from.
@@ -331,6 +368,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         <span ref={words} data-oq-words="">
           {openQuestionsFormText(n, form, a, permission)}
         </span>
+        {keyHint}
         <span className="ib-oq-chev" aria-hidden="true">
           <Icon name="chevU" size={13} />
         </span>
@@ -354,7 +392,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
             className="ib-oq"
             aria-label={selecting ? 'Select questions to skip' : heading}
             data-open-questions-list=""
-            finalFocus={() => (picked.current ? false : true)}
+            // Back on the button, wherever focus was when Q opened the list (a press leaves it on the button already).
+            finalFocus={() => (picked.current ? false : (trigger.current ?? true))}
           >
             {/* No drawn heading or foot line (owner, 2026-10-23): the popup's name (aria-label) carries the count. */}
             {phone && (

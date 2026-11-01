@@ -46,7 +46,7 @@ const read = (path: string) => readFileSync(path, "utf8");
 test("the block: markers on their own lines around the note", () => {
   expect(INBOX_NOTE_BLOCK.startsWith(`${INBOX_NOTE_START}\n## Plannotator Inbox\n`)).toBe(true);
   expect(INBOX_NOTE_BLOCK.endsWith(`\n${INBOX_NOTE_END}`)).toBe(true);
-  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v5 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
+  expect(INBOX_NOTE_START).toBe("<!-- plannotator-inbox:start v6 · added by Plannotator. Remove it in the Inbox's Settings or with `plannotator uninstall` -->");
 });
 
 describe("where each agent's note goes", () => {

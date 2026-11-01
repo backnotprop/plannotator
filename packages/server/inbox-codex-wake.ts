@@ -133,6 +133,26 @@ export interface InboxCodexWake {
   stop(): void;
 }
 
+/**
+ * The Codex CLIs this Inbox may run, best first: the `codex` on PATH, else the apps' own (macOS; never under the test
+ * sandbox). Only absolute paths that exist: a relative PATH entry would name another file wherever the Inbox runs. The
+ * `codex` on PATH is the one the person uses: when there is one, an app's own CLI is never tried instead.
+ */
+export function codexCliCandidates(environment: AgentEnvironment, extraClis?: readonly string[]): string[] {
+  const apps =
+    extraClis ??
+    (environment.platform === "darwin"
+      ? [
+          ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [INBOX_CODEX_DESKTOP_CLI, INBOX_CODEX_APP_CLI]),
+          join(environment.homeDir, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
+          join(environment.homeDir, "Applications", "Codex.app", "Contents", "Resources", "codex-cli", "bin", "codex"),
+        ]
+      : []);
+  const onPath = environment.which("codex");
+  const first = onPath && isAbsolute(onPath) ? [onPath] : [];
+  return [...new Set((first.length > 0 ? first : apps).filter((path) => isAbsolute(path) && existsSync(path)))];
+}
+
 /** The text a body is put in for, so the tool names are named only outside the person's words. */
 const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
 
@@ -194,26 +214,11 @@ export function createInboxCodexWake(options: {
   const deadDir = join(dir, DEAD_DIR);
   const stopping = new AbortController();
 
-  const extraClis =
-    options.extraClis ??
-    (environment.platform === "darwin"
-      ? [
-          ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [INBOX_CODEX_DESKTOP_CLI, INBOX_CODEX_APP_CLI]),
-          join(environment.homeDir, "Applications", "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"),
-          join(environment.homeDir, "Applications", "Codex.app", "Contents", "Resources", "codex-cli", "bin", "codex"),
-        ]
-      : []);
-
   // ── The CLI ──
   let cliAnswer: { cli: InboxCodexCli | null; at: number } | null = null;
   let cliProbe: Promise<InboxCodexCli | null> | null = null;
   const probe = async (): Promise<InboxCodexCli | null> => {
-    // Only absolute paths: a relative PATH entry would name another file wherever the Inbox runs. The `codex` on
-    // PATH is the one the person uses: when there is one, an app's own CLI is never tried instead.
-    const onPath = environment.which("codex");
-    const first = onPath && isAbsolute(onPath) ? [onPath] : [];
-    const candidates = (first.length > 0 ? first : extraClis).filter((path) => isAbsolute(path) && existsSync(path));
-    for (const path of [...new Set(candidates)]) {
+    for (const path of codexCliCandidates(environment, options.extraClis)) {
       const run = await environment.run([path, "--version"], { timeoutMs: 10_000, signal: stopping.signal });
       const version = parseCodexCliVersion(run.stdout);
       if (run.exitCode === 0 && codexCliQueues(version)) return { path, version: version!.join(".") };

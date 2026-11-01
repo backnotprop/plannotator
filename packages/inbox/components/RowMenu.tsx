@@ -39,6 +39,7 @@ const LABELS: Record<RowMenuAction, { label: string; icon: IconName }> = {
   'copy-link': { label: 'Copy link', icon: 'link' },
   'copy-id': { label: 'Copy thread ID', icon: 'hash' },
   read: { label: 'Mark read', icon: 'checkCircle' },
+  'mark-unread': { label: 'Mark unread', icon: 'envelope' },
   unread: { label: 'Move back', icon: 'inbox' },
   archive: { label: 'Archive', icon: 'archive' },
 };
@@ -56,7 +57,7 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
  * the trigger), aimed at the row the right-click (or the platform's
  * context-menu key, or Shift+F10, on a focused row) lands on. Pin thread (or
  * Unpin thread) in its own group, then Copy thread, Copy link, Copy thread ID, then Mark
- * read (or Move back) and Archive where they apply.
+ * read (or Mark unread, or Move back) and Archive where they apply.
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
  * on the row (wherever focus was before the right-click); a write that takes
@@ -79,10 +80,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     buttonFor,
     // A row that left the rows on screen: the row now in its slot, else the first band.
     slotOf: () => ({ order: rowOrder(), fallback: () => body.current?.querySelector<HTMLElement>('button.ib-band') ?? null }),
-    // What a write (Mark read, Move back, Archive) changes on a row: once it differs, the write has landed.
+    // What a write (Mark read, Mark unread, Move back, Archive) changes on a row: once it differs, the write has landed.
     stateOf: (id) => {
       const row = props.rowOf(id);
-      return row ? `${row.section}|${row.read_at ?? ''}|${row.resolved_at ?? ''}` : '';
+      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}` : '';
     },
     disabled: props.disabled,
     held: props.held,
@@ -92,7 +93,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null) : [];
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
-  const writes = actions.filter((a) => a === 'read' || a === 'unread' || a === 'archive');
+  const writes = actions.filter((a) => a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
   const item = (action: RowMenuAction) => (
     <Menu.Item
       key={action}

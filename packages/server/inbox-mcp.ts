@@ -470,7 +470,8 @@ function replyResult(store: InboxStore, reply: InboxMessage, base: string, calle
   // it sent answers or skips on), each named by its message.
   const answered = replyAnsweredMessages(store, reply);
   const questions = answered.flatMap((id) => replyQuestions(store, id).map((q) => ({ message_id: id, ...q })));
-  const subject = store.threadSubject(reply.thread_id);
+  // The wake's title, for a client no connection wakes: with none (a plain reply in an unnamed thread) the lead reads whole.
+  const subject = store.agentTitle(reply, caller);
   // The files the person attached are named with their paths, as the wake names them.
   const body = inboxBodyForAgent(reply);
   const naming = namingHint(store, reply.thread_id, caller);
@@ -621,10 +622,10 @@ export async function sendProject(
  */
 export async function threadReadScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject; projectIds: Set<string> }> {
   const project = await context.resolveProject(path);
-  const projectIds = new Set([project.id]);
+  const projectIds = new Set(context.store.projectGroup(project.id));
   const resolved = await context.projectRootOf?.(path).catch(() => null);
   const earlier = resolved?.worktree ? context.store.projectByRoot(resolved.worktree) : null;
-  if (earlier) projectIds.add(earlier.id);
+  if (earlier) for (const id of context.store.projectGroup(earlier.id)) projectIds.add(id);
   return { project, projectIds };
 }
 
@@ -639,8 +640,13 @@ const PROJECTS_INSIDE_MAX = 3;
 async function projectsInside(context: InboxMcpContext, path: string, own: InboxProject | null, includeResolved: boolean): Promise<{ name: string; root: string; threads: number }[]> {
   const folder = (await context.projectRootOf?.(path).catch(() => null))?.folder ?? path;
   const found: { name: string; root: string; threads: number }[] = [];
-  for (const candidate of context.store.listProjects()) {
-    if (candidate.id === own?.id || candidate.root === folder || !isInsideFolder(candidate.root, folder)) continue;
+  // Every folder: a combined project's may be the one inside `path`. One line for each group, and none for the caller's own.
+  const counted = new Set(own ? [context.store.canonicalProjectId(own.id)] : []);
+  for (const candidate of context.store.allProjects()) {
+    if (candidate.root === folder || !isInsideFolder(candidate.root, folder)) continue;
+    const group = context.store.canonicalProjectId(candidate.id);
+    if (counted.has(group)) continue;
+    counted.add(group);
     const rows = context.store.listRows({ projectId: candidate.id }).filter((row) => includeResolved || row.resolved_at === null || row.agent_after_archive === true);
     if (rows.length > 0) found.push({ name: candidate.name, root: candidate.root, threads: rows.length });
   }
@@ -660,8 +666,10 @@ function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | nul
  * its attachments, start there. Kept when it is a subfolder of the project,
  * when it lies in a linked worktree of the project's repository (a worktree
  * folds into the main repository's project, but the agent's files are in the
- * worktree, wherever on disk that is), or when it is the folder the
- * connection says the agent works in (`working`, `callerWorkingFolder`).
+ * worktree, wherever on disk that is), when it is the other folder of a
+ * combined project (a reply into a thread of the project it was combined with),
+ * or when it is the folder the connection says the agent works in (`working`,
+ * `callerWorkingFolder`).
  */
 async function sendBasePath(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject, working = false): Promise<string | null> {
   if (!projectPath || !isAbsolute(projectPath)) return null;
@@ -676,7 +684,9 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
   // stopped following a shell `cd`, that folder was the project_path, so its paths resolved there.
   if (working || isInsideFolder(real, project.root)) return real;
   const resolved = await context.projectRootOf?.(projectPath).catch(() => null);
-  return resolved && resolved.worktree !== null && resolved.root === project.root ? real : null;
+  if (resolved && resolved.worktree !== null && resolved.root === project.root) return real;
+  const found = await context.findProjects?.(projectPath).catch(() => null);
+  return found?.projects.some((other) => context.store.sameProject(other.id, project.id)) ? real : null;
 }
 
 /**
@@ -1196,7 +1206,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was listed; try the same call again.");
         }
         const { project, projectIds } = found
-          ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.map((p) => p.id)) }
+          ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
           : await threadReadScope(context, input.project_path);
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");

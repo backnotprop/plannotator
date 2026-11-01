@@ -41,7 +41,7 @@ import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME, readCodexEntry } from "./inbox-agents";
 import { createCodexPermissions } from "./inbox-launch-codex-permission";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchPermissionContext } from "./inbox-launch-host";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 
 /** The first Codex CLI tested for launch (the daemon commands, `thread/*`, `codex queue`). Below it the To row is not offered. */
@@ -213,14 +213,7 @@ export function codexTrustRoot(folder: string): string | null {
  * as one line, every control or invisible character dropped, Markdown's marks escaped, 300 characters at most.
  */
 export function codexTurnErrorNote(message: string): string {
-  const flat = message
-    // The zero-width joiner stays (it holds an emoji together).
-    .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const short = [...flat].length > 300 ? `${[...flat].slice(0, 299).join("").trimEnd()}…` : flat;
-  // Only marks the Inbox's inline Markdown both formats and unescapes.
-  const shown = short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+  const shown = launchNoteText(message, 300);
   return shown ? `Codex's turn ended with an error: ${shown}` : "Codex's turn ended with an error.";
 }
 
@@ -471,20 +464,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
     const launchId = root.launch!.id;
     if (existsSync(permissionContext.launchDir(launchId))) ctx.startLog(launchId, `turn ${String(turn.id)} failed: ${text.slice(0, 2000)}`);
     ctx.log(`Inbox launch ${launchId}: a Codex turn failed: ${text.slice(0, 200)}`);
-    try {
-      const { store } = permissionContext;
-      const latest = store.threadMessageIds(root.thread_id).at(-1) ?? root.id;
-      store.sendMessage({
-        project_id: root.project_id,
-        author: { kind: "agent", host: INBOX_CODEX_HOST, session: threadId, name: INBOX_CODEX_NAME },
-        body: codexTurnErrorNote(text),
-        reply_to: latest,
-        idempotency_key: `codex-error-${threadId}-${String(turn.id)}`,
-      });
-      permissionContext.onChange();
-    } catch (error) {
-      ctx.log(`Inbox launch ${launchId}: the turn's error note was not written: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const author = { host: INBOX_CODEX_HOST, session: threadId, name: INBOX_CODEX_NAME };
+    writeLaunchNote(permissionContext, root, { author, body: codexTurnErrorNote(text), key: `codex-error-${threadId}-${String(turn.id)}` }, ctx.log);
   };
 
   /** The daemon (started when `start` and not running) and the one connection. Null when it is not running and `start` is false. */
