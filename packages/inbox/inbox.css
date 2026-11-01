@@ -2302,6 +2302,8 @@ pre code.pn-code[data-keep-layout] {
 /* an image no larger than its thumbnail is drawn at its own size, never blown up (data-small, imageFitsWithin) */
 .ib-att-t .ib-fi.ib-thumb img[data-small] { object-fit: none; object-position: center; }
 .ib-att-t .ib-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The size line is one line, ending in an ellipsis if it must: a tile never grows a second line for it (a narrow tile, a hovered one). */
+.ib-att-t .ib-kd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-gallery { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 12px; }
 .ib-gal-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; text-align: left; color: inherit; }
 .ib-gal-frame { position: relative; display: block; width: 100%; max-height: 240px; overflow: hidden; border-radius: 9px; border: 1px solid var(--border); background-color: var(--muted); transition: border-color 120ms ease, box-shadow 120ms ease; }
@@ -4151,10 +4153,18 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
   --ib-sf-fi-s: var(--ib-soft-surfaces) var(--card);
   --ib-sf-open-o-s: var(--ib-soft-surfaces) 0;
   --ib-sf-open-fade-s: var(--ib-soft-surfaces) opacity 140ms ease-out;
-  /* While Open is hidden at rest it holds no room; it is back in the row the moment it shows (below). */
+  /* Open holds no room, at rest or shown: it lies over the tile's right edge (below). */
   --ib-sf-open-host-s: var(--ib-soft-surfaces) relative;
   --ib-sf-open-pos-s: var(--ib-soft-surfaces) absolute;
-  --ib-sf-open-inset-s: var(--ib-soft-surfaces) 0;
+  --ib-sf-open-top-s: var(--ib-soft-surfaces) 50%;
+  --ib-sf-open-y-s: var(--ib-soft-surfaces) -50%;
+  --ib-sf-open-right-s: var(--ib-soft-surfaces) 6px;
+  --ib-sf-open-h-s: var(--ib-soft-surfaces) 30px;
+  --ib-sf-open-pl-s: var(--ib-soft-surfaces) 22px;
+  --ib-sf-open-pr-s: var(--ib-soft-surfaces) 6px;
+  --ib-sf-open-pr-more-s: var(--ib-soft-surfaces) 30px;
+  --ib-sf-open-mr-s: var(--ib-soft-surfaces) 0px;
+  --ib-sf-kbd-hidden-s: var(--ib-soft-surfaces) 0;
   --ib-sf-beside-bg-s: var(--ib-soft-surfaces) color-mix(in oklch, var(--primary) 9%, var(--card));
   --ib-sf-beside-ring-s: var(--ib-soft-surfaces) inset 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent);
   --ib-sf-guide-s: var(--ib-soft-surfaces) color-mix(in oklch, var(--primary) 12%, var(--card));
@@ -4269,16 +4279,40 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-att-t .ib-add { color: var(--ib-sf-add-s, var(--success)); }
 .ib-att-t .ib-del { color: var(--ib-sf-del-s, var(--destructive)); }
 .ib-att-t .ib-open { color: var(--ib-calm-s, var(--primary)); opacity: var(--ib-sf-open-o-s, 1); transition: var(--ib-sf-open-fade-s, var(--ib-ui-fade)); }
-.ib-att-t:is(:hover, :focus-visible, .ib-open-beside) .ib-open { opacity: 1; }
+.ib-att-t:is(:hover, :focus-visible, .ib-open-beside) .ib-open, .ib-att-w:is(:hover, :focus-within) > .ib-att-t .ib-open { opacity: 1; }
 @media (hover: none) { .ib-att-t .ib-open { opacity: 1; } }
-/* The name keeps the tile's whole width while Open is hidden (Soft, a screen with hover): at rest Open is taken
-   out of the row, invisible over the tile's end. The moment it shows (the tile hovered or focused from the
-   keyboard, or the ⋯ beside it) it is back in the row, so the name is cut again before it and keeps its end
-   (the date, the extension) in either direction. Where Open always shows (the file open beside, a screen without
-   hover) it keeps its room, as today. Off, nothing here applies (each value is unset, today's). */
+/* Nothing in a tile moves or resizes when Open and the ⋯ show (Soft, a screen with hover). Open is out of the row
+   always: at rest invisible, hovered or focused from the keyboard (the tile, or the ⋯ beside it) shown over the
+   tile's right edge, on the tile's own colour (--ib-att-bg, the tile's background in each state) with a short
+   fade on its left where it meets the name. The name, the size line and the tile keep their boxes, so the name
+   is cut as much at rest as hovered and its tooltip (only for a cut name) stays true. The ⋯ lies on the same
+   patch. The shortcut keycap (the O of the newest file) fades out while Open shows, in the same place: Open
+   says the same thing, and the tile still names the key (aria-keyshortcuts). Where Open always shows (the file
+   open beside, a screen without hover) it keeps its room, as today. Off, nothing here applies (each value is
+   unset or falls back to today's). */
 @media (hover: hover) {
-  .ib-att-t:not(.ib-open-beside, :hover, :focus-visible, .ib-att-w:hover > *, .ib-att-w:focus-within > *) { position: var(--ib-sf-open-host-s); }
-  .ib-att-t:not(.ib-open-beside, :hover, :focus-visible, .ib-att-w:hover > *, .ib-att-w:focus-within > *) .ib-open { position: var(--ib-sf-open-pos-s); top: var(--ib-sf-open-inset-s); right: var(--ib-sf-open-inset-s); }
+  .ib-att-t:not(.ib-open-beside) { position: var(--ib-sf-open-host-s); --ib-att-bg: var(--ib-sf-bg-s); }
+  .ib-att-t:not(.ib-open-beside):hover { --ib-att-bg: var(--ib-sf-tile-hover-s); }
+  /* The pointer on the ⋯ (the tile's sibling) leaves the tile it lies on: it keeps its hover colour, so neither it nor Open's patch flickers. */
+  .ib-att-w:hover > .ib-att-t:not(.ib-open-beside, :hover) { --ib-att-bg: var(--ib-sf-tile-hover-s); background: var(--ib-sf-tile-hover-s, color-mix(in oklch, var(--primary) 4%, var(--card))); border-color: var(--ib-sf-line-s, color-mix(in oklch, var(--primary) 45%, var(--border))); }
+  .ib-att-t:not(.ib-open-beside):active { --ib-att-bg: var(--ib-sf-tile-active-s); }
+  .ib-att-t:not(.ib-open-beside) .ib-open {
+    position: var(--ib-sf-open-pos-s);
+    top: var(--ib-sf-open-top-s);
+    right: var(--ib-sf-open-right-s);
+    translate: 0 var(--ib-sf-open-y-s);
+    height: var(--ib-sf-open-h-s, auto);
+    line-height: var(--ib-sf-open-h-s, inherit);
+    padding-left: var(--ib-sf-open-pl-s, 14px);
+    padding-right: var(--ib-sf-open-pr-s, 0px);
+    background: linear-gradient(to right, transparent, var(--ib-att-bg) 16px);
+  }
+  .ib-att-w > .ib-att-t:not(.ib-open-beside) .ib-open { padding-right: var(--ib-sf-open-pr-more-s, 0px); margin-right: var(--ib-sf-open-mr-s, 28px); }
+  .ib-att-t:not(.ib-open-beside) .ib-att-kbd { transition: var(--ib-sf-open-fade-s, none); }
+  .ib-att-t:not(.ib-open-beside):is(:hover, :focus-visible) .ib-att-kbd, .ib-att-w:is(:hover, :focus-within) > .ib-att-t:not(.ib-open-beside) .ib-att-kbd { opacity: var(--ib-sf-kbd-hidden-s, 1); }
+}
+@media (hover: hover) and (prefers-reduced-motion: reduce) {
+  .ib-att-t .ib-open, .ib-att-t .ib-att-kbd { transition: none; }
 }
 .ib-att-t.ib-open-beside { border-color: var(--ib-sf-line-s, color-mix(in oklch, var(--primary) 55%, var(--border))); background: var(--ib-sf-beside-bg-s, color-mix(in oklch, var(--primary) 6%, var(--card))); box-shadow: var(--ib-sf-beside-ring-s, none); }
 .ib-att-t.ib-guide .ib-fi { background: var(--ib-sf-guide-s, color-mix(in oklch, var(--primary) 12%, transparent)); }
