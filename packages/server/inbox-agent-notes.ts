@@ -71,7 +71,11 @@ import {
  * line (INBOX_THREAD_RULE) after the follow-through line; v4 shipped in
  * 0.28.36 and is on users' disks. v6 (2026-10-31): v5 with the question line
  * reworded to keep the choices in their natural order (the owner: agents moved
- * their recommendation first); v5 is on users' disks. An earlier block Plannotator wrote is brought
+ * their recommendation first) and, right after the ask line, one line that a
+ * decision inside a report or summary still goes in a `:::question` block, one
+ * per decision (the owner: agents hand decisions over as prose); v5 is on
+ * users' disks, v6 was on no tag when this line went in, so it was amended in
+ * place. An earlier block Plannotator wrote is brought
  * up to date at the Inbox's next start (refreshInboxNotes) or when the note
  * is added again (`--notes`, the Settings switch); a block the person edited
  * never is. Every version's text is frozen as literals and its block's hash
@@ -150,13 +154,15 @@ const INBOX_NOTE_BODY_V5 = [
  * v5 (the owner, 2026-10-29): one thread per work stream, the one wording of
  * INBOX_THREAD_RULE (a literal too, held equal by the same test). v6 (the
  * owner, 2026-10-31): choices stay in their natural order; only the
- * `Recommended:` line marks the pick, never its place.
+ * `Recommended:` line marks the pick, never its place; a decision inside a
+ * report still goes in its own `:::question` block.
  */
 export const INBOX_NOTE_BODY = [
   "## Plannotator Inbox",
   "",
   "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
   "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
   "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
   "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
   "One thread per work stream, unless the person says otherwise.",

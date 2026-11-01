@@ -6334,3 +6334,67 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
   .ib-lo-phone .ib-lo-acts { flex-direction: column-reverse; align-items: stretch; padding-top: 14px; }
   .pn-inbox .ib-lo-phone .ib-lo-acts .ib-btn, dialog.ib-lo-phone .ib-lo-acts .ib-btn { min-height: 44px; justify-content: center; }
 }
+
+/* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
+   each host. The status shares the toolbar's row, so starting to listen moves nothing. */
+.ib-dtfoot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.ib-rfoot > .ib-dtfoot, .ib-fcomp-foot > .ib-dtfoot { flex: 1 1 0; margin-left: 6px; }
+.ib-dtfoot.ib-vlead { justify-content: flex-start; }
+/* Full screen's card has one short row: the status takes it from the chips until the words land. */
+.ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
+.ib-vline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-vline b { flex: none; font-weight: 600; color: var(--foreground); }
+.ib-vhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-vsp { flex: 1; }
+.ib-dttime { flex: none; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--foreground); }
+/* The bars give way in a tight row, oldest first (the newest are at the right), so the clock and the button never move. */
+.ib-vbars { flex: 0 1 auto; min-width: 0; overflow: hidden; display: flex; align-items: center; justify-content: flex-end; gap: 2px; height: 22px; }
+.ib-vbars > span { flex: none; width: 2px; height: 20px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); transform: scaleY(0.08); }
+.ib-vbars > span[data-v] { background: var(--primary); }
+.pn-inbox .ib-vmic { flex: none; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 28px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+@media (hover: hover) { .pn-inbox .ib-vmic:hover { background: var(--muted); color: var(--foreground); } }
+.pn-inbox .ib-vmic:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-vmic[data-state="live"], .pn-inbox .ib-vmic[data-state="live"]:hover { background: var(--primary); color: var(--primary-foreground); }
+.pn-inbox .ib-vmic[data-state="sending"] { color: var(--primary); cursor: default; }
+.pn-inbox .ib-vmic[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.pn-inbox .ib-vmic[aria-disabled="true"]:hover { background: none; color: var(--muted-foreground); }
+.pn-inbox .ib-cp-foot .ib-vmic { width: 34px; height: 34px; border-radius: 7px; }
+.pn-inbox .ib-fcomp .ib-vmic { width: 30px; }
+.pn-inbox .ib-dtlink { flex: none; padding: 0; border: 0; background: none; font: inherit; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-dtlink:hover { color: var(--foreground); }
+.pn-inbox .ib-dtlink.ib-vstrong { font-weight: 600; color: var(--foreground); }
+.ib-vnote { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 0 12px 2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-vnote.ib-verr .ib-vnote-t { color: var(--destructive); }
+.ib-vnote-t { flex: 1 1 260px; min-width: 0; }
+.ib-vnote-a { flex: none; display: inline-flex; align-items: baseline; gap: 12px; }
+.ib-vnote code { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-cfield[data-voice-live] .ib-rtext { caret-color: transparent; }
+/* Paint only (ComposerTokenTextarea's metric rule): zero net width, so the text never moves under them. */
+.ib-vcaret { display: inline-block; width: 2px; height: 1.15em; margin: 0 -1px 0 -1px; border-radius: 1px; background: var(--primary); vertical-align: -0.2em; transform: scaleY(0.3); }
+.ib-vcaret.ib-vstill { transform: none; opacity: 0.5; }
+.ib-vph { position: relative; }
+.ib-vph i { position: absolute; left: 3px; top: -0.15em; font-style: normal; white-space: nowrap; color: color-mix(in oklch, var(--muted-foreground) 62%, transparent); }
+mark.ib-vmark { color: inherit; background: color-mix(in oklch, var(--primary) 16%, transparent); border-radius: 3px; transition: background-color 1s ease-out; }
+mark.ib-vmark.ib-vfade { background: transparent; }
+@media (prefers-reduced-motion: reduce) { mark.ib-vmark { transition: none; } }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
+  .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
+  .pn-inbox .ib-dtlink { padding: 8px 2px; }
+  /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
+  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip) { display: none; }
+  .ib-vline { gap: 8px; }
+}
+/* The announcement (components/VoiceIntro.tsx): the list intro's dialog, its picture a reply box. */
+:root .ib-lo-frame.ib-vo-frame { width: 460px; height: auto; padding: 4px; overflow: visible; background: none; box-shadow: none; border-radius: 0; -webkit-mask-image: none; mask-image: none; }
+:root:not(.light) .ib-lo-frame.ib-vo-frame::after { content: none; }
+.ib-lo.ib-vo .ib-lo-art { padding: 24px 18px; }
+.ib-vo-picture { flex: 1; min-width: 0; color: var(--foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-vo-picture .ib-rbox { margin: 0; }
+.ib-vo-text { padding: 10px 12px 6px; min-height: 52px; line-height: 1.55; }
+.ib-lo-text p.ib-vo-route { margin-top: 10px; color: var(--foreground); }
+/* Settings → Voice. */
+.ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-vkeyctl { flex: 0 1 300px; min-width: 0; }
+.pn-inbox .ib-vkey { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line); border-radius: 7px; background: var(--background); color: var(--foreground); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
+.pn-inbox .ib-vkey:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
