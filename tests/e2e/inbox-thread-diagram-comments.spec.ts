@@ -26,6 +26,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -56,6 +57,9 @@ const BODY = [
 /** The fence opens on line 3, so `B` is declared on line 5 and `worker` (the dot fence opens on line 12) on line 14. */
 const B_LINE = 5;
 const WORKER_LINE = 14;
+
+/** How far the phone's swipe travels. */
+const SWIPE_PX = 200;
 
 const LONG = [...Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} of the notes above the diagram, long enough to take a few lines on a phone.`), '', BODY, '', ...Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} of the notes under the diagram, long enough to take a few lines on a phone.`)].join('\n\n');
 
@@ -295,12 +299,17 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await target.scrollIntoViewIfNeeded();
     const cdp = await context.newCDPSession(page);
     const scroller = page.locator('.ib-pbody');
+    // Real touches (phone-touch.ts): Input.synthesizeScrollGesture sends no moves on Linux, on a diagram or on plain text.
+    const hand = await finger(page, 'chromium');
 
-    // A swipe over the diagram scrolls the thread and opens nothing.
+    // A swipe over the diagram scrolls the thread and opens nothing. It starts on the diagram, with room left to scroll.
     const start = await centreOf(target);
     const before = await scroller.evaluate((el) => el.scrollTop);
-    await cdp.send('Input.synthesizeScrollGesture', { x: start.x, y: start.y, yDistance: -180, gestureSourceType: 'touch', speed: 800 });
-    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before + 60);
+    expect(await scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeGreaterThan(SWIPE_PX);
+    expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-diagram-canvas]') != null, start)).toBe(true);
+    await hand.down(start.x, start.y, 0, -SWIPE_PX);
+    await hand.up();
+    await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before + SWIPE_PX / 2);
     await expect(composer(page)).toHaveCount(0);
 
     // A sideways drag pans the diagram and opens nothing.
@@ -308,11 +317,8 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     const from = await centreOf(target);
     const svg = mermaid.locator('[data-diagram-svg]');
     const transform = await svg.evaluate((el) => (el as HTMLElement).style.transform);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from.x, y: from.y }] });
-    for (let step = 1; step <= 8; step++) {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + step * 6, y: from.y }] });
-    }
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await hand.down(from.x, from.y, 48, 0, 8);
+    await hand.up();
     await expect.poll(() => svg.evaluate((el) => (el as HTMLElement).style.transform)).not.toBe(transform);
     await expect(composer(page)).toHaveCount(0);
 
