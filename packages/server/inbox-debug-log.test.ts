@@ -200,6 +200,23 @@ describe("the log itself", () => {
     expect(lines(log.path).map((line) => [line.id, line.ev])).toEqual([[REQUEST, "req_start"]]);
   });
 
+  test("a method off the list logs as a fixed word: what a raw client sends as a method stays out of the file", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
+    roots.push(dir);
+    const log = createInboxDebugLog(dir);
+    const served = log.wrap(async () => new Response("ok"), () => true);
+    const threads = "http://127.0.0.1/api/inbox/threads";
+    // `new Request` turns an unknown token into GET, and Bun's server drops one today, so this one is built by hand.
+    const anyToken = { url: threads, method: "ZEBRAQUARTZ", headers: new Headers() } as unknown as Request;
+    await served(new Request(threads, { method: "PROPFIND" }), "local");
+    await served(anyToken, "local");
+    await served(new Request(threads, { method: "POST" }), "local");
+    const text = readFileSync(log.path, "utf8");
+    expect(text).not.toContain("PROPFIND");
+    expect(text).not.toContain("ZEBRAQUARTZ");
+    expect(lines(log.path).map((line) => line.method)).toEqual(["other", "other", "other", "other", "POST", "POST"]);
+  });
+
   test("a request that fails shows it failed, and the same failure reaches the caller", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-debug-")));
     roots.push(dir);

@@ -83,6 +83,10 @@ const WINDOW_EVENTS = new Set([
   "buffer_dropped",
 ]);
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
+/** A request's method as the log may hold it: a raw client can send any token, and one off the list is `other`. */
+export function debugMethod(method: string): string {
+  return METHODS.has(method) ? method : "other";
+}
 /** The names a failed fetch or body read can carry. Another name is dropped: the line still says it failed. */
 const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError", "SecurityError", "NotAllowedError", "NotSupportedError", "InvalidStateError", "SyntaxError", "Error"]);
 /** `nextHopProtocol` as browsers report it. */

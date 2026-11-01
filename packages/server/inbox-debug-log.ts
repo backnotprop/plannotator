@@ -6,7 +6,7 @@
  */
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { cleanWindowRecord, debugRoute, INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH, isDebugRequestId } from "@plannotator/shared/inbox/debug-log";
+import { cleanWindowRecord, debugMethod, debugRoute, INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_BODY_BYTES, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_ON_HEADER, INBOX_DEBUG_PATH, isDebugRequestId } from "@plannotator/shared/inbox/debug-log";
 
 /** Each of the two files. */
 export const INBOX_DEBUG_MAX_BYTES = 5 * 1024 * 1024;
@@ -86,7 +86,7 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
         serial += 1;
         const id = isDebugRequestId(given) ? given : `s${serial}`;
         const started = Date.now();
-        const base = { side: "server", id, method: req.method, route: debugRoute(pathname), via };
+        const base = { side: "server", id, method: debugMethod(req.method), route: debugRoute(pathname), via };
         append(line({ t: started, ev: "req_start", ...base }));
         let response: Response;
         try {
