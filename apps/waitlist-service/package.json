@@ -11,7 +11,7 @@
     "db:export": "wrangler d1 execute plannotator-waitlist --remote --command='SELECT * FROM waitlist ORDER BY created_at DESC' --json"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20261022.1",
     "wrangler": "^4.151.2"
   }
 }

@@ -8,7 +8,7 @@
     "deploy:cf": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241218.0",
+    "@cloudflare/workers-types": "^5.20261022.1",
     "wrangler": "^4.151.2"
   }
 }
