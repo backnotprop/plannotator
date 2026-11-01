@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
-import type { InboxTidyPlan, InboxTidyRun, InboxTidyRunAgent } from '@plannotator/core/inbox-types';
+import type { InboxTidyCombine, InboxTidyPlan, InboxTidyRun, InboxTidyRunAgent } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
 import { LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
+import { shortProjectNames } from '../projectLabels';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -27,6 +28,8 @@ export interface TidyController {
   run: InboxTidyRun | null;
   start: (sessions: readonly string[], key: string) => Promise<string | null>;
   refresh: () => void;
+  /** Combine each ticked pair, `from` into `into`, with one Undo. The window's: answers why it stopped, or null. */
+  combine?: (pairs: readonly InboxTidyCombine[]) => Promise<string | null>;
 }
 
 /** How long the window polls a run's progress. */
@@ -211,10 +214,21 @@ export function TidyMenu({
 
 const plural = (n: number, one: string, many = `${one}s`) => `${formatCount(n)} ${n === 1 ? one : many}`;
 
+/** One suggestion per project the others go into, read by the name it will have: alone, nothing clashes. */
+function combineGroups(pairs: readonly InboxTidyCombine[]) {
+  const groups = new Map<string, { into: InboxTidyCombine['into']; name: string; pairs: InboxTidyCombine[] }>();
+  for (const pair of pairs) {
+    const group = groups.get(pair.into.id) ?? { into: pair.into, name: shortProjectNames([pair.into]).get(pair.into.id) ?? pair.into.name, pairs: [] };
+    group.pairs.push(pair);
+    groups.set(pair.into.id, group);
+  }
+  return [...groups.values()];
+}
+
 /** The last run (when there is one), then the picker when there is something to ask. */
 function TidyPanel({ tidy, onDone }: { tidy: TidyController; onDone: () => void }) {
   const { plan, run } = tidy;
-  const offered = (plan?.agents.length ?? 0) > 0;
+  const offered = (plan?.agents.length ?? 0) > 0 || (plan?.combine?.length ?? 0) > 0;
   return (
     <>
       {run && <RunPanel run={run} />}
@@ -231,7 +245,8 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
   // One key per opening: a second press (or a retry) answers the same run.
   const [key] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `tidy-${Date.now()}-${Math.random()}`));
   if (!plan) return <div className="ib-tidy-top"><b>Tidy</b></div>;
-  if (plan.agents.length === 0)
+  const combine = plan.combine ?? [];
+  if (plan.agents.length === 0 && combine.length === 0)
     return (
       <div className="ib-tidy-top" data-tidy-empty="">
         <b>Tidy</b>
@@ -240,36 +255,65 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
     );
   const agents = plan.agents;
   const picked = agents.filter((a) => !off.has(a.session));
-  const allThreads = agents.every((a) => a.items.every((i) => i.thread_id !== null));
+  const pickedCombine = combine.filter((pair) => !off.has(pair.from.id));
+  const allThreads = combine.length === 0 && agents.every((a) => a.items.every((i) => i.thread_id !== null));
+  const tick = (ids: readonly string[], on: boolean) =>
+    setOff((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (on) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
   return (
     <>
       <div className="ib-tidy-top" data-below={below ? '' : undefined}>
         <b>Tidy</b>
         <span>{plural(plan.count, allThreads ? 'thread' : 'item')}</span>
       </div>
-      <ul className="ib-tidy-ags">
-        {agents.map((agent) => (
-          <li key={agent.session}>
-            <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
-              <input
-                type="checkbox"
-                checked={!off.has(agent.session)}
-                onChange={(event) =>
-                  setOff((current) => {
-                    const next = new Set(current);
-                    if (event.target.checked) next.delete(agent.session);
-                    else next.add(agent.session);
-                    return next;
-                  })
-                }
-              />
-              <HostMark host={agent.host} />
-              <span className="ib-tidy-nm">{agent.name}</span>
-              <em>{formatCount(agent.items.length)}</em>
-            </label>
-          </li>
-        ))}
-      </ul>
+      {agents.length > 0 && (
+        <ul className="ib-tidy-ags">
+          {agents.map((agent) => (
+            <li key={agent.session}>
+              <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
+                <input type="checkbox" checked={!off.has(agent.session)} onChange={(event) => tick([agent.session], event.target.checked)} />
+                <HostMark host={agent.host} />
+                <span className="ib-tidy-nm">{agent.name}</span>
+                <em>{formatCount(agent.items.length)}</em>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      {combine.length > 0 && (
+        <>
+          <div className="ib-tidy-sub" data-below={agents.length > 0 ? '' : undefined}>
+            Combine projects
+          </div>
+          <ul className="ib-tidy-ags">
+            {combineGroups(combine).map((group) => {
+              const ids = group.pairs.map((pair) => pair.from.id);
+              return (
+                <li key={group.into.id}>
+                  <label className="ib-tidy-ag ib-tidy-cmb" data-tidy-combine={group.into.id}>
+                    <input type="checkbox" checked={!ids.some((id) => off.has(id))} onChange={(event) => tick(ids, event.target.checked)} />
+                    <Icon name="folder" size={15} />
+                    <Tip content={[group.into.root, ...group.pairs.map((pair) => pair.from.root)].join('\n')}>
+                      <span className="ib-tidy-nm">
+                        <b dir="auto">{group.name}</b>
+                        <small>
+                          {formatCount(group.pairs.length + 1)} folders, {group.pairs[0]!.why}
+                        </small>
+                      </span>
+                    </Tip>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
       {error && (
         <p className="ib-tidy-err" role="alert">
           {error}
@@ -279,14 +323,22 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
         <button
           type="button"
           className="ib-btn ib-pri ib-sm"
-          disabled={picked.length === 0 || sending}
+          disabled={(picked.length === 0 && pickedCombine.length === 0) || sending}
           data-tidy-go=""
           onClick={async () => {
             setSending(true);
-            const failed = await tidy.start(
-              picked.map((a) => a.session),
-              key,
-            );
+            // The combines first: they are this window's, and an agent's prompt can wait for a retry.
+            let failed: string | null = null;
+            if (pickedCombine.length > 0) {
+              const names = new Map(combineGroups(pickedCombine).map((group) => [group.into.id, group.name]));
+              failed = (await tidy.combine?.(pickedCombine.map((pair) => ({ ...pair, into: { ...pair.into, name: names.get(pair.into.id) ?? pair.into.name } })))) ?? null;
+            }
+            if (!failed && picked.length > 0) {
+              failed = await tidy.start(
+                picked.map((a) => a.session),
+                key,
+              );
+            }
             setSending(false);
             if (failed) setError(failed);
             else onDone();

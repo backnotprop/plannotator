@@ -22,6 +22,8 @@ import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
+import { VoiceSettings } from './VoiceSettings';
+import { useVoiceSettings } from '../voice';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -35,6 +37,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   prompts: 'prompt',
   devices: 'phone',
   machines: 'system',
+  voice: 'mic',
   archived: 'archive',
   storage: 'disk',
   about: 'info',
@@ -630,6 +633,9 @@ function StoreTable({
                 <button type="button" className="ib-fold" onClick={() => setOpen(isOpen ? null : project.id)} aria-expanded={isOpen}>
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={13} /> {project.name}
                 </button>
+                {/* Each folder keeps its own size and Delete: Delete project never reaches a combined project's threads. */}
+                {project.combined_into && <div className="ib-store-note">In {project.combined_into}</div>}
+                {project.combined && <div className="ib-store-note">Deleting it leaves {project.combined.join(', ')}, as {project.combined.length === 1 ? 'its own project' : 'their own projects'}</div>}
               </td>
               <td className="ib-n ib-n-threads">{plural(project.threads.length, 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>
@@ -674,6 +680,7 @@ const LEDE: Record<SettingsSection, string> = {
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
   machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
+  voice: 'Speak a reply instead of typing it.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
@@ -770,8 +777,9 @@ export function SettingsPage(props: SettingsPageProps) {
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
+  const voice = useVoiceSettings();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0),
+    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -831,6 +839,8 @@ export function SettingsPage(props: SettingsPageProps) {
         return formatBytes(settings.store.bytes);
       case 'about':
         return settings.version;
+      case 'voice':
+        return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
         const on = [board?.on ? 'Board' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
@@ -914,6 +924,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'about':
         body = about;
+        break;
+      case 'voice':
+        body = <VoiceSettings />;
         break;
       case 'capabilities':
         body =

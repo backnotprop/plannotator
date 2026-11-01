@@ -58,7 +58,7 @@ import {
   stopSettle,
   type SettleSnapshot,
 } from './settle';
-import { plural, shortAgentName, tildePath } from './format';
+import { formatCount, plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
 import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
@@ -94,13 +94,16 @@ import { useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
 import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { VoiceIntro } from './components/VoiceIntro';
+import { adoptVoiceSettings } from './voice';
+import { useVoiceIntro } from './voiceIntro';
 import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
-import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, seenHeldInNew } from './markRead';
+import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import type { PinnedAction } from './components/PinnedRow';
@@ -131,7 +134,7 @@ import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
-import { pageOffersUpdates, sidebarUpdateNotice, updateForPage } from './updateNotice';
+import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
@@ -193,6 +196,8 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
+const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -205,6 +210,7 @@ const WHATS_NEW_RETRY_MS = 1000;
  * Opening a thread whose read failed (a dropped connection, a 5xx; not a 404): read it again after
  * these waits, then every last one, while it stays open. Before this the pane stayed blank until some
  * agent wrote anywhere in the Inbox (the event stream re-reads the open thread), seconds or forever.
+ * A failed re-read of a thread already on screen waits the same (liveThreadRetry).
  */
 export const THREAD_READ_RETRY_MS = [250, 1000, 2000, 4000, 5000] as const;
 /**
@@ -691,6 +697,15 @@ function Inbox() {
   const threadLoaded = useRef<InboxThread | null>(null);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
+  /**
+   * A re-read of the thread already on screen (a record's, a catch-up's) that failed: read again after
+   * THREAD_READ_RETRY_MS, until one lands or the thread closes or changes. `attempt`: the failures so far.
+   */
+  const liveThreadRetry = useRef<{ threadId: string; attempt: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const stopLiveThreadRetry = useCallback(() => {
+    if (liveThreadRetry.current) clearTimeout(liveThreadRetry.current.timer);
+    liveThreadRetry.current = null;
+  }, []);
   /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
   const focusThreadSubject = useRef(false);
   /** Try again on the placeholder: the open effect reads the thread at once. */
@@ -743,6 +758,8 @@ function Inbox() {
   const [restarting, setRestarting] = useState(false);
   // What this page may offer: nothing over the tailnet, where the update routes are local only.
   const pageUpdate = updateForPage(update, settings);
+  // What's new only reads release notes: this computer's pages and the owner's over the tailnet, never a guest's.
+  const pageWhatsNew = pageOffersWhatsNew(settings);
   // Checking for updates has failed for hours (packages/server/inbox-updates.ts): the sidebar's quiet row,
   // About's dot and the General row's line. Not on a page opened over the tailnet (About is local only there).
   const [checkFailing, setCheckFailing] = useState<UpdateCheckFailing | null>(null);
@@ -783,6 +800,7 @@ function Inbox() {
   const listIntroAsked = useRef(false);
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
+  const voiceIntroDueAtLoad = useRef(false);
   const tourThisLoad = useRef(false);
   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -834,6 +852,13 @@ function Inbox() {
   const toastDeadline = useRef(0);
   const toastLeft = useRef<number | null>(null);
   const [said, setSaid] = useState('');
+  /**
+   * The live stream is dead (liveStream.ts: silent past its window, and a reconnect brought nothing): the list's
+   * quiet "Reconnecting…" line, until the stream is heard again.
+   */
+  const [streamDead, setStreamDead] = useState(false);
+  /** When the live region last said "Reconnecting…": said once, and not again for a while (a flaky network). */
+  const reconnectSaidAt = useRef<number | null>(null);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
@@ -948,6 +973,8 @@ function Inbox() {
     litTimers.current = [];
   }, []);
   useEffect(() => clearLit, [clearLit]);
+  /** The thread a compose send just started, to light once its row is drawn (see the layout effect on the list order). One-shot: taken on the next commit, found or not. */
+  const [sentLight, setSentLight] = useState<{ thread: string } | null>(null);
   /** Clicking Inbox with a thread open: the close adopts the refresh's read instead of settling (refreshInbox). */
   const refreshPending = useRef(false);
   /** The refresh signal: the Inbox row's (or the list title's) refresh icon turns once. */
@@ -1003,6 +1030,10 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
+      // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
+      const held = latestRef.current;
+      if (held && next.serverSession === held.serverSession && next.cursor < held.cursor) return held;
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
@@ -1131,6 +1162,7 @@ function Inbox() {
         threadReadApplied.current = mine;
         threadLoaded.current = next.thread;
         wakeThreadRetry.current?.();
+        stopLiveThreadRetry();
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
@@ -1168,10 +1200,21 @@ function Inbox() {
         const refused = cause instanceof InboxApiError && cause.code === 'machine_conflict';
         if (missing) setThread(null);
         setThreadLoad({ threadId, state: refused ? 'refused' : missing ? 'missing' : 'failed', error: cause instanceof Error ? cause.message : String(cause), waiting });
+        // The thread is on screen already (the open effect retries a first read itself): this re-read is tried again,
+        // or what it would have brought (an agent's new message) waits until some other record re-reads the thread.
+        if (!missing && !refused && threadLoaded.current?.thread_id === threadId) {
+          const attempt = liveThreadRetry.current?.threadId === threadId ? liveThreadRetry.current.attempt : 0;
+          stopLiveThreadRetry();
+          const timer = setTimeout(() => {
+            if (routeRef.current.thread === threadId) void refreshThread(threadId);
+            else stopLiveThreadRetry();
+          }, THREAD_READ_RETRY_MS[Math.min(attempt, THREAD_READ_RETRY_MS.length - 1)]!);
+          liveThreadRetry.current = { threadId, attempt: attempt + 1, timer };
+        }
       }
       return null;
     }
-  }, [setThreadLoad]);
+  }, [setThreadLoad, stopLiveThreadRetry]);
 
   const refreshSettings = useCallback(async () => {
     try {
@@ -1179,6 +1222,7 @@ function Inbox() {
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedDiffStyle(next.diff_style);
+      adoptVoiceSettings(next.voice);
       setSettings(next);
       setSettingsReadFailed(false);
     } catch (cause) {
@@ -1462,6 +1506,18 @@ function Inbox() {
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
         onConnect: reportWindow,
+        // The stream went silent past its window (or the tab came back after it): read what a record would make the
+        // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
+        onCatchUp: () => {
+          void refreshList(false).then((next) => next && flushNotifications(next));
+          void refreshDecisions();
+          const open = routeRef.current.thread;
+          if (open) void refreshThread(open);
+          void refreshDrafts();
+          // A card record reads the Board: while it is open, it is read again too.
+          if (routeRef.current.page === 'board') void refreshCards();
+        },
+        onLive: (live) => setStreamDead(!live),
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
         // reconnect never does), and the open thread follows when it is that machine's. Its row moves once this Inbox
         // has read that machine's list again, which the `machines` frame says.
@@ -1600,8 +1656,10 @@ function Inbox() {
       cancelled = true;
       if (retry) clearTimeout(retry);
       wakeThreadRetry.current = null;
+      // Closed or changed: a failed re-read of this thread is not tried again.
+      stopLiveThreadRetry();
     };
-  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook]);
+  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry]);
   // The thread landed while focus was in its place: focus goes to its subject, never to the page.
   useLayoutEffect(() => {
     if (!focusThreadSubject.current || !thread || thread.thread_id !== route.thread) return;
@@ -1756,6 +1814,9 @@ function Inbox() {
   // is open and comes back on leaving, without writing the person's stored choice. ⌘B there opens it
   // for this visit only.
   const [settingsSidebar, setSettingsSidebar] = useState(false);
+  // The thread in full screen (`full` below) and its one way out (`leaveFull` below): Escape's ladder reads them.
+  const threadFullRef = useRef(false);
+  const leaveFullRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (route.page !== 'settings') setSettingsSidebar(false);
   }, [route.page]);
@@ -1782,7 +1843,12 @@ function Inbox() {
       if (selectionToolbarShowing()) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
+      // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
+      if (!now.guide && !now.artifacts && threadFullRef.current) {
+        leaveFullRef.current();
+        return;
+      }
       closeTo(now.guide ? { ...now, guide: null } : now.artifacts ? { ...now, artifacts: false } : { ...now, thread: null });
     };
     window.addEventListener('keydown', onKey);
@@ -1976,8 +2042,14 @@ function Inbox() {
     // started is their own action: it goes into Sent now (held.ts
     // addOwnThreads), the other rows sliding to make room, never behind "N new".
     const adopt = !routeRef.current.thread;
+    const at = routeRef.current;
     void refreshList(adopt, true).then((next) => {
-      if (!next || adopt) return;
+      if (!next) return;
+      // The new row may only be drawn by this read: the light starts in the commit that carries it. A person who went elsewhere meanwhile gets none.
+      const cur = routeRef.current;
+      const stayed = cur.page === at.page && cur.project === at.project && cur.thread === at.thread;
+      if (stayed) setSentLight({ thread: sent.threadId });
+      if (adopt) return;
       armSlide();
       setShown((current) => (current === null ? next.sections : addOwnThreads(current, next.sections, [sent.threadId])));
     });
@@ -2089,8 +2161,17 @@ function Inbox() {
   // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
   // when the thread closes, or when the person opens it.
   const [sidebarHeld, setSidebarHeld] = useState(false);
+  // The thread in full screen (the header's "Hide the sidebar and the list"): the sidebar and the list hide, without
+  // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
+  // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
+  // as full screen (`full` below), so widening it again returns to full screen.
+  const [threadFull, setThreadFull] = useState(false);
+  useEffect(() => {
+    if (!route.thread) setThreadFull(false);
+  }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld]);
+  // Full screen changes the sidebar's and the list's room without a route change: measured again too.
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -2139,6 +2220,20 @@ function Inbox() {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
   };
+  // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
+  // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
+  useEffect(() => {
+    if (!streamDead) {
+      // Live again: the region drops the words, saying nothing new (a screen reader that reads it later finds no stale state).
+      setSaid((current) => (current === 'Reconnecting…' ? '' : current));
+      return;
+    }
+    const at = reconnectSaidAt.current;
+    if (at !== null && Date.now() - at < RECONNECT_SAY_GAP_MS) return;
+    reconnectSaidAt.current = Date.now();
+    say('Reconnecting…');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
+  }, [streamDead]);
   /**
    * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
    * refreshes"): clicking Inbox, or the project folder the list shows, or the
@@ -2301,10 +2396,16 @@ function Inbox() {
     }
     if (!before) return;
     const { warn, ...copy } = markReadToast(before, place);
+    // A Mark read that stood (Mark unread took its look back) only got its look back: Undo takes it again, never a Move back.
+    const stood = (before.read_at ?? null) !== null;
     showToast({
       ...copy,
       icon: warn ? 'warn' : 'check',
-      onUndo: () => void markRead(threadId, false),
+      onUndo: () => {
+        if (!stood) return void markRead(threadId, false);
+        dismissToast();
+        void markUnread(threadId);
+      },
       ...(warn
         ? {
             onReply: () => {
@@ -2342,6 +2443,52 @@ function Inbox() {
         armSlide();
         setShown((current) => (current ? putRowBack(current, before, threadId) : current));
         say('Moved back.');
+      },
+    });
+  };
+
+  /**
+   * Mark unread (the owner's ask, 2026-10-31; markRead.ts `canMarkUnread`):
+   * the thread's latest agent message is new again, so its row is New and
+   * bold, as if the person had not opened it. Nothing is sent to the agent,
+   * and a Mark read stands, so Move back still reopens what it closed. From
+   * the open thread the thread closes, as a mail app's Mark unread does: left
+   * open, its next look would read it again, and the list shows the row back
+   * in New. Undo is a look capped at the message Mark unread took back, so it
+   * puts back exactly what was there and leaves anything that arrived since
+   * new. When the server wrote nothing (a stale row: the thread was new
+   * already) the row just shows what is true: no toast, nothing to undo.
+   */
+  const markUnread = async (threadId: string) => {
+    const before = rowOf(threadId);
+    let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
+    try {
+      written = await inboxApi.markUnread(threadId);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    if (!written.wrote) return;
+    if (routeRef.current.thread === threadId) {
+      if (fromCard) backToCard();
+      else close({ ...routeRef.current, thread: null, file: null });
+    }
+    showToast({
+      ...markUnreadToast(before ?? { subject: null }),
+      icon: 'unread',
+      onUndo: () => {
+        dismissToast();
+        void (async () => {
+          try {
+            await inboxApi.seen(threadId, written.through_seq);
+          } catch (cause) {
+            showError(cause);
+            return;
+          }
+          await afterWrite();
+          say('Read again.');
+        })();
       },
     });
   };
@@ -2540,6 +2687,7 @@ function Inbox() {
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
+    if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
@@ -2574,9 +2722,10 @@ function Inbox() {
     try {
       if (action === 'read') {
         const answer = await inboxApi.markProjectRead(projectId, newBatchId());
-        taken = answer.batch.read;
+        const looked = answer.batch.looked ?? [];
+        taken = [...answer.batch.read, ...looked];
         incomplete = answer.error?.message ?? null;
-        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read);
+        undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read, looked);
       } else {
         const answer = await inboxApi.archiveProject(projectId, newBatchId());
         taken = [...answer.batch.resolved, ...answer.batch.read];
@@ -2619,6 +2768,73 @@ function Inbox() {
         })();
       },
     });
+  };
+
+  /**
+   * The project menu's Rename… (a name) and Reset name (null): the project's
+   * `display_name` on the server, then the list read again, so the sidebar,
+   * the rows, search and the project's list all read the new name before the
+   * field closes. A refused name keeps the field open, with the toast.
+   */
+  const renameProject = async (projectId: string, name: string | null): Promise<boolean> => {
+    try {
+      await inboxApi.renameProject(projectId, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    await refreshList(false);
+    const now = latestRef.current?.projects.find((p) => p.id === projectId)?.name;
+    say(name === null ? `Name reset${now ? ` to ${now}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
+  /**
+   * Combine projects (approval "project-combine"): each `from` goes into its
+   * `into`. One toast with one Undo for the whole step (the button and `Z`),
+   * whichever of the rename warning or Tidy took it. Pairs that went through
+   * stay, and Undo takes them back, even when a later one was refused.
+   */
+  const combineProjects = async (pairs: readonly { from: string; into: string; intoName: string }[]): Promise<string | null> => {
+    const write = async (steps: readonly { project: string; into: string | null }[]) => {
+      const done: { project: string; into: string | null }[] = [];
+      for (const step of steps) {
+        try {
+          await inboxApi.combineProject(step.project, step.into);
+          done.push(step);
+        } catch (cause) {
+          return { done, failed: cause };
+        }
+      }
+      return { done, failed: null };
+    };
+    const { done, failed } = await write(pairs.map((pair) => ({ project: pair.from, into: pair.into })));
+    await refreshList(false);
+    const failure = failed === null ? null : failed instanceof Error ? failed.message : 'The projects did not change.';
+    if (done.length === 0) {
+      showToast(errorToast(failed, 'The projects did not change.'));
+      return failure;
+    }
+    const lead = done.length === 1 ? `Combined into ${pairs[0]!.intoName}` : `Combined ${formatCount(done.length)} projects`;
+    const undo = done.map((step) => ({ project: step.project, into: null }));
+    showToast({
+      icon: 'check',
+      lead,
+      onUndo: () => {
+        void (async () => {
+          const back = await write(undo);
+          await refreshList(false);
+          if (back.failed !== null) {
+            showToast(errorToast(back.failed, 'The projects did not change.'));
+            return;
+          }
+          dismissToast();
+          say('Combine undone.');
+        })();
+      },
+    });
+    say(`${lead}.`);
+    return failure;
   };
 
   /**
@@ -2766,6 +2982,8 @@ function Inbox() {
         handle: () => {
           const now = routeRef.current;
           if (now.page !== 'inbox') leave({ page: 'inbox', project: null, thread: null });
+          // The list is hidden under a thread in full screen: the list comes back so its row can take focus.
+          if (threadFullRef.current) leaveFullRef.current();
           const open = now.page === 'inbox' ? now.thread : null;
           focusSoon([...(open ? [`.ib-main .ib-lbody [data-thread-id="${CSS.escape(open)}"]`] : []), '.ib-main .ib-lbody [data-thread-id]', '.ib-main .ib-lbody button.ib-band', '.ib-main .ib-empty h2', '.ib-main h1']);
         },
@@ -3026,6 +3244,11 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
+  // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
+  const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
+  useEffect(() => {
+    if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
+  }, [combinedHead]);
   const latestSections = latest?.sections ?? [];
   const latestRows = useMemo(() => new Map((latest?.sections ?? []).flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const)), [latest]);
   // Decision mode is on only while settings say so; with it off, nothing of it renders and nothing is read.
@@ -3124,6 +3347,7 @@ function Inbox() {
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
+    voiceIntroDueAtLoad.current = settings.voice?.intro_due === true;
   }
   const listIntroAtLoad = listIntroLatch.current;
   const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
@@ -3189,8 +3413,32 @@ function Inbox() {
     }, 700);
     return () => clearInterval(timer);
   }, [listIntroClaimed, listIntroPlaceFree]);
+  // The one-time voice announcement (voiceIntro.ts): last in the queue, so voice waits a load if another is due.
+  const voiceIntro = useVoiceIntro(
+    {
+      due: voiceIntroDueAtLoad.current,
+      local: listIntroLoad.local,
+      listLoaded: listIntroLoad.listLoaded,
+      firstRun: listIntroLoad.firstRun,
+      listIntroDue: listIntroLoad.due,
+      tourThisLoad: listIntroLoad.tourThisLoad,
+      otherDialogThisLoad: listIntroLoad.otherDialogThisLoad,
+      othersSettled: listIntroLoad.othersSettled,
+      updating: listIntroLoad.updating,
+    },
+    listIntroClear,
+    `${route.thread}|${route.project}|${route.machine}`,
+    listIntroHeldBack,
+  );
   // The notification lines wait for it too, as for the other one-time dialogs, and stand down while it is due here.
-  const linesFree = askLinesFree && (!listIntroWant || listIntroDecided) && listIntro !== 'open' && listIntro !== 'claimed';
+  const linesFree =
+    askLinesFree &&
+    (!listIntroWant || listIntroDecided) &&
+    listIntro !== 'open' &&
+    listIntro !== 'claimed' &&
+    (!voiceIntro.wanted || voiceIntro.decided) &&
+    voiceIntro.stage !== 'open' &&
+    voiceIntro.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).filter((section) => section.threads.length > 0).map((section) => ({ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }))
@@ -3630,6 +3878,26 @@ function Inbox() {
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
+  // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
+  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  threadFullRef.current = full;
+  // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
+  // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
+  // does not stack over the list it was asked to show.
+  const holdSidebarIfTight = () => {
+    const root = rootRef.current;
+    if (!root || !sidebarOpen) return;
+    const width = root.getBoundingClientRect().width;
+    const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
+    const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
+    if (width >= room && width - sidebar < room) setSidebarHeld(true);
+  };
+  // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
+  const leaveFull = () => {
+    holdSidebarIfTight();
+    setThreadFull(false);
+  };
+  leaveFullRef.current = leaveFull;
   const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -3722,6 +3990,23 @@ function Inbox() {
   // left the rows on screen (for folded Quiet) hands it to the row now in its
   // slot; Show (whose line goes away) hands it to the first row it brought in.
   const listOrder = useRef<string[]>([]);
+  // A compose send's thread, lit once (the Show light, no new motion) when its row is on screen in this commit. A row
+  // that is not (another project or filter, a covered list) gets nothing, now or later.
+  useLayoutEffect(() => {
+    if (!sentLight) return;
+    setSentLight(null);
+    const body = listBody(rootRef.current);
+    if (!body || !rowElement(body, sentLight.thread)) return;
+    clearLit();
+    const ids = new Set([sentLight.thread]);
+    // A slide armed for this commit (below) plays first, as for Show.
+    const start = slideFrom.current ? SHOW_LIT_AFTER_SLIDE_MS : 0;
+    setLit(new Set());
+    litTimers.current.push(
+      setTimeout(() => setLit(ids), start),
+      setTimeout(() => setLit(new Set()), start + SHOW_LIT_MS),
+    );
+  }, [sentLight, clearLit]);
   // The last order that drew the open thread's row, kept when that row leaves the rows on screen: J / K step from its slot.
   const openSlot = useRef<{ thread: string; order: string[] } | null>(null);
   const focusAfterShow = useRef(false);
@@ -3938,8 +4223,9 @@ function Inbox() {
             onCheckNow={() => void checkNow()}
             onToggle={(change) => void saveUpdateSwitches(change)}
             update={pageUpdate}
+            updates={pageOffersUpdates(settings)}
             onUpdate={pressUpdate}
-            onWhatsNew={openWhatsNew}
+            onWhatsNew={pageWhatsNew ? openWhatsNew : undefined}
             where={
               settings
                 ? { data: tildePath(settings.data_dir, settings.home), mcpUrl: settings.mcp_url, mcpCommand: shellLine(settings.mcp_command) }
@@ -3970,7 +4256,7 @@ function Inbox() {
       <WhatsNewPage
         model={whatsNew}
         error={whatsNewError}
-        update={update}
+        update={pageUpdate}
         onBack={() => pageBackRef.current()}
         onUpdate={pressUpdate}
         onTakeTour={
@@ -4075,6 +4361,8 @@ function Inbox() {
   } else {
     main = (
       <>
+        {/* In full screen the list stays drawn, hidden (inbox.css `data-thread-full`): J/K and G I read its order, and
+            its scroll stays where it was. */}
         {!fileOpen && !fromCard && (
         <InboxList
           scope={route.project}
@@ -4122,13 +4410,22 @@ function Inbox() {
           }}
           onOpen={openRow}
           onMarkRead={(row) => void markRead(row.thread_id, true)}
+          onMarkUnread={(row) => void markUnread(row.thread_id)}
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           pinned={pinsOn ? pinnedIds : undefined}
-          tidy={listTidy}
+          tidy={{
+            ...listTidy,
+            combine: async (pairs) => {
+              const failed = await combineProjects(pairs.map((pair) => ({ from: pair.from.id, into: pair.into.id, intoName: pair.into.name })));
+              listTidy.refresh();
+              return failed;
+            },
+          }}
           onSearch={(opener) => openSearch(opener)}
           onCompose={(opener) => openCompose({}, opener)}
           phone={phone}
+          reconnecting={streamDead}
           empty={
             projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">
@@ -4182,6 +4479,7 @@ function Inbox() {
             onRunChanged={() => void refreshThread(thread.thread_id)}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
+            onMarkUnread={() => void markUnread(thread.thread_id)}
             onAck={(messageId, on, agent) => void acknowledge(thread.thread_id, messageId, on, agent)}
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
@@ -4277,19 +4575,18 @@ function Inbox() {
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
             phone={phone}
             stacked={stack.thread || !!fromCard}
+            threadAlone={full}
+            fullSidebar={sidebarOpen && !sidebarHeld}
+            onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
-              const root = rootRef.current;
-              if (root && sidebarOpen) {
-                const width = root.getBoundingClientRect().width;
-                const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-                const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
-                if (width >= room && width - sidebar < room) setSidebarHeld(true);
-              }
+              holdSidebarIfTight();
+              // ‹ Inbox beside a file opened from full screen ends full screen too: the list comes back.
+              setThreadFull(false);
               backFromFile.current = { thread: thread.thread_id, name: fileName, label: listTitle };
               closeTo({ ...routeRef.current, file: null });
             }}
@@ -4309,6 +4606,8 @@ function Inbox() {
       data-enter={tourOn ? undefined : (entered.current ?? undefined)}
       // The tour draws its stacked layouts itself (tour/Tour.tsx): the window's stacking rules stay out of it.
       data-stack={!tourOn && (stack.thread || stack.file) ? [stack.thread && 'thread', stack.file && 'file'].filter(Boolean).join(' ') : undefined}
+      // The thread in full screen: the list is hidden under it (inbox.css), not taken off the page.
+      data-thread-full={full ? '' : undefined}
       data-tour={tourOn ? String(tourState.step) : undefined}
     >
       {tourOn && (
@@ -4324,10 +4623,16 @@ function Inbox() {
       <SidebarShell
         className="ib-shell"
         toggleNotice={sidebarToggleNotice}
-        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld}
+        open={route.page === 'settings' ? settingsSidebar : sidebarOpen && !fileOpen && !sidebarHeld && !full}
         onOpenChange={(next) => {
           if (routeRef.current.page === 'settings') {
             setSettingsSidebar(next);
+            return;
+          }
+          // ⌘B in full screen leaves it (the sidebar and the list come back) and keeps the person's stored choice. Not
+          // while a file is open from it: closing the file comes back to the thread in full screen.
+          if (next && full && !fileOpen) {
+            leaveFull();
             return;
           }
           setSidebarHeld(false);
@@ -4362,10 +4667,14 @@ function Inbox() {
             projectCounts={projectCounts}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
+            onProjectRename={renameProject}
+            onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
+            announce={say}
             // Not on a page opened over the tailnet: the update routes answer 403 local_only there.
             update={pageUpdate}
             restarting={restarting}
-            updated={updated}
+            // The quiet "What's new in X" link: this computer's pages and the owner's over the tailnet, not a guest's.
+            updated={pageWhatsNew ? updated : null}
             onSearch={(opener) => openSearch(opener)}
             onCompose={(opener) => openCompose({}, opener)}
             pins={pinRows}
@@ -4454,6 +4763,36 @@ function Inbox() {
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}
+        />
+      )}
+      {voiceIntro.stage === 'open' && (
+        <VoiceIntro
+          phone={phone}
+          onTurnOn={(phonesOnly) => {
+            voiceIntro.close();
+            void inboxApi
+              .saveVoice({ on: true, phones_only: phonesOnly })
+              .then((saved) => adoptVoiceSettings(saved.voice))
+              // The dialog never comes back: Settings is the way on from here.
+              .catch(() =>
+                showToast(
+                  {
+                    icon: 'warn',
+                    lead: 'Voice isn’t on',
+                    detail: 'The setting wasn’t saved. You can turn it on in Settings.',
+                    action: {
+                      label: 'Voice settings',
+                      onPress: () => {
+                        dismissToast();
+                        window.location.hash = '#settings/voice';
+                      },
+                    },
+                  },
+                  8000,
+                ),
+              );
+          }}
+          onKeep={voiceIntro.close}
         />
       )}
       {soundDialog === 'open' && settings && (

@@ -17,7 +17,10 @@
  * read is failing the thread's place says so and offers Try again, which
  * reads at once and, holding focus, hands it to the thread's subject; opening
  * another thread or closing stops the retries; a thread the server does not
- * have (404) says so with Close and is not read again.
+ * have (404) says so with Close and is not read again. And once the thread is
+ * on screen, a record's re-read that fails (it used to leave the agent's new
+ * message off screen until another record came) is read again on the same
+ * waits until it lands, then stops; closing stops it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -76,7 +79,17 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-const TESTS = 6;
+/** An agent writes in the store (the window does not hear it until the stream is poked). */
+async function agentSends(body: string, reply_to: string): Promise<string> {
+  (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_late', body, reply_to } })}\n`);
+  (child!.stdin as import('bun').FileSink).flush();
+  return (JSON.parse(await readLine()) as { sent: string }).sent;
+}
+
+/** The stand-in stream's `record` frame, as a store line would send it. */
+let pokeStream: (() => void) | null = null;
+
+const TESTS = 7;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -133,10 +146,12 @@ beforeEach(() => {
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
-  // The event stream is a stand-in that never fires: no store line re-reads the open thread here.
+  // The event stream is a stand-in that fires only when a test pokes it: no store line re-reads the open thread here.
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
-    addEventListener() {}
+    addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+      if (type === 'record') pokeStream = () => listener({ data: '' } as MessageEvent<string>);
+    }
     close() {}
   };
   savedMatchMedia = window.matchMedia;
@@ -160,6 +175,7 @@ afterEach(() => {
   root = null;
   host = null;
   globalThis.fetch = savedFetch;
+  pokeStream = null;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   window.matchMedia = savedMatchMedia;
 });
@@ -278,6 +294,41 @@ test('opening another thread, or closing, stops the retries', async () => {
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
   await until(() => waiting(el) === null, 'the thread closed');
+  const atClose = threadReads.length;
+  await wait(THREAD_READ_RETRY_MS[1] + THREAD_READ_RETRY_MS[2] + 300);
+  expect(threadReads.length).toBe(atClose);
+}, 15000);
+
+test("a record's re-read of the open thread that fails is read again until it lands, then stops; closing stops it", async () => {
+  if (!hasDom) return;
+  const el = renderAt(`#thread=${world.waiting}`);
+  await until(() => pane(el, world.waiting) !== null && pokeStream !== null, 'the thread');
+  await wait(300);
+  // An agent writes in the open thread; the record's re-read fails twice (a dropped connection, a 500).
+  const body = `Canary at 25%; error rate flat (${Date.now()}).`;
+  await agentSends(body, world.waiting);
+  const before = threadReads.length;
+  failures = ['reset', 500];
+  act(() => pokeStream!());
+  // No other record, no click: the message is on screen after the waits (250 ms, then 1 s).
+  await until(() => pane(el, world.waiting)?.textContent?.includes(body) === true, "the agent's message", THREAD_READ_RETRY_MS[0] + THREAD_READ_RETRY_MS[1] + 2500);
+  expect(threadReads.length - before).toBe(3);
+  // The thread stayed on screen throughout: no wait line in its place.
+  expect(waiting(el)).toBeNull();
+  // Landed: no more reads.
+  await wait(THREAD_READ_RETRY_MS[2] + 300);
+  expect(threadReads.length - before).toBe(3);
+
+  // Failing for good, then closed: no read after the close.
+  failures = Array.from({ length: 50 }, () => 'reset' as const);
+  const second = threadReads.length;
+  act(() => pokeStream!());
+  await until(() => threadReads.length - second >= 2, 'the re-read and its first retry', 2000);
+  act(() => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => pane(el, world.waiting) === null, 'the thread closed');
   const atClose = threadReads.length;
   await wait(THREAD_READ_RETRY_MS[1] + THREAD_READ_RETRY_MS[2] + 300);
   expect(threadReads.length).toBe(atClose);

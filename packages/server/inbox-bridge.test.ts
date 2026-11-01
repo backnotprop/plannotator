@@ -102,7 +102,7 @@ describe("Inbox connection bridge", () => {
 
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatchObject({ type: "reply", id: replyId, thread_id: asked.thread_id, reply_to: asked.message_id, subject: "Ship the retry worker today?" });
+    expect(commands[0]).toMatchObject({ type: "reply", id: replyId, thread_id: asked.thread_id, reply_to: asked.message_id, subject: null });
     expect(commands[0]!.body).toContain("Yes, ship it.\n\nBut keep the flag off.");
     expect(commands[0]!.url).toBe(`${server.url}#thread=${asked.thread_id}`);
     // Another session's poll is not woken by it, and waits out its own hold.
