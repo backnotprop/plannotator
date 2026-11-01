@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { diagramTargetName, diagramTargetText } from '@plannotator/core/diagram-anchor';
 import { cn } from '../../lib/utils';
 import type { ScreenRect } from '../../utils/diagram-projection';
@@ -30,6 +30,7 @@ export function DiagramComposer({
   draft,
   anchorRect,
   hostWidth,
+  hostHeight = 0,
   sourceDirty,
   submitting,
   error,
@@ -41,6 +42,8 @@ export function DiagramComposer({
   draft: DiagramComposerDraft;
   anchorRect: ScreenRect;
   hostWidth: number;
+  /** The canvas's height, to keep the composer inside it. */
+  hostHeight?: number;
   sourceDirty: boolean;
   submitting: boolean;
   /** The last submit's failure, shown under the textarea. */
@@ -73,6 +76,14 @@ export function DiagramComposer({
   const canWrite = disabledReason === undefined && !unsavedPart;
   const rightFits = anchorRect.left + anchorRect.width + 12 + COMPOSER_WIDTH_PX <= hostWidth;
   const left = rightFits ? anchorRect.left + anchorRect.width + 12 : Math.max(0, anchorRect.left - COMPOSER_WIDTH_PX - 12);
+  // The canvas clips what overflows it: a part near the bottom of a short
+  // canvas (an inline diagram on a phone) lifts the composer until it all shows.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    setHeight(rootRef.current?.offsetHeight ?? 0);
+  });
+  const top = Math.max(0, hostHeight > 0 && height > 0 ? Math.min(anchorRect.top, hostHeight - height) : anchorRect.top);
 
   const canAskAI = onAskAI !== undefined && !asking && !submitting && text.trim() !== '';
   const askAI = async () => {
@@ -113,11 +124,12 @@ export function DiagramComposer({
 
   return (
     <div
+      ref={rootRef}
       data-diagram-composer=""
       role="dialog"
       aria-label={`Comment on ${diagramTargetText(target)}`}
-      className="pointer-events-auto absolute z-10 flex w-72 flex-col gap-1.5 rounded-md border border-border bg-card p-2 shadow-lg"
-      style={{ left, top: Math.max(0, anchorRect.top) }}
+      className="pointer-events-auto absolute z-10 flex w-72 max-w-full flex-col gap-1.5 rounded-md border border-border bg-card p-2 shadow-lg"
+      style={{ left, top }}
       onPointerDown={(event) => event.stopPropagation()}
       onPointerUp={(event) => event.stopPropagation()}
       onKeyDown={(event) => {

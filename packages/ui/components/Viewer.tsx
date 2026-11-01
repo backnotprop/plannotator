@@ -404,12 +404,14 @@ export interface ViewerProps {
    * Opt-in host capability, with `answerOnly`: the reader may comment on the
    * text. A text selection opens the selection toolbar, comment-only
    * (Comment and the one-click 👍; no Delete, no label picker), and its
-   * comment composer; `annotations` are drawn as highlights. Question cards
-   * are left out of selection (their text is not commented on), and nothing
-   * else of authoring comes back (no pinpoint, code-block toolbar, Global
-   * comment or Copy, no Vim). For a host that shows a message whose words
-   * can be commented on (the Plannotator Inbox's agent messages). Ignored
-   * without `answerOnly` and under `readOnly`. Absent → unchanged.
+   * comment composer; `annotations` are drawn as highlights. A rendered
+   * diagram takes comments on its parts the same way (`onAddAnnotation` gets
+   * a row with `diagramAnchor`). Question cards are left out of selection
+   * (their text is not commented on), and nothing else of authoring comes
+   * back (no pinpoint, code-block toolbar, Global comment or Copy, no Vim).
+   * For a host that shows a message whose words can be commented on (the
+   * Plannotator Inbox's agent messages). Ignored without `answerOnly` and
+   * under `readOnly`. Absent → unchanged.
    */
   textComments?: boolean;
   /**
@@ -1864,10 +1866,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
@@ -1880,10 +1882,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
