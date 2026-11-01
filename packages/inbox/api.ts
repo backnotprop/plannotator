@@ -30,6 +30,11 @@ import type {
   InboxUpload,
   InboxPromptsChange,
   InboxPromptsSettings,
+  InboxVoiceEngine,
+  InboxVoiceFailure,
+  InboxVoiceKeyState,
+  InboxVoiceSettings,
+  InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
@@ -334,6 +339,8 @@ export interface SettingsModel {
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };
+  /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
+  voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
@@ -1229,6 +1236,28 @@ export const inboxApi = {
   claimBoardIntro: () => post<{ show: boolean }>(inboxUrl('/board/intro'), {}),
   /** The one-time list options dialog: only the first claim ever gets `show: true` (once per machine). */
   claimListIntro: () => post<{ show: boolean; list_intro: { due: boolean } }>(inboxUrl('/list-intro'), {}),
+  /** The one-time voice announcement, as the list options dialog; the Inbox also checks this computer's Codex login. */
+  claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
+  saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
+  /** Only on this computer; the answer never holds the key. Null removes it. */
+  saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
+  voiceStatus: (fresh: boolean) => get<InboxVoiceStatus>(inboxUrl('/voice/status', fresh ? 'fresh=1' : undefined)),
+  /**
+   * The clip, to the Inbox that serves this window: never a `machine`, so audio is never forwarded, even for a thread
+   * on a linked machine. A failure is an answer here, not a throw; only an Inbox that can't be reached throws.
+   */
+  transcribeVoice: async (clip: Blob, signal: AbortSignal): Promise<{ text: string } | { code: InboxVoiceFailure | null; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] }> => {
+    const response = await fetch(inboxUrl('/voice/transcribe', pageSession ? `serverSession=${encodeURIComponent(pageSession)}` : undefined), {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav', Accept: 'application/json' },
+      body: clip,
+      signal,
+    });
+    const body = (await response.json().catch(() => ({}))) as { text?: unknown; code?: unknown; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] };
+    if (response.ok && typeof body.text === 'string') return { text: body.text };
+    const code = typeof body.code === 'string' && body.code.startsWith('voice_') ? (body.code as InboxVoiceFailure) : null;
+    return { code, engine: body.engine, reason: body.reason };
+  },
   /** The person looked at Dropped: an agent's drops there are seen. */
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
   pin: (threadId: string, pinned: boolean) =>

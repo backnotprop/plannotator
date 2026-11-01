@@ -94,6 +94,9 @@ import { useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
 import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
+import { VoiceIntro } from './components/VoiceIntro';
+import { adoptVoiceSettings } from './voice';
+import { useVoiceIntro } from './voiceIntro';
 import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
@@ -793,6 +796,7 @@ function Inbox() {
   const listIntroAsked = useRef(false);
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
+  const voiceIntroDueAtLoad = useRef(false);
   const tourThisLoad = useRef(false);
   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1213,6 +1217,7 @@ function Inbox() {
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedDiffStyle(next.diff_style);
+      adoptVoiceSettings(next.voice);
       setSettings(next);
       setSettingsReadFailed(false);
     } catch (cause) {
@@ -3277,6 +3282,7 @@ function Inbox() {
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
+    voiceIntroDueAtLoad.current = settings.voice?.intro_due === true;
   }
   const listIntroAtLoad = listIntroLatch.current;
   const listIntroClear = listIntroPageClear(route, { search: searchOpen, compose: compose !== null });
@@ -3342,8 +3348,32 @@ function Inbox() {
     }, 700);
     return () => clearInterval(timer);
   }, [listIntroClaimed, listIntroPlaceFree]);
+  // The one-time voice announcement (voiceIntro.ts): last in the queue, so voice waits a load if another is due.
+  const voiceIntro = useVoiceIntro(
+    {
+      due: voiceIntroDueAtLoad.current,
+      local: listIntroLoad.local,
+      listLoaded: listIntroLoad.listLoaded,
+      firstRun: listIntroLoad.firstRun,
+      listIntroDue: listIntroLoad.due,
+      tourThisLoad: listIntroLoad.tourThisLoad,
+      otherDialogThisLoad: listIntroLoad.otherDialogThisLoad,
+      othersSettled: listIntroLoad.othersSettled,
+      updating: listIntroLoad.updating,
+    },
+    listIntroClear,
+    `${route.thread}|${route.project}|${route.machine}`,
+    listIntroHeldBack,
+  );
   // The notification lines wait for it too, as for the other one-time dialogs, and stand down while it is due here.
-  const linesFree = askLinesFree && (!listIntroWant || listIntroDecided) && listIntro !== 'open' && listIntro !== 'claimed';
+  const linesFree =
+    askLinesFree &&
+    (!listIntroWant || listIntroDecided) &&
+    listIntro !== 'open' &&
+    listIntro !== 'claimed' &&
+    (!voiceIntro.wanted || voiceIntro.decided) &&
+    voiceIntro.stage !== 'open' &&
+    voiceIntro.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).filter((section) => section.threads.length > 0).map((section) => ({ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }))
@@ -4655,6 +4685,36 @@ function Inbox() {
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}
+        />
+      )}
+      {voiceIntro.stage === 'open' && (
+        <VoiceIntro
+          phone={phone}
+          onTurnOn={(phonesOnly) => {
+            voiceIntro.close();
+            void inboxApi
+              .saveVoice({ on: true, phones_only: phonesOnly })
+              .then((saved) => adoptVoiceSettings(saved.voice))
+              // The dialog never comes back: Settings is the way on from here.
+              .catch(() =>
+                showToast(
+                  {
+                    icon: 'warn',
+                    lead: 'Voice isn’t on',
+                    detail: 'The setting wasn’t saved. You can turn it on in Settings.',
+                    action: {
+                      label: 'Voice settings',
+                      onPress: () => {
+                        dismissToast();
+                        window.location.hash = '#settings/voice';
+                      },
+                    },
+                  },
+                  8000,
+                ),
+              );
+          }}
+          onKeep={voiceIntro.close}
         />
       )}
       {soundDialog === 'open' && settings && (
