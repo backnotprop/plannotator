@@ -215,6 +215,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
+  // The draft question or a phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind
+  // it. A take already on its way isn't a recording, and its words still land.
+  const footCovered = question || (picker && phone);
+  useEffect(() => {
+    if (footCovered && voice.view.phase !== 'sending') voice.session.covered();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [footCovered, voice.session]);
+
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(crypto.randomUUID());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
@@ -719,7 +727,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </span>
             </Tip>
           )}
-          <VoiceFoot voice={voice} phone={phone} lead />
           {/* On a desktop the To line already says "Draft · saved". */}
           {draft && !dirty && phone && (
             <span className="ib-cp-savedline" data-compose-saved="">
@@ -743,6 +750,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
               Save draft
             </button>
           )}
+          {/* The mic where the reply box has it, at the row's right end; Send, on the row, keeps the end itself. */}
+          <VoiceFoot voice={voice} phone={phone} />
           {!phone && (
             <button
               type="button"

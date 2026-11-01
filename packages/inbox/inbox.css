@@ -6412,7 +6412,11 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */
 .ib-dtfoot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .ib-rfoot > .ib-dtfoot, .ib-fcomp-foot > .ib-dtfoot { flex: 1 1 0; margin-left: 6px; }
-.ib-dtfoot.ib-vlead { justify-content: flex-start; }
+/* New message's row: the mic alone at rest, the row's room going to the spacer before it. Dictating, that room is the
+   status's, so the mic never moves, the bars have their width and nothing is drawn over the clock. */
+.ib-cp-foot .ib-dtfoot { flex: none; }
+.ib-cp-foot .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+.ib-cp-foot:has(.ib-vline) > :is(.ib-sp, .ib-cp-status) { display: none; }
 /* Full screen's card has one short row: the status takes it from the chips until the words land. */
 .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
 .ib-vline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
@@ -6441,6 +6445,8 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-vnote-t { flex: 1 1 260px; min-width: 0; }
 .ib-vnote-a { flex: none; display: inline-flex; align-items: baseline; gap: 12px; }
 .ib-vnote code { font-family: var(--font-mono); font-size: var(--ib-fs-11-5, 11.5px); }
+/* New message's field runs past what a phone's keyboard leaves: its note stays in sight, at the body's foot. */
+.ib-cp-field .ib-vnote { position: sticky; bottom: 0; z-index: 1; padding: 6px 0; background: var(--card); }
 .ib-cfield[data-voice-live] .ib-rtext { caret-color: transparent; }
 /* Paint only (ComposerTokenTextarea's metric rule): zero net width, so the text never moves under them. */
 .ib-vcaret { display: inline-block; width: 2px; height: 1.15em; margin: 0 -1px 0 -1px; border-radius: 1px; background: var(--primary); vertical-align: -0.2em; transform: scaleY(0.3); }
@@ -6451,11 +6457,13 @@ mark.ib-vmark { color: inherit; background: color-mix(in oklch, var(--primary) 1
 mark.ib-vmark.ib-vfade { background: transparent; }
 @media (prefers-reduced-motion: reduce) { mark.ib-vmark { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
+  .pn-inbox .ib-vmic, .pn-inbox .ib-cp-foot .ib-vmic { width: 36px; height: 36px; border-radius: 8px; }
   .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
   .pn-inbox .ib-dtlink { padding: 8px 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
-  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip) { display: none; }
+  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip), .ib-cp-foot:has(.ib-vline) > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]) { display: none; }
+  /* Send on New message's row (#2466): 12 px from the mic at rest and dictating alike, so the mic never moves. */
+  .pn-inbox .ib-cp-foot .ib-dtfoot + [data-compose-send], .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-dtfoot + [data-compose-send] { margin-left: 12px; }
   .ib-vline { gap: 8px; }
 }
 /* The announcement (components/VoiceIntro.tsx): the list intro's dialog, its picture a reply box. */
