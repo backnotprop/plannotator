@@ -22,9 +22,8 @@ export interface InboxDebugLog {
   accept(req: Request): Promise<Response>;
 }
 
-/** The body as text, read no further than `cap`; null past it. A chunked body has no Content-Length to check first. */
+/** The body as text, read no further than `cap`; null past it. Counted as it comes: a chunked body has no Content-Length. */
 async function readCapped(req: Request, cap: number): Promise<string | null> {
-  if (Number(req.headers.get("content-length") ?? 0) > cap) return null;
   if (!req.body) return "";
   const chunks: Uint8Array[] = [];
   let bytes = 0;
