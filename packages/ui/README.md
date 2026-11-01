@@ -591,6 +591,21 @@ const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: sa
 - **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through. To paint into a text part, return your own `<ChatMarkdown annotatable rootRef={ref} ... />`. `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
 - **Styles.** Nine tokens are not in `theme.css`; `components/chat/index.ts` lists them, and a host defines them in its own `@theme`. Add this folder and `components/ui/{button,textarea}.tsx` to your `@source`. Recipes live in `chatRecipes.tsx` so a `*.tsx` glob reaches them.
 
+### Inbox thread parts (`components/inbox-thread`; unreleased, in progress)
+
+The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete and styles ship (below).
+
+```tsx
+import { Icon, HostMark } from "@plannotator/ui/components/inbox-thread/icons";
+import { GuideCard } from "@plannotator/ui/components/inbox-thread/GuideCard";
+```
+
+- **In the folder so far.** `icons` (`Icon`, `HostMark`, `AuthorMark`, `TabGlyph`, `TailscaleMark`), `Tip` (`Tip`, `isTextCut`), `FileName`, `GuideCard`, `SkillsLine`, `ReaskNote`, and `reask` (the pure Re-ask rules).
+- **Host-neutral.** A part takes what it shows as props, over core's `InboxMessageWire`, `InboxAttachmentState` and related types. It makes no request and reads no route, hash, cookie or storage. `tests/inbox-thread-parts-host-neutral.test.ts` fails if one does.
+- **Tooltips.** `Tip` portals into the nearest `[data-pn-tooltip-root]`, so put that attribute on your root. Without a `TooltipProvider`, each `Tip` keeps its own 150 ms delay.
+- **Styles are not shipped yet.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. A later step generates `@plannotator/ui/inbox-thread.css` from that file at `prepack` (the pattern of `bridge-script.asset.js`), and hosts wrap the parts in a `.pn-inbox` root. Until then a part renders here without its look.
+- **Plannotator.** The parts' old paths in `packages/inbox` re-export them, and the Inbox passes nothing new. These parts add no Tailwind output: the built CSS of plan review, code review, the Inbox and `styles.css` does not change.
+
 ## Consuming it (e.g. from Workspaces)
 
 ```bash
