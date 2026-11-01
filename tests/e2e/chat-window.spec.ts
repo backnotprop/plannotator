@@ -30,11 +30,12 @@ const sent: string[] = [];
 const store = new ChatWindowStore({ onGeometryChange: (geometry) => reports.push(geometry) });
 const root = createRoot(document.getElementById('frame')!);
 let messages: unknown[] = [];
+let status = 'ready';
 function draw() {
   root.render(
     h('div', { id: 'host-tree', style: { position: 'absolute', inset: 0 } },
       h(ChatFrame, { store, label: 'Chat' }, () => [
-        h(ChatTranscript, { key: 't', messages, status: 'ready', agentName: 'Agent' }),
+        h(ChatTranscript, { key: 't', messages, status, agentName: 'Agent' }),
         h(ChatComposer, { key: 'c', value: 'hello', onChange: () => {}, onSend: () => sent.push('sent') }),
       ]),
     ),
@@ -43,7 +44,7 @@ function draw() {
 (window as any).__chat = {
   store, reports, sent,
   open() { flushSync(() => { store.setMinimized(false); draw(); }); },
-  show(next: unknown[]) { flushSync(() => { messages = next; draw(); }); },
+  show(next: unknown[], nextStatus = 'ready') { flushSync(() => { messages = next; status = nextStatus; draw(); }); },
 };
 `);
   const out = join(work, 'bundle.js');
@@ -79,12 +80,14 @@ const say = (id: string, role: string, text: string, state?: 'streaming' | 'done
   parts: [{ type: 'text', text, state }],
 });
 
-const show = (page: Page, messages: unknown[]) =>
-  page.evaluate((next) => {
+/** Draw, and lay it out: most of what a huge DOM costs comes after the commit. */
+const show = (page: Page, messages: unknown[], status = 'ready') =>
+  page.evaluate(([next, nextStatus]) => {
     const started = performance.now();
-    (window as any).__chat.show(next);
+    (window as any).__chat.show(next, nextStatus);
+    document.querySelector('[data-chat-window]')?.getBoundingClientRect();
     return performance.now() - started;
-  }, messages);
+  }, [messages, status] as const);
 
 const hostStanding = (page: Page) => page.evaluate(() => document.getElementById('host-tree') !== null);
 
@@ -234,6 +237,25 @@ test.describe('text that would stop the page', () => {
     }
   });
 
+  const openTags = (open: number) => Array.from({ length: open }, (_, index) => `<strong a=${index}>`).join('');
+  const rawHtml: [string, string][] = [
+    ['open tags rebuilt in each paragraph, 27 KB', `<div>${openTags(300)}</div>${'<p>x</p>'.repeat(3_000)}`],
+    ['open tags rebuilt in each paragraph, 92 KB', `<div>${openTags(1_000)}</div>${'<p>x</p>'.repeat(10_000)}`],
+    ['nested links', `<div>${'<a href=x><div>'.repeat(15_000)}`],
+    ['unknown tags', `<div>${'<x>'.repeat(80_000)}`],
+    ['nested tables', `<div>${'<table><tr><td>'.repeat(15_000)}`],
+    ['svg titles', `<div>${'<svg><title>'.repeat(18_000)}`],
+  ];
+  for (const [name, text] of rawHtml) {
+    test(`raw HTML of ${name} is words on the page`, async ({ page }) => {
+      await open(page);
+      const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
+      expect(took).toBeLessThan(1_000);
+      expect(await page.locator('[data-text-part] *').count()).toBeLessThan(10);
+      await expect(page.locator('[data-chat-window]')).toContainText('still here');
+    });
+  }
+
   test('a line of nothing but line ends draws a bounded number of elements', async ({ page }) => {
     await open(page);
     const took = await show(page, [say('a', 'assistant', '\n'.repeat(3_000_000))]);
@@ -243,7 +265,62 @@ test.describe('text that would stop the page', () => {
 });
 
 test.describe('a stream', () => {
-  const delta = (page: Page, text: string, state: 'streaming' | 'done') => show(page, [say('a', 'assistant', text, state)]);
+  const delta = (page: Page, text: string, state: 'streaming' | 'done') =>
+    show(page, [say('a', 'assistant', text, state)], state === 'streaming' ? 'streaming' : 'ready');
+
+  const costly: [string, string, string][] = [
+    ['a very wide table', `${'|a'.repeat(33_000)}\n${'|-'.repeat(33_000)}\n`, 'th'],
+    ['a square table', `${`|${' a |'.repeat(300)}\n|${' - |'.repeat(300)}\n`}${`|${' b |'.repeat(300)}\n`.repeat(300)}`, 'td'],
+    ['many short paragraphs', 'x\n\n'.repeat(80_000), 'p + p'],
+  ];
+  for (const [name, text, element] of costly) {
+    test(`of ${name} does not pay its draw on every delta, and ends in full`, async ({ page }) => {
+      await open(page);
+      await delta(page, text, 'streaming');
+      const later: number[] = [];
+      for (let more = 1; more <= 6; more += 1) later.push(await delta(page, `${text}${'word '.repeat(more)}`, 'streaming'));
+      expect(Math.max(...later)).toBeLessThan(50);
+      await expect(page.locator(`[data-text-part] ${element}`)).toHaveCount(0);
+      await delta(page, text, 'done');
+      expect(await page.locator(`[data-text-part] ${element}`).count()).toBeGreaterThan(0);
+    });
+  }
+
+  test('of a long plain answer stops growing its cost per delta', async ({ page }) => {
+    await open(page);
+    const text = 'A normal sentence of ordinary words.\n\n'.repeat(12_000);
+    const average = async (size: number) => {
+      let total = 0;
+      for (let step = 1; step <= 20; step += 1) total += await delta(page, text.slice(0, size + step * 32), 'streaming');
+      return total / 20;
+    };
+    await delta(page, text.slice(0, 200_000), 'streaming');
+    expect(await average(400_000)).toBeLessThan(50);
+    expect(await hostStanding(page)).toBe(true);
+  });
+
+  test('that ends with its part still streaming draws what arrived', async ({ page }) => {
+    await open(page);
+    await page.evaluate(() => {
+      const real = Date.now;
+      let now = 0;
+      Date.now = () => (now += 1_000);
+      (window as any).__chat.show([{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: '**one**', state: 'streaming' }] }], 'streaming');
+      Date.now = real;
+    });
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(0);
+    await show(page, [say('a', 'assistant', '**one**', 'streaming')], 'ready');
+    await expect(page.locator('[data-text-part] strong')).toHaveCount(1);
+  });
+
+  test('that ends under reduced motion keeps its partial text', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page);
+    await show(page, [say('u', 'user', 'Why?'), say('a', 'assistant', 'Half a sent', 'streaming')], 'streaming');
+    await expect(page.locator('[data-chat-window]')).not.toContainText('Half a sent');
+    await show(page, [say('u', 'user', 'Why?'), say('a', 'assistant', 'Half a sent', 'streaming')], 'error');
+    await expect(page.locator('[data-chat-window]')).toContainText('Half a sent');
+  });
 
   test('that spends its budget pays once, not on every delta', async ({ page }) => {
     await open(page);
@@ -261,7 +338,7 @@ test.describe('a stream', () => {
       const real = Date.now;
       let now = 0;
       Date.now = () => (now += 1_000);
-      (window as any).__chat.show([{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: '**one**', state: 'streaming' }] }]);
+      (window as any).__chat.show([{ id: 'a', role: 'assistant', parts: [{ type: 'text', text: '**one**', state: 'streaming' }] }], 'streaming');
       Date.now = real;
     });
     await expect(page.locator('[data-text-part] strong')).toHaveCount(0);
@@ -292,6 +369,20 @@ test.describe('a long line in an ordinary message', () => {
       await show(page, [say('a', 'assistant', text)]);
       await expect(page.locator('[data-text-part] h2')).toHaveText('Result');
       await expect(page.locator('[data-text-part] strong')).toHaveText('cause');
+    });
+  }
+
+  const prose = 'A line of ordinary prose.\n'.repeat(120);
+  const pipes: [string, string][] = [
+    ['a fenced line of pipes', `\`\`\`\n${'|'.repeat(1_200)}\n\`\`\`\n`],
+    ['fenced minified code', `\`\`\`js\n${'a||b;'.repeat(4_200)}\n\`\`\`\n`],
+  ];
+  for (const [name, fence] of pipes) {
+    test(`${name} leaves the rest formatted`, async ({ page }) => {
+      await open(page);
+      await show(page, [say('a', 'assistant', `## Title\n\n**bold**\n\n${prose}\n${fence}`)]);
+      await expect(page.locator('[data-text-part] h2')).toHaveText('Title');
+      await expect(page.locator('[data-text-part] strong')).toHaveText('bold');
     });
   }
 
@@ -334,6 +425,20 @@ test.describe('the window against a real frame', () => {
     await page.mouse.down();
     await page.mouse.move(x - 200, y - 100);
     await page.mouse.move(x, y);
+    await page.mouse.up();
+    expect(await page.evaluate(() => (window as any).__chat.store.geometry())).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
+  });
+
+  test('a drag the system cancels goes back to its start', async ({ page }) => {
+    await frameSize(page, 1000, 700);
+    await open(page);
+    const start = await box(page);
+    const x = start!.x + 120;
+    const y = start!.y + 14;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 150, y - 80);
+    await page.locator('[data-chat-drag-handle]').dispatchEvent('pointercancel', { pointerId: 1, bubbles: true });
     await page.mouse.up();
     expect(await page.evaluate(() => (window as any).__chat.store.geometry())).toEqual({ w: 420, h: 560, right: 16, bottom: 16 });
   });

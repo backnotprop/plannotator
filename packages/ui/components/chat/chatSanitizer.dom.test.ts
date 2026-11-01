@@ -10,6 +10,7 @@
  * Requires DOM (DOM_TESTS=1).
  */
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
+import { Lexer } from 'marked';
 import type * as Markdown from './chatMarkdown';
 
 const hasDom = typeof document !== 'undefined';
@@ -90,11 +91,25 @@ const bothRoles = [
 ] as const;
 
 describe.if(hasDom)('what agent text can write into a host\'s page', () => {
-  test('a link cannot be placed over the page: the host\'s classes are out of reach', () => {
-    const html = chatMarkdownHtml('<a href="https://evil.test/phish" class="fixed inset-0 z-50">x</a>');
-    expect(html).not.toContain('class');
-    expect(html).not.toContain('fixed');
-    expect(parsed(html).querySelector('a')?.getAttribute('href')).toBe('https://evil.test/phish');
+  test('a link cannot be placed over the page: raw HTML is words, not a link', () => {
+    const view = parsed(chatMarkdownHtml('<a href="https://evil.test/phish" class="fixed inset-0 z-50">x</a>'));
+    expect(view.querySelector('a')).toBeNull();
+    expect(view.textContent).toContain('class="fixed inset-0 z-50"');
+  });
+
+  test.each([
+    ['a title', '[x](https://example.test "a title")', ['href', 'rel', 'target']],
+    ['a code block\'s language', '```ts\nconst x = 1;\n```\n', []],
+    ['a list\'s start', '3. three\n4. four\n', []],
+  ])('of what markdown itself writes, %s does not pass the allowlist', (_name, text, kept) => {
+    expect([...new Set(attributesIn(chatMarkdownHtml(text)))].sort()).toEqual(kept);
+  });
+
+  test.each([
+    ['an image', '![tracker](https://evil.test/pixel.png)', 'img'],
+    ['a task box', '- [ ] task\n', 'input'],
+  ])('%s from markdown is taken out', (_name, text, tag) => {
+    expect(parsed(chatMarkdownHtml(text)).querySelector(tag)).toBeNull();
   });
 
   test('a heading dressed as a host dialog loses its classes and keeps its words', () => {
@@ -121,8 +136,9 @@ describe.if(hasDom)('what agent text can write into a host\'s page', () => {
     ['svg', '<svg onload="alert(1)"></svg>'],
     ['base', '<base href="https://evil.test/">'],
   ])('%s does not come through', (_name, input) => {
-    const html = chatMarkdownHtml(input);
-    expect(html).not.toMatch(/<(script|img|iframe|form|input|style|svg|base)\b|onclick|onerror|onload/i);
+    const view = parsed(chatMarkdownHtml(input));
+    expect(view.querySelector('script, img, iframe, form, input, style, svg, base')).toBeNull();
+    expect(attributesIn(view.innerHTML)).toEqual([]);
   });
 
   test.each(bothRoles)('a javascript: link from %s has no href', (_who, render) => {
@@ -137,10 +153,56 @@ describe.if(hasDom)('links', () => {
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
   });
 
-  test('agent text cannot choose how its own link opens', () => {
-    const link = parsed(chatMarkdownHtml('<a href="https://x.test" target="_self" rel="opener">x</a>')).querySelector('a')!;
-    expect(link.getAttribute('target')).toBe('_blank');
-    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  test('a raw link is not a link, so it cannot choose how it opens', () => {
+    const view = parsed(chatMarkdownHtml('<a href="https://x.test" target="_self" rel="opener">x</a>'));
+    expect(view.querySelector('a')).toBeNull();
+  });
+});
+
+describe.if(hasDom)('raw HTML in an answer', () => {
+  const openTags = (tag: string, count: number) =>
+    Array.from({ length: count }, (_, index) => `<${tag} a=${index}>`).join('');
+  const rebuilt = (tag: string, open: number, paragraphs: number) =>
+    `<div>${openTags(tag, open)}</div>${'<p>x</p>'.repeat(paragraphs)}`;
+
+  // Each of these builds a huge DOM from a short string, inside the sanitizer.
+  test.each([
+    ['open formatting tags rebuilt in each paragraph, 27 KB', rebuilt('strong', 300, 3_000)],
+    ['the same, 92 KB', rebuilt('strong', 1_000, 10_000)],
+    ['nested links', `<div>${'<a href=x><div>'.repeat(15_000)}`],
+    ['unknown tags', `<div>${'<x>'.repeat(80_000)}`],
+    ['nested tables', `<div>${'<table><tr><td>'.repeat(15_000)}`],
+    ['svg titles', `<div>${'<svg><title>'.repeat(18_000)}`],
+  ])('%s is words on the page, and never an element', (_name, text) => {
+    const html = chatMarkdownHtml(text);
+    expect(html).not.toMatch(/<(strong|div|table|svg|x)\b/);
+    expect(parsed(html).querySelector('strong, a, table, div')).toBeNull();
+    expect(parsed(html).textContent!.length).toBeGreaterThan(0);
+  });
+
+  test('inline and block alike keep their words', () => {
+    const view = parsed(chatMarkdownHtml('See <kbd>Cmd</kbd> **now**\n\n<details>\n<summary>more</summary>\n</details>\n'));
+    expect(view.querySelector('strong')?.textContent).toBe('now');
+    expect(view.textContent).toContain('<kbd>Cmd</kbd>');
+    expect(view.textContent).toContain('<summary>more</summary>');
+  });
+
+  test.each([['<br>'], ['<br/>'], ['<br />'], ['<BR>']])('%s in a table cell stays a line break', (tag) => {
+    const view = parsed(chatMarkdownHtml(`| a |\n| - |\n| one${tag}two |\n`));
+    expect(view.querySelector('td br')).not.toBeNull();
+    expect(view.textContent).not.toContain('<');
+  });
+
+  test('a line break tag cannot carry anything with it', () => {
+    const view = parsed(chatMarkdownHtml('one<br onclick="alert(1)">two'));
+    expect(view.querySelector('br')).toBeNull();
+    expect(view.textContent).toContain('onclick');
+  });
+
+  test('a person\'s line break stays the text they typed', () => {
+    const view = parsed(personMarkdownHtml('one<br>two'));
+    expect(view.querySelector('br')).toBeNull();
+    expect(view.textContent).toContain('<br>');
   });
 });
 
@@ -227,6 +289,32 @@ describe.if(hasDom)('text that would stop the page', () => {
     expect(view.querySelectorAll('tbody tr').length).toBe(1_000);
   });
 
+  test('a table past the limit leaves the rest of the message formatted', () => {
+    const view = parsed(chatMarkdownHtml(`## Result\n\n${table(500, 2_000)}\n**after**\n`));
+    expect(view.querySelector('h2')?.textContent).toBe('Result');
+    expect(view.querySelector('td')).toBeNull();
+    expect(view.querySelector('strong')?.textContent).toBe('after');
+  });
+
+  test('the budget still runs out while a link is drawn, after the tokens are done', () => {
+    let tokensDone = false;
+    const realLex = Lexer.prototype.lex;
+    const lex = spyOn(Lexer.prototype, 'lex').mockImplementation(function (this: Lexer, src: string) {
+      const tokens = realLex.call(this, src);
+      tokensDone = true;
+      return tokens;
+    });
+    const clock = spyOn(Date, 'now').mockImplementation(() => (tokensDone ? 1_000_000 : 0));
+    try {
+      expect(chatMarkdownHtml('[a](https://a.test)')).not.toContain('<a ');
+      tokensDone = false;
+      expect(chatMarkdownHtml('![a](https://a.test)')).toContain('![a]');
+    } finally {
+      clock.mockRestore();
+      lex.mockRestore();
+    }
+  });
+
   test.each([
     ['repeated 5,000 times', `[a]: https://example.test/${'a'.repeat(7_900)}\n\n${'[a] '.repeat(5_000)}`],
     ['with an address past any word limit', `[a]: <https://example.test/${'a'.repeat(200_000)}>\n\n${'[a] '.repeat(10_000)}`],
@@ -249,6 +337,15 @@ describe.if(hasDom)('text that would stop the page', () => {
     const view = parsed(html);
     expect(view.querySelectorAll('br').length).toBe(20_000);
     expect(view.textContent!.replaceAll(/\s/g, '').length).toBe(300_000);
+  });
+
+  test.each([
+    ['a lone carriage return', 'a\rb\rc'],
+    ['CRLF', 'a\r\nb\r\nc'],
+    ['a line feed', 'a\nb\nc'],
+  ])('plain text keeps its lines on %s', (_name, lines) => {
+    const html = chatMarkdownHtml(`${lines}${'x'.repeat(300_000)}`);
+    expect(parsed(html).querySelectorAll('br').length).toBe(2);
   });
 
   test('a message after one of these draws as usual, and a long honest one stays markdown', () => {
@@ -274,6 +371,24 @@ describe.if(hasDom)('a long line in an ordinary message', () => {
   ])('%s leaves the rest of the message formatted', (_name, text) => {
     const view = parsed(withStoppedClock(() => chatMarkdownHtml(text)));
     for (const tag of ['h2', 'strong', 'li']) expect(view.querySelector(tag)).not.toBeNull();
+  });
+
+  const prose = 'A line of ordinary prose.\n'.repeat(90);
+  test.each([
+    ['a fenced line of pipes', `\`\`\`\n${'|'.repeat(1_200)}\n\`\`\`\n`],
+    ['fenced minified code', `\`\`\`js\n${'a||b;'.repeat(4_200)}\n\`\`\`\n`],
+    ['a fenced delimiter row', `\`\`\`\n${'|-'.repeat(5_000)}\n${'row\n'.repeat(500)}\`\`\`\n`],
+    ['a line of pipes in prose', `${'|'.repeat(1_200)}\n`],
+  ])('%s with many lines around it leaves the message formatted', (_name, text) => {
+    const view = parsed(withStoppedClock(() => chatMarkdownHtml(`## Title\n\n**bold**\n\n${prose}\n${text}`)));
+    expect(view.querySelector('h2')?.textContent).toBe('Title');
+    expect(view.querySelector('strong')?.textContent).toBe('bold');
+  });
+
+  test('a run of spaces past the limit is literal text, and the rest stays formatted', () => {
+    const view = parsed(chatMarkdownHtml(`**held**${' '.repeat(1_100)}word\n\n**next**`));
+    expect(view.querySelector('p')?.textContent).toContain('**held**');
+    expect(view.querySelector('strong')?.textContent).toBe('next');
   });
 
   test('a long line stays whole in its code block', () => {
@@ -364,5 +479,39 @@ describe.if(hasDom)('a stream that spends its budget', () => {
     expect(withBudgetGone(() => render('<b>x</b> **y** z', true))).toContain('&lt;b&gt;');
     expect(render('<b>x</b> **y** z w', true)).toContain('&lt;b&gt;');
     expect(render('<b>x</b> **y** z w', false)).toContain('<strong>y</strong>');
+  });
+
+  const wideTable = `${'|a'.repeat(33_000)}\n${'|-'.repeat(33_000)}\n`;
+
+  test.each([
+    ['a table too costly to draw on every delta', wideTable, '<th>'],
+    // Few elements and a lot of HTML, because the host's DOM here is not a browser's.
+    ['paragraphs too costly to draw on every delta', `${'&'.repeat(7_000)} ${'&'.repeat(7_000)}\n\n`.repeat(5), '</p>\n<p>'],
+  ])('%s is held, and drawn in full when the stream ends', (_name, text, drawn) => {
+    const render = chatTextRenderer(false);
+    expect(withStoppedClock(() => render(text, true))).not.toContain(drawn);
+    expect(withStoppedClock(() => render(text, false))).toContain(drawn);
+  });
+
+  test('thousands of short paragraphs are held, however little they weigh as text', () => {
+    expect(chatTextRenderer(false)('x\n\n'.repeat(80_000), true)).not.toContain('<p>x</p>');
+  });
+
+  test('a held text does not redraw on every delta, only as it grows by a share', () => {
+    const render = chatTextRenderer(false);
+    const text = 'word '.repeat(60_000);
+    const held = render(text, true);
+    expect(render(`${text}more`, true)).toBe(held);
+    expect(render(`${text}${'more '.repeat(1_000)}`, true)).toBe(held);
+    const grown = `${text}${'more '.repeat(10_000)}`;
+    expect(parsed(render(grown, true)).textContent).toContain('more more');
+  });
+
+  test('a text past the length limit is held too, and comes back whole at the end', () => {
+    const render = chatTextRenderer(false);
+    const text = 'word '.repeat(60_000);
+    const held = render(text, true);
+    expect(render(`${text}end`, true)).toBe(held);
+    expect(parsed(render(`${text}end`, false)).textContent).toContain('end');
   });
 });

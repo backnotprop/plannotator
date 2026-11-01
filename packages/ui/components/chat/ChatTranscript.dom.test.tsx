@@ -204,13 +204,37 @@ describe.if(hasDom)('reduced motion', () => {
     expect(view.textContent).toContain('First sentence.');
   });
 
-  test('a turn stopped before its first sentence ended still says so', () => {
+  test.each([['ready'], ['error']] as const)(
+    'a turn that ended %s with its part still streaming shows what arrived',
+    (status) => {
+      reduced();
+      const view = render({
+        messages: [say('1', 'user', 'Why?'), say('2', 'assistant', 'First sent', 'streaming')],
+        stopped: new Set(['2']),
+        status,
+      });
+      expect(view.textContent).toContain('Stopped');
+      expect(view.textContent).toContain('First sent');
+    },
+  );
+
+  test('a stopped turn keeps its words while the next turn runs', () => {
     reduced();
     const view = render({
-      messages: [say('1', 'user', 'Why?'), say('2', 'assistant', 'First sent', 'streaming')],
-      stopped: new Set(['2']),
+      messages: [say('1', 'assistant', 'Half a sent', 'streaming'), say('2', 'user', 'Go on')],
+      status: 'submitted',
     });
-    expect(view.textContent).toContain('Stopped');
+    expect(view.textContent).toContain('Half a sent');
+  });
+
+  test('a host\'s own ChatMarkdown shows what arrived once the turn has ended', () => {
+    reduced();
+    const { ChatMarkdown } = transcriptModule!;
+    const view = render({
+      messages: [say('1', 'assistant', 'First sent', 'streaming')],
+      renderPart: (part) => <ChatMarkdown text={(part as unknown as { text: string }).text} streaming />,
+    });
+    expect(view.textContent).toContain('First sent');
   });
 });
 

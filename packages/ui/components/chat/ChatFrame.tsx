@@ -101,25 +101,34 @@ function startsGesture(event: React.PointerEvent): boolean {
   return event.button === 0 && event.isPrimary && !event.ctrlKey;
 }
 
-/** Follow one pointer on an element until it lifts. A second finger is ignored. */
+/** Follow one pointer on an element until it lifts. A second finger is ignored.
+ * A gesture the system cancels runs `onCancel`: it never finished, so it undoes. */
 function followPointer(
   element: HTMLElement,
   pointerId: number,
   onMove: (move: PointerEvent) => void,
+  onCancel: () => void,
 ): void {
   element.setPointerCapture(pointerId);
   const move = (event: PointerEvent): void => {
     if (event.pointerId === pointerId) onMove(event);
   };
-  const end = (event: PointerEvent): void => {
-    if (event.pointerId !== pointerId) return;
+  const stop = (): void => {
     element.removeEventListener('pointermove', move);
-    element.removeEventListener('pointerup', end);
-    element.removeEventListener('pointercancel', end);
+    element.removeEventListener('pointerup', up);
+    element.removeEventListener('pointercancel', cancel);
+  };
+  const up = (event: PointerEvent): void => {
+    if (event.pointerId === pointerId) stop();
+  };
+  const cancel = (event: PointerEvent): void => {
+    if (event.pointerId !== pointerId) return;
+    stop();
+    onCancel();
   };
   element.addEventListener('pointermove', move);
-  element.addEventListener('pointerup', end);
-  element.addEventListener('pointercancel', end);
+  element.addEventListener('pointerup', up);
+  element.addEventListener('pointercancel', cancel);
 }
 
 /** Did this event start on the title row itself? A menu opened from the header
@@ -239,14 +248,19 @@ export function ChatFrame({
     const from = drawn;
     const start = store.geometry();
     const max = maxSize();
-    followPointer(event.currentTarget, event.pointerId, (move) => {
-      resizeFrom(
-        from,
-        start,
-        Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, from.w + (startX - move.clientX))),
-        Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, from.h + (startY - move.clientY))),
-      );
-    });
+    followPointer(
+      event.currentTarget,
+      event.pointerId,
+      (move) => {
+        resizeFrom(
+          from,
+          start,
+          Math.max(CHAT_WINDOW_MIN.width, Math.min(max.width, from.w + (startX - move.clientX))),
+          Math.max(CHAT_WINDOW_MIN.height, Math.min(max.height, from.h + (startY - move.clientY))),
+        );
+      },
+      () => store.setWindowSize(start.w, start.h),
+    );
   };
 
   // Keyboard resize on the focused grip: arrows resize, Shift for big steps,
@@ -287,14 +301,19 @@ export function ChatFrame({
     const from = drawn;
     const start = store.geometry();
     const frame = frameBox();
-    followPointer(event.currentTarget, event.pointerId, (move) => {
-      moveFrom(
-        from,
-        start,
-        Math.max(0, Math.min(frame.width - from.w, from.right - (move.clientX - startX))),
-        Math.max(0, Math.min(frame.height - from.h, from.bottom - (move.clientY - startY))),
-      );
-    });
+    followPointer(
+      event.currentTarget,
+      event.pointerId,
+      (move) => {
+        moveFrom(
+          from,
+          start,
+          Math.max(0, Math.min(frame.width - from.w, from.right - (move.clientX - startX))),
+          Math.max(0, Math.min(frame.height - from.h, from.bottom - (move.clientY - startY))),
+        );
+      },
+      () => store.setWindowOffsets(start.right, start.bottom),
+    );
   };
 
   if (!shown) return null;

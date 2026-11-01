@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef } from 'react';
+import { createContext, memo, useContext, useEffect, useMemo, useRef } from 'react';
 import type * as React from 'react';
 
 import { usePrefersReducedMotion } from '../../hooks/usePrefersReducedMotion';
@@ -73,6 +73,11 @@ const BODY_PROSE = cn(
   '[&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold',
 );
 
+/** False once the turn around a text has ended. A part's own `state` cannot say
+ * so, because a stopped or failed turn can leave it `streaming`, and the person
+ * must then see what arrived, in full. */
+const TurnLiveContext = createContext(true);
+
 /** One text part as sanitized markdown, memoized on its text. */
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
@@ -103,9 +108,10 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   rootRef?: React.Ref<HTMLDivElement>;
 }) {
   const reducedMotion = usePrefersReducedMotion();
-  const shown = streaming && reducedMotion ? clipAtSentenceBoundary(text) : text;
+  const live = useContext(TurnLiveContext) && streaming;
+  const shown = live && reducedMotion ? clipAtSentenceBoundary(text) : text;
   const render = useMemo(() => chatTextRenderer(literalHtml), [literalHtml]);
-  const html = useMemo(() => render(shown, streaming), [render, shown, streaming]);
+  const html = useMemo(() => render(shown, live), [render, shown, live]);
   // One `{__html}` object per html string: React re-sets innerHTML whenever
   // that prop's identity changes, which would collapse a live selection.
   const inner = useMemo(() => ({ __html: html }), [html]);
@@ -291,12 +297,12 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   // push an assistant message with no parts without changing the status. The
   // whole blank gap is "a run is active and the answer shows nothing yet".
   const running = status === 'submitted' || status === 'streaming';
-  const clipping = usePrefersReducedMotion() && running;
+  const reducedMotion = usePrefersReducedMotion();
   const lastMessage = messages[messages.length - 1];
   const answerStarted =
     lastMessage !== undefined &&
     lastMessage.role === 'assistant' &&
-    chatTurnHasOutput(lastMessage, clipping);
+    chatTurnHasOutput(lastMessage, reducedMotion && running);
   const pending = running && !answerStarted && pendingLine !== false;
 
   // Follow the output: stick to the live edge, released by scrolling away,
@@ -321,9 +327,9 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
 
   // An assistant turn that has painted nothing yet would be a bare name row,
   // so it is dropped and the pending turn stands in its place.
-  const drawn = (message: ChatMessage<Part>): boolean =>
+  const drawn = (message: ChatMessage<Part>, live: boolean): boolean =>
     message.role === 'user' ||
-    (message.role === 'assistant' && chatTurnHasOutput(message, clipping));
+    (message.role === 'assistant' && chatTurnHasOutput(message, reducedMotion && live));
 
   return (
     <div
@@ -348,23 +354,28 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
       {messages.length === 0
         ? empty
         : messages.map((message, index) => {
+            // Only the last message can still be arriving.
+            const live = running && index === messages.length - 1;
             const custom = renderMessage?.(message, index);
-            if (custom !== undefined) return <Fragment key={message.id}>{custom}</Fragment>;
-            if (!drawn(message)) return null;
             return (
-              <ChatMessageView
-                key={message.id}
-                message={message}
-                agentName={agentName}
-                agentMark={agentMark}
-                userName={userName}
-                userMark={userMark}
-                stopped={stopped?.has(message.id) ?? false}
-                stoppedLabel={stoppedLabel}
-                indentContent={indentContent}
-                renderPart={renderPart}
-                footer={messageFooter?.(message)}
-              />
+              <TurnLiveContext.Provider key={message.id} value={live}>
+                {custom !== undefined ? (
+                  custom
+                ) : drawn(message, live) ? (
+                  <ChatMessageView
+                    message={message}
+                    agentName={agentName}
+                    agentMark={agentMark}
+                    userName={userName}
+                    userMark={userMark}
+                    stopped={stopped?.has(message.id) ?? false}
+                    stoppedLabel={stoppedLabel}
+                    indentContent={indentContent}
+                    renderPart={renderPart}
+                    footer={messageFooter?.(message)}
+                  />
+                ) : null}
+              </TurnLiveContext.Provider>
             );
           })}
       {pending && (

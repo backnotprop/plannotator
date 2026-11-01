@@ -157,6 +157,37 @@ describe.if(hasDom)('window limits', () => {
     expect([store.winW, store.winH]).toEqual([360, 420]);
   });
 
+  test.each([
+    ['a drag', () => handle()!],
+    ['a resize', () => grip()!],
+  ])('%s the system cancels goes back to its start, and says so', (_name, target) => {
+    const reports: unknown[] = [];
+    const store = openStore({ onGeometryChange: (geometry) => reports.push(geometry) });
+    mount(store);
+    const el = target();
+    capturable(el);
+    pointer(el, 'pointerdown', 500, 500);
+    pointer(el, 'pointermove', 400, 450);
+    pointer(el, 'pointercancel', 400, 450);
+    const start = { w: 420, h: 560, right: 16, bottom: 16 };
+    expect(store.geometry()).toEqual(start);
+    expect(reports.at(-1)).toEqual(start);
+
+    pointer(el, 'pointermove', 300, 300);
+    expect(store.geometry()).toEqual(start);
+  });
+
+  test('a second finger lifting by a cancel leaves the drag alone', () => {
+    const store = openStore();
+    mount(store);
+    const el = handle()!;
+    capturable(el);
+    pointer(el, 'pointerdown', 500, 500);
+    pointer(el, 'pointermove', 400, 500);
+    pointer(el, 'pointercancel', 400, 500, { pointerId: 2 });
+    expect(store.winRight).toBe(116);
+  });
+
   test('a press on a header button is not a drag', () => {
     const store = openStore();
     mount(store);
