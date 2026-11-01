@@ -9,6 +9,8 @@
     "./components/ai/*": "./components/ai/*.tsx",
     "./components/core/*": "./components/core/*.tsx",
     "./components/goal-setup/*": "./components/goal-setup/*.tsx",
+    "./components/inbox-thread/*": "./components/inbox-thread/*.tsx",
+    "./components/inbox-thread/reask": "./components/inbox-thread/reask.ts",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
     "./components/html-viewer": "./components/html-viewer/index.ts",
     "./components/diagram": "./components/diagram/index.ts",
