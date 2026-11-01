@@ -562,6 +562,50 @@ import { DocumentContents } from "@plannotator/ui/components/DocumentContents";
 - `TableOfContents` takes two optional seams: `scrollViewport`, the element a click scrolls (default: the `ScrollViewportProvider` context, as before), and `maxLevel` (default 3). Plan review passes neither and is unchanged.
 - Used by the Inbox's sheet (a phone, or where the rail yields) and the phone surface; plan review keeps `SidebarContainer`.
 
+### Floating chat window (`components/chat`; unreleased)
+
+A floating window, a transcript and a composer, as screen code only: the host owns the conversation, the transport and anything saved. It imports nothing from a backend and has no seam in `configurePlannotatorUI`; everything comes in as props.
+
+```tsx
+import { ChatComposer, ChatFrame, ChatTranscript, ChatWindowStore } from "@plannotator/ui/components/chat";
+
+const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: save, onOpen: load });
+
+<div className="relative isolate">
+  <ChatFrame store={store} label="Chat" header={() => <span>Chat</span>} onClose={close}>
+    {() => (
+      <>
+        <ChatTranscript messages={messages} status={status} agentName="Agent" />
+        <ChatComposer value={value} onChange={setValue} onSend={send} below={<span>docs/plan.md</span>} />
+      </>
+    )}
+  </ChatFrame>
+</div>
+```
+
+- **Frame.** `ChatFrame` is `absolute`, so its parent is the frame it floats in and is fitted to. Give that parent its own stacking context (`isolate`): the window is `z-40`. Under 392 px of width the window is forced fullscreen, because it cannot float there.
+- **Geometry.** The store holds what the person chose. What is drawn is fitted to the frame at render, so a frame that narrows for a moment changes neither the store nor what you save. `onGeometryChange` runs for each step of a person's drag or resize, so debounce it and flush on unload. It does not run for `initialGeometry`, for `restore`, or when the frame changes size. The store never touches storage.
+- **Keys.** The frame listens to no key. `useChatFrameKeys` is the opt-in map (Mod+J, Shift+Mod+J, Escape). `useChatFrameFocusReturn` returns focus to the element wearing `data-chat-launcher` when focus was in the window.
+- **Composer.** It is controlled and set `onChange` synchronously, or typing and IME input are lost. `onSend` runs while `busy` and with an empty box, so guard those. Enter does not bubble past the React root, so a bubble listener on `window` or `document` does not hear it; capture listeners and native listeners on ancestors still do. Other keys bubble as usual, so an app's own Escape handling still sees them. On a touch keyboard pass `sendOnEnter={false}`: it has no Shift, so otherwise no message can have a second line.
+- **Text.** `ChatTranscript` draws text parts as sanitized markdown. Nothing in message text can carry a class, a `data-*` or `aria-*` attribute, an image or a script, and links open in a new tab with `noopener`. Raw HTML in an agent's text shows as text; the one exception is `<br>`, which stays a line break. Where the sanitizer fails its check on first use, or the text is past a work limit (length, parse time, the size of the HTML it makes, or thousands of characters past ASCII in one paragraph or code block, which is what makes layout slow), the message goes out as plain text. The time limit is a check, not a wall, and it is wall-clock, so a text near it can draw either way. A run of text too costly to parse, such as one holding a very long word, is local: it goes out as literal text and the rest stays formatted, and so does a table with too many cells. Long lines of code in a code block cost nothing. Mark a part `state: 'streaming'` while it grows: a text too costly to draw on every delta then stays plain, and redraws only as it grows by an eighth, so its last words can lag. It renders in full once the part stops streaming or the turn ends. A person can send while an answer streams: keep `status` at `streaming` and the answer above their message keeps streaming, and put a turn that is over in `stopped`. Rendering never throws.
+- **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through, or `null` to draw nothing. To paint into a text part, return your own `ChatMarkdown`, with the props the transcript gives its own plus yours. Leave out `literalHtml` and a person's `<b>` draws bold:
+
+  ```tsx
+  <ChatMarkdown
+    text={part.text}
+    streaming={part.state === "streaming"}
+    literalHtml={message.role === "user"}
+    messageId={message.id}
+    role={message.role}
+    partIndex={index}
+    annotatable
+    rootRef={ref}
+  />
+  ```
+
+  `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
+- **Styles.** Nine tokens are not in `theme.css`; `components/chat/index.ts` lists them, and a host defines them in its own `@theme`. Add this folder and `components/ui/{button,textarea}.tsx` to your `@source`. Recipes live in `chatRecipes.tsx` so a `*.tsx` glob reaches them.
+
 ### Inbox thread parts (`components/inbox-thread`; unreleased, in progress)
 
 The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete.
