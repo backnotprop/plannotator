@@ -63,6 +63,7 @@ export const MAP_COLUMNS: MapGroup[][] = [
         { label: 'Next or previous message', keys: [thread('nextMessage'), thread('previousMessage')] },
         { keys: [thread('firstNew')] },
         { keys: [thread('openNewest')] },
+        { keys: [thread('openItems')] },
         { keys: [thread('fullScreen')] },
         { keys: [thread('close')], also: [app('leavePage'), file('escape')] },
       ],

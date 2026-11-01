@@ -360,6 +360,11 @@ export interface PlannotatorConfig {
    */
   inboxReminder?: boolean | Partial<Record<InboxToolHost, boolean>>;
   /**
+   * The Plannotator Inbox's debug log (`inbox/debug.log` in the data dir), as
+   * `PLANNOTATOR_INBOX_DEBUG=1`. Config-only, read when the Inbox starts.
+   */
+  inboxDebug?: boolean;
+  /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
@@ -420,6 +425,13 @@ export interface PlannotatorConfig {
    * once per machine.
    */
   inboxListIntro?: { dueAt?: string; shownAt?: string };
+  /**
+   * Inbox voice dictation (approval "inbox-voice"), off unless turned on. Written by Settings → Voice and the
+   * announcement (`POST /api/inbox/settings` `{ voice }`).
+   */
+  inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
+  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. */
+  inboxVoiceIntro?: { dueAt?: string; shownAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
@@ -1501,6 +1513,17 @@ export function resolveInboxPhones(
   if (v === "1" || v === "true" || v === "on") return true;
   if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
   return coerceConfigBoolean(config.inboxPhones, false);
+}
+
+/**
+ * Whether the Plannotator Inbox offers Ask AI: an environment switch, off by
+ * default, until the owner has used it. Off, the ask routes answer 404, no
+ * question can wait and no agent connects for one. Same words as
+ * PLANNOTATOR_INBOX_PHONES; anything else counts as off.
+ */
+export function resolveInboxAskAi(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = env.PLANNOTATOR_INBOX_ASK_AI?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on";
 }
 
 /**

@@ -139,6 +139,37 @@ export function inboxThreadNameKey(name: string): string {
     .toLowerCase();
 }
 
+// ─────────────────────────────── Project names ───────────────────────────────
+
+/** The longest name a person can give a project (Rename… in the project menu), in characters. */
+export const INBOX_PROJECT_NAME_MAX = 64;
+
+/**
+ * A project's display name as the person typed it: trimmed, runs of
+ * whitespace as one space, NFC, 1..64 characters, no control characters or
+ * line breaks, no bidi controls, and something visible in it. The same rules
+ * as a thread name, with a shorter cap: the name has to fit the sidebar.
+ */
+export function checkInboxProjectName(value: unknown): { ok: true; name: string } | { ok: false; message: string } {
+  if (typeof value !== "string") return { ok: false, message: "must be a string or null." };
+  if (THREAD_NAME_CONTROL.test(value.replace(/[\t\n\r]/g, " "))) return { ok: false, message: "must not contain control characters." };
+  const name = value.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (name === "" || inboxThreadNameKey(name) === "") return { ok: false, message: "must not be empty." };
+  if ([...name].length > INBOX_PROJECT_NAME_MAX) return { ok: false, message: `at most ${INBOX_PROJECT_NAME_MAX} characters.` };
+  if (THREAD_NAME_BIDI.test(name)) return { ok: false, message: "must not contain bidirectional control characters." };
+  return { ok: true, name };
+}
+
+/**
+ * A project record's `display_name` when it can be shown: a non-empty
+ * string, else null. A hand-edited file or another machine's list could
+ * carry anything, and a label must always be a string.
+ */
+export function inboxProjectDisplayName(project: { display_name?: unknown }): string | null {
+  const name = project.display_name;
+  return typeof name === "string" && name !== "" ? name : null;
+}
+
 // ─────────────────────────────── Subjects ───────────────────────────────
 
 /** A line break in any spelling: CR, LF, U+2028, U+2029. */
@@ -209,6 +240,22 @@ export interface InboxProject {
   /** Absolute realpath of the repository root (git toplevel) or folder. */
   root: string;
   created_at: string;
+  /**
+   * The name the person gave the project (Rename… in the project menu),
+   * shown as it is in place of its folder's name. Additive: absent until
+   * someone renames, and absent again after Reset name. Id, key, `name` (the
+   * slug) and root never change with it.
+   */
+  display_name?: string;
+  /**
+   * The project this one was combined into (approval "project-combine"). Every
+   * reader shows this project's threads under the end of that chain; nothing of
+   * this project moves, and an older reader ignores the field. A target that is
+   * gone, or a loop, counts as not combined, so a project can only reappear.
+   */
+  merged_into?: string;
+  /** The project this one's last undone combine went into: Tidy does not suggest the pair again. */
+  separated_from?: string;
 }
 
 /**
@@ -1478,12 +1525,14 @@ export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unsee
  * person, and the thread is open or came back from the archive (Mark read
  * sends a came-back thread back to the archive). Never on a thread whose Mark
  * read still stands: unsent work can keep it in New ("inbox-reply-drafts"),
- * and marking it again then undoing would drop the earlier Mark read.
+ * and marking it again then undoing would drop the earlier Mark read. A
+ * standing Mark read that Mark unread took the look back from (`unseen`) does
+ * take it: the store only gives the look back, and writes no new Mark read.
  */
 export function inboxRowOffersMarkRead(
   row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent" | "resolved_at" | "back_from_archive"> & { read_at?: string | null },
 ): boolean {
-  return (row.resolved_at === null || row.back_from_archive === true) && (row.read_at ?? null) === null && inboxRowWaitsOnPerson(row);
+  return (row.resolved_at === null || row.back_from_archive === true) && ((row.read_at ?? null) === null || row.unseen > 0) && inboxRowWaitsOnPerson(row);
 }
 
 export interface InboxThread {
@@ -2238,6 +2287,8 @@ export interface InboxComposeSession {
   idle_since: string | null;
   /** The thread it last wrote in, or null when it has not written in the Inbox. */
   last_thread: { id: string; subject: string | null; at: string } | null;
+  /** Where it works, when that is another folder of a combined project than the group's `root`. */
+  root?: string;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
@@ -2375,3 +2426,51 @@ export interface InboxPromptsChange {
     runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
   };
 }
+
+/** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */
+export type InboxVoiceEngine = "codex" | "api";
+
+/** Where the API key comes from. A page never gets the key: the last 4 of a saved one at most. */
+export interface InboxVoiceKeyState {
+  source: "saved" | "env" | null;
+  last4: string | null;
+}
+
+/** Settings → Voice (`GET /api/inbox/settings` `voice`). */
+export interface InboxVoiceSettings {
+  on: boolean;
+  phones_only: boolean;
+  engine: InboxVoiceEngine;
+  key: InboxVoiceKeyState;
+  /** This computer's name, for a page over the tailnet; null on the computer itself. */
+  computer: string | null;
+  /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
+  intro_due: boolean;
+  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
+  guest: boolean;
+}
+
+/**
+ * Whether voice can work here (`GET /api/inbox/voice/status`). `off`: nothing was asked. `ready`: Codex has a ChatGPT
+ * login, or a key is there. `missing`, `signedout`, `apikey`, `other`: what Codex says of itself. `nokey`: the API
+ * engine has no key. `unknown`: Codex did not answer.
+ */
+export interface InboxVoiceStatus {
+  state: "off" | "ready" | "missing" | "signedout" | "apikey" | "other" | "nokey" | "unknown";
+  plan: string | null;
+}
+
+/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
+export type InboxVoiceFailure =
+  | "voice_off"
+  | "voice_not_ready"
+  | "voice_bad_clip"
+  | "voice_expired"
+  | "voice_refused"
+  | "voice_key_refused"
+  | "voice_unreachable"
+  | "voice_codex_failed"
+  | "voice_empty";
+
+/** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
+export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;

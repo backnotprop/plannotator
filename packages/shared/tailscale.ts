@@ -11,11 +11,13 @@
  *
  * Pure parsers live here so both runtimes (Bun server, Pi extension) share
  * them. The only process-spawning edge is `runTailscale`, which never invokes
- * a shell and is injectable for tests.
+ * a shell and is injectable for tests; it and the Inbox's async runner
+ * (inbox-pairing-checks.ts) share one lookup, `tailscaleAppFallback`.
  */
 
 import { childEnv } from "./child-env";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { isValidUrlHost } from "./config";
 
 /** Detection commands answer from local state; keep the wait short. */
@@ -78,10 +80,66 @@ export interface TailscaleRunResult {
 
 export type TailscaleRunner = (args: string[], timeoutMs: number) => TailscaleRunResult;
 
-/** Run the `tailscale` CLI without a shell. */
-export const runTailscale: TailscaleRunner = (args, timeoutMs) => {
-  const result = spawnSync("tailscale", args, {
-    env: childEnv(),
+/**
+ * The Mac Tailscale app's own program, which is also its CLI when run by
+ * this exact path (Tailscale's "Install CLI" writes a `/usr/local/bin/tailscale`
+ * script that runs it). Never through a symlink: invoked under another name
+ * it crashes on its bundle identifier.
+ */
+export const MAC_TAILSCALE_APP_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
+
+/** What the app fallback reads; each part replaceable so tests never look at the real /Applications. */
+export interface TailscaleAppLookup {
+  platform?: NodeJS.Platform;
+  exists?: (path: string) => boolean;
+  env?: Record<string, string | undefined>;
+}
+
+/**
+ * The command to try when `tailscale` on PATH was not found (`ENOENT`): on
+ * macOS, the Tailscale app's own CLI if the app is installed, so a Mac whose
+ * app never had its command-line tool turned on still works. Undefined for
+ * any other failure, any other platform, or a test run
+ * (`PLANNOTATOR_TEST_SANDBOX`, so no test reaches the real app). PATH always
+ * comes first.
+ */
+export function tailscaleAppFallback(result: TailscaleRunResult, lookup: TailscaleAppLookup = {}): string | undefined {
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") return undefined;
+  if ((lookup.env ?? process.env).PLANNOTATOR_TEST_SANDBOX) return undefined;
+  if ((lookup.platform ?? process.platform) !== "darwin") return undefined;
+  return (lookup.exists ?? existsSync)(MAC_TAILSCALE_APP_CLI) ? MAC_TAILSCALE_APP_CLI : undefined;
+}
+
+/**
+ * The environment for the app's CLI: `env` with `SHLVL=1` when it has none.
+ * The app's program acts as a CLI only when its environment looks like a
+ * shell's (SHLVL or a non-empty TERM); with neither it tries to start the
+ * GUI instead. Tailscale's own `/usr/local/bin/tailscale` wrapper gets SHLVL
+ * from `sh`; an Inbox started without a terminal (the Claude app, launchd)
+ * has neither. TERM is left alone.
+ */
+export function tailscaleAppEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return env.SHLVL ? env : { ...env, SHLVL: "1" };
+}
+
+/** What Tailscale's Mac app prints (exit 0) when run as a CLI without a shell-like environment. */
+const APP_GUI_FAILED = /The Tailscale GUI failed to start/;
+
+export const TAILSCALE_APP_NOT_CLI =
+  "The Tailscale app did not answer as a command-line tool; turn on Tailscale → Settings → Install CLI, then try again.";
+
+/** The app's CLI answer, with "the GUI failed to start" (which exits 0) turned into a failure callers report in plain words. */
+export function checkTailscaleAppAnswer(result: TailscaleRunResult): TailscaleRunResult {
+  if (result.error || !APP_GUI_FAILED.test(`${result.stdout}\n${result.stderr}`)) return result;
+  return { ...result, error: new Error(TAILSCALE_APP_NOT_CLI) };
+}
+
+/** Spawn one `tailscale` command (bare name or absolute path) without a shell, in `env`. */
+export type TailscaleSpawn = (command: string, args: string[], timeoutMs: number, env: Record<string, string | undefined>) => TailscaleRunResult;
+
+const spawnTailscale: TailscaleSpawn = (command, args, timeoutMs, env) => {
+  const result = spawnSync(command, args, {
+    env,
     encoding: "utf8",
     windowsHide: true,
     timeout: timeoutMs,
@@ -93,6 +151,26 @@ export const runTailscale: TailscaleRunner = (args, timeoutMs) => {
     stderr: result.stderr ?? "",
   };
 };
+
+/**
+ * A runner that tries `tailscale` on PATH, then the app's CLI
+ * (`tailscaleAppFallback`) with the same args and timeout, in `tailscaleAppEnv`.
+ * `baseEnv` is the child environment (the live `process.env` by default).
+ */
+export function createTailscaleRunner(
+  spawn: TailscaleSpawn = spawnTailscale,
+  lookup: TailscaleAppLookup = {},
+  baseEnv: () => Record<string, string | undefined> = childEnv,
+): TailscaleRunner {
+  return (args, timeoutMs) => {
+    const onPath = spawn("tailscale", args, timeoutMs, baseEnv());
+    const app = tailscaleAppFallback(onPath, lookup);
+    return app ? checkTailscaleAppAnswer(spawn(app, args, timeoutMs, tailscaleAppEnv(baseEnv()))) : onPath;
+  };
+}
+
+/** Run the `tailscale` CLI without a shell (PATH first, then the Mac app's CLI). */
+export const runTailscale: TailscaleRunner = createTailscaleRunner();
 
 /**
  * A failure whose cause is Tailscale's own state on this computer or tailnet,
@@ -111,6 +189,7 @@ export const runTailscale: TailscaleRunner = (args, timeoutMs) => {
 export function explainTailscaleSetup(result: TailscaleRunResult): string | undefined {
   const output = `${result.stdout}\n${result.stderr}`;
   const links = output.match(/https:\/\/[^\s"'<>]+/g) ?? [];
+  if (APP_GUI_FAILED.test(output)) return TAILSCALE_APP_NOT_CLI;
   const enableLink = links.find((link) => /\/f\/(?:serve|https)\b/.test(link));
   if (enableLink || /\b(?:serve|https)\b[^\n]*\bnot enabled\b/i.test(output)) {
     const link = enableLink ?? links.find((candidate) => /login\.tailscale\.com/.test(candidate));
@@ -144,7 +223,7 @@ export function describeTailscaleFailure(result: TailscaleRunResult): string {
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      return "`tailscale` CLI not found on PATH. Install Tailscale (https://tailscale.com/download) and sign in with `tailscale up`.";
+      return "`tailscale` CLI not found on PATH (on a Mac, Plannotator also looks for the app at /Applications/Tailscale.app). With the Tailscale app, turn on its command-line tool (Tailscale → Settings → Install CLI); otherwise install Tailscale from https://tailscale.com/download and sign in.";
     }
     if (code === "ETIMEDOUT") {
       return "Timed out waiting for the `tailscale` CLI.";

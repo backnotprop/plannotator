@@ -34,7 +34,8 @@ export function splitProjectName(name: string): { folder: string; parents: strin
 
 /** Every live session, in the server's order (the most recently active project first). */
 export function composeTargets(projects: readonly InboxComposeProject[]): ComposeTarget[] {
-  return projects.flatMap((group) => group.sessions.map((session) => ({ ...session, project: group.project })));
+  // A session in another folder of a combined project shows that folder, under the group's name.
+  return projects.flatMap((group) => group.sessions.map((session) => ({ ...session, project: session.root ? { ...group.project, root: session.root } : group.project })));
 }
 
 export function findTarget(projects: readonly InboxComposeProject[], session: string | null | undefined): ComposeTarget | null {
@@ -60,7 +61,7 @@ export function composeGroups(
   const groups = projects.map((group) => ({
     project: group.project,
     current: isCurrent(group.project, current),
-    sessions: group.sessions.map((session) => ({ ...session, project: group.project })),
+    sessions: composeTargets([group]),
   }));
   const ordered = [...groups.filter((g) => g.current), ...groups.filter((g) => !g.current)];
   const at = last ? ordered.findIndex((g) => g.sessions.some((s) => s.session === last)) : -1;

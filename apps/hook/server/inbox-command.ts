@@ -23,6 +23,7 @@
  *                                   the URL
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
+ *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -61,9 +62,11 @@ import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDis
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
+import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runInboxLinkCommand } from "./inbox-link-command";
+import { runInboxProjectsCommand } from "./inbox-projects-command";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -271,6 +274,14 @@ async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   } catch {
     // The agents are connected at the next run.
   }
+}
+
+/** The debug log is decided at start, so the variable cannot reach an Inbox that is already up: say so, on stderr. */
+async function reportDebugNeedsStart(dataDir: string): Promise<void> {
+  if (process.env.PLANNOTATOR_INBOX_DEBUG !== "1") return;
+  const status = await inboxStatus(dataDir);
+  if (status.state !== "running" && status.state !== "busy") return;
+  process.stderr.write("PLANNOTATOR_INBOX_DEBUG is read at start, so it does nothing for the Inbox already running. Run plannotator inbox stop first, or set inboxDebug: true in config.json and Restart.\n");
 }
 
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
@@ -652,6 +663,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
   }
 
+  if (args[0] === "projects") {
+    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
   if (args[0] === "link" || args[0] === "unlink") {
     process.exit(await runInboxLinkCommand(args, () => ensureInboxRunning(dataDir)));
   }
@@ -677,6 +692,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (open && (background || noOpen)) {
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
+
+  await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
     try {

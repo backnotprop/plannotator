@@ -35,11 +35,12 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 0,
     },
     send: {
-      // The reply box's and compose's own keydown (Thread.tsx, ComposeDialog.tsx) match this binding.
+      // The reply box's and compose's own keydown (Thread.tsx, ComposeDialog.tsx) match this binding, and so does
+      // Thread.tsx's handler for the closed foot's Send (from any focus in the thread), and the full-screen composer's card.
       description: 'Send',
       bindings: ['Mod+Enter'],
       section: 'Thread',
-      hint: 'In the reply box or a new message.',
+      hint: 'Anywhere in an open thread where Send shows (your picks, a note, the reply box), and in a new message. Not while a menu or dialog is open.',
       preventDefault: true,
       displayOrder: 1,
     },
@@ -92,6 +93,16 @@ export const inboxThreadShortcuts = defineShortcutScope({
       preventDefault: true,
       displayOrder: 5,
     },
+    openItems: {
+      // Thread.tsx: the same list the "N open questions" button opens, with focus on its first row. Only where that
+      // button shows; with the list open, Q is the menu's type-ahead (guards.ts: a key from inside a menu is its own).
+      description: 'Open questions and action items',
+      bindings: ['Q'],
+      section: 'Thread',
+      hint: 'Opens the list of what is still open in this thread; then ↑ ↓ and Enter jump to one. Only where its button shows.',
+      preventDefault: true,
+      displayOrder: 5.5,
+    },
     fullScreen: {
       // Thread.tsx: never saved as the view files open in (only the Full screen button is a choice).
       description: 'Full screen',
@@ -102,7 +113,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 6,
     },
     close: {
-      // App.tsx: a guided review, then the Artifacts view, then the thread.
+      // App.tsx: a guided review, then the Artifacts view, then full screen, then the thread.
       description: 'Close, one layer at a time',
       bindings: ['Escape'],
       section: 'Everywhere',
