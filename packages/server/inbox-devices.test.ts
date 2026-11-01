@@ -316,6 +316,8 @@ describe("the device door, on the binary", () => {
       ["POST", "threads/msg_x/ask"],
       ["POST", "threads/msg_x/ask/seen"],
       ["POST", "threads/msg_x/ask/end"],
+      ["POST", "ask/session-a/api/ai/bridge/poll"],
+      ["POST", "ask/session-a/api/ai/bridge/event"],
       // Shared drafts stay the window's (never seen by phones) until that is ruled otherwise.
       ["GET", "drafts"],
       ["POST", "drafts/drf_x"],
