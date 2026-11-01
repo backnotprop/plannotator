@@ -690,7 +690,7 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
   }
 });
 
-test('a phone on its side and a desktop stay as they were: Fit has the whole stage and the card its note', async () => {
+test('a phone on its side stays as it was, and a desktop card keeps its note row', async () => {
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
   try {
@@ -725,20 +725,7 @@ test('a phone on its side and a desktop stay as they were: Fit has the whole sta
 
     expect((await layout(page)).card!.height).toBeGreaterThan(80);
 
-    // Fit works on the whole stage, with its 28 px of padding: the card floats over the picture as it did.
-    await page.goto('about:blank');
-    await page.goto(`${url}#thread=${thread}`);
-    const portrait = page.getByRole('button', { name: 'Zoom: Option C' }).first();
-    await portrait.scrollIntoViewIfNeeded();
-    await portrait.click();
-    await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
-    await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
-    await settled(page);
-    expect(await page.locator('[data-image-clear]').evaluate((el) => el.parentElement!.clientHeight - (el as HTMLElement).offsetHeight)).toBe(0);
-    const l = await layout(page);
-    expect(Math.abs(l.image.top - l.stage.top - (l.stage.bottom - l.image.bottom))).toBeLessThan(1);
-    expect(Math.abs(l.image.height - (l.stage.height - 56))).toBeLessThan(1);
-    expect(l.image.bottom).toBeGreaterThan(l.card!.top);
+    // A desktop's picture keeps clear of the card too since "inbox-option-card-desktop" (its own spec).
     await desktop.close();
   } finally {
     await browser.close().catch(() => {});

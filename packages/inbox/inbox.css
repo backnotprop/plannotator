@@ -2022,6 +2022,12 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 :root.light .ib-optcap { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
 .ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); width: min(420px, calc(100% - 56px)); height: var(--ib-optcap-h); }
 .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
+/* On a desktop the card is as tall as its note row makes it, on every choice (OptionCaption holds that row's room and says the height in --ib-optcap-h): the picture fits above it, and Hide takes the card with the rest, as on a phone. */
+.ib-view.ib-fullview:not(.ib-phone) .ib-optcap-hold { visibility: hidden; }
+.ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
+.ib-view.ib-fullview:not(.ib-phone):not(:has(.ib-imgcompose)) { --ib-clearfoot: var(--ib-fvfoot, 0px); }
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-imgcompose) { --ib-clearfoot: 0px; }
+.ib-view.ib-fullview:not(.ib-phone)[data-tools="pinned"]:has(.ib-optcap) .ib-imgclear { bottom: calc(22px + var(--ib-clearfoot) + var(--ib-optcap-h, 0px)); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); width: min(420px, calc(100% - 352px)); }
 .ib-optcap-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .ib-optcap-letter { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-foreground); font: 700 var(--ib-fs-12-5, 12.5px)/1 var(--font-sans, system-ui); }
@@ -2039,7 +2045,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-optcap-dots i.ib-on { width: 16px; background: var(--primary); }
 .ib-optcap-end { margin-top: 9px; padding-top: 9px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
 .ib-optcap-pill { display: inline-flex; align-items: center; gap: 2px; color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { .ib-optcap-dots i, .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .ib-optcap-dots i, .ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { transition: none; } }
 /* the image's size bar moves out from under the toolbar */
 .ib-view.ib-fullview:not(.ib-phone) .ib-imgbar { right: auto; left: 14px; }
 /* and the "Your marked-up copy" chip sits under it */
