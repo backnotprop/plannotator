@@ -888,7 +888,7 @@ export class InboxLink {
    */
   private async startAskClient(): Promise<void> {
     const { turns } = this.options
-    if (!turns || this.askClient) return
+    if (!turns) return
     const registry = await this.registry()
     // After the read: two polls can answer together, and the lease or the session can move.
     if (!registry || this.askClient || this.disposed || !this.leader) return

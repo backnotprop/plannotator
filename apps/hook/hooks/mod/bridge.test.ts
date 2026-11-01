@@ -332,6 +332,24 @@ describe('how a bridge loop ends', () => {
     }
   })
 
+  test('a question an open poll brings after the client stopped being live is refused as gone, and never submitted', async () => {
+    const host = fakeHost()
+    const events: unknown[] = []
+    let live = true
+    host.onFetch = (url, body) => {
+      if (url !== POLL) {
+        events.push(body)
+        return { status: 200, ok: true, text: '{}' }
+      }
+      live = false
+      return { status: 200, ok: true, text: JSON.stringify({ commands: [{ type: 'ask', askId: 'late', text: 'Why?', mode: 'turn' }] }) }
+    }
+    await client(host, () => live).run()
+
+    expect(host.submits).toEqual([])
+    expect(events).toEqual([{ type: 'error', askId: 'late', code: 'gone' }])
+  })
+
   test('a review that is no longer live ends it as ended', async () => {
     const host = fakeHost()
     let live = true

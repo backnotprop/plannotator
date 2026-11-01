@@ -199,6 +199,12 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
     if (seenAsks.has(command.askId)) return
     seenAsks.add(command.askId)
     const askId = command.askId
+    // A poll stays open past the session's end or a lease move, and a turn now
+    // would land in whatever conversation the process goes on with.
+    if (!options.isLive()) {
+      emit({ type: 'error', askId, code: 'gone' })
+      return
+    }
     let streamed = ''
     const sink: AskSink = {
       delta: (text) => {

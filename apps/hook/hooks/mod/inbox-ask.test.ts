@@ -220,6 +220,28 @@ describe('the setting on', () => {
     expect(await savedTurns(server, threadId)).toMatchObject([{ answer: 'Words so far', failure: 'gone' }])
   })
 
+  test('a question after the session ended goes in nowhere, even with the client still in its poll', async () => {
+    const { server, threadId, open } = await world()
+    const session = await open()
+    await until(() => inboxPolled(session))
+    const first = await asked(server, threadId, 'turn-0001')
+    await until(() => session.running !== null)
+    session.endTurn('Yes.')
+    await first.finished
+    expect(session.mod.turns.askInFlight).toBe(false)
+    await until(async () => (await readAsk(server, threadId)).running === null)
+    // Past the 750 ms poll of a running question: the client now sits in its 15 s poll, and the Inbox hands the next question to it.
+    await Bun.sleep(1_000)
+
+    session.mod.dispose()
+    const late = await asked(server, threadId, 'turn-0002', 'Still there?')
+    await late.finished
+
+    expect(late.messages.at(-1)?.code).toBe('session_gone')
+    expect(session.host.submits).toHaveLength(1)
+    expect(session.turns).toHaveLength(1)
+  })
+
   test('two processes: the answer finishes where it started after the lease moves, and the next question goes to the new holder', async () => {
     const { server, threadId, open } = await world()
     const first = await open()
@@ -259,7 +281,7 @@ describe('how the client stops', () => {
   const answer = (body: unknown, status = 200) => ({ status, ok: status < 300, text: JSON.stringify(body) })
 
   /** A link on a memory host whose Inbox always has a question waiting; `onAskPoll` plays the client's bridge. */
-  function link(host: FakeHost, onAskPoll: (count: number, stop: () => void) => ReturnType<typeof answer>) {
+  function link(host: FakeHost, onAskPoll: (count: number, stop: () => void) => ReturnType<typeof answer> | Promise<ReturnType<typeof answer>>) {
     host.files.set(inboxRegistryPathOf('/data'), registry)
     const inbox: InboxLink = new InboxLink({
       host,
@@ -272,8 +294,12 @@ describe('how the client stops', () => {
     })
     const gone: unknown[] = []
     let askPolls = 0
+    let signals = 0
     host.onFetch = (url, body) => {
-      if (url.endsWith(INBOX_BRIDGE_POLL_PATH)) return answer({ commands: [], ask_waits: true })
+      if (url.endsWith(INBOX_BRIDGE_POLL_PATH)) {
+        signals += 1
+        return answer({ commands: [], ask_waits: true })
+      }
       if (url === ASK_POLL) {
         askPolls += 1
         return onAskPoll(askPolls, () => inbox.dispose())
@@ -282,7 +308,7 @@ describe('how the client stops', () => {
       return answer({ ok: true })
     }
     inbox.start()
-    return { inbox, gone, askPolls: () => askPolls }
+    return { inbox, gone, askPolls: () => askPolls, signals: () => signals }
   }
 
   async function ticks(host: FakeHost, count: number) {
@@ -291,6 +317,15 @@ describe('how the client stops', () => {
       await host.tick()
     }
   }
+
+  test('however many polls say a question waits, one client runs: several would supersede each other', async () => {
+    const host = fakeHost()
+    const { inbox, askPolls, signals } = link(host, () => new Promise(() => undefined))
+    await ticks(host, 6)
+    expect(signals()).toBeGreaterThanOrEqual(3)
+    expect(askPolls()).toBe(1)
+    inbox.dispose()
+  })
 
   test('a closed bridge or a refused client starts again on the next signal', async () => {
     for (const end of [answer({ commands: [], closing: true }), answer({}, 404)]) {

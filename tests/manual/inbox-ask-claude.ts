@@ -52,11 +52,15 @@
  *     process stopped hard. Start the session again with `claude --continue`.
  *
  *   two processes: `claude --continue` in a second terminal (same variables),
- *   and type one short message there so the lease moves to it:
+ *   and type one short message there so the lease moves to it. Wait 25 s: the
+ *   first process reads the lease every 5 s, and a client left from an earlier
+ *   case can sit in a poll for 15 s more. Then:
  *     bun tests/manual/inbox-ask-claude.ts --expect answered
- *     Up to 5 s after that message, the question runs in the second terminal.
- *     Ask again while the first process answers a long question and type into
- *     the second: the answer still ends and is saved.
+ *     The question runs in the second terminal. Asked sooner, it can run in the
+ *     first terminal (the first 5 s), or end `gone` with nothing submitted, and
+ *     a retry reaches the second.
+ *     Then ask a long question, and while the terminal answering it runs, type
+ *     into the other one: the answer still ends and is saved.
  *
  *   off: stop the Inbox, unset PLANNOTATOR_INBOX_ASK_AI, start it again:
  *     plannotator inbox stop
