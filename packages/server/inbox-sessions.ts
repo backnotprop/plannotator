@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -131,6 +131,8 @@ interface SeenSession {
   sendNow: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
+  /** Its poll said it can answer Ask AI live (`ask`). */
+  ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
   cwd: string | null;
   /**
@@ -388,6 +390,7 @@ export function createInboxLiveSessions(options: {
     entry.host = host;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
     entry.engine = parseEngine(body.engine);
@@ -701,6 +704,12 @@ export function createInboxLiveSessions(options: {
     return !!entry && isLive(entry) && entry.tags;
   };
 
+  /** The host of a live session whose connection can answer Ask AI (its poll said `ask`), else null. */
+  const askHostOf = (session: string): string | null => {
+    const entry = sessions.get(session);
+    return entry?.ask === true && isLive(entry) ? entry.host : null;
+  };
+
   /** How a session is connected now (live, no grace), or null when its connection does not poll. */
   const connectionOf = (session: string): InboxRecipientConnection | null => {
     const entry = sessions.get(session);
@@ -985,6 +994,7 @@ export function createInboxLiveSessions(options: {
     pollsNow,
     composeTarget,
     connectionOf,
+    askHostOf,
     deliveryConnectionOf,
     lastIdleOf,
     steerableSessions,

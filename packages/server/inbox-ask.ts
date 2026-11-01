@@ -3,16 +3,21 @@
  * set when the Inbox starts: off, every path here falls through to the
  * unknown-route 404, as if it did not exist.
  *
- *   GET  /api/inbox/threads/:id/ask        `{ conversation }` (null when none)
- *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: save a question for
- *                                          the session that owns the thread now
+ *   GET  /api/inbox/threads/:id/ask        `{ conversation, running }`: null when none, and the
+ *                                          turn id being answered
+ *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: claim the owner's
+ *                                          slot, save the question, wait for its client
  *   POST /api/inbox/threads/:id/ask/seen   `{ seen_at }`: the person saw the answers up to then
- *   POST /api/inbox/threads/:id/ask/end    End conversation: the file is deleted, with no Undo
+ *   POST /api/inbox/threads/:id/ask/end    End conversation: stops the answer, and the file is
+ *                                          deleted with no Undo
+ *   /api/ai/*                              Ask AI's session and query routes (packages/ai/endpoints.ts)
+ *   POST /api/inbox/ask/:session/api/ai/bridge/{poll,event}   the agent's client (inbox-ask-live.ts)
  *
- * Conversations are the person's alone, so every route answers only the
- * person's own window: a tailnet guest gets `403 owner_only` and anything but
- * the window's page (an agent's curl, another site) gets `403 window_only`,
- * reads included. `Sec-Fetch-Site: same-origin` is the browser's own mark,
+ * Conversations are the person's alone, so every route but the client's two
+ * answers only the person's own window: a tailnet guest gets `403 owner_only`
+ * and anything but the window's page (an agent's curl, another site) gets
+ * `403 window_only`, reads included. The client's routes sit behind the
+ * connection routes' gate. `Sec-Fetch-Site: same-origin` is the browser's own mark,
  * which page script cannot set. Nothing here is on the phone's door. A change
  * tells the window (`event: ask`), which reads the conversation again.
  *
@@ -22,9 +27,11 @@
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { addInboxAskTurn, checkInboxAskInput, findInboxAskTurn, markInboxAskSeen, readInboxAsk, removeInboxAsk } from "@plannotator/shared/inbox/ask";
+import { isAIEndpointPath } from "@plannotator/ai/endpoints";
+import { addInboxAskTurn, checkInboxAskInput, findInboxAskTurn, markInboxAskSeen, readInboxAsk, removeInboxAsk, updateInboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { createInboxAskLive, type InboxAskClaim, type InboxAskTimes } from "./inbox-ask-live";
 
 export const INBOX_ASK_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/ask(?:\/(seen|end))?$/;
 
@@ -39,8 +46,14 @@ export function createInboxAsk(options: {
   isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** A conversation changed: the windows' streams say so. */
   onChange: (threadId: string) => void;
+  /** The Inbox's token, and the host of a session that can answer live: inbox-ask-live.ts. */
+  token: string;
+  hostOf: (session: string) => string | null;
+  times?: InboxAskTimes;
 }) {
   const { on, store, serverSession, json } = options;
+  const live = createInboxAskLive({ token: options.token, dir: store.dir, hostOf: options.hostOf, onChange: options.onChange, times: options.times });
+  const stopDeletions = store.onDeletion(() => live.sweep((threadId) => store.thread(threadId) !== null));
 
   const fromWindow = (req: Request): boolean => req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "same-origin";
 
@@ -61,7 +74,7 @@ export function createInboxAsk(options: {
     const action = match[2];
     if (!action && req.method === "GET") {
       if (!store.thread(threadId)) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
-      return json({ serverSession, conversation: readInboxAsk(store.dir, threadId) });
+      return json({ serverSession, conversation: readInboxAsk(store.dir, threadId), running: live.running(threadId) });
     }
     if (req.method !== "POST") return json({ error: action ? "Use POST." : "Use GET or POST." }, 405);
     const body = await options.readBody(req);
@@ -70,6 +83,7 @@ export function createInboxAsk(options: {
     if (!thread) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
 
     if (action === "end") {
+      live.stopThread(threadId);
       const ended = removeInboxAsk(store.dir, threadId);
       if (ended) options.onChange(threadId);
       return json({ ok: true, ended });
@@ -85,16 +99,64 @@ export function createInboxAsk(options: {
     const input = checkInboxAskInput(body);
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
     const known = findInboxAskTurn(store.dir, threadId, input.id);
-    if (known) return json(known);
+    if (known && (known.turn.answer !== undefined || known.turn.stopped)) return json({ ...known, provider_id: null });
     const last = thread.messages.at(-1);
-    if (last && !store.messageAnswerable(last.id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to ask.");
-    // Re-read at each ask: a thread handed off since the last question has a new owner.
-    const owner = store.threadOwner(threadId);
-    if (!owner) throw new InboxError("ask_no_owner", "No agent owns this thread: nothing was saved.");
-    const saved = addInboxAskTurn(store.dir, threadId, { ...input, at: new Date().toISOString(), session: owner.session, host: owner.host });
-    if (saved.added) options.onChange(threadId);
-    return json({ turn: saved.turn, conversation: saved.conversation });
+    const open = !last || store.messageAnswerable(last.id);
+    // Re-read at each ask: a thread handed off since the last question has a new owner, and a retry goes to it.
+    const owner = open ? store.threadOwner(threadId) : null;
+    if (!owner) {
+      if (known) return json({ ...known, provider_id: null, reason: "no_live_path" });
+      if (!open) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to ask.");
+      throw new InboxError("ask_no_owner", "No agent owns this thread: nothing was saved.");
+    }
+
+    // The slot first: a question the agent can't take now is refused with nothing saved.
+    let claim: InboxAskClaim;
+    try {
+      claim = live.claim({ threadId, turnId: input.id, session: owner.session });
+    } catch (error) {
+      if (known && error instanceof InboxError && error.code === "ask_no_live_path") return json({ ...known, provider_id: null, reason: "no_live_path" });
+      throw error;
+    }
+    if (known && live.answering(claim)) return json({ ...known, provider_id: null, running: true });
+
+    let saved: NonNullable<typeof known>;
+    try {
+      const moved = known && (known.turn.session !== owner.session || known.turn.host !== owner.host);
+      if (moved) saved = updateInboxAskTurn(store.dir, threadId, input.id, { session: owner.session, host: owner.host }) ?? known;
+      else if (known) saved = known;
+      else {
+        const added = addInboxAskTurn(store.dir, threadId, { ...input, at: new Date().toISOString(), session: owner.session, host: owner.host });
+        saved = { conversation: added.conversation, turn: added.turn };
+        options.onChange(threadId);
+      }
+    } catch (error) {
+      live.free(claim);
+      throw error;
+    }
+    // The turn stays saved either way: with no connection the window offers to ask again, or to reply in the thread.
+    if (await live.connected(claim)) return json({ ...saved, provider_id: claim.bridge.providerId });
+    return json({ ...saved, provider_id: null, reason: "no_connection" });
   };
 
-  return { allowed, route };
+  /** Everything `/api/ai` does for Ask AI, behind the same gate: only the owner's own window. */
+  const aiRoute = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
+    if (!on || !isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
+    refuse(req, via);
+    return (live.endpoints[path] as (request: Request) => Promise<Response> | Response)(req);
+  };
+
+  return {
+    allowed,
+    route,
+    aiRoute,
+    /** On every poll answer, and what ends a held poll. */
+    waits: (session: string) => live.waits(session),
+    onWaits: live.onWaits,
+    hostRoute: live.hostRoute,
+    stop() {
+      stopDeletions();
+      live.stop();
+    },
+  };
 }
