@@ -45,6 +45,7 @@ import {
   codexThreadOfCall,
   inboxId,
   isCodexThreadId,
+  isInboxSessionId,
   isQwenMcpClient,
   isQwenSessionId,
   qwenSessionOfCall,
@@ -68,9 +69,6 @@ const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card"]);
  */
 export const INBOX_SESSION_HOST_NAMES: Readonly<Record<string, string>> = Object.fromEntries(INBOX_WAKING_HOSTS.map((host) => [host, INBOX_HOST_NAMES[host]!]));
 
-/** A host session id: what Claude Code, Pi and OpenCode use (UUIDs, `ses_` ids), and nothing that could carry anything else. */
-const HOST_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
 /** The agent host session a shim process runs inside. */
 export interface InboxHostSession {
   host: string;
@@ -93,12 +91,12 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
     const colon = tag.indexOf(":");
     const host = colon > 0 ? tag.slice(0, colon) : "";
     const session = tag.slice(colon + 1);
-    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && HOST_SESSION_ID.test(session) && (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) && (host !== INBOX_QWEN_HOST || isQwenSessionId(session))) {
+    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && isInboxSessionId(session) && (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) && (host !== INBOX_QWEN_HOST || isQwenSessionId(session))) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
   }
   const pi = env.PI_SESSION_ID;
-  if (typeof pi === "string" && HOST_SESSION_ID.test(pi)) return { host: "pi", session: pi, name: INBOX_SESSION_HOST_NAMES.pi! };
+  if (isInboxSessionId(pi)) return { host: "pi", session: pi, name: INBOX_SESSION_HOST_NAMES.pi! };
   const codex = env.CODEX_THREAD_ID;
   if (isCodexThreadId(codex)) return { host: INBOX_CODEX_HOST, session: codex, name: INBOX_CODEX_NAME };
   const qwen = env[INBOX_QWEN_SESSION_ENV];
@@ -193,17 +191,19 @@ function rpcError(id: string | number | null | undefined, message: string, code 
 
 /**
  * Fill `project_path` and `agent_session` on the Inbox's tools when absent.
- * `own` is the shim's own `ses_` id; `hostSession` the agent host session the
+ * `own` is the shim's own `ses_` id (null: `plannotator inbox call`, which
+ * outlives one call and so has none); `hostSession` the agent host session the
  * shim runs inside, if any. The host session is adopted only when the agent
  * named no host or that same host (an agent that says it is another host is
  * not that session, and a reply to it must not wake the session), and then its
- * host and name are filled too on the tools that record an author.
+ * host and name, where it has them, are filled too on the tools that record an
+ * author.
  *
  * A call from Codex (`clientName` is `codex-mcp-client`, or the call carries
  * Codex's turn metadata) that names its thread (`params._meta.threadId`) is
  * that thread's: the host session is the thread, whatever the environment says.
  */
-export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string, hostSession?: InboxHostSession | null, clientName?: string | null): JsonRpc {
+export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string | null, hostSession?: (Pick<InboxHostSession, "session"> & Partial<InboxHostSession>) | null, clientName?: string | null): JsonRpc {
   if (message.method !== "tools/call" || !message.params) return message;
   const codexThread = codexThreadOfCall(message.params._meta, clientName);
   if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
@@ -221,10 +221,10 @@ export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: strin
     if (hostSession && (args.agent_host === undefined || args.agent_host === hostSession.host)) {
       args.agent_session = hostSession.session;
       if (AUTHOR_TOOLS.has(name)) {
-        args.agent_host = hostSession.host;
-        if (args.agent_name === undefined) args.agent_name = hostSession.name;
+        if (hostSession.host) args.agent_host = hostSession.host;
+        if (args.agent_name === undefined && hostSession.name) args.agent_name = hostSession.name;
       }
-    } else {
+    } else if (own !== null) {
       args.agent_session = own;
     }
   }

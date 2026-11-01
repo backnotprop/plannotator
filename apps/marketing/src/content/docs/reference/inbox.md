@@ -28,6 +28,7 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |
+| `plannotator inbox call <action> [<json> \| -]` | Run one Inbox action from a script and print its result as JSON, so an agent can make many fixes in one go. `-` reads the JSON from stdin. It starts a stopped Inbox the same way |
 | `plannotator inbox status` | Say whether the Inbox is running, with its address, process ID, version and data folder. Add `--json` for the same as JSON |
 | `plannotator inbox stop` | Stop the running Inbox |
 | `plannotator inbox restart` | Stop the Inbox, then start it again in the background and print its address |

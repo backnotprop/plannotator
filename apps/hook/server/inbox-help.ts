@@ -32,7 +32,7 @@ import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, 
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
-import { INBOX_COMMAND_USAGE } from "./cli";
+import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS } from "@plannotator/core/inbox-types";
@@ -443,6 +443,19 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "4. Tell the person what you combined, and that you can undo it. Their window shows no notice of your combine: the project just leaves the sidebar.",
     "",
     "`undo` takes the id of the project that went in, listed under \"Combined into it\", not the one that stayed. It works at any time, from any session, and brings back that project with whatever went into it. It gives back the project's name, its cards and its threads, the ones started since the combine too. A message or a card that joined the other project's thread stays with that thread. After an undo, the project is not suggested back into the project it left, or into whatever that project has gone into. Combining never crosses machines.",
+    "",
+    "## Scripting the Inbox",
+    "",
+    "When you have many Inbox calls to make, a tidy above all, put them in one script instead of making them one tool call at a time. Each call's whole result stays in your context; a script keeps only what it prints.",
+    "",
+    "```text",
+    `${self} inbox call [--session <id>] <action> [<json> | -]`,
+    "```",
+    "",
+    `- Actions: ${INBOX_CALL_ACTIONS.map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
+    "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
+    "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names (Claude Code, Pi, Codex and Qwen Code each name theirs), and the same as your tool: your threads and cards, your name, the person's reply reaches you. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",
     "",
     "## Commands and flags",
     "",
