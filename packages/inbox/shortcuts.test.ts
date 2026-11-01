@@ -18,7 +18,7 @@ const COMBOS: InboxShortcutExtras[] = [false, true].flatMap((slashSearch) =>
 
 /** The single keys the owner approved; each extra adds its own. */
 function approvedBare(extras: InboxShortcutExtras): string[] {
-  const core = ['E', 'Z', 'R', 'J', 'K', 'Shift+J', 'Shift+K', 'N', 'O', 'F', '?', '[', ']'];
+  const core = ['E', 'Z', 'R', 'J', 'K', 'Shift+J', 'Shift+K', 'N', 'O', 'Q', 'F', '?', '[', ']'];
   return [...core, ...(extras.slashSearch ? ['/'] : []), ...(extras.goTo ? ['G I', 'G B', 'G S'] : [])].sort();
 }
 
