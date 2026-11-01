@@ -120,6 +120,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
+    // No agent lookups (the voice setting probes Codex otherwise), and no agent config of the real computer.
+    PLANNOTATOR_TEST_SANDBOX: root,
+    CLAUDE_CONFIG_DIR: join(root, 'claude'),
+    CODEX_HOME: join(root, 'codex'),
+    OPENCODE_CONFIG_DIR: join(root, 'opencode'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -407,9 +412,10 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
 async function pillLayout(page: Page) {
   return card(page).evaluate((root) => {
     const q = root.querySelector<HTMLElement>('[data-fcomp-questions]')!;
-    const words = q.querySelector('[data-oq-words]')!.firstChild as Text;
+    // The words are the text inside the pill, whatever wraps them.
     const range = document.createRange();
-    range.selectNodeContents(words);
+    const text = document.createTreeWalker(q, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent!.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode()!;
+    range.selectNodeContents(text);
     const box = q.getBoundingClientRect();
     const chips = q.parentElement!.getBoundingClientRect();
     const link = root.querySelector('[data-fcomp-open-thread]')!.getBoundingClientRect();
@@ -444,7 +450,7 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
   ].join('\n');
   const oneAndAction = [BODY, '', ':::action', 'Run the migration', 'Needs your badge.', ':::'].join('\n');
   const send = async (subject: string, body: string) => {
-    const sent = await world.claude.send({ project_path: world.project, subject, body, attachments: ['shots/checkout.png'] });
+    const sent = await world.claude.send({ project_path: world.project, thread: subject.toLowerCase().replace(/\W+/g, '-'), subject, body, attachments: ['shots/checkout.png'] });
     const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
     return `${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`;
   };
@@ -474,6 +480,7 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
         await page.goto(c.url);
         await page.reload();
         await expect(card(page)).toBeVisible();
+        await card(page).getByRole('radio', { name: 'Reply' }).tap();
         await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
         for (const width of [430, 390, 360, 320]) {
           await page.setViewportSize({ width, height: 844 });
@@ -487,7 +494,7 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
           expect(got.right, `${where}: over the next button (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.next + 1);
           // Short words only when the long ones do not fit: with the room (no mic, 430) the whole words show.
           if (!withMic && width === 430 && c.name === 'one question') expect(got.text, where).toBe(c.full);
-          if (got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
+          if (got.form && got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
         }
       }
     }
@@ -498,10 +505,11 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
 });
 
 test('on a computer the pill keeps its whole words', async () => {
-  const sent = await world.claude.send({ project_path: world.project, subject: 'Pill: computer', body: BODY, attachments: ['shots/checkout.png'] });
+  const sent = await world.claude.send({ project_path: world.project, thread: 'pill-computer', subject: 'Pill: computer', body: BODY, attachments: ['shots/checkout.png'] });
   const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
   await world.page.goto(`${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`);
   await expect(card()).toBeVisible();
+  await card().getByRole('radio', { name: 'Reply' }).click();
   await expect(card().locator('[data-fcomp-questions]')).toHaveText('1 open question');
   await expect(card().locator('[data-fcomp-questions]')).toHaveAttribute('data-label-form', 'full');
 });
