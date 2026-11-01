@@ -71,15 +71,11 @@ export function inboxAttachedLines(message: { attachments?: readonly InboxAttach
  * `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
  * the Board request (`inboxBoardRequestBlock`). The stored body never holds it.
  */
-export function inboxBodyForAgent(
-  message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true },
-  options: { boardRequest?: boolean } = {},
-): string {
+export function inboxBodyForAgent(message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true }): string {
   const attached = inboxAttachedLines(message);
   // A reply of pasted files alone may have no words.
   let words = !attached ? message.body : message.body.trim() ? `${message.body}\n\n${attached}` : attached;
-  // `boardRequest: false`: a JSON field that keeps the person's words (the block is in the text beside it).
-  if (options.boardRequest !== false && message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
+  if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   return words;
 }
 const PENDING_DIR = "pending";

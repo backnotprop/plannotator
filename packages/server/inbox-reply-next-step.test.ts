@@ -20,6 +20,7 @@ import { discoverInboxTools, InboxAgentConnection } from "@plannotator/shared/in
 import { INBOX_REMOVED_ACTION_TEXT } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
+import { INBOX_REPLY_LOOK_TEXT } from "./inbox-mcp";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -57,6 +58,8 @@ describe("the send tools' next step follows the caller's wake", () => {
     expect(result.isError).toBe(false);
     expect(result.text).toMatch(ARRIVES);
     expect(result.text).not.toMatch(READ_LATER);
+    // A connection hands a reply until it is delivered: only Codex and Qwen, woken once, are told to look.
+    expect(result.text).not.toContain(INBOX_REPLY_LOOK_TEXT);
   });
 
   test("send_message through a connection without a wake (OpenCode 1, an older connection): read the thread later, no wait", async () => {
@@ -112,6 +115,24 @@ describe("the removed wait_for_reply, as an older plugin, skill or raw client st
     expect(old.content).toEqual([{ type: "text", text: INBOX_REMOVED_ACTION_TEXT }]);
     expect(old.content[0]!.text).toContain("read_thread");
     expect(server.store.cursor()).toBe(before);
+  });
+
+  test("the refused call still counts as the session being there: a session known only by it can be tagged", async () => {
+    const { server, project } = await setup();
+    const client = new Client({ name: "inbox-old-wait-test", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+    clients.push(client);
+    const sent = (await client.callTool({ name: "send_message", arguments: { body: "Plain note", project_path: project, agent_session: "ses_asker" } })).structuredContent as { message_id: string; thread_id: string };
+    const tag = (key: string) =>
+      fetch(`http://127.0.0.1:${server.port}/api/inbox/messages/${sent.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: key, words: "See this.", tags: [{ session: "ses_only_old" }] }),
+      });
+    expect((await tag("k1")).status).toBeGreaterThanOrEqual(400);
+    const old = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, agent_session: "ses_only_old", agent_host: "codex", agent_name: "Codex" } })) as { isError?: boolean };
+    expect(old.isError).toBe(true);
+    expect((await tag("k2")).status).toBe(200);
   });
 
   test("a body of several calls gets the MCP server's own answer, not a crash", async () => {

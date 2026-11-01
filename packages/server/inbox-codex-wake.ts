@@ -23,8 +23,8 @@
  *    before the call), and never queued twice, across restarts too;
  *  - exit 0 means queued, not delivered: the item is "Delivered" once the
  *    thread calls an Inbox tool from a turn that started after it was queued
- *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when the agent
- *    reads it (read_thread). A turn that starts while the
+ *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when that thread
+ *    reads it itself (read_thread, `recordOwnRead`). A turn that starts while the
  *    call still runs counts, once the call exits 0. Until then the window says
  *    "Queued for Codex; it gets this as its next turn.";
  *  - a call that ran out of time (or that the Inbox's stop cut short) may or
@@ -121,7 +121,7 @@ export interface InboxCodexWake {
   uncertain(session: string, itemId: string): boolean;
   /** The items of `session` that are uncertain (see `uncertain`). */
   uncertainItems(session: string): string[];
-  /** Look for items to queue now (the Inbox runs it on every store line, a retry coming due, a wait ending). */
+  /** Look for items to queue now (the Inbox runs it on every store line and a retry coming due). */
   sweep(): Promise<void>;
   stop(): void;
 }

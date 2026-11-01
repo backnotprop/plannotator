@@ -658,7 +658,7 @@ export interface InboxTag {
    * Its connection wakes it (the Claude Code mod, Pi, OpenCode 2, with the
    * tag capability): the reply arrives as a turn. False: an agent that reads
    * the Inbox only (MCP, OpenCode 1); it sees the tag the next time it reads
-   * the thread or waits for a reply.
+   * the thread.
    */
   wakes: boolean;
   /** It reached the session (its connection delivered it). */

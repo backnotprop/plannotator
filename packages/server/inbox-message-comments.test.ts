@@ -213,7 +213,7 @@ test("an archived thread's messages take no new comment and no edit (409) until 
   expect((await post(server, route, { annotation: comment({ text: "An edit." }) })).status).toBe(200);
 });
 
-test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's read_thread returns it, and a sent comment isclosed", async () => {
+test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's read_thread returns it, and a sent comment is closed", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const client = await agent(server);

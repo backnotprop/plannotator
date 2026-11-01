@@ -19,7 +19,7 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
-import { checkInboxSubject, INBOX_CARD_ACTION_ON, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { INBOX_AGENT_RULES, INBOX_PEEK_META_KEY, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -329,9 +329,18 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
 export const INBOX_REPLY_ARRIVES_TEXT =
   "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work.";
 
+/** One more for Codex and Qwen: the Inbox sends their wake once, and a lost one is not sent again, so the agent has to look. */
+export const INBOX_REPLY_LOOK_TEXT = "If it has not arrived when you next work, call read_thread with this thread_id.";
+
 /** The same place for a sender nothing wakes (an MCP client, OpenCode 1, an older connection, a session whose bridge does not poll): it reads the thread itself. */
 export const INBOX_REPLY_READ_LATER_TEXT =
   "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
+
+/** What a send tool's result ends with, for this caller. */
+export function replyNextStepText(wakes: boolean, host: string | undefined): string {
+  if (!wakes) return INBOX_REPLY_READ_LATER_TEXT;
+  return INBOX_MCP_WAKING_HOSTS.includes(host?.trim() ?? "") ? `${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}` : INBOX_REPLY_ARRIVES_TEXT;
+}
 
 
 function threadUrl(base: string, threadId: string): string {
@@ -413,8 +422,8 @@ export async function sendProject(
 }
 
 /**
- * The project a thread read from `path` covers (search), and the projects
- * whose threads it lists: that
+ * The project a thread read from `path` covers (search, and read_thread's
+ * list without `findProjects`), and the projects whose threads it lists: that
  * project, plus the project an Inbox from before worktrees folded into their
  * repository made for the very worktree `path` is in (keyed by the
  * worktree's toplevel). Without it, an agent that asked from a worktree
@@ -793,10 +802,10 @@ export interface InboxAgentThreadRow {
   /**
    * The person wrote something in it for you that no agent has read yet: a
    * reply after the thread's agent-read mark (any agent's read_thread reads
-   * it), a message addressed to you (`to`) not yet delivered (only your wake
-   * delivers it; a read_thread does not), or a reply that tags you or that you
-   * own with tags, until your own read (not woken) or delivery. The Inbox's
-   * own notes never count.
+   * it), a message addressed to you (`to`) not yet delivered (your wake
+   * delivers it, or on Codex and Qwen your own read_thread), or a reply that
+   * tags you or that you own with tags, until your own delivery or read. The
+   * Inbox's own notes never count.
    */
   unread: boolean;
   /**
@@ -820,11 +829,11 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
     // The Inbox's own notes are not the person's words.
     if (message.author.kind !== "person" || isInboxNote(message)) continue;
     last = message;
-    // A reply that tags agents is unread for each recipient until it took it: its delivery, or,
-    // for one no connection wakes, its read (`delivered_at` for an owner, `read_at` for a tag).
+    // A reply that tags agents is unread for each recipient until it took it, never by another agent's read:
+    // its delivery (its own read records it for an owner no connection wakes), or `read_at` for such a tag.
     if (message.tags && message.tags.length > 0) {
       if (caller && store.isOwner(message, caller)) {
-        if (!store.recipientsOf(message).find((r) => r.owner)?.delivered_at) unread = true;
+        if (!message.delivery) unread = true;
       } else if (caller && message.tags.some((t) => t.session === caller && !t.delivery && !t.read_at)) unread = true;
       continue;
     }
@@ -930,7 +939,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${wakes ? INBOX_REPLY_ARRIVES_TEXT : INBOX_REPLY_READ_LATER_TEXT}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
@@ -971,8 +980,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             if (!guest) store.markAgentChecked(threadId);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.
             if (!guest) store.markAcksSeen(threadId);
-            // An agent that is not woken read a thread it was tagged in: the window says it saw it.
-            if (reader) store.recordTagRead(threadId, reader);
+            // What this session was owed here and no wake is left to settle.
+            if (reader) store.recordOwnRead(threadId, reader);
             // This session has read the thread now (send_message's "not read since" line).
             noteSessionRead(store, reader, threadId, clock());
             // The full records, as before the window (tests, scripts, a jq over the result).
@@ -987,10 +996,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough);
-            store.markAcksSeen(threadId, Number.POSITIVE_INFINITY, undefined, shown);
+            store.markAcksSeen(threadId, shown);
           }
-          // An agent that is not woken read a thread it was tagged in: the window says it saw it.
-          if (reader) store.recordTagRead(threadId, reader);
+          // What this session was owed in the messages it was shown, and no wake is left to settle.
+          if (reader) store.recordOwnRead(threadId, reader, shown);
           noteSessionRead(store, reader, threadId, clock());
           return okComplete(windowedThreadText(result, order, naming?.line ?? ""), { ...result, ...(naming?.structured ?? {}) });
         }
@@ -1017,13 +1026,12 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
         let threads = listScopedRows(store, projectIds, askedBy === "me" ? session : null);
-        // Threads the person tagged this session in (approval "inbox-tag-agents"), in any project: listed too.
+        // Threads the person tagged this session in (approval "inbox-tag-agents") or addressed to it, in any
+        // project, first: this list is the only way an agent no wake reached finds them, so `limit` never cuts them.
         const tagged = session ? new Set(store.taggedThreadsOf(session)) : new Set<string>();
-        for (const id of tagged) {
-          if (threads.some((row) => row.thread_id === id)) continue;
-          const row = store.listRow(id);
-          if (row) threads = [...threads, row];
-        }
+        const owed = new Set([...tagged, ...(session ? store.addressedThreadsOf(session) : [])]);
+        const owedRows = [...owed].flatMap((id) => store.listRow(id) ?? []).sort((a, b) => b.last_at.localeCompare(a.last_at));
+        threads = [...owedRows, ...threads.filter((row) => !owed.has(row.thread_id))];
         // A thread an agent wrote in after its archive line still takes a reply: listed like an open one.
         if (!input.include_resolved) threads = threads.filter((t) => t.resolved_at === null || t.agent_after_archive === true);
         const limit = input.limit ?? 20;

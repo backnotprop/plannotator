@@ -371,6 +371,75 @@ describe("tags in a reply", () => {
     expect((await row()).unread).toBe(false);
   });
 
+  test("another agent's read never clears `unread` for an owner that is not woken: only its own read does", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-owner", "Should the queue own retries?", CODEX);
+    const second = await client.callTool({ name: "send_message", arguments: { body: "I can look.", reply_to: asked.thread_id, project_path: project, agent_session: "ses-other", agent_host: "codex", agent_name: "Codex" } });
+    expect(second.isError).toBeFalsy();
+    expect((await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Codex please do.", tags: [{ session: "ses-other" }] })).status).toBe(200);
+    const unread = async () =>
+      ((await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses-owner" } })).structuredContent as { threads: { thread_id: string; unread: boolean }[] }).threads.find((t) => t.thread_id === asked.thread_id)!.unread;
+    expect(await unread()).toBe(true);
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-other" } });
+    expect(await unread()).toBe(true);
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-owner" } });
+    expect(await unread()).toBe(false);
+  });
+
+  test("a page that does not show the tagging reply settles nothing: the thread stays listed until a read shows it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-owner", "Should the queue own retries?", CLAUDE);
+    await agentSends(client, project, "ses-mcp", "Install page moved.", CODEX);
+    const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Codex the runbook.", tags: [{ session: "ses-mcp" }] });
+    const tagged = ((await sent.json()) as { reply: { id: string } }).reply.id;
+    const row = async () =>
+      ((await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses-mcp" } })).structuredContent as { threads: { thread_id: string; unread: boolean; tagged_you?: true }[] }).threads.find((t) => t.thread_id === asked.thread_id);
+    expect(await row()).toMatchObject({ unread: true, tagged_you: true });
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-mcp", before: tagged } });
+    expect(await row()).toMatchObject({ unread: true, tagged_you: true });
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-mcp" } });
+    expect(await row()).toBeUndefined();
+  });
+
+  test("format full reads every message, so it settles a tag like the windowed read", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-owner", "Should the queue own retries?", CLAUDE);
+    await agentSends(client, project, "ses-mcp", "Install page moved.", CODEX);
+    const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Codex the runbook.", tags: [{ session: "ses-mcp" }] });
+    const tagged = ((await sent.json()) as { reply: { id: string } }).reply.id;
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-mcp", format: "full" } });
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === tagged)!.tags![0]!.read_at).toBeTruthy();
+  });
+
+  test("a tag in another project is never cut off by the list's limit: it comes first", async () => {
+    const { server, client, project, infra } = await setup();
+    const asked = await agentSends(client, infra, "ses-owner", "Should the queue own retries?", CLAUDE);
+    for (let i = 0; i < 20; i += 1) {
+      await client.callTool({ name: "send_message", arguments: { body: `Open ${i}`, thread: `Open ${i}`, project_path: project, agent_session: "ses-mcp", agent_host: "codex", agent_name: "Codex" } });
+    }
+    expect((await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Codex the runbook.", tags: [{ session: "ses-mcp" }] })).status).toBe(200);
+    const list = (await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses-mcp" } })).structuredContent as { total: number; threads: { thread_id: string; tagged_you?: true }[] };
+    expect(list.total).toBe(21);
+    expect(list.threads).toHaveLength(20);
+    expect(list.threads[0]).toMatchObject({ thread_id: asked.thread_id, tagged_you: true });
+  });
+
+  test("a session a connection polls for keeps \"only the wake delivers\": its read settles neither what is addressed to it nor a waking tag", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-owner", "Should the queue own retries?", CLAUDE);
+    await agentSends(client, project, "ses-tagged", "Install page moved.", CLAUDE);
+    await poll(server, "ses-owner", "claude-code", project);
+    await poll(server, "ses-tagged", "claude-code", project);
+    const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude the runbook.", tags: [{ session: "ses-tagged" }] });
+    expect(sent.status).toBe(200);
+    const tagged = ((await sent.json()) as { reply: { id: string } }).reply.id;
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-tagged" }, _meta: { [INBOX_WAKES_META_KEY]: true } });
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-owner" }, _meta: { [INBOX_WAKES_META_KEY]: true } });
+    const pending = (session: string) => server.store.pendingReplies(session, { tags: true }).map((m) => m.id);
+    expect(pending("ses-tagged")).toEqual([tagged]);
+    expect(pending("ses-owner")).toEqual([tagged]);
+  });
+
   test("the tagged agent answers with reply_to from another project and its answer lands in this thread; an untagged next reply goes to the agent that wrote last", async () => {
     const { server, client, project, infra } = await setup();
     const asked = await agentSends(client, project, "ses-owner", "Should the queue own retries?", CLAUDE);

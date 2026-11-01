@@ -90,6 +90,7 @@ import {
   inboxActionInDraft,
   inboxAgentName,
   INBOX_HOST_NAMES,
+  INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
   type InboxParticipant,
   type InboxSentRecipient,
@@ -2726,15 +2727,15 @@ export class InboxStore {
   /**
    * An agent read the thread's settled acks (read_thread): each gets
    * `seen_at`, so the window's pill says "<agent>
-   * saw it". `upToSeq` limits it to acks settled at or before that seq. An
-   * ack that was not sent (`not_sent`) is never seen. `only` limits it to
-   * those messages (a windowed read marks only the acks it showed).
+   * saw it". An ack that was not sent (`not_sent`) is never seen. `only`
+   * limits it to those messages (a windowed read marks only the acks it showed).
    */
-  markAcksSeen(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), only?: ReadonlySet<string>): void {
+  markAcksSeen(threadId: string, only?: ReadonlySet<string>): void {
+    const at = this.stamp();
     for (const message of this.threadMessages(threadId)) {
       const ack = message.ack;
       if (only && !only.has(message.id)) continue;
-      if (!ack || ack.settled_seq == null || ack.not_sent || ack.settled_seq > upToSeq || ack.seen_at) continue;
+      if (!ack || ack.settled_seq == null || ack.not_sent || ack.seen_at) continue;
       this.appendMessage({ ...message, ack: { ...ack, seen_at: at } }, at);
     }
   }
@@ -4871,17 +4872,35 @@ export class InboxStore {
   }
 
   /**
-   * A session that is not woken (MCP) read a thread it was tagged in with
-   * read_thread: its tags there record the read (`read_at`), so the window
-   * can say it saw it. Its own read only; nothing changes for the owner or
-   * any other recipient, and it is not a delivery. No write when nothing is new.
+   * `session` read a thread with read_thread: what it was owed among the
+   * messages the read showed (`shown`; all of them without it) is settled, for
+   * it alone, and only where no wake is left to do it. A tag that does not
+   * wake records the read (`read_at`, the window says it saw it). A reply it
+   * owns that tags others, when nothing wakes it, is delivered. So is what
+   * only a delivery settles on Codex and Qwen, whose wake the Inbox sends once
+   * and never again when it is lost: a message addressed to it, a reply it
+   * owns that tags others, a waking tag. A connection that polls hands its
+   * items until they are delivered, so its session keeps "only the wake
+   * delivers". A Tidy note is left to its wake: a read shows it as one line.
+   * No write when nothing is new.
    */
-  recordTagRead(threadId: string, session: string): void {
+  recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>): void {
     for (const message of this.threadMessages(threadId)) {
-      const tag = message.author.kind === "person" && !this.isOwner(message, session) ? tagOf(message, session) : null;
-      if (!tag || tag.wakes || tag.delivery || tag.read_at) continue;
-      const at = this.stamp();
-      this.appendMessage({ ...message, tags: message.tags!.map((t) => (t.session === session ? { ...t, read_at: at } : t)) }, at);
+      if (message.author.kind !== "person" || message.tidy || (shown && !shown.has(message.id))) continue;
+      const owner = this.isOwner(message, session);
+      const tag = owner ? null : tagOf(message, session);
+      if (!owner && !tag) continue;
+      if (tag && !tag.wakes) {
+        if (tag.delivery || tag.read_at) continue;
+        const at = this.stamp();
+        this.appendMessage({ ...message, tags: message.tags!.map((t) => (t.session === session ? { ...t, read_at: at } : t)) }, at);
+        continue;
+      }
+      if (!this.pendingFor(message, session, {})) continue;
+      const host = tag ? tag.host : this.recipientOf(message)?.host;
+      const wakes = tag ? true : this.wakesRecipient(message);
+      if (wakes && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
+      this.recordDelivery(message.id, { host: host ?? "agent", session });
     }
   }
 
@@ -4919,6 +4938,19 @@ export class InboxStore {
       const tag = tagOf(message, session);
       // A hand-off's stop notice is not a tag: the former owner was not tagged here.
       if (tag && !tag.delivery && !tag.read_at && !tag.handed_away) out.add(message.thread_id);
+    }
+    return [...out];
+  }
+
+  /**
+   * The threads holding a message addressed to `session` (`to`) that it has
+   * not taken: read_thread lists them, also when it never wrote there (a New
+   * message), wherever their project is.
+   */
+  addressedThreadsOf(session: string): string[] {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "person" && message.to?.session === session && this.pendingFor(message, session, {})) out.add(message.thread_id);
     }
     return [...out];
   }
