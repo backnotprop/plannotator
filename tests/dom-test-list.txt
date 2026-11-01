@@ -31,6 +31,9 @@ packages/ui/components/ai/SessionAskNotice.dom.test.tsx
 packages/ui/hooks/useAIChat.sessionAsk.test.tsx
 packages/ui/hooks/useAIChat.newChat.test.tsx
 packages/ui/components/ai/NewChatButton.dom.test.tsx
+packages/ui/components/chat/ChatFrame.dom.test.tsx
+packages/ui/components/chat/ChatComposer.dom.test.tsx
+packages/ui/components/chat/ChatTranscript.dom.test.tsx
 packages/review-editor/hooks/useAIChat.newChat.test.tsx
 packages/ui/hooks/useAgentSettings.dom.test.tsx
 packages/ui/utils/codeHighlight.test.ts
