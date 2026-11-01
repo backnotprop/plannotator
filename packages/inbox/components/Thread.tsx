@@ -379,6 +379,8 @@ export function MessageBody({
     openId?: string | null;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
     suggest?: (selectedText: string) => string | undefined;
+    /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
+    revealed?: string | null;
   };
   /**
    * The person's own sent reply (sentReply.ts): the answers it carried, read
@@ -704,6 +706,16 @@ export function MessageBody({
   // person removes elsewhere (the reply box's list) leaves the text.
   const viewerRef = useRef<ViewerHandle>(null);
   const commentList = useMemo<Annotation[]>(() => (comments ? [...comments.annotations] : NO_ANNOTATIONS), [comments?.annotations]);
+  // A diagram's numbered badge, in the message or its popout, shows its comment selected. A text highlight's press is
+  // openHighlight's, and reaches here too, so it is passed over.
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
+  const selectBadge = useCallback(
+    (id: string | null) => {
+      if (id !== null && !commentList.find((comment) => comment.id === id)?.diagramAnchor) return;
+      setSelectedBadge((current) => (current === id ? null : id));
+    },
+    [commentList],
+  );
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const painted = useRef<Set<string>>(new Set());
@@ -819,8 +831,8 @@ export function MessageBody({
         markdown={shown}
         annotations={commentList}
         onAddAnnotation={comments ? addComment : noop}
-        onSelectAnnotation={noop}
-        selectedAnnotationId={comments?.openId ?? null}
+        onSelectAnnotation={comments ? selectBadge : noop}
+        selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
@@ -1823,6 +1835,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [records]);
   /** Comments whose words were not found in their message (the reply box's list marks them). */
   const [unanchoredComments, setUnanchoredComments] = useState<ReadonlySet<string>>(NO_IDS);
+  const [revealedComment, setRevealedComment] = useState<string | null>(null);
   const noteUnanchored = useCallback((report: { attempted: readonly string[]; unanchored: readonly string[] }) => {
     setUnanchoredComments((current) => {
       const next = new Set(current);
@@ -1993,17 +2006,21 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       stopHold();
       const show = () => {
         stopHold();
-        const mark = bodyRef.current?.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(record.message_id)}"] [data-bind-id="${CSS.escape(record.id)}"], [data-message-id="${CSS.escape(record.message_id)}"] [data-highlight-id="${CSS.escape(record.id)}"]`,
-        );
-        const target = mark ?? articleOf(record.message_id);
+        const inMessage = `[data-message-id="${CSS.escape(record.message_id)}"]`;
+        const id = CSS.escape(record.id);
+        const mark = bodyRef.current?.querySelector<HTMLElement>(`${inMessage} [data-bind-id="${id}"], ${inMessage} [data-highlight-id="${id}"], ${inMessage} [data-diagram-badge="${id}"]`);
+        // A comment on a diagram part: the diagram is rung, and its own selection brings the part into view.
+        const onDiagram = annotationOf(record).diagramAnchor != null;
+        const target = mark?.closest<HTMLElement>('[data-diagram-block]') ?? mark ?? articleOf(record.message_id);
         if (!target) return;
         target.scrollIntoView?.({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
         target.classList.remove('ib-q-target-out');
         target.classList.add('ib-q-target');
+        if (onDiagram) setRevealedComment(record.id);
         setTimeout(() => {
           target.classList.add('ib-q-target-out');
           target.classList.remove('ib-q-target');
+          if (onDiagram) setRevealedComment((current) => (current === record.id ? null : current));
           setTimeout(() => target.classList.remove('ib-q-target-out'), 700);
         }, 1400);
       };
@@ -4740,6 +4757,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                           onPainted: () => repaintHits(message.id),
                           onOpen: openListAt,
                           openId: commentsList?.at ?? null,
+                          revealed: revealedComment,
                         }
                       : undefined
                   }

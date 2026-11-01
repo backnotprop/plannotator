@@ -2939,6 +2939,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-fl-tm > button.ib-mut { width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
   .pn-inbox .ib-mfold-b { height: 44px; }
   .ib-tmeta { margin-top: -6px; }
+  /* A diagram's comment composer, inline or in the popout (which portals to body): buttons a thumb can hit. */
+  body:has(.pn-inbox) [data-diagram-composer] button { min-height: 44px; }
   /* the question cards (ui's QuestionBlock): rows and buttons a thumb can hit */
   .ib-body [data-question-option]:not([data-question-tile] > *) { min-height: 44px; align-items: center; padding-top: 8px; padding-bottom: 8px; }
   /* A picture tile: its caption row is the 44 px target, the radio or checkbox drawn at 20 px. */
