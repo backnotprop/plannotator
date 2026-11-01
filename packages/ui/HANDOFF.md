@@ -1770,6 +1770,7 @@ Additive, one optional `Viewer` prop; Plannotator passes none, so its render is 
 Additive, one optional `Viewer` prop; Plannotator's plan review and annotate pass none, so their render is unchanged. Added for the Plannotator Inbox (approval "inbox-message-comments", 2026-10-19), where the person comments on the words of an agent's message.
 
 - **`textComments?: boolean`** on `Viewer`, with `answerOnly`: a text selection opens the selection toolbar again, comment-only (the toolbar's `commentOnly`: Comment and the one-click 👍, no Delete, no label picker), with its comment composer, and `annotations` are drawn as highlights (the highlighter is enabled). Question cards (and a host's `renderQuestionCard`) are wrapped `annotation-exclude`, so their words are never commented on. Nothing else of authoring comes back: no pinpoint, code-block toolbar, Global comment, Copy or Vim. Ignored without `answerOnly` and under `readOnly`. Inside, `selectionCommentsOn = !authoringOff || (answerOnly && textComments && !readOnly)` replaces `!authoringOff` for the highlighter and the selection toolbar, its composer and its label picker only.
+- **Diagrams follow it (next publish; no API change).** Under the same condition a Mermaid or Graphviz fence takes comments on its parts, inline and in the popout, and a host's `onAskAI` reaches its composer as it reaches the text composer: `onAddAnnotation` gets the row `DiagramBlock` has always made (`diagramAnchor`, the fence's `blockId`, the part's label as `originalText`). A host that passes `textComments` must keep that row and pass it back in `annotations`; plain `answerOnly` and `readOnly` documents stay read-only, unchanged. Two touch fixes reach every host that comments on diagrams: a second finger cancels the press (it opened a composer), and the composer lifts to stay inside a canvas that would clip it.
 
 ## Dependency bumps: KaTeX 0.18, @pierre/diffs 1.5.2, Mermaid 12.2 (published in ui 0.54.0)
 
@@ -1845,6 +1846,7 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **The next ui publish carries `inbox-thread.css` and the chat window together** (the owner's ruling). The sheet needs no core change. Workspaces moves its import as "Inbox thread stylesheet" says.
 - **ui 0.55.0: ui only. `@plannotator/core` is unchanged at 0.25.14** (nothing under `packages/core` moved since v0.28.37), so ui publishes alone and keeps pinning core `0.25.14` exactly. No guides.show deploy is needed. It is cut from `main` at `f103b6703` plus the version bump, and packed with `bun pm pack` from a clean `bun install --frozen-lockfile` at Bun 1.4.4. **No export name is removed** (checked name by name against ui 0.54.0 on npm), and peer ranges are unchanged. Hosts must act on these:
   1. **KaTeX 0.19.** `katex` is `^0.19.0` (was `^0.18.11`, which npm marks deprecated). Rendering is unchanged, but a host that serves its own `katex.min.css` should move it to 0.19. Mermaid 12.2.0 still declares `katex ^0.18.0`, so without action the install holds two KaTeX copies. Add a root override `"katex": "^0.19.0"` (`pnpm.overrides`, `overrides` or `resolutions`), or point Mermaid's `katex` at `utils/mermaid-math-slot`. See "KaTeX 0.19".
   2. **`HtmlViewer` `sandbox?: string`, for Workspaces.** The srcdoc frame's whole `sandbox` attribute. Workspaces passes `sandbox="allow-scripts"` so a shared document's `alert` / `confirm` / `prompt` cannot draw over its origin, and can drop its pnpm patch. Absent, the default stays `"allow-scripts allow-modals"`. See "`HtmlViewer` `sandbox`".
@@ -1891,7 +1893,7 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 - The HTML annotation seams also changed the guides.show viewer **stylesheet** (five utility rules from `HtmlSurfaceControls`; the viewer JS is unchanged), so `packages/core/guide-viewer-manifest.ts` now pins a CSS hash that exists on guides.show only after the deploy workflow has published this build's `/v1/` assets. A guide exported from this build before that deploy would pin a stylesheet the host does not serve yet: **deploy guides.show before any release that ships this manifest.**
 - UI declares the already published core version exactly in its source manifest. Do not replace it with `workspace:*`: direct publication can preserve that protocol and make the package impossible to install outside this repository. Bun links the local core workspace whenever its version matches the exact dependency. Before publishing, run `bun run --cwd packages/ui smoke:package`; it checks the source and packed manifests, required tarball subpaths, local Bun linking, and a real pnpm install in an external temporary consumer. When both packages change, publish **`core` first, then `ui`**.
 - **`--provenance` only works from a supported CI environment (GitHub Actions OIDC)** — a local publish fails with `Automatic provenance generation not supported for provider: null`. Until a CI publish job exists for these two packages, local publishes drop the flag. Publishing under `--tag next` first lets the consumer preflight before `npm dist-tag add <pkg>@<version> latest` promotes it.
-- `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS; since 0.33.0 `prepack` also runs `build:bridge-assets`, which generates the gitignored `bridge-script.asset.js` and `bridge-script.lite.ts` beside their source. Both are in `files`, so a tarball built without `prepack` (a hand-rolled `npm pack --ignore-scripts`) would ship export subpaths that resolve to nothing; always build with `bun pm pack`.
+- `styles.css` is built by the `prepack` script (`bun run build:css`) so the published tarball always carries fresh precompiled CSS; since 0.33.0 `prepack` also runs `build:bridge-assets`, which generates the gitignored `bridge-script.asset.js` and `bridge-script.lite.ts` beside their source, and it now runs `build:inbox-thread-css`, which generates the gitignored `inbox-thread.css` from `packages/inbox/inbox.css`. All of them are in `files`, so a tarball built without `prepack` (a hand-rolled `npm pack --ignore-scripts`) would ship export subpaths that resolve to nothing; always build with `bun pm pack`. `smoke:package` fails if the sheet is missing from the tarball or a consumer cannot import it.
 - There is **no CI publish job for these two packages yet** — first publish is manual from `main` after merge. (Wiring a CI publish job is a follow-up.)
 
 ---
@@ -2560,6 +2562,40 @@ Slice 1 of the Inbox thread extract (plan record, not in this repo). These pure 
 - **`./inbox-format`**: display helpers with fixed `en-US` `Intl` formats (`shortTime`, `whenTime`, `fullTime`, `formatCount`, `agentName` …).
 
 Publish core first, then ui, as always. These subpaths need no ui bump until ui imports them.
+
+## Inbox thread stylesheet: `@plannotator/ui/inbox-thread.css` (unreleased; additive, no core change)
+
+The parts in `components/inbox-thread/` draw with the Inbox's `ib-` classes. `packages/inbox/inbox.css` stays their only source. `scripts/build-inbox-thread-css.ts` generates `inbox-thread.css` from it at `prepack`, the pattern of `bridge-script.asset.js`: gitignored, in `files`, exported as `./inbox-thread.css`. It is the whole sheet in the source's order, about 560 KB raw and 79 KB gzipped (511 KB and 78 KB after a host's bundler minifies it). A thread-only subset can come later.
+
+**What generation changes.** The comments go, and whatever would reach a host page outside `.pn-inbox`. `tests/inbox-thread-css.test.ts` runs the generator over the real `inbox.css` and checks each of these from the outside:
+
+| In `inbox.css` | Reach | In the sheet |
+|---|---|---|
+| `html, body, #root` (`@layer base`) | height and margin of the page | dropped |
+| `html:has(.pn-inbox), body:has(.pn-inbox)` (phone block) | the page's background | dropped |
+| `:root[data-ib-keyboard-pin]:has(.pn-inbox)` (phone block) | `overflow: hidden` on the page while the Inbox pins the keyboard | dropped |
+| `html.ib-theme-instant` | transitions on `html` | dropped; its `*` forms are scoped |
+| `body:has(.pn-inbox) :is(input…, textarea, select)` (phone block) | every field on the page at `16px !important` | scoped |
+| `pre code.pn-code`, `[data-local-link="unavailable"]`, `kbd[data-keycap]::after`, `[data-open-in-menu] …`, `[data-comment-popover] …`, `[data-full-view-menu] …`, `[data-thread-owner] b` | ui's own elements and attributes, anywhere on the page | scoped |
+| `.tp`, `.tp-*`, `.pm-*` | unprefixed classes a host may also use | scoped |
+| `.ib-*`, `dialog.ib-*`, `::highlight(ib-*)` and the rest | prefixed, but matching outside the root | scoped |
+| `@keyframes tp-draw` | a global name without the prefix | `ib-tp-draw`, with its use |
+| `:root` and `:root.light` token blocks | `--ib-*` only, checked rule by rule | kept |
+
+Scoping prefixes `:where(.pn-inbox)`, after any leading page element (`:root.light :where(.pn-inbox) .ib-linknote`). It adds no specificity, so the sheet's own cascade is the source's, rule for rule. The sheet has no `@font-face`, no `@import` and no `url()` but one inline `data:` mask. It names two layers, Tailwind's `base` and its own `ib-type`. A new at-rule in `inbox.css` that the generator does not know fails `prepack`, so someone decides what it does in a host first. So do nested CSS, `body > x`, and a renamed keyframe name held in a custom property, which the rename cannot follow. The generator reads the sheet with postcss, a devDependency of this package only: it runs at `prepack` and nothing at runtime needs it.
+
+**What a host does.**
+
+1. Import the sheet **outside any cascade layer, after the host's base reset**, as with `contents-rail.css`. In Workspaces that is next to `contents-rail.css` in `src/styles.css`, not in `src/plannotator/plannotator.css`: inside `layer(plannotator)` the sheet would lose to Tailwind's preflight in `base`.
+2. Keep `styles.css`. The sheet reads the theme tokens (`--background`, `--card`, `--muted`, `--border`, `--primary`, `--ring`, `--font-sans`, `--font-mono` and the rest) and defines none of them.
+3. Wrap the parts in one root: `<div className="pn-inbox" data-pn-tooltip-root="">`. Both on the same element, or a `Tip` portals outside the root and loses its look. The root sets `height: 100%`, `position: relative`, the type and `background: var(--ib-ground)`. The Inbox's pane paints `--card` over that, so a host matches it with `background: var(--card)` on its root, or uses its panel's own surface. In a scrolling panel `height: 100%` stops the background short of tall content: set `height: auto` on the root, or make the root the scroller.
+4. Load the fonts, as for `styles.css`: Inter and Geist Mono, or your own under `--font-sans` and `--font-mono`. A Tailwind host sets both on its root: Tailwind's `theme` layer defines them too, and it beats `styles.css` in `layer(plannotator)`, so without this the parts draw in the system font.
+5. Set the mode on `<html>` the way `ThemeProvider` does: the light half of the tokens reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount.
+6. Portal into the root. The `ib-` rules match only inside `.pn-inbox`, so a popup a part sends to `document.body` has no look.
+
+**What the Inbox's window owns and a host does not get.** `--ib-vvh`, `--inbox-text-size`, `--sidebar-width`, `data-view`, `data-ib-keyboard` and `.ib-phone` come from the Inbox's own code. Their rules ship, inert, with fallbacks where the source has them. `@container ib-thread` needs the Inbox's `.ib-pbody` around the parts, and `@container ib-ask` its `.ib-askline`; without them those rules do not apply.
+
+**Viewport queries.** The sheet keeps the Inbox's media queries, and they measure the window, not the panel. For the parts in the folder today the one that matters is the phone block, `@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse)`. Under it `.ib-att-t` takes the full width and 56 px of height, and `.pn-inbox` paints `--card`. Most of its 712 selectors belong to the Inbox's window or to parts that have not moved yet.
 
 ## Document font (#1657; published in ui 0.54.0; additive, no core change)
 

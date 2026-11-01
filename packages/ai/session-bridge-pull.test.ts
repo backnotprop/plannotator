@@ -139,6 +139,34 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
 }
 
 describe("pull session bridge", () => {
+  test("once `connected`, status is what the host reported, not a new bridge's ready", async () => {
+    const host = fakeHost("busy");
+    const { pull, startHost } = setup({}, host);
+    expect(pull.connected).toBe(false);
+    expect(pull.bridge.status()).toBe("ready");
+    void startHost();
+    await waitFor(() => pull.connected);
+    expect(pull.bridge.status()).toBe("busy");
+  });
+
+  test("an event before any poll is contact, and not a connection: it reported no status", async () => {
+    const { pull, call } = setup();
+    const event = await call(SESSION_BRIDGE_EVENT_PATH, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ type: "done", askId: "an-earlier-question", answer: "Late." }),
+    });
+    expect(event.status).toBe(409);
+    expect(pull.connected).toBe(false);
+  });
+
+  test("a body past the limit is refused, and the limit is 1,000,000 unless a server sets its own", async () => {
+    const body = JSON.stringify({ type: "status", status: "busy", pad: "x".repeat(1_000_000) });
+    const post = (call: ReturnType<typeof setup>["call"]) => call(SESSION_BRIDGE_EVENT_PATH, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body });
+    expect((await post(setup().call)).status).toBe(400);
+    expect((await post(setup({ maxBodyChars: 2_000_000 }).call)).status).toBe(200);
+  });
+
   test("a host that never interrupts says so on its polls; every other host's advert is unchanged", async () => {
     // What regresses: the capability leaking onto other hosts' adverts (absent = interruptible).
     const ordinary = setup();

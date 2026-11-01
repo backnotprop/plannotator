@@ -221,7 +221,7 @@ test.skipIf(!hasDom)('⋯ is a real button beside the row, named for the project
   expect(more.getAttribute('aria-expanded')).toBe('true');
   expect(row.hasAttribute('data-menu')).toBe(true);
   const items = [...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim());
-  expect(items).toEqual(['Mark all as read', 'Archive all']);
+  expect(items).toEqual(['Mark all as read', 'Archive all', 'Rename…']);
   expect(item('read')!.hasAttribute('data-disabled')).toBe(false);
 });
 
@@ -232,7 +232,7 @@ test.skipIf(!hasDom)('a right-click on the row opens the same menu', async () =>
     row.querySelector('.ib-proj')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 200 }));
   });
   await until(() => !!menu(), 'the context menu');
-  expect([...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim())).toEqual(['Mark all as read', 'Archive all']);
+  expect([...menu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim())).toEqual(['Mark all as read', 'Archive all', 'Rename…']);
 });
 
 test.skipIf(!hasDom)('Mark all as read: one batch, the warning toast, and one Undo (Z) puts every thread back', async () => {

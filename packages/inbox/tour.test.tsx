@@ -44,6 +44,8 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 let pushRecord: ((data: unknown) => void) | null = null;
+/** The stand-in stream's last record id: past any cursor the list reads in these tests. */
+let fakeEventId = 1000;
 let tailnetPage = false;
 let savedNotification: unknown;
 let savedHasFocus: typeof document.hasFocus;
@@ -123,7 +125,8 @@ beforeEach(async () => {
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
     addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
-      if (type === 'record') pushRecord = (data) => listener({ data: JSON.stringify(data), lastEventId: '999' } as MessageEvent<string>);
+      // Each record a seq above the last, as the server's are (the window drops one at or below what it passed).
+      if (type === 'record') pushRecord = (data) => listener({ data: JSON.stringify(data), lastEventId: String(++fakeEventId) } as MessageEvent<string>);
     }
     close() {}
   };

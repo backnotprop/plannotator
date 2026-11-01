@@ -14,7 +14,7 @@
  * during each handover; the leader tells the server a follower is gone when
  * that tab's lock is freed; followers name their leader (`served_by`).
  */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, jest, test } from 'bun:test';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 import { dispatchInboxFrame } from './api';
 import {
@@ -24,6 +24,7 @@ import {
   EVENTS_LOCK,
   prepareInboxEvents,
   inboxEventsServedBy,
+  subscribeOwnInboxEvents,
   subscribeSharedInboxEvents,
   WINDOW_LOCK_PREFIX,
   type SharedEventsEnv,
@@ -194,8 +195,26 @@ class FakeServer {
   constructor(readonly locks: FakeLocks) {}
   seq = 0;
   lines: { seq: number; kind: string }[] = [];
-  streams = new Set<{ tab: number; push: (frame: InboxEventFrame) => void }>();
+  streams = new Set<{ tab: number; stalled: boolean; push: (frame: InboxEventFrame) => void }>();
   opened: { tab: number; cursor: number }[] = [];
+  /** Tabs whose new streams are born silent (a broken connection on that tab, or a proxy holding every stream back). */
+  stalledTabs = new Set<number>();
+  stallEverything = false;
+
+  /**
+   * The tab's open streams go silent and stay open: a dead connection nothing closed. `andNew`: its next streams too,
+   * until `heal`. A silent stream passes on nothing, not even the heartbeat.
+   */
+  stall(tab: number | 'all', options: { andNew?: boolean } = {}): void {
+    for (const stream of this.streams) if (tab === 'all' || stream.tab === tab) stream.stalled = true;
+    if (options.andNew && tab === 'all') this.stallEverything = true;
+    else if (options.andNew) this.stalledTabs.add(tab as number);
+  }
+  /** New streams work again (the silent ones stay silent, as dead sockets do). */
+  heal(): void {
+    this.stalledTabs.clear();
+    this.stallEverything = false;
+  }
 
   write(count = 1): number[] {
     const written: number[] = [];
@@ -218,8 +237,12 @@ class FakeServer {
     let open = true;
     const stream = {
       tab,
+      stalled: this.stallEverything || this.stalledTabs.has(tab),
       // Frames arrive a task later, in order, like a socket.
-      push: (frame: InboxEventFrame) => setTimeout(() => this.locks.run(tab, () => open && onFrame(frame)), 0),
+      push: (frame: InboxEventFrame) => {
+        if (stream.stalled) return;
+        setTimeout(() => this.locks.run(tab, () => open && !stream.stalled && onFrame(frame)), 0);
+      },
     };
     stream.push({ name: 'hello', data: JSON.stringify({ serverSession: 's', cursor: this.seq }), id: null });
     for (const line of this.lines) if (line.seq > cursor) stream.push(this.frameOf(line));
@@ -244,6 +267,10 @@ interface Tab {
   deliveries: number;
   drafts: string[];
   gone: { window: string; unloading: boolean }[];
+  /** The page read its list and open thread again (`onCatchUp`). */
+  listCatchUps: number;
+  /** What `onLive` said, in order (`false`: "Reconnecting…" shows). */
+  live: boolean[];
   visible: boolean;
   doc: EventTarget;
   win2: EventTarget;
@@ -264,7 +291,7 @@ class World {
   catchUpDelayMs = 0;
   next = 1;
 
-  open(cursor = this.server.seq, options: { visible?: boolean } = {}): Tab {
+  open(cursor = this.server.seq, options: { visible?: boolean; liveTimers?: SharedEventsEnv['liveTimers'] } = {}): Tab {
     const id = this.next++;
     const tab: Tab = {
       id,
@@ -276,6 +303,8 @@ class World {
       deliveries: 0,
       drafts: [],
       gone: [],
+      listCatchUps: 0,
+      live: [],
       visible: options.visible ?? false,
       doc: new EventTarget(),
       win2: new EventTarget(),
@@ -298,6 +327,10 @@ class World {
       onConnect: () => {
         tab.connects += 1;
       },
+      onCatchUp: () => {
+        tab.listCatchUps += 1;
+      },
+      onLive: (live) => tab.live.push(live),
     };
     const env: SharedEventsEnv = {
       locks: this.locks.managerFor(id),
@@ -328,6 +361,7 @@ class World {
       lifecycle: { document: tab.doc, window: tab.win2 },
       isVisible: () => tab.visible,
       timing: this.timing,
+      liveTimers: options.liveTimers,
     };
     tab.unsubscribe = subscribeSharedInboxEvents(cursor, handlers, tab.win, env);
     this.tabs.set(id, tab);
@@ -1119,3 +1153,323 @@ test('a random life with leaders stopping (no freeze) and tabs shown and hidden:
   // The rounds did take streams over (the property is not vacuous).
   expect(steals).toBeGreaterThan(5);
 }, 120_000);
+
+// ── A stream that dies without closing (liveStream.ts), on fake timers ──
+//
+// Real windows: the server beats every 10 s, the page's window is 25 s (a
+// follower's 30 s), the note waits 3 s for the reconnect; the leader check
+// keeps its own defaults. Fake time passes in 50 ms steps, each running the
+// tasks then due and the promises they settle.
+
+const STEP_MS = 50;
+const BEAT_MS = 10_000;
+
+/** A world on fake timers with the real windows, and a clock whose server beats while `beating`. */
+/**
+ * Bun's fake timers drive the runtime's timers, not happy-dom's (the DOM lanes swap those in), so these run without
+ * the DOM, as CI runs this file (it is not in tests/dom-test-list.txt).
+ */
+const fakeTimerTest = test.skipIf(typeof document !== 'undefined');
+
+function silenceWorld() {
+  jest.useFakeTimers();
+  const w = world();
+  w.timing = undefined;
+  let clock = 0;
+  /** The server beats (off: the whole computer asleep, the Inbox too). */
+  const beat = { on: true };
+  const pass = async (ms: number) => {
+    for (let t = 0; t < ms; t += STEP_MS) {
+      jest.advanceTimersByTime(STEP_MS);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      clock += STEP_MS;
+      if (beat.on && clock % BEAT_MS === 0) w.server.broadcast('heartbeat', '{}');
+    }
+  };
+  const done = () => {
+    for (const tab of w.tabs.values()) tab.unsubscribe();
+    jest.useRealTimers();
+  };
+  return { w, pass, done, beat };
+}
+
+/** A tab's watch timers that wait while `asleep` and run when the tab's `wake` comes (the computer slept). */
+function sleepyTimers() {
+  let asleep = false;
+  let waiting: (() => void)[] = [];
+  const timers: NonNullable<SharedEventsEnv['liveTimers']> = {
+    setTimeout: (fn, ms) => {
+      const timer = { cancelled: false, id: null as ReturnType<typeof setTimeout> | null };
+      const run = () => {
+        if (!timer.cancelled) fn();
+      };
+      timer.id = setTimeout(() => (asleep ? waiting.push(run) : run()), ms);
+      return timer;
+    },
+    clearTimeout: (handle) => {
+      const timer = handle as { cancelled: boolean; id: ReturnType<typeof setTimeout> | null };
+      timer.cancelled = true;
+      if (timer.id !== null) clearTimeout(timer.id);
+    },
+  };
+  return {
+    timers,
+    sleep: () => {
+      asleep = true;
+    },
+    wake: () => {
+      asleep = false;
+      const due = waiting;
+      waiting = [];
+      for (const fn of due) fn();
+    },
+  };
+}
+
+fakeTimerTest('healthy: five minutes of heartbeats with a leader and two followers: one stream, no reopen, no steal, no catch-up, no note', async () => {
+  const { w, pass, done } = silenceWorld();
+  try {
+    const a = w.open();
+    await pass(500);
+    const b = w.open(w.server.seq, { visible: true });
+    const c = w.open(w.server.seq);
+    await pass(500);
+    for (let minute = 0; minute < 5; minute++) {
+      w.server.write(1);
+      await pass(60_000);
+    }
+    expect(w.leader()).toBe(a.id);
+    expect(w.server.opened).toHaveLength(1);
+    expect(w.locks.steals).toBe(0);
+    for (const tab of [a, b, c]) {
+      expect(tab.listCatchUps).toBe(0);
+      expect(tab.live).toEqual([]);
+      expectAll(tab, 0, 5);
+    }
+    // Showing a tab after a short hide asks for nothing either.
+    b.visible = false;
+    b.doc.dispatchEvent(new Event('visibilitychange'));
+    await pass(BEAT_MS);
+    b.visible = true;
+    b.doc.dispatchEvent(new Event('visibilitychange'));
+    await pass(STEP_MS);
+    expect(b.listCatchUps).toBe(0);
+  } finally {
+    done();
+  }
+});
+
+fakeTimerTest('the leader\'s stream dies silently while it runs: it opens the stream again within the window, nobody takes it, nothing missed, no note', async () => {
+  const { w, pass, done } = silenceWorld();
+  try {
+    const a = w.open();
+    await pass(500);
+    const b = w.open(w.server.seq, { visible: true });
+    await pass(500);
+    w.server.write(2);
+    await pass(1_000);
+    w.server.stall(a.id);
+    // Written while the stream is dead: neither tab hears it.
+    w.server.write(3);
+    await pass(5_000);
+    expect(a.records).toEqual([1, 2]);
+    expect(b.records).toEqual([1, 2]);
+    // The leader's window (25 s from the last beat it heard) passes: it opens its stream again from its last seq.
+    await pass(30_000);
+    expect(w.server.opened.map((o) => o.cursor)).toEqual([0, 2]);
+    expect(w.server.opened.every((o) => o.tab === a.id)).toBe(true);
+    expect(w.leader()).toBe(a.id);
+    expect(w.locks.steals).toBe(0);
+    expectAll(a, 0, 5);
+    expectAll(b, 0, 5);
+    // The leader read its list and thread once; the follower heard the replay in time and asked nothing.
+    expect(a.listCatchUps).toBe(1);
+    expect(b.listCatchUps).toBe(0);
+    // The reconnect answered at once: no "Reconnecting…" anywhere.
+    expect(a.live).toEqual([]);
+    expect(b.live).toEqual([]);
+    await pass(2 * 60_000);
+    expect(w.server.opened).toHaveLength(2);
+    expect(a.listCatchUps).toBe(1);
+  } finally {
+    done();
+  }
+});
+
+/**
+ * A hidden tab's timers as Chrome's intensive throttling runs them: each fires at the next whole minute (from
+ * `base`), never before. Its main thread still runs: it answers pings and handles messages at once.
+ */
+function throttledTimers(base: number): NonNullable<SharedEventsEnv['liveTimers']> {
+  return {
+    setTimeout: (fn, ms) => {
+      const due = Date.now() + ms;
+      const at = base + Math.ceil((due - base) / 60_000) * 60_000;
+      return setTimeout(fn, Math.max(0, at - Date.now()));
+    },
+    clearTimeout: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  };
+}
+
+fakeTimerTest('the leader dies without noticing (hidden, its timers held back a minute, its stream silent): the follower takes the stream within its window; no loop after', async () => {
+  const { w, pass, done } = silenceWorld();
+  try {
+    const a = w.open(w.server.seq, { liveTimers: throttledTimers(Date.now()) });
+    await pass(500);
+    const b = w.open(w.server.seq, { visible: true });
+    await pass(1_000);
+    w.server.write(1);
+    await pass(1_000);
+    // The leader's stream goes silent; the leader would see it only at the next whole minute.
+    w.server.stall(a.id);
+    w.server.write(2);
+    await pass(40_000);
+    // The follower waited its longer window, then took the stream and opened its own, from its last seq.
+    expect(w.leader()).toBe(b.id);
+    expect(w.locks.steals).toBe(1);
+    expect(w.server.opened.filter((o) => o.tab === b.id)).toEqual([{ tab: b.id, cursor: 1 }]);
+    w.server.write(2);
+    await pass(1_000);
+    expectAll(a, 0, 5);
+    expectAll(b, 0, 5);
+    // The new stream answered at once: no "Reconnecting…"; the follower read its list once.
+    expect(a.live).toEqual([]);
+    expect(b.live).toEqual([]);
+    expect(b.listCatchUps).toBe(1);
+    // The old leader follows now, and stays a follower: no taking back, no loop.
+    await pass(3 * 60_000);
+    expect(w.leader()).toBe(b.id);
+    expect(w.locks.steals).toBe(1);
+    expect(a.listCatchUps).toBe(0);
+    expect(b.listCatchUps).toBe(1);
+  } finally {
+    done();
+  }
+});
+
+fakeTimerTest('the computer sleeps and wakes: the leader reopens at once, the followers wait their grace and take nothing; no list is read but the leader\'s', async () => {
+  const { w, pass, done, beat } = silenceWorld();
+  try {
+    const clocks = [sleepyTimers(), sleepyTimers(), sleepyTimers()];
+    const a = w.open(w.server.seq, { liveTimers: clocks[0]!.timers });
+    await pass(500);
+    const b = w.open(w.server.seq, { visible: true, liveTimers: clocks[1]!.timers });
+    const c = w.open(w.server.seq, { liveTimers: clocks[2]!.timers });
+    await pass(30_000);
+    // Ten minutes asleep: no timer runs, the Inbox beats nothing.
+    beat.on = false;
+    for (const clock of clocks) clock.sleep();
+    await pass(10 * 60_000);
+    beat.on = true;
+    // Awake: the followers' overdue checks happen to run first, before any frame has come.
+    clocks[1]!.wake();
+    clocks[2]!.wake();
+    clocks[0]!.wake();
+    await pass(10_000);
+    expect(w.locks.steals).toBe(0);
+    expect(w.leader()).toBe(a.id);
+    for (const tab of [a, b, c]) expect(tab.live).toEqual([]);
+    expect(b.listCatchUps).toBe(0);
+    expect(c.listCatchUps).toBe(0);
+    w.server.write(1);
+    await pass(1_000);
+    for (const tab of [a, b, c]) expect(tab.records.at(-1)).toBe(w.server.seq);
+  } finally {
+    done();
+  }
+});
+
+fakeTimerTest('every stream held back (a proxy), five tabs: no follower takes the stream from a leader at work on it; each tab says "Reconnecting…" once, catches up once a window, and is live again when the stream comes back', async () => {
+  const { w, pass, done } = silenceWorld();
+  try {
+    const a = w.open();
+    await pass(500);
+    const followers = [w.open(w.server.seq, { visible: true }), w.open(w.server.seq), w.open(w.server.seq), w.open(w.server.seq)];
+    const tabs = [a, ...followers];
+    await pass(1_000);
+    w.server.stall('all', { andNew: true });
+    w.server.write(2);
+    await pass(2 * 60_000);
+    // The leader reopens once a window and says so; the followers leave the stream to it (each would otherwise
+    // take it from the one before, every window, for as long as the outage lasts).
+    expect(w.locks.steals).toBe(0);
+    expect(w.leader()).toBe(a.id);
+    expect(w.server.opened.every((o) => o.tab === a.id)).toBe(true);
+    expect(w.server.opened.length).toBeLessThanOrEqual(6);
+    for (const tab of tabs) {
+      expect(tab.live).toEqual([false]);
+      // One read per window at most while it stays dead (two minutes: three to five windows).
+      expect(tab.listCatchUps).toBeGreaterThanOrEqual(3);
+      expect(tab.listCatchUps).toBeLessThanOrEqual(5);
+    }
+    w.server.heal();
+    await pass(35_000);
+    for (const tab of tabs) {
+      expect(tab.live).toEqual([false, true]);
+      expectAll(tab, 0, 2);
+    }
+    // Live again: nothing more is read.
+    const reads = tabs.map((tab) => tab.listCatchUps);
+    const opened = w.server.opened.length;
+    await pass(2 * 60_000);
+    expect(tabs.map((tab) => tab.listCatchUps)).toEqual(reads);
+    expect(w.server.opened).toHaveLength(opened);
+    expect(w.locks.steals).toBe(0);
+  } finally {
+    done();
+  }
+});
+
+test('a window with its own stream (no Web Locks): the same watch reopens it from its last record and catches up', async () => {
+  jest.useFakeTimers();
+  const opened: number[] = [];
+  const streams: { push: (frame: InboxEventFrame) => void; open: boolean }[] = [];
+  const got: number[] = [];
+  const events = { catchUps: 0, live: [] as boolean[] };
+  const frame = (name: InboxEventFrame['name'], seq?: number): InboxEventFrame =>
+    seq === undefined ? { name, data: '{}', id: null } : { name, id: String(seq), data: JSON.stringify({ seq, kind: 'message', id: `m${seq}`, message: {} }) };
+  const unsubscribe = subscribeOwnInboxEvents(
+    0,
+    { onRecord: (event) => event && got.push(event.seq), onStatus: () => {}, onCatchUp: () => (events.catchUps += 1), onLive: (live) => events.live.push(live) },
+    { id: 'w-own', permission: 'granted', origin: 'http://localhost:1' },
+    {
+      open: (cursor, onFrame) => {
+        opened.push(cursor);
+        const stream = { open: true, push: (f: InboxEventFrame) => stream.open && onFrame(f) };
+        streams.push(stream);
+        return () => {
+          stream.open = false;
+        };
+      },
+      dispatch: dispatchInboxFrame,
+      lifecycle: null,
+      isVisible: () => true,
+    },
+  );
+  try {
+    const first = streams[0]!;
+    first.push(frame('hello'));
+    first.push(frame('record', 1));
+    for (let i = 0; i < 6; i++) {
+      jest.advanceTimersByTime(BEAT_MS);
+      first.push(frame('heartbeat'));
+    }
+    expect(opened).toEqual([0]);
+    expect(events.catchUps).toBe(0);
+    // Silent from here (the record 2 never arrives on it).
+    jest.advanceTimersByTime(25_000);
+    expect(opened).toEqual([0, 1]);
+    expect(events.catchUps).toBe(1);
+    jest.advanceTimersByTime(3_000);
+    expect(events.live).toEqual([false]);
+    const second = streams[1]!;
+    second.push(frame('hello'));
+    second.push(frame('record', 1));
+    second.push(frame('record', 2));
+    expect(events.live).toEqual([false, true]);
+    expect(got).toEqual([1, 2]);
+  } finally {
+    unsubscribe();
+    jest.useRealTimers();
+  }
+});
