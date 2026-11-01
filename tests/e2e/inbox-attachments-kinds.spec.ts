@@ -362,7 +362,7 @@ test('Send carries the image comment with its marked-up copy and the code commen
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
   const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
-  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 annotations');
+  await expect(page.locator('[data-annotations-chip]')).toHaveText('2 comments');
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes, one on the phone shot and one on the worker.');
   await shot('8-reply-with-annotations');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();

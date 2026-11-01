@@ -283,7 +283,7 @@ test.skipIf(!hasDom)("words selected in an agent's message: the comment-only too
   // The reply box's chip counts it and lists it under the message.
   openReply(el);
   await settle();
-  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 annotation', 'the chip');
+  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 comment', 'the chip');
   act(() => (el.querySelector('[data-annotations-chip]') as HTMLButtonElement).click());
   const row = el.querySelector(`[data-annotation-row="${records[0]!.id}"]`) as HTMLElement;
   expect(row.textContent).toContain("Claude Code's message, ");
@@ -327,7 +327,7 @@ test.skipIf(!hasDom)('👍 on selected words is a comment too; a reload draws th
 
   // Removed from the reply box's list: gone from the store and from the text.
   openReply(el);
-  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 annotation', 'the chip');
+  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 comment', 'the chip');
   act(() => (el.querySelector('[data-annotations-chip]') as HTMLButtonElement).click());
   await act(async () => button(el.querySelector(`[data-annotation-row="${record!.id}"]`)!, 'Remove').click());
   await until(async () => (await pending(message.id)).length === 0, 'the removal');
