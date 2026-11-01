@@ -114,6 +114,7 @@ async function world(options: WorldOptions = {}) {
     version: "0.28.10",
     phones: options.phones ?? true,
     tailscale: ts.run,
+    feedbackUrl: "http://127.0.0.1:9/feedback",
     ...(options.board === undefined ? {} : { board: options.board }),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: fake.env }),
     updates: {
