@@ -1729,7 +1729,7 @@ export interface InboxAgentReachState {
  * its plugin, and this only says that one added by hand already reaches the Inbox.
  */
 export function claudeCodeMcpPath(e: AgentEnvironment): string {
-  return claudeGlobalConfigPath(e);
+  return join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json");
 }
 
 export function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly string[])[], read: RawReadOptions = { maxBytes: CLAUDE_JSON_MAX_BYTES }): InboxEntryRead {
@@ -1783,7 +1783,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
   // Claude Code connected by hand through MCP, where the plugin gives it no tool (not installed, disabled, or its mod off):
   // it reaches the Inbox (without the wake). Checked before the agent is called off.
   if (id === "claude-code" && (way.kind === "manual" || !claudeCodeModOn(e)) && claudeCodeMcpEntry(e, ourCommands(options, record)).kind === "ours") {
-    return { kind: "mcp", on: true, state: "connected", path: displayPath(claudeGlobalConfigPath(e), e), locked: false, reason: null };
+    return { kind: "mcp", on: true, state: "connected", path: displayPath(claudeCodeMcpPath(e), e), locked: false, reason: null };
   }
   // Connected in another file than the environment names (`QWEN_HOME` differs): off here, the switch moves it.
   if (record && recordedElsewhere(spec, e, record)) {
