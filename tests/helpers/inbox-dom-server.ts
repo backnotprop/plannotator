@@ -122,6 +122,10 @@
  * holds an agent's leaked tool-call text, as an Inbox older than the one-line
  * subject check kept it (tests/helpers/inbox-leaked-subject.ts); the world
  * adds `leaked` (that thread's id).
+ *
+ * With `accounts`, the Inbox's agent PATH is `<data dir>/cswap-bin` and nothing
+ * else: a test writes a fake `cswap` there (tests/helpers/fake-cswap.ts), and no
+ * real claude-swap can be reached.
  */
 import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -312,6 +316,9 @@ const server = await startInboxServer({
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
   ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
+  ...(extra === "accounts"
+    ? { agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: join(dataDir, "cswap-bin") } }) }
+    : {}),
   ...(restartMode
     ? {
         version: "0.28.25",

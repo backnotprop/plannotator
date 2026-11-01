@@ -209,6 +209,8 @@ test.skipIf(!hasDom)('markdown: the first editor is the button; picking another 
   expect(launched.app).toBe('cursor');
   expect(launched.path.endsWith('/plan.md')).toBe(true);
   await until(() => pane(el).querySelector('[data-open-in-primary]')?.getAttribute('data-open-in-primary') === 'cursor', 'cursor remembered');
+  // The server logs a launch before its answer arrives, and the button waits for that answer.
+  await until(() => pane(el).querySelector<HTMLButtonElement>('[data-open-in-primary]')?.disabled === false, 'the first launch answered');
   // The left half launches the remembered app straight away.
   await act(async () => pane(el).querySelector<HTMLButtonElement>('[data-open-in-primary]')!.click());
   await until(() => launches().length === before + 2, 'the second launch');

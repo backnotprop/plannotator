@@ -151,7 +151,7 @@ export function liveAgentRunCount(): number {
  * hangs never outlives its run. A CLI that exited by itself is left alone (its
  * group may hold a daemon it started on purpose).
  */
-function runWithTimeout(
+export function runWithTimeout(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   timeoutMs: number,

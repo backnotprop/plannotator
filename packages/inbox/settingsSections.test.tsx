@@ -201,13 +201,14 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/agents',
     '#settings/prompts',
     '#settings/devices',
     '#settings/machines',
+    '#settings/accounts',
     '#settings/voice',
     '#settings/capabilities',
     '#settings/archived',
@@ -574,11 +575,11 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   expect(el.querySelector('.ib-snav')).toBeNull();
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'voice', 'capabilities', 'archived', 'storage', 'about']);
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'about']);
   // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.
   const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
   expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
-  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'voice', 'capabilities']);
+  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
   expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['archived', 'storage', 'about']);
   const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
   expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');

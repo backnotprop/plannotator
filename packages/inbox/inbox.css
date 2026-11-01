@@ -1587,6 +1587,45 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Settings → Archived: the archived rows drawn as the section's card rows. */
 .ib-card .ib-arcrow { padding: 10px 16px; border-bottom: 1px solid var(--ib-hair); }
 .ib-card .ib-arcrow:last-child { border-bottom: 0; }
+/* Settings → Accounts (components/Accounts.tsx, mock .product/approved/accounts-page/): a short list, one row per
+   account, the usage in two fixed columns so the bars line up down the list. Week holds the right-hand column. */
+.ib-acct-h { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 8px; }
+.ib-acct-h h2 { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; }
+.pn-inbox .ib-acct-h .ib-btn { flex: none; margin-right: -6px; padding: 0 6px; }
+.ib-acct-h + p { margin-top: 2px; }
+.ib-acct { border-bottom: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+.ib-acct:last-child { border-bottom: 0; }
+/* Room for the chevron stays on the right of every row, so a row with nothing to open keeps the columns. */
+.ib-acct-row { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 8px 34px 8px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+button.ib-acct-row { cursor: pointer; border-radius: inherit; }
+.pn-inbox button.ib-acct-row:focus-visible { outline-offset: -2px; }
+.ib-acct-car { position: absolute; right: 12px; top: 50%; margin-top: -6px; width: 12px; height: 12px; stroke-width: 2; color: var(--muted-foreground); opacity: 0.6; transition: transform 120ms ease; }
+button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
+.ib-acct-row[aria-expanded="true"] .ib-acct-car { transform: rotate(180deg); }
+.ib-acct-more { padding: 0 34px 12px 16px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.6; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.ib-acct-wait { display: flex; align-items: center; min-height: 48px; padding: 8px 16px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-acct-install { display: flex; flex-direction: column; gap: 10px; padding: 16px; font-size: var(--ib-fs-14, 14px); font-weight: 500; }
+.ib-acct-install a { color: var(--primary); text-decoration: none; }
+.ib-acct-install a:hover { text-decoration: underline; }
+.ib-acct-who { flex: 1; min-width: 0; }
+.ib-acct-name { display: block; min-width: 0; font-size: var(--ib-fs-14, 14px); font-weight: 500; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-acct-org { display: block; margin-top: 1px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Three fixed columns, so the bars line up down the list: week at the right, the window before it in the middle. */
+.ib-acct-use { flex: none; display: grid; grid-template-columns: repeat(3, 96px); gap: 8px 14px; }
+.ib-acct-ro { flex: none; width: 316px; display: flex; align-items: center; gap: 7px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-acct-ro > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-acct-bar { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ib-acct-bar[data-week] { grid-column: 3; }
+.ib-acct-bar[data-lone] { grid-column: 2; }
+.ib-acct-bar-l { display: flex; gap: 4px; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-acct-bar-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-acct-bar-l b { flex: none; font-weight: 550; color: var(--foreground); }
+.ib-acct-bar[data-high] b { color: color-mix(in oklab, var(--warning) 70%, var(--foreground)); }
+.ib-acct-bar i { display: block; height: 3px; border-radius: 99px; background: color-mix(in oklch, var(--foreground) 10%, transparent); overflow: hidden; }
+.ib-acct-bar i::after { content: ""; display: block; height: 100%; width: var(--ib-acct-w); border-radius: 99px; background: color-mix(in oklch, var(--foreground) 45%, transparent); }
+.ib-acct-bar[data-high] i::after { background: var(--warning); }
+.ib-acct-note { flex: none; width: 96px; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-acct-why { display: block; margin-top: 1px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); line-height: 1.4; }
 .ib-arcblock .ib-arcnone { margin: 14px 0 8px; }
 .ib-arcblock .ib-arcghead { border-bottom: 0; margin: 14px 0 6px; }
 
@@ -3058,6 +3097,16 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-spg > h1 { font-size: var(--ib-fs-24, 24px); margin-top: 4px; }
   .ib-prow { flex-wrap: wrap; min-height: 56px; }
   .ib-prow .ib-txt { flex-basis: 60%; }
+  .ib-acct-row { flex-wrap: wrap; gap: 8px 10px; min-height: 56px; padding: 8px 34px 8px 14px; }
+  .ib-acct-more { padding: 0 34px 12px 14px; }
+  .ib-acct-use { grid-template-columns: repeat(2, 76px); column-gap: 10px; }
+  .ib-acct-use[data-windows="many"] { flex: 1 1 100%; grid-template-columns: repeat(3, 76px); justify-content: end; }
+  .ib-acct-bar[data-week] { grid-column: 2; }
+  .ib-acct-use[data-windows="many"] .ib-acct-bar[data-week] { grid-column: 3; }
+  .ib-acct-bar[data-lone] { grid-column: 1; }
+  .ib-acct-note { width: auto; min-width: 76px; }
+  .ib-acct-ro { width: auto; max-width: 62%; }
+  .pn-inbox .ib-acct-h .ib-btn { min-height: 44px; margin-block: -8px; }
   .ib-mpair { flex-direction: column; }
   .ib-mpair > .ib-mdigits { flex: none; }
   .ib-mfield .ib-fbk-contact { height: 44px; font-size: var(--ib-fs-16-in, 16px); }

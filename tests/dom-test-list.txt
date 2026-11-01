@@ -170,6 +170,7 @@ packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/agentsSettings.test.tsx
+packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx
 packages/inbox/settingsSections.test.tsx

@@ -1827,6 +1827,50 @@ export interface InboxAgentRow {
   wakes?: boolean;
 }
 
+/** One usage limit of a Claude account, as `cswap list --json` reports it. A window it does not report is null, never 0. */
+export interface InboxUsageWindow {
+  pct: number;
+  resetsAt: string | null;
+  countdown: string | null;
+  clock: string | null;
+}
+
+/** A limit on one model family; `name` is what the window calls it ("Fable"). */
+export interface InboxScopedUsageWindow extends InboxUsageWindow {
+  name: string;
+}
+
+export interface InboxAccountUsage {
+  fiveHour: InboxUsageWindow | null;
+  sevenDay: InboxUsageWindow | null;
+  scoped: InboxScopedUsageWindow[];
+}
+
+/** One Claude account on this computer. Field names are `cswap`'s; nothing else of its row reaches the window. */
+export interface InboxAccount {
+  number: number;
+  alias: string | null;
+  /** Null for an API-key account: its placeholder address is never passed on. */
+  email: string | null;
+  organizationName: string | null;
+  isOrganization: boolean;
+  active: boolean;
+  usageStatus: string | null;
+  usageError: string | null;
+  usageRetryAt: string | null;
+  /** Null: no reading. */
+  usage: InboxAccountUsage | null;
+}
+
+/** Why a read of the accounts failed: a fixed code, never `cswap`'s own words. */
+export type InboxAccountsFailure = "timed_out" | "run_failed" | "bad_output" | "unknown_schema";
+
+/** `GET /api/inbox/accounts` (Settings → Accounts). */
+export type InboxAccountsRead =
+  | { state: "not_installed" }
+  | { state: "failed"; reason: InboxAccountsFailure }
+  | { state: "accounts"; accounts: InboxAccount[] };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;

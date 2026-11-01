@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "activeAccountNumber": 2,
+  "accounts": [
+    {"number": 1, "email": "a@fake.test", "organizationName": "Fake a@fake.test", "organizationUuid": "00000000-0000-0000-0000-00000000000a", "isOrganization": true, "active": false, "usageStatus": "unavailable", "usage": null, "alias": "personal", "usageError": "network", "usageRetryAt": "2026-11-01T12:48:33Z"},
+    {"number": 2, "email": "b@fake.test", "organizationName": "Fake b@fake.test", "organizationUuid": "00000000-0000-0000-0000-00000000000b", "isOrganization": true, "active": true, "usageStatus": "unavailable", "usage": null, "usageError": "network", "usageRetryAt": "2026-11-01T12:48:33Z"},
+    {"number": 3, "email": "api-key-3@token.local", "organizationName": "", "organizationUuid": "", "isOrganization": false, "active": false, "usageStatus": "api_key", "usage": null}
+  ]
+}

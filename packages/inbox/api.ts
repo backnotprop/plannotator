@@ -45,6 +45,7 @@ import type { InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotat
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
+  InboxAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
   InboxCardColumn,
@@ -1322,6 +1323,8 @@ export const inboxApi = {
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),
   setLan: (on: boolean) => post<{ lan: LanState }>(inboxUrl('/lan'), { on }),
+  /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  accounts: () => get<InboxAccountsRead>(inboxUrl('/accounts')),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
   agents: () => get<InboxAgentsModel>(inboxUrl('/agents')),
   saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>
