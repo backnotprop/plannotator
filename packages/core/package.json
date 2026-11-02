@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.15",
+  "version": "0.25.16",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -44,6 +44,7 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",

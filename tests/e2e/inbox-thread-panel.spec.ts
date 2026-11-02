@@ -216,7 +216,7 @@ test('the ⋮ item: panel view at once, the menu stays open, a ✓, remembered; 
   await expect(empty(page)).toBeVisible();
   await expect(item(page)).toBeVisible();
   await expect(item(page)).toHaveAttribute('aria-checked', 'true');
-  await expect(item(page).locator('.ib-pmi-check')).toBeVisible();
+  await expect(item(page).locator('.ib-pmi-box[data-on]')).toBeVisible();
   await expect(list(page)).toHaveClass(/ib-narrow/);
   expect(await width(page)).toBe(380);
   expect(await cookie(page)).toBe('1');

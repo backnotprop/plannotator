@@ -234,10 +234,16 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
   }
 });
 
-test('a wrapped control keeps its width: Mark read never spills over the icons after it, from 320 px to 1440 px', async ({ browser }) => {
+test('a wrapped control keeps its width: Mark read never spills over the icons after it, from 810 px to 1440 px; a phone has it in ⋯', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
-    for (const width of [320, 390, 600, 810, 1024, 1280, 1440]) {
+    // A phone's bar has no read button (approval "inbox-thread-header"): its ⋯ sheet leads with it.
+    for (const width of [320, 390, 600]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.waitForTimeout(150);
+      await expect(page.locator('section.ib-pane .ib-phead [data-mark-read]'), `no read button in the bar at ${width}px`).toHaveCount(0);
+    }
+    for (const width of [810, 1024, 1280, 1440]) {
       await page.setViewportSize({ width, height: 800 });
       await page.waitForTimeout(150);
       const boxes = await page.evaluate(() => {

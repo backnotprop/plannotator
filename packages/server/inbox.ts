@@ -60,6 +60,7 @@ import {
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
   INBOX_TEXT_SIZE_DEFAULT,
+  INBOX_ROWS_OPTIONS,
   INBOX_TOUR_VERSION,
   type InboxTourChange,
   type InboxTourState,
@@ -76,6 +77,9 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  inboxRowsList,
+  inboxRowsRead,
+  type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
@@ -116,6 +120,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
@@ -846,6 +851,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
+  /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -1605,6 +1612,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
+   * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
+   * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
+   * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
+   * when it is newer than the last it took, whatever order the answers and events arrive in.
+   */
+  const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxRowsRev;
+    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
+
+  const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
+    const rows = inboxRowsList(input);
+    if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
+    const rev = rowsState().rev + 1;
+    if (validateOnly) return { rows, rev };
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    const saved = rowsState();
+    if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    for (const listener of rowsListeners) listener(rows, rev);
+    return { rows, rev };
+  };
+  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev });
+
+  /**
    * The onboarding tour (config.json `inboxTour`, approval
    * "inbox-onboarding-tour"): when it was started, finished or skipped, and
    * whether the first real thread offers notifications once more. Kept per
@@ -1888,6 +1921,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
+    ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. */
     diff_style: diffStyleState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
@@ -2035,6 +2070,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
+        // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
+        const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
+        if (windowId) rowsListeners.add(onRows);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
         const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
@@ -2063,6 +2101,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           snoozeListeners.delete(onSnoozes);
+          rowsListeners.delete(onRows);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();
@@ -2991,6 +3030,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.rows === undefined &&
           body.diff_style === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
@@ -3000,7 +3040,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -3039,6 +3079,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        if (body.rows !== undefined) saveRows(body.rows, true);
         if (body.diff_style !== undefined) saveDiffStyle(body.diff_style, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
@@ -3056,13 +3097,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -3822,6 +3864,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (stopped) return;
     for (const project of store.allProjects()) void repos.refresh(project.root);
     repoReadsBegun = true;
+    // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
+    // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.
+    void foldCheckoutFolderProjects({
+      store,
+      ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+      log: (fold) => debugLog?.note("project_folded", fold),
+    }).catch(() => {});
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
     for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
     for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);

@@ -325,7 +325,7 @@ test('Mark read moves the thread to Quiet ("Read"); a new agent message brings i
   await expect(head).toHaveAttribute('aria-pressed', 'false');
   await head.click();
   await expect(head).toHaveAttribute('aria-pressed', 'true');
-  await expect(head).toContainText('Read');
+  await expect(head).toHaveAccessibleName('Read');
   await expect(page.locator('[data-read-line]')).toContainText('It stays out of the top until Codex writes again.');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moves to Quiet');
   await shot('05-thread-read');

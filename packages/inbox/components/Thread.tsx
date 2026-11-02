@@ -9,6 +9,7 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
@@ -42,12 +43,14 @@ import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
-import { MessageMenu, ThreadMore, type CopyMenuHost } from './CopyMenus';
+import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { useReplyDraft } from '../replyDraft';
+import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
+import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -77,7 +80,7 @@ import { ReaskNote } from './ReaskNote';
 import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
-import { InboxComposerField } from './ComposerField';
+import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
@@ -112,7 +115,6 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
-import { ThreadChip } from './InboxList';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -120,7 +122,7 @@ import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { newUuid } from '../uuid';
-import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
@@ -457,9 +459,9 @@ export function MessageBody({
   const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
   const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
   const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
-  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false }) : []), [restShown]);
-  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false }) : []), [feedbackShown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown, ownReply]);
+  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown, ownReply]);
+  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown, ownReply]);
   const refRepo = useRefRepo(repo);
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
@@ -828,6 +830,7 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    <SoftLineBreaksContext.Provider value={ownReply}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
@@ -888,6 +891,7 @@ export function MessageBody({
       )}
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
   );
 }
@@ -1135,6 +1139,11 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
 const REPLY_BOX_CONTROLS =
   'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
 
+/** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
+function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
+  return <InboxComposerField {...props} value={useReplyText(replyText)} />;
+}
+
 /**
  * A press anywhere else in the reply box puts the caret in its text, as a
  * press anywhere in an input does. The box is drawn as one field with a focus
@@ -1339,14 +1348,32 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const threadRef = useRef(thread);
   threadRef.current = thread;
 
-  const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
+  /**
+   * The reply box: open or not here, its words in `replyText` (replyText.ts), so a key typed re-renders the
+   * field alone, never this pane and its messages. Read the words with `replyText.get()` (or `boxRef`) where
+   * they are acted on; a render reads only whether there are any (`boxHasWords`).
+   */
+  const [boxOpen, setBoxOpen] = useState(false);
+  const replyText = useReplyTextStore();
+  const box = { open: boxOpen };
+  const setBox = useCallback(
+    (next: { open: boolean; text: string }) => {
+      replyText.set(next.text);
+      setBoxOpen(next.open);
+    },
+    [replyText],
+  );
+  const boxHasWords = useReplyHasWords(replyText);
   /**
    * The reply box's words, kept per thread as a server draft (approval
    * "inbox-reply-drafts"): saved while typing, back when the thread opens.
    */
   const replyDraft = useReplyDraft(thread.thread_id);
-  /** The words a Send carries: the box's, or (the box closed) those kept as its draft. */
-  const boxWords = box.open ? box.text.trim() : ((replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '');
+  const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
+  /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
+  const hasWords = box.open ? boxHasWords : keptWords !== '';
+  /** The words a Send carries, as they are now: the box's, or (the box closed) those kept as its draft. */
+  const boxWords = () => (box.open ? replyText.get().trim() : keptWords);
   /** The box closed: the long pastes its draft keeps (approval "inbox-paste-attachment"), which a Send carries too. */
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
@@ -1368,7 +1395,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     onPasted: (names) => announce(attachedAnnouncement(names)),
     onPutBack: () => announce('The pasted text is back in your reply.'),
     machine: machine?.id ?? null,
-    text: { value: box.text, set: (text) => changeReply(text, true) },
+    text: {
+      get value() {
+        return replyText.get();
+      },
+      set: (text) => changeReply(text, true),
+    },
   });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   /**
@@ -1793,7 +1825,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const keepOpen = skipIds.size === 0;
   const toggleKeepOpen = () => setSkipArmed(keepOpen ? new Set(unanswered.map((u) => u.id)) : null);
   const skipping = !keepOpen;
-  const asking = askingSessionOf(thread, { skip: skipIds, carries: boxWords !== '' || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
+  const asking = askingSessionOf(thread, { skip: skipIds, carries: hasWords || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
   const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
@@ -2184,9 +2216,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     revisions.current.clear();
   }, [thread.thread_id]);
 
-  // The subject in the header once it scrolls away, and the "↓ N new" pill
-  // while new messages the person has not seen are below the view (its count:
-  // those messages, never everything new this visit).
+  // The "↓ N new" pill while new messages the person has not seen are below
+  // the view (its count: those messages, never everything new this visit).
+  // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
   const [chrome, setChrome] = useState({ subject: false, pill: 0 });
   /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
   const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
@@ -2745,8 +2777,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
   // closes when the draft is gone); a box with edits keeps them, and the conflict shows (replyDraft.ts).
   const reloadDraft = replyDraft.reload;
-  const boxRef = useRef(box);
-  boxRef.current = box;
+  // The box as it is now: open as of this render (or as a change in this event made it), its words as they are now.
+  const liveBox = (open: boolean): { open: boolean; readonly text: string } => ({
+    open,
+    get text() {
+      return replyText.get();
+    },
+  });
+  const boxRef = useRef(liveBox(box.open));
+  boxRef.current = liveBox(box.open);
   const hasFilesRef = useRef(false);
   hasFilesRef.current = replyFiles.files.length > 0;
   useEffect(() => {
@@ -2855,7 +2894,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setError(null);
   });
   // The box open with words or files in it, wherever focus is: the list options dialog waits for it (App).
-  const unsentWriting = box.open && (boxWords !== '' || replyFiles.files.length > 0);
+  const unsentWriting = box.open && (boxHasWords || replyFiles.files.length > 0);
   useEffect(() => {
     reportUnsentReply({ subject: unsentSubject, files: unsentFiles, writing: unsentWriting });
     return () => reportUnsentReply(null);
@@ -3201,7 +3240,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (behind && !boxRef.current.open) restoringRef.current = true;
     setBox({ open: true, text });
     // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
-    boxRef.current = { open: true, text };
+    boxRef.current = liveBox(true);
+    // A long paste's tile keeps its place in the words, edit by edit (this pane does not render for a key).
+    replyFiles.follow();
     // The long pastes beside the words go in the draft too, each placed in these words (approval "inbox-paste-attachment").
     const pastes = replyFiles.pastedDraft(text);
     pastedSaved.current = pastedSignature(pastes);
@@ -3300,7 +3341,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const earlier = unconfirmed.get(thread.thread_id);
     if (!earlier) return;
     if (!thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === earlier.key)) return;
-    if (box.open && box.text.trim() === earlier.words) {
+    if (box.open && replyText.get().trim() === earlier.words) {
       finishLanded(earlier);
       void reloadFiles();
     } else {
@@ -3308,7 +3349,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       unconfirmed.delete(thread.thread_id);
       replyDraft.expectOwnClear(earlier.words);
       const leftover = leftoverText(earlier);
-      const line = box.open && box.text.trim() ? 'Your earlier reply went; Send sends your edited words as another reply.' : (leftover ?? 'Your reply went.');
+      const line = box.open && replyText.get().trim() ? 'Your earlier reply went; Send sends your edited words as another reply.' : (leftover ?? 'Your reply went.');
       setError(line);
       announce(line);
       if (!box.open) void replyDraft.reload();
@@ -3370,7 +3411,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
     if (askerEnded && anyOtherLive && asking && !options.routed) {
-      const empty = picksCount === 0 && records.length === 0 && boxWords === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
+      const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
         return;
@@ -3439,7 +3480,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // first. There, that Send is finished and nothing goes again; not there, this is an ordinary new Send.
       const earlier = unconfirmed.get(current.thread_id);
       unconfirmed.delete(current.thread_id);
-      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords) {
+      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords()) {
         const landed = await replyLanded(current.thread_id, earlier.key);
         if (landed === 'unknown') {
           unconfirmed.set(current.thread_id, earlier);
@@ -3458,7 +3499,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           return;
         }
       }
-      let words = boxWords;
+      let words = boxWords();
       let draftSavedAs: string | null = null;
       /** The long pastes a closed box's draft keeps (approval "inbox-paste-attachment"): they go with its words. */
       let draftUploads: string[] = [];
@@ -3968,6 +4009,49 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     }
   };
 
+  // Request guided review (the header's ⋯, guideRequest.ts): the person's reply asking for a guided review of the
+  // thread's code changes, to the session a typed reply reaches. Hidden on an archived thread, for a host that gets
+  // no guided reviews, and while the session it would reach has ended, as the window knows it. That session is the
+  // target's (after a hand-off, the new owner's), read with the asker's liveness when it is the same session, else
+  // on its own.
+  const guideTarget = guideRequestTarget(thread);
+  const guideSession = guideTarget && guideTargetCanEnd(guideTarget) ? guideTarget.to.session : null;
+  const guideWatch = guideSession !== null && guideSession !== askerToWatch ? guideSession : null;
+  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null);
+  const guideLiveNow = guideSession === null ? null : guideSession === askerToWatch ? live : guideLive;
+  const guideEnded = guideSession !== null && guideLiveNow?.asker?.session === guideSession && guideLiveNow.asker.live === false;
+  const guideOffered = guideTarget !== null && !guideEnded;
+  /** One request at a time (a double click sends one). */
+  const requestingGuide = useRef(false);
+  /** The key of a request that did not land, kept for a retry of that same request: the message it answers, and the key. */
+  const guideKey = useRef<{ message: string; key: string } | null>(null);
+  /**
+   * An ordinary reply of words alone, through the reply route: stored, shown as the person's message with its
+   * Delivered or Queued line, and waking the session as a typed reply does. The reply box, its draft, picks and
+   * comments are left as they are: the request carries none of them.
+   */
+  const requestGuide = async () => {
+    if (requestingGuide.current || sending) return;
+    const target = guideRequestTarget(threadRef.current);
+    if (!target) return;
+    requestingGuide.current = true;
+    setError(null);
+    // A retry of the same request keeps its key; a request to another message (another thread, or the agent wrote
+    // again) is a new one, never a key the Inbox has seen on another reply (`idempotency_key_reused`).
+    if (guideKey.current?.message !== target.message.id) guideKey.current = { message: target.message.id, key: newUuid() };
+    try {
+      await inboxApi.reply(target.message.id, { idempotency_key: guideKey.current.key, words: GUIDE_REQUEST_WORDS, questions: [] });
+      guideKey.current = null;
+      announce(`Asked ${hostName(target.to.host)} for a guided review.`);
+      await onChanged();
+      requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    } catch (cause) {
+      setError(`The guided review request was not sent. ${cause instanceof InboxApiError ? cause.message : 'Try again.'}`);
+    } finally {
+      requestingGuide.current = false;
+    }
+  };
+
   // Open questions in this thread (approval "inbox-thread-open-questions", option A): the "N open questions"
   // button lists them (Re-ask at its foot), and a row takes the person to the card (unfolding its message).
   const openQFromServer = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
@@ -4043,18 +4127,21 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * sends it. The card has no words of its own: it shows the box's (or, the box closed, the kept draft's) and
    * writes through `changeReply`, so typing in either is the one draft; Send is this thread's Send.
    */
+  const composerShown = !!file && shownFull && !resolved;
+  // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
+  const composerText = useReplyTextWhile(replyText, composerShown);
   const composer: FullScreenComposerValue | null =
-    file && shownFull && !resolved
+    composerShown
       ? {
           threadId: thread.thread_id,
           phone,
           reply: {
             to: replyName ?? asker,
-            value: box.open ? box.text : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
             onSend: () => void send({ stayFull: true }),
             sending,
-            canSend: boxWords !== '' || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
+            canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
             picks: picksCount,
             annotations: records.length,
             comments: {
@@ -4237,8 +4324,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
   // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
-  // The header's ⋯ More offers it where that button does not: a thread marked read. A phone keeps it there too,
-  // since its header gives way when short of room (headFit.ts).
+  // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
+  // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
   const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
@@ -4312,45 +4399,71 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         }
       });
   };
-  const markReadButton = markUnreadOffered ? (
-    <Tip content="Back to New, bold, as if you had not opened it. Nothing is sent.">
+  // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
+  // tooltip ("Mark read" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
+  // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
+  const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
+  const markReadButton = phone ? null : markUnreadOffered ? (
+    <Tip content="Mark unread">
       <button
         type="button"
-        className="ib-hbtn"
+        className="ib-iconbtn ib-readbtn"
         data-mark-unread=""
+        aria-label="Mark unread"
         onClick={(event) => {
           // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
           if (event.detail > 1) return;
           onMarkUnread!();
         }}
       >
-        <Icon name="envelope" size={16} />
-        <span className="ib-hbtn-l">Mark unread</span>
+        <Icon name="mail" size={17} />
       </button>
     </Tip>
   ) : markReadOffered ? (
     <Tip
       content={
-        readAt !== null
-          ? 'Move it back to the top'
-          : markReadEnabled
-            ? `Out of the top until ${asker} writes again. Its waiting questions close unanswered.`
-            : 'Nothing here waits on you'
+        readAt !== null ? (
+          <span className="flex flex-col gap-1">
+            <span>Read</span>
+            <span className="text-muted-foreground">Move it back to the top</span>
+          </span>
+        ) : markReadEnabled ? (
+          withShortcut('Mark read', { scope: inboxThreadShortcuts, action: 'markRead' })
+        ) : (
+          <span className="flex flex-col gap-1">
+            <span>Mark read</span>
+            <span className="text-muted-foreground">Nothing here waits on you</span>
+          </span>
+        )
       }
     >
-      <button type="button" className="ib-hbtn" data-mark-read="" aria-pressed={readAt !== null} disabled={!markReadEnabled} onClick={() => onMarkRead!(readAt === null)}>
-        <Icon name="checkCircle" size={16} />
-        <span className="ib-hbtn-l">{readAt !== null ? 'Read' : 'Mark read'}</span>
-        <ShortcutHint scope={inboxThreadShortcuts} action="markRead" className="ib-kbd ib-wide" />
+      <button
+        type="button"
+        className="ib-iconbtn ib-readbtn"
+        data-mark-read=""
+        aria-label={readAt !== null ? 'Read' : 'Mark read'}
+        aria-pressed={readAt !== null}
+        aria-keyshortcuts={readAt === null && markReadEnabled ? markReadAria : undefined}
+        disabled={!markReadEnabled}
+        onClick={() => onMarkRead!(readAt === null)}
+      >
+        <Icon name="mailOpen" size={17} />
       </button>
     </Tip>
   ) : null;
+  // A phone's ⋯ sheet offers every read action a desktop has (its bar has no read button, and a phone has no row menu
+  // and no E): Mark read whenever it can be done (a seen update the list still holds in New included, where a desktop
+  // reaches it by E or the row menu; never disabled there: the sheet lists what can be done), Move back to the top on
+  // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
+  const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  const snoozeProps = onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
-  // A phone's header gives way one step at a time so it stays on one line (headFit.ts): the Artifacts count,
-  // then Mark read's words, then the way back's label; the scrolled-away subject shows only with room to read.
+  // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
+  // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4476,18 +4589,23 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
           </>
         )}
-        {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
-            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close.
-            A phone keeps the same order after its way back. */}
+        {/* The bar (approval "inbox-thread-header", 2026-11-02): the read button and the Snooze clock, as icons, lead
+            before the subject; everything at the right is an icon with a tooltip (approval "inbox-thread-artifacts"):
+            Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close. A phone has ‹ Inbox, the
+            subject, Artifacts, Expand and ⋯: its read action and Snooze lead the ⋯ sheet. */}
         {phone && artifactsOn ? null : (
           <>
             {markReadButton}
+            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} />}
             {one && !artifactsOn && !nameChip ? (
               <span className="ib-sp" />
             ) : (
-              // The thread's name (the list's rule), always; with no name, the subject once it has scrolled away, so its words never show twice. Always over the Artifacts grid (the heading stays the one a screen reader reads).
-              <Tip content={nameChip ?? thread.subject ?? '(no subject)'} cut>
-                <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`), always; with no name,
+              // the subject once the body's heading has scrolled away, so its words never show twice; always over the
+              // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
+              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
+              <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+                <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
                   {nameChip ?? thread.subject ?? '(no subject)'}
                 </span>
               </Tip>
@@ -4528,9 +4646,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              markRead={phoneMarkRead}
+              moveBack={phoneMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
-              snooze={onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined}
+              snooze={snoozeProps}
+              requestGuide={guideOffered ? () => void requestGuide() : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
@@ -4550,6 +4671,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
+        {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
         {machine && (
           // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
           <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
@@ -4613,13 +4736,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
           </div>
         )}
-        {/* The thread's name first (the list's own pill and rule), then the count and time; a one-message thread has only the name. */}
-        {(!one || nameChip) && (
+        {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
+            chip would (the owner, 2026-11-02: never the same words twice). */}
+        {!one && (
           <div className="ib-tmeta" data-thread-meta="">
-            <ThreadChip name={nameChip} lead="Thread name: " />
-            {/* The rest of the line moves as one beside the name: a name that leaves too little room sends it all to the next line, never one dot. */}
-            {!one && (
-              <span className="ib-tmeta-rest" data-thread-meta-rest="">
+            <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 {participants.length > 1 && (
                   <>
                     <span className="ib-tg-hwho" data-thread-participants="">
@@ -4639,7 +4760,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   </>
                 )}
               </span>
-            )}
           </div>
         )}
         {thread.messages.flatMap((message, index) => {
@@ -5163,7 +5283,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             ref={guardRef}
             questions={staleQuestions}
             thread={thread}
-            words={boxWords}
+            words={boxWords()}
             otherPicks={picksCount}
             annotations={records.length}
             onAnswerNew={(target) => {
@@ -5195,7 +5315,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           <>
             <DraftHead
               label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
-              savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
+              savedAt={boxHasWords ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
               conflict={
                 replyDraft.conflict !== null
@@ -5203,7 +5323,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                       id: conflictId,
                       text: conflictText(conflictSentElsewhere),
                       onKeepMine: () => {
-                        replyDraft.keepMine(box.text, replyFiles.pastedDraft(box.text));
+                        const mine = replyText.get();
+                        replyDraft.keepMine(mine, replyFiles.pastedDraft(mine));
                         announce('Your words are saved.');
                         requestAnimationFrame(() => textRef.current?.focus());
                       },
@@ -5235,7 +5356,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 if (replyFiles.paste(event)) setError(null);
               }}
             >
-              <InboxComposerField
+              <ReplyTextField
+                replyText={replyText}
                 textareaRef={textRef}
                 voice={voice}
                 ariaLabel={`Reply to ${replyName ?? asker}`}
@@ -5243,7 +5365,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 placeholder="Write a reply"
                 destination="your reply"
                 tags={composerTags}
-                value={box.text}
                 onChange={(text) => changeReply(text)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
