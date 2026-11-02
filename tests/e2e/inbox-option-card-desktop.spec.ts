@@ -8,7 +8,10 @@
  * minimizing the comment box (restoring it brings the card back). The card is
  * one row (approval "inbox-option-card-lean"): ‹ Previous and Next › that step
  * like [ and ], marked disabled at the ends, the letter, the name (a long one
- * cut with its full name on hover), "Recommended" when there is one. Zooming
+ * cut with its full name on hover), "Recommended" when there is one. It is one
+ * box on every step (the widest name of the set sets its width), so the arrows
+ * stay under a still mouse; it lets every pointer through to the picture; a
+ * panned picture holds its place when the room around it changes. Zooming
  * in and out and panning to all four edges keep working. A plain picture (no
  * card) keeps today's Fit.
  *
@@ -78,7 +81,25 @@ async function world() {
     body: ['Four ways to place Back to draft. A mockup is attached too.', '', QUESTION].join('\n'),
     attachments: ['shots/plain.png'],
   });
-  return { root, url, agent, thread: sent.thread_id as string };
+  const names = await agent.send({
+    project_path: project,
+    subject: 'Names',
+    thread: 'names',
+    body: [
+      'Four names of very different widths.',
+      '',
+      ':::question',
+      'Which name?',
+      '',
+      '- [ ] Ok — ![Option A](shots/a.png) short',
+      '- [ ] A rather longer name for this one — ![Option B](shots/b.png) long',
+      '- [ ] Hi — ![Option C](shots/c.png) short',
+      '- [ ] Middling name here — ![Option D](shots/d.png) middling',
+      '',
+      ':::',
+    ].join('\n'),
+  });
+  return { root, url, agent, thread: sent.thread_id as string, names: names.thread_id as string };
 }
 
 interface Box {
@@ -145,12 +166,7 @@ async function step(page: Page, key: ']' | '[', letter: string) {
 const same = (a: Box, b: Box) => {
   for (const side of ['top', 'bottom', 'left', 'right'] as const) expect(Math.abs(a[side] - b[side]), side).toBeLessThan(1.5);
 };
-/** The card keeps its row and its middle; its width follows the name. */
-const sameRow = (a: Box, b: Box) => {
-  expect(Math.abs(a.top - b.top), 'top').toBeLessThan(1.5);
-  expect(Math.abs(a.bottom - b.bottom), 'bottom').toBeLessThan(1.5);
-  expect(Math.abs((a.left + a.right) / 2 - (b.left + b.right) / 2), 'middle').toBeLessThan(1.5);
-};
+
 const clearOfCard = (l: Layout) => expect(l.image.bottom).toBeLessThanOrEqual(l.card!.top + 0.5);
 
 /** Drags the picture the same way until it stops moving. */
@@ -201,7 +217,7 @@ for (const { width, height } of [
       clearOfCard(fit);
       const card = fit.card!;
       expect(card.bottom - card.top, 'one row').toBeLessThan(60);
-      await expect(page.locator('[data-option-caption] .ib-optcap-letter')).toHaveText('B');
+      await expect(page.locator('.ib-optcap-main .ib-optcap-letter')).toHaveText('B');
       await expect(page.locator('[data-option-recommended]')).toHaveText('Recommended');
       for (const gone of ['.ib-optcap-q', '.ib-optcap-dots', '[data-option-end]', '.ib-optcap-hold']) await expect(page.locator(gone)).toHaveCount(0);
       await shot(page, `${width}x${height}-B-fit`);
@@ -244,7 +260,7 @@ for (const { width, height } of [
       for (const letter of ['C', 'D']) {
         await step(page, ']', letter);
         const l = await layout(page);
-        sameRow(l.card!, card);
+        same(l.card!, card);
         if (letter === 'D') clearOfCard(l);
         // A panorama is as wide as it likes: its height is above the card.
         expect(l.image.bottom).toBeLessThanOrEqual(card.top + 0.5);
@@ -253,7 +269,7 @@ for (const { width, height } of [
       await step(page, '[', 'B');
       await step(page, '[', 'A');
       const tall = await layout(page);
-      sameRow(tall.card!, card);
+      same(tall.card!, card);
       // A tall picture reads from the top, so its lower part starts under the card; a pan brings every part clear.
       expect(tall.image.top).toBeGreaterThanOrEqual(tall.stage.top - 0.5);
       const tallBottom = await panTo(page, 'bottom');
@@ -345,10 +361,12 @@ for (const { width, height } of [
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
       await atRest(page);
       await note();
-      const label = page.locator('.ib-optcap-label');
+      const label = page.locator('.ib-optcap-main .ib-optcap-label');
       expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth), 'cut').toBe(true);
-      await label.hover();
-      await expect(label).toHaveAttribute('title', /A panorama with a very long name/);
+      const nameBox = (await label.boundingBox())!;
+      await page.mouse.move(nameBox.x + 20, nameBox.y + nameBox.height / 2);
+      await page.mouse.move(nameBox.x + 24, nameBox.y + nameBox.height / 2);
+      await expect(page.locator('.ib-optcap-tip')).toHaveText(/A panorama with a very long name/);
       await shot(page, `${width}x${height}-C-long-name`);
 
       // The last option: Next is disabled and does nothing; Previous steps back.
@@ -382,10 +400,262 @@ for (const { width, height } of [
       await atRest(page);
       const restored = await layout(page);
       same(restored.image, before.image);
-      sameRow(restored.card!, last.card!);
+      same(restored.card!, last.card!);
     } finally {
       await browser.close().catch(() => {});
       await agent.close().catch(() => {});
       await removeInboxScratch(root);
     }
   });
+
+/** What a person's pointer does to the picture: where it sits and how big, read from the page. */
+const scaleOf = async (page: Page) => (await layout(page)).scale;
+
+test('the card is one box on every step, so three clicks on Next with the mouse held still go A, B, C, D', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, names } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    const next = page.locator('[data-option-step="next"]');
+    const prev = page.locator('[data-option-step="prev"]');
+    await open(page, url, names, 'A');
+    const boxes: Box[] = [];
+    const arrows: { prev: number; next: number }[] = [];
+    const measure = async () => {
+      const l = await layout(page);
+      boxes.push(l.card!);
+      const p = (await prev.boundingBox())!;
+      const n = (await next.boundingBox())!;
+      arrows.push({ prev: Math.round(p.x), next: Math.round(n.x) });
+    };
+    await measure();
+    // The mouse goes to Next once and stays: every click lands on the arrow, whatever the name in front of it.
+    const at = (await next.boundingBox())!;
+    const x = at.x + at.width / 2;
+    const y = at.y + at.height / 2;
+    await page.mouse.move(x, y);
+    for (const letter of ['B', 'C', 'D']) {
+      await page.mouse.click(x, y);
+      await expect(caption(page)).toHaveAttribute('data-option-caption', letter);
+      await atRest(page);
+      await measure();
+    }
+    for (const box of boxes) same(box, boxes[0]);
+    expect(new Set(arrows.map((a) => a.next)).size, 'Next stays put').toBe(1);
+    expect(new Set(arrows.map((a) => a.prev)).size, 'Previous stays put').toBe(1);
+    await context.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('a panned picture holds its place when the room around it changes: Hide, minimize, the Reply tab', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    for (const [width, height] of [
+      [1440, 900],
+      [1000, 700],
+    ] as const) {
+      const context = await browser.newContext({ viewport: { width, height } });
+      const page = await context.newPage();
+      await open(page, url, thread, 'A');
+      // The tall picture reads from the top; scroll it down part of the way (not to its stop, where the new room would move it) and note where it is.
+      const stageBox = (await layout(page)).stage;
+      await page.mouse.move((stageBox.left + stageBox.right) / 2, 300);
+      await page.mouse.wheel(0, 400);
+      await atRest(page);
+      const top = (await layout(page)).image.top;
+      expect(top, 'panned').toBeLessThan(0);
+      const holds = async (what: string) => {
+        await atRest(page);
+        expect(Math.abs((await layout(page)).image.top - top), what).toBeLessThan(1.5);
+      };
+      await page.locator('[data-full-view-bar] button[aria-label="Hide tools"]').click();
+      await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
+      await holds('Hide');
+      await context.close();
+      // Minimize and the Reply tab on a fresh page (Hide left the toolbar tucked).
+      const again = await browser.newContext({ viewport: { width, height } });
+      const second = await again.newPage();
+      await open(second, url, thread, 'A');
+      const stage2 = (await layout(second)).stage;
+      await second.mouse.move((stage2.left + stage2.right) / 2, 300);
+      await second.mouse.wheel(0, 400);
+      await atRest(second);
+      const where = (await layout(second)).image.top;
+      expect(where, 'panned').toBeLessThan(0);
+      const holdsNow = async (what: string) => {
+        await atRest(second);
+        expect(Math.abs((await layout(second)).image.top - where), what).toBeLessThan(1.5);
+      };
+      await second.locator('[data-fcomp-minimize]').click();
+      await expect(second.locator('[data-fcomp-pill]')).toBeVisible();
+      await holdsNow('minimize');
+      await second.locator('[data-fcomp-pill]').click();
+      await holdsNow('restore');
+      await second.getByRole('radio', { name: /Reply/ }).first().click();
+      await holdsNow('the Reply tab');
+      await again.close();
+    }
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('the card lets the pointer through: a pinch or wheel over the name or an arrow zooms or scrolls the picture, a drag from the name pans it', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await open(page, url, thread, 'B');
+    const centre = async (selector: string) => {
+      const box = (await page.locator(selector).first().boundingBox())!;
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    // Ctrl + wheel (a trackpad pinch) over each part of the card: the picture zooms, and the page's own zoom is held off.
+    for (const selector of ['.ib-optcap-main .ib-optcap-label', '[data-option-step="next"]', '[data-option-step="prev"]', '.ib-optcap-main .ib-optcap-letter']) {
+      await page.locator('[data-image-fit]').click();
+      await page.locator('[data-image-fit]').click();
+      await atRest(page);
+      const before = await scaleOf(page);
+      const { x, y } = await centre(selector);
+      await page.mouse.move(x, y);
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, -300);
+      await page.keyboard.up('Control');
+      await atRest(page);
+      expect(await scaleOf(page), `a pinch over ${selector}`).toBeGreaterThan(before);
+    }
+    // The arrow still steps on a click.
+    await page.locator('[data-option-step="next"]').click();
+    await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+    // A plain wheel over the name scrolls a tall picture, and a drag that starts on the name pans it.
+    await step(page, '[', 'B');
+    await step(page, '[', 'A');
+    const tall = await layout(page);
+    const name = await centre('.ib-optcap-main .ib-optcap-label');
+    await page.mouse.move(name.x, name.y);
+    await page.mouse.wheel(0, 300);
+    await atRest(page);
+    const wheeled = await layout(page);
+    expect(wheeled.image.top, 'a wheel over the name scrolls the tall picture').toBeLessThan(tall.image.top - 50);
+    await page.mouse.move(name.x, name.y);
+    await page.mouse.down();
+    await page.mouse.move(name.x, name.y + 120, { steps: 6 });
+    await page.mouse.up();
+    await atRest(page);
+    expect((await layout(page)).image.top, 'a drag from the name pans it').toBeGreaterThan(wheeled.image.top + 50);
+    await context.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('the full name of a cut name shows on hover and goes with the step; the last option is said to a screen reader; reduced motion has no fade', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1000, height: 700 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await open(page, url, thread, 'C');
+    const tip = page.locator('.ib-optcap-tip');
+    const label = page.locator('.ib-optcap-main .ib-optcap-label');
+    const box = (await label.boundingBox())!;
+    await page.mouse.move(box.x + 20, box.y + box.height / 2);
+    await page.mouse.move(box.x + 24, box.y + box.height / 2);
+    await expect(tip).toHaveText(/A panorama with a very long name/);
+    // A step takes the tip with it, and the next name (not cut) never shows one.
+    await page.keyboard.press(']');
+    await expect(caption(page)).toHaveAttribute('data-option-caption', 'D');
+    await expect(tip).toHaveCount(0);
+    await page.mouse.move(box.x + 30, box.y + box.height / 2);
+    await page.mouse.move(box.x + 34, box.y + box.height / 2);
+    await expect(tip).toHaveCount(0);
+
+    // The last option is said where nothing on screen says it (the thread has one other file: the mockup).
+    await expect(page.locator('[data-step-live]')).toHaveText('Option D of 4: D photo. Last option. 1 other file under the 4/4 button');
+
+    // Reduced motion: Hide and minimize take the card with no fade at all.
+    const fade = () => page.locator('.ib-optcap').evaluate((el) => getComputedStyle(el).transitionDuration);
+    expect(await fade()).toBe('0s');
+    await page.locator('[data-full-view-bar] button[aria-label="Hide tools"]').click();
+    await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
+    expect(await fade()).toBe('0s');
+    await context.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('minimizing takes the card at once and restoring waits for the picture; Save it and go on leaves focus on the arrow', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await open(page, url, thread, 'B');
+    const opacity = () => page.locator('.ib-optcap').evaluate((el) => (getComputedStyle(el).visibility === 'hidden' ? 0 : Number(getComputedStyle(el).opacity)));
+    await page.locator('[data-fcomp-minimize]').click();
+    await page.locator('[data-fcomp-pill]').waitFor({ state: 'attached' });
+    expect(await opacity(), 'gone as the box goes, not fading where the foot has already moved it').toBe(0);
+    await page.locator('[data-fcomp-pill]').click();
+    await page.waitForTimeout(60);
+    expect(await opacity(), 'not back while the picture is still easing').toBeLessThan(0.1);
+    await expect.poll(opacity).toBe(1);
+
+    // A comment typed on the picture, then Next: the question row asks; Save it and go on steps and puts focus back on the arrow.
+    await page.getByPlaceholder(/Comment on this image/).fill('A note on this picture');
+    await page.locator('[data-option-step="next"]').click();
+    await page.getByRole('button', { name: 'Save it and go on' }).click();
+    await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-option-step'))).toBe('next');
+    await context.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
+
+test('on a tablet (touch, wider than a phone) the arrows are 44 px and the picture is still clear of the card', async () => {
+  test.setTimeout(240_000);
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true, isMobile: true });
+    const page = await context.newPage();
+    await page.goto(`${url}#thread=${thread}`);
+    const zoom = page.getByRole('button', { name: 'Zoom: Option B' }).first();
+    await zoom.scrollIntoViewIfNeeded();
+    await zoom.tap();
+    await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
+    await atRest(page);
+    for (const dir of ['prev', 'next']) {
+      const box = (await page.locator(`[data-option-step="${dir}"]`).boundingBox())!;
+      expect(box.width, dir).toBeGreaterThanOrEqual(44);
+      expect(box.height, dir).toBeGreaterThanOrEqual(44);
+    }
+    clearOfCard(await layout(page));
+    await context.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});

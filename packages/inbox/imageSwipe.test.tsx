@@ -483,3 +483,29 @@ test.skipIf(!hasDom)('under reduced motion nothing follows the finger: the step 
   await settle(20);
   expect(closes.count).toBe(1);
 });
+
+test.skipIf(!hasDom)('the card holds every name of the set (unseen) so it is one width on every step, and a wheel over an arrow goes to the picture', async () => {
+  await captionAlone(1, false);
+  const sizers = [...caption()!.querySelectorAll('.ib-optcap-size')].map((el) => el.textContent);
+  expect(sizers).toHaveLength(4);
+  expect(sizers.join('|')).toContain(SET.choices[3]!.label);
+  for (const el of caption()!.querySelectorAll('.ib-optcap-size')) expect(el.getAttribute('aria-hidden')).toBe('true');
+  // The name read aloud is the visible row's only (not four names).
+  expect(caption()!.querySelector('.ib-optcap-main .ib-optcap-label')!.textContent).toContain(SET.choices[1]!.label);
+  expect(caption()!.querySelectorAll('.ib-optcap-main .sr-only')).toHaveLength(1);
+
+  // A pinch (Ctrl + wheel) over an arrow: held off the page and handed to the picture's stage.
+  host!.className = 'ib-view';
+  const stage = document.createElement('div');
+  stage.setAttribute('data-image-zoom-stage', 'fit');
+  host!.appendChild(stage);
+  const received: WheelEvent[] = [];
+  stage.addEventListener('wheel', (e) => received.push(e as WheelEvent));
+  const wheel = new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, clientX: 10, clientY: 20, bubbles: true, cancelable: true });
+  await act(async () => {
+    caption()!.querySelector('[data-option-step="next"]')!.dispatchEvent(wheel);
+  });
+  expect(wheel.defaultPrevented).toBe(true);
+  expect(received).toHaveLength(1);
+  expect(received[0]!.deltaY).toBe(-120);
+});

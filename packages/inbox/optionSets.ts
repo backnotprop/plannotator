@@ -33,8 +33,6 @@ export interface OptionSet {
   id: string;
   messageId: string;
   questionKey: string;
-  /** The question's prompt, for the caption's second line. */
-  prompt: string;
   choices: OptionSetChoice[];
   /** The thread's steps for those choices, in choice order: what the viewer steps through. */
   steps: AttachmentStep[];
@@ -121,7 +119,7 @@ export function optionSetOf(messages: readonly InboxMessageWire[], steps: readon
     choices.push({ label: choice.label, ...named[index]!, recommended: choice.recommended, attachmentId: step.attachment.id });
   });
   if (setSteps.length < 2) return null;
-  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, prompt: question.prompt, choices, steps: setSteps };
+  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, choices, steps: setSteps };
 }
 
 /** The choice a file is in the set (by its own id or the twin record folded into its step); null when it is not one of them. */

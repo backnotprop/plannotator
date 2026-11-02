@@ -59,7 +59,6 @@ describe('option sets', () => {
       ['D', 'Header menu only'],
     ]);
     expect(set.choices[0]!.recommended).toBe(true);
-    expect(set.prompt).toBe('Which copy-message design should ship?');
     // The other question's pictures are a set of their own.
     expect(optionSetOf([EARLIER, MESSAGE], STEPS, optionSetId(M2, 'q-dots'))!.steps.map((s) => s.attachment.id)).toEqual(['att_q1', 'att_q2']);
   });
