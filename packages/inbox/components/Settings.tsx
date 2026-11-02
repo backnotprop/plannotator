@@ -682,7 +682,7 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
-  // Rows draws its own lede, with Reset to defaults beside it (RowsSettings.tsx).
+  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   accounts: '',
