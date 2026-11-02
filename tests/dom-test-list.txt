@@ -184,6 +184,7 @@ packages/inbox/toast.test.tsx
 packages/inbox/attachmentsHeader.test.tsx
 packages/inbox/threadArtifacts.test.tsx
 packages/inbox/sentQuestionLocked.test.tsx
+packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx
