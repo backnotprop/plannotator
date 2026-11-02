@@ -9,7 +9,7 @@
  * Columns (approval "inbox-board-columns-v2", 2026-11-02): where the work
  * stands, never whose move it is. Backlog (nobody asked for it yet: an idea,
  * a proposal; the Icebox folded in, so an agent never moves out a card the
- * person put here) · To do (asked or sent, not started) · In progress · In
+ * person put here) · Todo (asked or sent, not started) · In progress · In
  * review (handed over on purpose by an agent: "You: …" says what the person
  * owes) · Done (merged, live or finished: not all work is code; `shipped`
  * before the owner's rename, 2026-11-02), and Dropped (the Board calls it
@@ -27,7 +27,7 @@
  * 2026-10-20). An agent's drop reaches the person: it stays unseen
  * (`dropped.seen_at` null) until they look at Dropped. Nothing moves a card
  * by guessing. One rule moves a card by itself (Q3 of the v2 approval): a
- * card in To do, In progress or In review ships once every PR it links has
+ * card in Todo, In progress or In review ships once every PR it links has
  * merged and none is open (`inboxCardAutoShip`); an unknown state does
  * nothing, and a card the person moved out of Done is not moved there again
  * for the same PRs.
@@ -55,7 +55,7 @@ export const INBOX_CARD_COLUMNS = ["backlog", "todo", "in_progress", "in_review"
 
 export type InboxCardColumn = (typeof INBOX_CARD_COLUMNS)[number];
 
-/** The columns of work not finished: Backlog, To do, In progress, In review. Done and Dropped are resolved. */
+/** The columns of work not finished: Backlog, Todo, In progress, In review. Done and Dropped are resolved. */
 export const INBOX_CARD_LIVE_COLUMNS: readonly InboxCardColumn[] = ["backlog", "todo", "in_progress", "in_review"];
 
 /** The column where a card waits on the person: it shows "You: …" (`you`). */
@@ -67,7 +67,7 @@ export const INBOX_CARD_AUTO_SHIP_COLUMNS: readonly InboxCardColumn[] = ["todo",
 /** How the Board names each column. Dropped is "Cancelled" to the person; its id stays, so an older Inbox still reads it. */
 export const INBOX_CARD_COLUMN_LABELS: Readonly<Record<InboxCardColumn, string>> = {
   backlog: "Backlog",
-  todo: "To do",
+  todo: "Todo",
   in_progress: "In progress",
   in_review: "In review",
   done: "Done",
@@ -162,7 +162,7 @@ export function inboxCardColumnOf(value: unknown): InboxCardColumn | null {
  * Where a card written before v2 stands now (the migration table of the v2
  * approval). Only Backlog needs the card: before v2 it held both work an
  * agent was asked to do and the person's own ideas, so a card with an agent
- * or a send reads as To do, and one nobody was asked about stays in Backlog.
+ * or a send reads as Todo, and one nobody was asked about stays in Backlog.
  */
 export function inboxCardLegacyColumn(value: string, card: { agent?: unknown; sent?: unknown }): InboxCardColumn | null {
   if (value === "backlog") return card.agent || card.sent ? "todo" : "backlog";
@@ -319,7 +319,7 @@ export interface InboxCardAutoShip {
 
 /**
  * Whether a card moves to Done by itself now, given the states of its links
- * (by URL): the URLs of its own PRs (inboxCardShipPrs) when it is in To do,
+ * (by URL): the URLs of its own PRs (inboxCardShipPrs) when it is in Todo,
  * In progress or In review, links at least one, every one of them is merged
  * (none open, draft, closed or unknown), and one of them is new since the
  * card was last in Done (`done_prs`: moved back by the person, or reported
@@ -460,7 +460,7 @@ export function normalizeInboxCardNotes(value: unknown): { notes: string | null 
   return { notes: trimmed };
 }
 
-/** Whether the Board shows a card as "Sent to <agent>": sent, in To do (a send puts it there), and not moved since. */
+/** Whether the Board shows a card as "Sent to <agent>": sent, in Todo (a send puts it there), and not moved since. */
 export function isInboxCardSentWaiting(card: Pick<InboxCard, "sent" | "column" | "moved_at">): boolean {
   return card.sent !== null && card.sent !== undefined && card.column === "todo" && card.moved_at <= card.sent.at;
 }

@@ -8,7 +8,7 @@ import { Modal } from '../components/Updates';
 import { SessionDetail, ToPicker } from '../compose/ToPicker';
 import { composeGroups, findTarget, hostLabel, type ComposeTarget } from '../compose/model';
 
-/** Where a New card goes: Backlog by default, or straight to an agent (To do). The Icebox folded into Backlog (Board columns v2). */
+/** Where a New card goes: Backlog by default, or straight to an agent (Todo). The Icebox folded into Backlog (Board columns v2). */
 export type NewCardMode = 'backlog' | 'send';
 
 export interface NewCardInput {
@@ -34,7 +34,7 @@ export function splitRefs(text: string): string[] {
  * project (or the agent, when sent), links to issues or PRs, and two plain
  * buttons for where it goes: Backlog (the default, sent to no agent) or Send
  * to an agent (compose's live-session picker; the notes are the message; the
- * card lands in To do). The main button names the action: "Add to Backlog",
+ * card lands in Todo). The main button names the action: "Add to Backlog",
  * "Send to Claude Code". On a phone the dialog is a full screen with
  * Cancel and the action at the top.
  */

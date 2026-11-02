@@ -16,7 +16,7 @@
 export const INBOX_TIDY_PERSON_LAST_MS = 10 * 60_000;
 /** An open question or action item counts once it is this old. */
 export const INBOX_TIDY_OPEN_ITEM_MS = 2 * 60 * 60_000;
-/** A Board card in To do or In progress counts once it has not moved for this long. */
+/** A Board card in Todo or In progress counts once it has not moved for this long. */
 export const INBOX_TIDY_CARD_IDLE_MS = 2 * 24 * 60 * 60_000;
 /** A session is not asked again this soon, unless the person wrote to it since. */
 export const INBOX_TIDY_COOLDOWN_MS = 30 * 60_000;

@@ -75,7 +75,7 @@ export interface CardPanelProps {
  * thread in the Inbox, with a way back); links (PRs, issues), their live
  * state read when the card opens and never acted on; history, with a quiet
  * "Ask for an update"; and at the foot Mark done · Cancel… (with a reason),
- * Send to an agent for a Backlog or To do card nobody was asked about,
+ * Send to an agent for a Backlog or Todo card nobody was asked about,
  * Restore on a Cancelled card.
  */
 export function CardPanel(props: CardPanelProps) {

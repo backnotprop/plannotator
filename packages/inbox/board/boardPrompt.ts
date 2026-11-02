@@ -1,7 +1,7 @@
 /**
  * The Board's prompt (approval "inbox-board", intro amendment: the prompt in
  * `intro-mock/board-prompt.md`; columns v2: work an agent was asked to do and
- * has not started goes in To do, only a hand-over in In review). The first-visit dialog's Copy prompt and the
+ * has not started goes in Todo, only a hand-over in In review). The first-visit dialog's Copy prompt and the
  * empty Board's "Copy prompt" copy it; the person pastes it into an agent,
  * which fills the Board with the work in flight it knows about.
  *

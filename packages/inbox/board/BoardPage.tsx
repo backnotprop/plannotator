@@ -110,7 +110,7 @@ export interface BoardPageProps {
 
 /**
  * The Board (approval "inbox-board", step 2; columns v2): five lanes, Backlog,
- * To do, In progress, In review and Done (its last seven days), cards in
+ * Todo, In progress, In review and Done (its last seven days), cards in
  * variant C "Lean", All done and Cancelled as links to their own lists, the
  * agents' unseen drops above the lanes. A card opens in
  * a panel beside the Board (the lanes narrow and scroll, so the card's lane
@@ -328,7 +328,7 @@ export function BoardPage(props: BoardPageProps) {
       card = (await inboxApi.editCard(card.id, { op: 'edit', title: input.title, notes: input.notes })).card;
     }
     for (const ref of input.refs) if (!was || !was.refs.includes(ref)) card = (await inboxApi.editCard(card.id, { op: 'link', ref })).card;
-    // A card the dialog made but has not sent yet stays in Backlog (a send moves it to To do).
+    // A card the dialog made but has not sent yet stays in Backlog (a send moves it to Todo).
     if (!card.sent && card.column !== 'backlog') card = (await inboxApi.moveCard(card.id, { op: 'move', column: 'backlog' })).card;
     dialogCard.current = card;
     madeFrom.current = { input, target };
@@ -337,7 +337,7 @@ export function BoardPage(props: BoardPageProps) {
 
   /**
    * Make a card from New card: Backlog in a project, or sent to an agent
-   * (To do). Sending makes the card first (Backlog, in the session's project)
+   * (Todo). Sending makes the card first (Backlog, in the session's project)
    * and names it in the message, so the agent never gets "it is yours now"
    * for a card that does not exist; a retry reuses the card and the key.
    */

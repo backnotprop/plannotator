@@ -31,7 +31,7 @@ test('every op and argument the prompt names is one the card action takes', () =
   expect(INBOX_CARD_OP_FIELDS.list).toContain('asked_by');
 });
 
-test('the columns it lists are the store’s v2 ids, To do takes work not started, and only a hand-over goes to In review', () => {
+test('the columns it lists are the store’s v2 ids, Todo takes work not started, and only a hand-over goes to In review', () => {
   const prompt = boardPrompt(BIN);
   const listed = [...prompt.matchAll(/^- ([a-z_]+): /gm)].map((match) => match[1]);
   expect(listed).toEqual(['todo', 'in_progress', 'in_review', 'backlog']);

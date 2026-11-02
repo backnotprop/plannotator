@@ -3161,7 +3161,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent; a window
         // from before v2 says icebox, which folded into it); or sent to an agent: `thread_id` is the thread
         // the window just started for it with compose's Send (its body the notes), and the card lands in
-        // that thread's project, sent, in To do.
+        // that thread's project, sent, in Todo.
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const asked = body.column === undefined || body.column === null ? "backlog" : body.column;
@@ -3233,7 +3233,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", `cards: the crd_ ids of the cards on screen (at most ${INBOX_CARD_MARKS_MAX}).`, { field: "cards" });
         }
         const wanted: { id: string; ref: InboxCardRef }[] = [];
-        // Auto-ship (approval "inbox-board-columns-v2", Q3): a card in To do, In progress or In review has
+        // Auto-ship (approval "inbox-board-columns-v2", Q3): a card in Todo, In progress or In review has
         // its own PRs (linked through `pr`, inboxCardShipPrs) read with its mark, in the same queries; all
         // merged, one of them new since it was last in Done, moves it to Done (inboxCardAutoShip).
         const shipping: { id: string; refs: InboxCardRef[] }[] = [];

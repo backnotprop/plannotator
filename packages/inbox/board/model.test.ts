@@ -1,6 +1,6 @@
 /**
  * The Board page's rules (approval "inbox-board", step 2; columns v2), pure:
- * the lanes' order with a sent card on top of To do, the header's counts, a card's
+ * the lanes' order with a sent card on top of Todo, the header's counts, a card's
  * second line, the unread rule for one visit, the opened card's foot and
  * column menu, the age and the live state of a link. What regresses: a lane
  * out of the v2 order, "You: …" leaking out of In review, a card
@@ -45,11 +45,11 @@ function card(id: string, over: Partial<InboxCardWire> = {}): InboxCardWire {
   } as InboxCardWire;
 }
 
-test('the five lanes in order, only In review on the person; a card the person sent sits on top of To do until it moves', () => {
+test('the five lanes in order, only In review on the person; a card the person sent sits on top of Todo until it moves', () => {
   const sent = card('sent', { column: 'todo', agent: CLAUDE, sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' }, moved_at: '2026-10-20T10:00:00.000Z' });
   const lanes = boardLanes([card('a', { column: 'todo' }), card('b', { column: 'in_progress' }), sent, card('c', { column: 'done' }), card('d')], Date.parse('2026-10-21T10:00:00.000Z'));
   expect(lanes.map((lane) => lane.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
-  expect(lanes.map((lane) => lane.label)).toEqual(['Backlog', 'To do', 'In progress', 'In review', 'Done']);
+  expect(lanes.map((lane) => lane.label)).toEqual(['Backlog', 'Todo', 'In progress', 'In review', 'Done']);
   expect(lanes.filter((lane) => lane.onYou).map((lane) => lane.column)).toEqual(['in_review']);
   expect(lanes[1].cards.map((c) => c.id)).toEqual(['sent', 'a']);
   expect(lanes[0].cards.map((c) => c.id)).toEqual(['d']);
@@ -165,13 +165,13 @@ test('a card’s right-click menu: Open thread when linked, the Move menu’s wo
   // the same as the opened card's Move menu, so a drift in either place fails here.
   expect(menuWords(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1'))).toEqual([
     ['Open thread'],
-    ['Backlog', 'To do', 'In progress*', 'In review'],
+    ['Backlog', 'Todo', 'In progress*', 'In review'],
     ['Done'],
     ['Cancel…'],
   ]);
   expect(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1')[0]).toEqual([{ kind: 'thread', threadId: 'msg_1', label: 'Open thread' }]);
   // No linked thread: no Open thread (the click opens the card).
-  expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'To do', 'In progress', 'In review']);
+  expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'Todo', 'In progress', 'In review']);
   // A card in Done (the Done page): the same menu, Done checked.
   expect(menuWords(cardMenuItems(card('x', { column: 'done' }), null))[1]).toEqual(['Done*']);
   // A cancelled card has no menu (its row has Restore).

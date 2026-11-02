@@ -70,7 +70,7 @@ const LANES: { col: string; cards: { host: string | null; you?: boolean; w: [num
   { col: 'in_review', cards: [{ host: 'pi', you: true, w: [78, 58] }, { host: 'codex', you: true, w: [66, 50] }] },
   { col: 'done', cards: [{ host: 'claude-code', w: [70, 40] }] },
 ];
-const NAMES: Record<string, string> = { backlog: 'Backlog', todo: 'To do', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
+const NAMES: Record<string, string> = { backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
 
 /** The picture: a small board, one card walking through its stages. Decoration only (aria-hidden). */
 function BoardIntroArt() {
