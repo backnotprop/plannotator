@@ -3981,6 +3981,12 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
      until the words land. On the narrowest phones it is always the bare arrow, its name kept for a screen reader: it
      can't narrow only while dictating, or the mic beside it would move. */
   .ib-cp-foot .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* "Listening" is whole or not there: the bars, the clock and the stop button say it, and they take its room. A screen
+     reader keeps the status (VoiceFoot). */
+  .ib-cp-foot .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { flex: none; }
+  @media (max-width: 429px) {
+    .ib-cp-foot .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { display: none; }
+  }
   @media (max-width: 359px) {
     .pn-inbox .ib-cp-foot .ib-cp-send { width: 44px; padding: 0; justify-content: center; }
     .ib-cp-foot .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

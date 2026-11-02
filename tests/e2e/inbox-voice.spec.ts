@@ -14,8 +14,9 @@
  *    and a touch the system takes away ends the take with nothing sent.
  *  - Reply box, compose, and full screen's composer.
  *  - New message dictates as the reply box does, in Chromium and in WebKit (WebKit has no fake capture device, so a tone
- *    through a real MediaStream stands in for the microphone), at 320 to 390 px, the keyboard a stand-in: the mic at the
- *    row's right end and still when it starts, the level drawn and moving, nothing over the clock. Words land where they
+ *    through a real MediaStream stands in for the microphone), at 320 to 430 px, the keyboard a stand-in: the mic at the
+ *    row's right end and still when it starts, the level drawn and moving, nothing over the clock, "Listening" whole or
+ *    not there. Words land where they
  *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
  *    a take on its way. On a desktop Save draft stays put when listening starts.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
@@ -768,11 +769,14 @@ test.describe('New message dictates as the reply box does', () => {
     }) as Promise<Row>;
 
   /** Listening, the level on screen and moving, the mic where it was, nothing drawn over the words. */
-  async function listensWell(page: Page, scope: Locator, row: Row, name: string) {
+  async function listensWell(page: Page, scope: Locator, row: Row, name: string, wordFits: boolean) {
     await expect.poll(async () => (await readRow(scope)).mic.left, { message: `${name}: the mic stays under the finger` }).toBeCloseTo(row.mic.left, 0);
     const first = await readRow(scope);
-    // A floor, not a reply's count: a phone row that also carries Send draws fewer strokes, and none at all is the fault.
-    expect(first.bars, `${name}: the level is drawn`).toBeGreaterThanOrEqual(4);
+    // All ten of a phone's strokes: Send shares this row, and the word gives them its room.
+    expect(first.bars, `${name}: the level is drawn`).toBe(10);
+    const word = await scope.locator('[data-voice-line] b').evaluate((el) => ({ shown: el.checkVisibility(), clipped: el.scrollWidth > el.clientWidth }));
+    expect(word.shown, `${name}: "Listening" is there only where it fits`).toBe(wordFits);
+    if (word.shown) expect(word.clipped, `${name}: the word is whole`).toBe(false);
     await expect.poll(async () => (await readRow(scope)).level, { message: `${name}: the level moves` }).not.toBe(first.level);
     const parts = await scope.evaluate((box) => ['[data-voice-line] b', '[data-voice-cancel]', '.ib-vbars', '.ib-dttime', '[data-voice-mic]', '.ib-cp-status'].flatMap((selector) => {
       const el = box.querySelector(selector);
@@ -780,7 +784,7 @@ test.describe('New message dictates as the reply box does', () => {
       return at && at.width > 0 && el!.checkVisibility() ? [{ selector, left: at.left, right: at.right }] : [];
     }));
     for (let i = 1; i < parts.length; i++) expect(parts[i]!.left, `${name}: ${parts[i]!.selector} clear of ${parts[i - 1]!.selector}`).toBeGreaterThanOrEqual(parts[i - 1]!.right - 0.5);
-    expect(parts.map((part) => part.selector), `${name}: in the reply box's order, and nothing else`).toEqual(['[data-voice-line] b', '[data-voice-cancel]', '.ib-vbars', '.ib-dttime', '[data-voice-mic]']);
+    expect(parts.map((part) => part.selector), `${name}: in the reply box's order, and nothing else`).toEqual([...(wordFits ? ['[data-voice-line] b'] : []), '[data-voice-cancel]', '.ib-vbars', '.ib-dttime', '[data-voice-mic]']);
   }
 
   const onTheRight = (row: Row, name: string) => {
@@ -849,6 +853,8 @@ test.describe('New message dictates as the reply box does', () => {
     { width: 360, height: 640, keyboard: 383 },
     { width: 375, height: 667, keyboard: 410 },
     { width: 389, height: 660, keyboard: 403 },
+    // Where "Listening" fits whole.
+    { width: 430, height: 740, keyboard: 483 },
   ] as const;
 
   for (const engine of ENGINES) {
@@ -892,7 +898,7 @@ test.describe('New message dictates as the reply box does', () => {
               onTheRight(rest, name);
               await mic(sheet(page)).tap();
               await expect(line(sheet(page), 'tap')).toBeVisible();
-              await listensWell(page, sheet(page), rest, name);
+              await listensWell(page, sheet(page), rest, name, size.width >= 430);
               const seen = await sheet(page).locator('.ib-cp-foot').boundingBox();
               expect(seen!.height, `${name}: still one row`).toBeLessThanOrEqual(rest.row.height + 0.5);
               expect(seen!.y + seen!.height, `${name}: the row is above the keyboard`).toBeLessThanOrEqual(size.height - (keyboard ? size.keyboard : 0) + 0.5);
