@@ -149,7 +149,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
-import { createInboxAccounts } from "./inbox-accounts";
+import { accountsTestOptions, createInboxAccounts } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -178,9 +178,8 @@ import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
-import { createInboxMachines, type InboxMachines, type MachineFrame } from "./inbox-machines";
+import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
-import type { PeerLinkTimings } from "./inbox-peer-link";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -351,7 +350,7 @@ export interface InboxServerOptions {
    */
   phones?: boolean;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
-  machineLinkTimings?: Partial<PeerLinkTimings>;
+  machineLinkTimings?: MachineLinkTimings;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
   windowHeartbeatMs?: number;
   /** The Board, decided here instead of config.json `inboxBoard` (tests). Absent: config.json decides on every request. */
@@ -2509,12 +2508,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.voice,
   });
 
-  // The test sandbox's agent PATH is empty and a loopback link needs the sandbox, so a spec of linked machines on the
-  // compiled binary names its fake `cswap`'s folder. Without the sandbox this is never read.
-  const fakeCswap = process.env.PLANNOTATOR_TEST_SANDBOX ? process.env.PLANNOTATOR_TEST_CSWAP_DIR : undefined;
+  // A spec on the compiled binary names its fake `cswap`'s folder. Without the sandbox this is never heard.
+  const { cswapDir: fakeCswap, ...accountsForSpec } = accountsTestOptions(process.env);
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   const accounts = createInboxAccounts({
     environment: fakeCswap ? createAgentEnvironmentFor({ platform: process.platform, homeDir: agentEnvironment.homeDir, env: { HOME: agentEnvironment.homeDir, PATH: fakeCswap } }) : agentEnvironment,
+    ...accountsForSpec,
     ...options.accounts,
   });
 

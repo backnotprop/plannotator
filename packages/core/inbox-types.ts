@@ -1873,8 +1873,13 @@ export type InboxAccountsRead =
   | { state: "failed"; reason: InboxAccountsFailure }
   | { state: "accounts"; accounts: InboxAccount[] };
 
-/** `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is none: unreachable, or too old to answer. Neither is an error. */
-export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" };
+/**
+ * `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is
+ * none: `offline`, no answer at all; `needs_update`, a version apart;
+ * `unreachable`, it answered something else (a 500, a refused token). None is
+ * an error.
+ */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];

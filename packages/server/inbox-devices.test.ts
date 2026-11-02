@@ -1127,6 +1127,34 @@ describe("the device door, in process", () => {
     expect(after.status).toBe(401);
     expect(asked.length).toBe(1);
   });
+
+  test("through the relay (asDevice), a phone's command never reaches a machine's accounts, while the same phone's other commands run", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-relay-accounts-"));
+    roots.push(dataDir);
+    const asked: string[] = [];
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async (req) => {
+        asked.push(new URL(req.url).pathname);
+        return new Response(ONE_PIXEL_PNG, { headers: { "Content-Type": "image/png" } });
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    expect((await phones.asDevice(paired.device.id, { method: "GET", path: "/api/inbox/device/messages/msg_x/image?path=a.png" })).status).toBe(200);
+    expect(asked).toHaveLength(1);
+    for (const path of ["/api/inbox/device/accounts", "/api/inbox/device/accounts?fresh=1"]) {
+      const refused = await phones.asDevice(paired.device.id, { method: "GET", path });
+      expect(refused.status).toBe(404);
+      expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
+    }
+    expect(asked).toHaveLength(1);
+  });
 });
 
 describe("the door's parity routes, in process (7.39 to 7.49)", () => {

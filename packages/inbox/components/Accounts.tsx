@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { InboxAccount, InboxMachineAccountsRead, InboxUsageWindow } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
 import { accountsFailure, useAccounts, type AccountsFailure, type AccountsView, type MachineAccounts } from '../useAccounts';
@@ -79,47 +79,78 @@ export function accountMeters(account: InboxAccount): Meter[] {
   ];
 }
 
-/** One row of the list: a login, and the machines it is saved on (none named while no machine is linked). */
+/** One row of the list: a login, the machines it is saved on (none named while no machine is linked), and each one's own copy. */
 export interface ListedAccount {
   key: string;
   account: InboxAccount;
   machines: string[];
+  copies: { machine: string; account: InboxAccount }[];
 }
 
-/** The newer reading of one login on two machines, and an alias if only one of them gave it. */
+/** The newer reading of one login on two machines, under the number it came with, and an alias if only one of them gave it. */
 function newerReading(held: InboxAccount, other: InboxAccount): InboxAccount {
   const newer = other.usage && (!held.usage || (other.usageAgeSeconds ?? 0) < (held.usageAgeSeconds ?? 0)) ? other : held;
-  return { ...newer, alias: held.alias ?? other.alias };
+  return { ...newer, number: held.number, alias: held.alias ?? other.alias };
+}
+
+/**
+ * `cswap`'s number is unique on one machine, so across machines one row may
+ * have to give way. The first row to show a number keeps it, so this machine's
+ * stay the ones `cswap` prints here; a later one takes a number no row has.
+ */
+function uniqueNumbers(rows: ListedAccount[]): ListedAccount[] {
+  const taken = new Set<number>();
+  let spare = Math.max(0, ...rows.map((row) => row.account.number));
+  return rows.map((row) => {
+    const number = taken.has(row.account.number) ? ++spare : row.account.number;
+    taken.add(number);
+    return number === row.account.number ? row : { ...row, account: { ...row.account, number } };
+  });
 }
 
 /**
  * Every machine's accounts as one list, this machine's first: one login saved
  * on two machines is one row, by its address and organization. An API key has
  * no address to tell it by, so it stays its machine's own row, and rows one
- * machine keeps apart stay apart.
+ * machine keeps apart stay apart. `seen` holds the page's order: a machine that
+ * answers late adds its rows under what is showing, whatever the machines' order.
  */
-export function listedAccounts(self: { name: string; accounts: InboxAccount[] }, linked: MachineAccounts[]): ListedAccount[] {
+export function listedAccounts(self: { name: string; accounts: InboxAccount[] }, linked: MachineAccounts[], seen: string[] = []): ListedAccount[] {
   const listed = new Map<string, ListedAccount>();
   const name = (machine: string) => (linked.length > 0 ? [machine] : []);
   const add = (id: string, machine: string, accounts: InboxAccount[]) => {
-    const seen = new Map<string, number>();
+    const counts = new Map<string, number>();
     for (const account of accounts) {
       const login = account.email ? `${account.email.toLowerCase()}\n${account.organizationName ?? ''}` : `${id}\n${account.number}`;
-      const nth = seen.get(login) ?? 0;
-      seen.set(login, nth + 1);
+      const nth = counts.get(login) ?? 0;
+      counts.set(login, nth + 1);
       const key = `${login}\n${nth}`;
       const held = listed.get(key);
-      if (held) listed.set(key, { key, account: newerReading(held.account, account), machines: [...held.machines, ...name(machine)] });
-      else listed.set(key, { key, account, machines: name(machine) });
+      const copy = { machine, account };
+      if (held) listed.set(key, { key, account: newerReading(held.account, account), machines: [...held.machines, ...name(machine)], copies: [...held.copies, copy] });
+      else listed.set(key, { key, account, machines: name(machine), copies: [copy] });
     }
   };
   add('self', self.name, self.accounts);
   for (const { id, name: machine, read } of linked) if (read?.state === 'accounts') add(id, machine, read.accounts);
-  return [...listed.values()];
+  for (const key of listed.keys()) if (!seen.includes(key)) seen.push(key);
+  return uniqueNumbers([...listed.values()].sort((a, b) => seen.indexOf(a.key) - seen.indexOf(b.key)));
+}
+
+/** The states a person has to act on, worst first. A login renewing or a failed fetch passes by itself, and another machine's reading can stand in. */
+const NEEDS_A_PERSON = ['relogin_required', 'no_credentials', 'foreign_credential', 'keychain_unavailable'];
+
+/** The worst such state among a login's machines, and which ones. */
+function worstState(copies: ListedAccount['copies']): { reason: string; machines: string[] } | null {
+  for (const status of NEEDS_A_PERSON) {
+    const here = copies.filter(({ account }) => account.usageStatus === status);
+    if (here.length > 0) return { reason: noReadingReason(here[0]!.account), machines: here.map(({ machine }) => machine) };
+  }
+  return null;
 }
 
 /** What an open row adds. An organization a row already shows is not said twice. */
-function accountMore(account: InboxAccount, meters: Meter[], name: RowName, machines: string[]): string[] {
+function accountMore(account: InboxAccount, meters: Meter[], name: RowName, machines: string[], worst: ReturnType<typeof worstState>): string[] {
   const resets = meters.flatMap(({ label, window }) => {
     const when = window.clock ?? (window.countdown && `in ${window.countdown}`);
     return when ? [`${label} ${when}`] : [];
@@ -131,6 +162,7 @@ function accountMore(account: InboxAccount, meters: Meter[], name: RowName, mach
   if (resets.length > 0) lines.push(`Resets ${resets.join(' · ')}`);
   if (meters.length > 0 && isStale(account)) lines.push(`Last read ${ageText(account.usageAgeSeconds!)} ago`);
   if (machines.length > 0) lines.push(machines.join(', '));
+  if (worst && machines.length > 1) lines.push(`${worst.reason} on ${worst.machines.join(', ')}`);
   return lines;
 }
 
@@ -203,10 +235,12 @@ function AccountUsage({ account, meters }: { account: InboxAccount; meters: Mete
   );
 }
 
-function AccountRow({ account, name, machines }: { account: InboxAccount; name: RowName; machines: string[] }) {
+function AccountRow({ row: { account, machines, copies }, name }: { row: ListedAccount; name: RowName }) {
   const [open, setOpen] = useState(false);
   const meters = accountMeters(account);
-  const more = accountMore(account, meters, name, machines);
+  const worst = worstState(copies);
+  const more = accountMore(account, meters, name, machines, worst);
+  const why = worst?.reason ?? (account.usageStatus !== 'api_key' && meters.length === 0 ? noReadingReason(account) : null);
   const head = (
     <>
       <span className="ib-acct-who">
@@ -220,7 +254,7 @@ function AccountRow({ account, name, machines }: { account: InboxAccount; name: 
           )}
         </span>
         {name.organization && <span className="ib-acct-org">{name.organization}</span>}
-        {account.usageStatus !== 'api_key' && meters.length === 0 && <span className="ib-acct-why">{noReadingReason(account)}</span>}
+        {why && <span className="ib-acct-why">{why}</span>}
       </span>
       <AccountUsage account={account} meters={meters} />
     </>
@@ -246,7 +280,7 @@ function AccountRow({ account, name, machines }: { account: InboxAccount; name: 
   );
 }
 
-function AccountList({ rows, reading }: { rows: ListedAccount[]; reading: boolean }) {
+function AccountList({ rows, reading, linked }: { rows: ListedAccount[]; reading: boolean; linked: boolean }) {
   if (rows.length === 0) {
     return (
       <div className="ib-card ib-acct-install" data-accounts-none="">
@@ -257,9 +291,9 @@ function AccountList({ rows, reading }: { rows: ListedAccount[]; reading: boolea
   }
   const accounts = rows.map((row) => row.account);
   return (
-    <ul className="ib-card ib-acct-list" aria-label="Claude Code accounts" aria-busy={reading}>
-      {rows.map(({ key, account, machines }) => (
-        <AccountRow key={key} account={account} name={rowName(accounts, account)} machines={machines} />
+    <ul className="ib-card ib-acct-list" aria-label="Claude Code accounts" aria-busy={reading} data-linked={linked ? '' : undefined}>
+      {rows.map((row) => (
+        <AccountRow key={row.key} row={row} name={rowName(accounts, row.account)} />
       ))}
     </ul>
   );
@@ -272,12 +306,18 @@ const NO_ACCOUNT: Record<string, string> = {
   needs_update: 'Update Plannotator',
 };
 
+/** A machine's account as the list calls it, once the list has it, so a name and number mean one login on the whole page. */
+function listName(rows: ListedAccount[], accounts: InboxAccount[], active: InboxAccount): RowName {
+  const row = rows.find(({ copies }) => copies.some((copy) => copy.account === active));
+  return row ? rowName(rows.map(({ account }) => account), row.account) : rowName(accounts, active);
+}
+
 /** What a machine's row says on its right, in one line, so an answer never moves the rows under it. */
-function MachineUse({ read }: { read: AccountsView | InboxMachineAccountsRead | null }) {
+function MachineUse({ read, rows }: { read: AccountsView | InboxMachineAccountsRead | null; rows: ListedAccount[] }) {
   if (read?.state === 'accounts') {
     const active = read.accounts.find((account) => account.active);
     if (active) {
-      const { label, organization, number } = rowName(read.accounts, active);
+      const { label, organization, number } = listName(rows, read.accounts, active);
       const name = number === null ? label : `${label} #${number}`;
       return (
         <span className="ib-acct-ro" data-machine-use="account">
@@ -296,19 +336,19 @@ function MachineUse({ read }: { read: AccountsView | InboxMachineAccountsRead | 
   );
 }
 
-function MachineRow({ name, read }: { name: string; read: AccountsView | InboxMachineAccountsRead | null }) {
+function MachineRow({ name, read, rows }: { name: string; read: AccountsView | InboxMachineAccountsRead | null; rows: ListedAccount[] }) {
   return (
     <div className="ib-acct-row ib-acct-machine" data-accounts-machine={name}>
       <span className="ib-acct-who">
         <span className="ib-acct-name">{name}</span>
       </span>
-      <MachineUse read={read} />
+      <MachineUse read={read} rows={rows} />
     </div>
   );
 }
 
 /** Every machine and the account it is using, this one first. Switch comes here in a later step. */
-function MachineGroup({ self, view, linked }: { self: string; view: AccountsView | null; linked: MachineAccounts[] }) {
+function MachineGroup({ self, view, linked, rows }: { self: string; view: AccountsView | null; linked: MachineAccounts[]; rows: ListedAccount[] }) {
   return (
     <section className="ib-sgroup ib-sgroup-first" data-accounts-machines="" aria-labelledby="ib-g-machines">
       <div className="ib-acct-h">
@@ -318,9 +358,9 @@ function MachineGroup({ self, view, linked }: { self: string; view: AccountsView
         </h2>
       </div>
       <div className="ib-card">
-        <MachineRow name={self} read={view} />
+        <MachineRow name={self} read={view} rows={rows} />
         {linked.map((machine) => (
-          <MachineRow key={machine.id} name={machine.name} read={machine.read} />
+          <MachineRow key={machine.id} name={machine.name} read={machine.read} rows={rows} />
         ))}
       </div>
     </section>
@@ -343,12 +383,14 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
   const self = machine ?? 'This machine';
   const own = view?.state === 'accounts' ? view.accounts : [];
   const linked = view?.state === 'owner_only' ? [] : machines;
-  const rows = listedAccounts({ name: self, accounts: own }, linked);
+  // The list waits for this machine's answer, which goes first: nothing is put above rows already showing.
+  const seen = useRef<string[]>([]);
+  const rows = view === null ? [] : listedAccounts({ name: self, accounts: own }, linked, seen.current);
   const hasMachines = linked.length > 0 || own.some((account) => account.active);
   const failure = refreshFailed ?? (view ? accountsFailure(view) : null);
   return (
     <>
-      {hasMachines && <MachineGroup self={self} view={view} linked={linked} />}
+      {hasMachines && <MachineGroup self={self} view={view} linked={linked} rows={rows} />}
       <section className={hasMachines ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} data-settings-accounts={view?.state ?? 'reading'} aria-labelledby="ib-g-claude">
         <div className="ib-acct-h">
           <h2 id="ib-g-claude">
@@ -374,7 +416,7 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
             {FAILURE_TEXT[failure]}
           </p>
         )}
-        {(view?.state === 'accounts' || rows.length > 0) && <AccountList rows={rows} reading={reading} />}
+        {(view?.state === 'accounts' || rows.length > 0) && <AccountList rows={rows} reading={reading} linked={linked.length > 0} />}
         {view?.state === 'not_installed' && (
           <div className="ib-card ib-acct-install">
             <span>

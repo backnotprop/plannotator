@@ -1600,6 +1600,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-acct-row.ib-acct-machine:last-child { border-bottom: 0; }
 /* Room for the chevron stays on the right of every row, so a row with nothing to open keeps the columns. */
 .ib-acct-row { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 8px 34px 8px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
+/* With machines linked a late answer can give a row its second line (an organization, "Sign in again"): every row has room for it, so none pushes the rows under it. */
+.ib-acct-list[data-linked] .ib-acct-row { min-height: 58px; }
 button.ib-acct-row { cursor: pointer; border-radius: inherit; }
 .pn-inbox button.ib-acct-row:focus-visible { outline-offset: -2px; }
 .ib-acct-car { position: absolute; right: 12px; top: 50%; margin-top: -6px; width: 12px; height: 12px; stroke-width: 2; color: var(--muted-foreground); opacity: 0.6; transition: transform 120ms ease; }

@@ -148,6 +148,11 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
   const { view, machines } = useAccounts();
   const near = nearMachines(machines);
   const row = useMemo(() => ({ current: anchor }), [anchor]);
+  // Where the row was as it opened: the peek stays put when the row goes (the hover sidebar slides away).
+  const placedAt = useMemo(() => anchor?.getBoundingClientRect() ?? null, [anchor]);
+  const grown = `${view === null} ${near.length}`;
+  // A new reference places it again at its new size, and an answer that grows it changes nothing else: its focus stays.
+  const place = useMemo(() => (placedAt ? { getBoundingClientRect: () => placedAt } : undefined), [placedAt, grown]);
   const open = anchor !== null && hasUsage(view, true);
   // The read took `cswap` away while it was open, and the row with it.
   useEffect(() => {
@@ -155,8 +160,7 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
   }, [anchor, open, onClose]);
   return (
     <Popover.Root
-      // Placed at its size: it stays put once open, so a desktop peek that grew (a first read, a machine's answer) is placed again.
-      key={phone ? 'sheet' : `${view === null ? 'reading' : 'read'} ${near.length}`}
+      key={phone ? 'sheet' : 'peek'}
       open={open}
       modal={phone}
       onOpenChange={(next, details) => {
@@ -168,7 +172,7 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
       <Popover.Portal container={document.querySelector<HTMLElement>('.pn-inbox') ?? undefined}>
         {phone && <Popover.Backdrop className="ib-pm-scrim" />}
         {/* Stays put when the row goes: the hover sidebar slides away, and a phone's closes. */}
-        <Popover.Positioner className="ib-tidy-pos" anchor={row} side="right" align="end" sideOffset={14} disableAnchorTracking data-phone={phone ? '' : undefined}>
+        <Popover.Positioner className="ib-tidy-pos" anchor={place} side="right" align="end" sideOffset={14} disableAnchorTracking data-phone={phone ? '' : undefined}>
           <Popover.Popup
             className="ib-tidy ib-usage"
             aria-label="Usage"
@@ -177,8 +181,11 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
             onKeyDown={(event) => {
               // Tab past either end closes it, back on the row: left alone, focus lands on a guard behind the open peek.
               if (phone || event.key !== 'Tab') return;
-              const blocks = event.currentTarget.querySelectorAll('button');
-              if (event.target !== blocks[event.shiftKey ? 0 : blocks.length - 1]) return;
+              const popup = event.currentTarget;
+              const blocks = popup.querySelectorAll('button');
+              // The popup itself holds focus after a click on its padding: it is the first stop going back.
+              const leaving = event.shiftKey ? event.target === popup || event.target === blocks[0] : event.target === blocks[blocks.length - 1];
+              if (!leaving) return;
               event.preventDefault();
               onClose();
             }}

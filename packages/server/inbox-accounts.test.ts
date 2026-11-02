@@ -11,6 +11,7 @@ import { join, resolve } from "node:path";
 import type { InboxAccountsRead, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { accountsTestOptions, INBOX_MACHINE_ACCOUNTS_MAX_BYTES } from "./inbox-accounts";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
 import { fakeCswapCalls, fakeCswapFinished, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer } from "../../tests/helpers/fake-cswap";
 import { waitFor } from "../../tests/helpers/inbox-world";
@@ -46,13 +47,15 @@ interface WorldOptions {
   cacheMs?: number;
   tailnet?: boolean;
   phones?: boolean;
-  /** How long a read of a linked machine waits. */
+  /** How long the link waits for any answer. */
   requestMs?: number;
+  /** How long a read of a linked machine waits. */
+  accountsMs?: number;
   /** A stand-in for another Inbox's door, linked here. */
   linkedTo?: string;
 }
 
-async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, linkedTo }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -90,7 +93,7 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
     // The fake's folder and nothing else.
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: bin } }),
     accounts: { timeoutMs, hardLimitMs, cacheMs },
-    ...(requestMs ? { machineLinkTimings: { requestMs } } : {}),
+    machineLinkTimings: { ...(requestMs ? { requestMs } : {}), ...(accountsMs ? { accountsMs } : {}) },
     // Linked or not, nothing here may run the real `tailscale`.
     tailscale: run,
     ...(tailnet ? { publishTailnet: true } : {}),
@@ -401,15 +404,14 @@ describe.skipIf(process.platform === "win32")("one read at a time", () => {
     expect(fakeCswapCalls(w.bin)).toHaveLength(2);
   });
 
-  test("a good answer serves the reads after it, and fresh=1 runs again", async () => {
-    const w = await world({ cacheMs: 60_000 });
+  test("an answer serves every read inside its time, a Refresh's too, so cswap never starts twice in it", async () => {
+    const w = await world({ cacheMs: 1_000 });
     const first = await w.read();
     writeFakeCswap(w.bin, { stdout: withUsage({ fiveHour: { pct: 12 } }) });
-    expect(await w.read()).toEqual(first);
+    for (const query of ["", "?fresh=1", "", "?fresh=1", "?fresh=1"]) expect(await w.read(query)).toEqual(first);
     expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    await Bun.sleep(1_050);
     expect(await w.read("?fresh=1")).not.toEqual(first);
-    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
-    expect(listed(await w.read())).toHaveLength(1);
     expect(fakeCswapCalls(w.bin)).toHaveLength(2);
   });
 
@@ -421,17 +423,34 @@ describe.skipIf(process.platform === "win32")("one read at a time", () => {
     expect(fakeCswapCalls(w.bin)).toHaveLength(2);
   });
 
-  test("a failure and not installed are never kept, and drop the good answer, so a change shows at once", async () => {
-    const w = await world({ cacheMs: 60_000, cswap: { stdout: "Traceback" } });
-    await w.read();
-    await w.read();
+  test("a failure serves as long as an answer, so a broken cswap runs once however often a window opens; the next good run replaces it", async () => {
+    const w = await world({ cacheMs: 1_000, cswap: { stdout: "Traceback" } });
+    for (const query of ["", "", "?fresh=1", "", "?fresh=1"]) expect(await w.read(query)).toEqual({ state: "failed", reason: "bad_output" });
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
+    writeFakeCswap(w.bin, { stdout: JSON.stringify({ schemaVersion: 1, error: { type: "CswapError", message: "no" } }), exit: 1 });
+    await Bun.sleep(1_050);
+    for (const query of ["", "?fresh=1", ""]) expect(await w.read(query)).toEqual({ state: "failed", reason: "run_failed" });
     expect(fakeCswapCalls(w.bin)).toHaveLength(2);
-
     writeFakeCswap(w.bin, { stdout: LIST });
+    await Bun.sleep(1_050);
     expect(listed(await w.read())).toHaveLength(3);
+  });
+
+  test("Refresh counts from the last run's start: a slow run does not push the next one back by its length", async () => {
+    const w = await world({ cacheMs: 600, cswap: { stdout: LIST, delay: 0.4 } });
+    await w.read();
+    await Bun.sleep(300);
+    await w.read("?fresh=1");
+    expect(fakeCswapCalls(w.bin)).toHaveLength(2);
+  });
+
+  test("cswap gone shows at once, over whatever is kept: finding that out runs nothing", async () => {
+    const w = await world({ cacheMs: 60_000 });
+    await w.read();
     rmSync(join(w.bin, "cswap"));
-    expect(await w.read("?fresh=1")).toEqual({ state: "not_installed" });
     expect(await w.read()).toEqual({ state: "not_installed" });
+    expect(await w.read("?fresh=1")).toEqual({ state: "not_installed" });
+    expect(fakeCswapCalls(w.bin)).toHaveLength(1);
   });
 
   test("settings say whether cswap is on PATH and run nothing, so opening an Inbox does not", async () => {
@@ -479,7 +498,7 @@ describe.skipIf(process.platform === "win32")("who may read", () => {
     expect(fakeCswapCalls(w.bin)).toEqual([]);
   });
 
-  test("a phone's token and the relay's commands don't reach it: on the door it is a machine's read alone", async () => {
+  test("a phone's token doesn't reach it: on the door it is a machine's read alone (the relay's half: inbox-devices.test.ts)", async () => {
     const w = await world({ phones: true });
     const made = (await (await fetch(`${w.base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as { offer: { code: string } };
     const paired = await fetch(`${w.base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
@@ -489,10 +508,32 @@ describe.skipIf(process.platform === "win32")("who may read", () => {
     expect(((await refused.json()) as { code: string }).code).toBe("device_route_not_found");
     expect(fakeCswapCalls(w.bin)).toEqual([]);
   });
+
+  test("the owner's phone browser reads what the desktop reads, this machine and a linked one", async () => {
+    const far = await world();
+    const near = await world({ tailnet: true });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    for (const path of ["/api/inbox/accounts", `/api/inbox/accounts/${machine}`]) {
+      const desktop = (await (await fetch(`${near.base}${path}`)).json()) as InboxAccountsRead;
+      const phone = await near.through(OWNER, path);
+      expect(phone.status).toBe(200);
+      expect(listed(desktop)).toHaveLength(3);
+      expect((await phone.json()) as InboxAccountsRead).toEqual(desktop);
+    }
+  });
+});
+
+test("the test folder for cswap and the test cache are heard only in a sandbox, so no release can be pointed at another cswap", () => {
+  const knobs = { PLANNOTATOR_TEST_CSWAP_DIR: "/tmp/fake", PLANNOTATOR_TEST_ACCOUNTS_CACHE_MS: "0" };
+  expect(accountsTestOptions(knobs)).toEqual({});
+  expect(accountsTestOptions({ ...knobs, PLANNOTATOR_TEST_SANDBOX: "" })).toEqual({});
+  expect(accountsTestOptions({ ...knobs, PLANNOTATOR_TEST_SANDBOX: "/tmp/root" })).toEqual({ cswapDir: "/tmp/fake", cacheMs: 0 });
+  expect(accountsTestOptions({ PLANNOTATOR_TEST_SANDBOX: "/tmp/root" })).toEqual({});
 });
 
 describe.skipIf(process.platform === "win32")("a linked machine's accounts, through its door", () => {
-  test("its read, its one run and its kept answer; Refresh skips that; what `cswap` adds never crosses", async () => {
+  test("its read, its one run and its kept answer, whatever a far caller sends; what `cswap` adds never crosses", async () => {
     const list = JSON.parse(LIST) as { accounts: Record<string, unknown>[] };
     list.accounts[0]!.accessToken = "sk-ant-oat01-never-shown-4f2a";
     const far = await world({ cswap: { stdout: JSON.stringify(list) }, cacheMs: 60_000 });
@@ -502,10 +543,21 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
     expect(listed(read as InboxAccountsRead).map((account) => account.email)).toEqual(["a@fake.test", "b@fake.test", null]);
     expect(JSON.stringify(read)).not.toContain("sk-ant");
     expect(fakeCswapCalls(far.bin)).toEqual(["list --json"]);
-    await near.readOf(machine);
+    for (const query of ["", "?fresh=1", "?fresh=1", "?fresh=1&fresh=1"]) await near.readOf(machine, query);
+    const headers = { Authorization: `Bearer ${machineToken(near)}` };
+    expect((await fetch(`${far.base}/api/inbox/device/accounts?fresh=1`, { headers })).status).toBe(200);
     expect(fakeCswapCalls(far.bin)).toHaveLength(1);
-    await near.readOf(machine, "?fresh=1");
-    expect(fakeCswapCalls(far.bin)).toHaveLength(2);
+  });
+
+  test("a far run slower than the far limit comes back as its own timed_out, past the link's usual limit; the next read gets its answer", async () => {
+    const far = await world({ cswap: { stdout: LIST, delay: 1.2 }, timeoutMs: 600, cacheMs: 60_000 });
+    const near = await world({ cswap: null, requestMs: 300, accountsMs: 1_500 });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    expect(await near.readOf(machine)).toEqual({ state: "failed", reason: "timed_out" });
+    await waitFor("the far run to end", () => fakeCswapFinished(far.bin) === 1);
+    expect(listed((await near.readOf(machine)) as InboxAccountsRead)).toHaveLength(3);
+    expect(fakeCswapCalls(far.bin)).toHaveLength(1);
   });
 
   test("no address reaches either machine's disk, and nothing is polled", async () => {
@@ -548,12 +600,44 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
       () => new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode('{"state":')) }), { headers: { "Content-Type": "application/json" } }),
     ];
     for (const answer of stalled) {
-      const near = await world({ linkedTo: standInDoor(answer), requestMs: 300 });
+      const near = await world({ linkedTo: standInDoor(answer), accountsMs: 300 });
       await onlineMachine(near);
       const reading = near.readOf(FAR);
       expect(listed(await near.read())).toHaveLength(3);
       expect(await reading).toEqual({ state: "offline" });
     }
+  });
+
+  test("a far answer past the cap is a failed read: its door's stream stops there, and nothing past the cap is read", async () => {
+    let sent = 0;
+    let stopped = false;
+    const chunk = new Uint8Array(64 * 1024).fill(32);
+    const flood = () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            sent += chunk.length;
+            controller.enqueue(chunk);
+          },
+          cancel() {
+            stopped = true;
+          },
+        }),
+      );
+    const near = await world({ linkedTo: standInDoor(flood) });
+    await onlineMachine(near);
+    expect(await near.readOf(FAR)).toEqual({ state: "failed", reason: "bad_output" });
+    await waitFor("the door's stream to stop", () => stopped);
+    expect(sent).toBeLessThan(INBOX_MACHINE_ACCOUNTS_MAX_BYTES * 4);
+  });
+
+  test("a real answer's size is well inside the cap, and a field no real answer has is dropped by name", async () => {
+    expect(LIST.length * 50).toBeLessThan(INBOX_MACHINE_ACCOUNTS_MAX_BYTES);
+    const near = await world({ linkedTo: standInDoor(() => Response.json({ state: "accounts", accounts: [{ number: 1, alias: "x".repeat(5_000), email: "a@fake.test", usageStatus: "ok", active: true }] })) });
+    await onlineMachine(near);
+    const [row] = listed((await near.readOf(FAR)) as InboxAccountsRead);
+    expect(row!.alias).toBeNull();
+    expect(row!.email).toBe("a@fake.test");
   });
 
   test("a far side that does not know the route, an older Plannotator, reads as needing an update; so does one too old to link", async () => {
@@ -569,7 +653,7 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
     expect(await tooOld.readOf(FAR)).toEqual({ state: "needs_update" });
   });
 
-  test("whatever a far door sends: named fields only, a fixed failure, and anything else is offline", async () => {
+  test("whatever a far door sends: named fields only, a fixed failure; only silence is offline", async () => {
     let sends: () => Response = () => new Response();
     const near = await world({ linkedTo: standInDoor(() => sends()) });
     await onlineMachine(near);
@@ -587,10 +671,18 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
     sends = () => Response.json({ state: "failed", reason: "a sentence from the other side" });
     expect(await near.readOf(FAR)).toEqual({ state: "failed", reason: "run_failed" });
 
-    for (const answer of [() => new Response("<html>"), () => Response.json({ state: "accounts", accounts: [{ number: "one" }] }), () => Response.json({ state: "shrug" }), () => new Response("bad gateway", { status: 502 }), () => new Response("not found", { status: 404 })]) {
+    // A machine that answers is awake. A shape this build can't read is a version apart, however the rows came.
+    for (const answer of [() => Response.json({ state: "accounts", accounts: [{ number: 1 }, { number: "one" }] }), () => Response.json({ state: "a newer state" })]) {
       sends = answer;
-      expect(await near.readOf(FAR)).toEqual({ state: "offline" });
+      expect(await near.readOf(FAR)).toEqual({ state: "needs_update" });
     }
+    // Anything else it says is no answer to this read.
+    for (const status of [401, 403, 404, 500, 502]) {
+      sends = () => Response.json({ error: "no" }, { status });
+      expect(await near.readOf(FAR)).toEqual({ state: "unreachable" });
+    }
+    sends = () => new Response("<html>");
+    expect(await near.readOf(FAR)).toEqual({ state: "unreachable" });
   });
 
   test("a machine that is not linked is 404", async () => {

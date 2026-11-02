@@ -115,6 +115,10 @@ test.beforeAll(async () => {
     PATH: bin,
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
+    // Each state is read by Refresh, seconds apart: the 30 s between two runs would stand in the way.
+    PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_TEST_CSWAP_DIR: bin,
+    PLANNOTATOR_TEST_ACCOUNTS_CACHE_MS: '0',
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -313,8 +317,6 @@ test('320 px: a three-window row stays inside its card and lines up', async ({ b
   writeFakeCswap(world.bin, { stdout: THREE_WINDOWS });
   const context: BrowserContext = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await context.newPage();
-  // The Inbox keeps the last test's answer 30 s: this read replaces it.
-  expect((await (await page.request.get(new URL('api/inbox/accounts?fresh=1', world.url).href)).json()).state).toBe('accounts');
   await page.goto(`${world.url}#settings/accounts`);
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
   await expect(page.locator('[data-account]')).toHaveCount(3);

@@ -28,7 +28,7 @@ import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/i
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { parsePeerAccounts } from "./inbox-accounts";
+import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts, readCapped } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
 import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
@@ -107,9 +107,12 @@ export interface InboxMachinesContext {
    */
   holds: (kind: HeldKind, id: string) => boolean;
   /** Tests: the links' clocks. */
-  timings?: Partial<PeerLinkTimings>;
+  timings?: MachineLinkTimings;
   now?: () => Date;
 }
+
+/** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
+export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
 export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView };
@@ -654,8 +657,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /**
    * Its door's read, asked for only when a window asks (nothing polls), kept
    * nowhere, and picked by name again. Each machine is its own request, so a
-   * slow one holds up only itself. Whatever does not answer is offline, never
-   * an error. A door that does not know the route is an older Plannotator.
+   * slow one holds up only itself. It waits past the far run's own limit, so a
+   * slow run comes back as its real `timed_out`, and only a machine that does
+   * not answer at all is offline. A door that does not know the route is an
+   * older Plannotator. An answer past the cap is a failed read, and read no
+   * further.
    */
   const accountsOf = async (machine: string, fresh: boolean, signal: AbortSignal): Promise<InboxMachineAccountsRead> => {
     const peer = peers.get(machine);
@@ -666,12 +672,19 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return { state: "offline" };
     }
     try {
-      // The peer's limit stops at the answer's headers: this one covers its body too.
-      const limit = AbortSignal.timeout(context.timings?.requestMs ?? PEER_LINK_TIMINGS.requestMs);
-      const response = await peer.request("accounts", fresh ? "?fresh=1" : "", { method: "GET", headers: {}, signal: AbortSignal.any([signal, limit]) });
-      const body: unknown = await response.json().catch(() => null);
+      const waitMs = context.timings?.accountsMs ?? INBOX_MACHINE_ACCOUNTS_WAIT_MS;
+      // `timeoutMs` stops at the answer's headers: this signal covers its body too.
+      const response = await peer.request("accounts", fresh ? "?fresh=1" : "", { method: "GET", headers: {}, timeoutMs: waitMs, signal: AbortSignal.any([signal, AbortSignal.timeout(waitMs)]) });
+      const raw = await readCapped(response, INBOX_MACHINE_ACCOUNTS_MAX_BYTES);
+      if (raw === null) return { state: "failed", reason: "bad_output" };
+      let body: unknown = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // Not JSON: no answer to this read, below.
+      }
       if (response.status === 404 && (body as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
-      return (response.ok ? parsePeerAccounts(body) : null) ?? { state: "offline" };
+      return response.ok ? parsePeerAccounts(body) : { state: "unreachable" };
     } catch {
       return { state: "offline" };
     }
@@ -679,7 +692,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The window's routes and the CLI's ──
 
-  const staleTab =(body: Record<string, unknown>) =>
+  const staleTab = (body: Record<string, unknown>) =>
     checkServerSession(body, context.serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null;
 
   /** The routes the window calls. `via`: linking and unlinking answer only on this computer (PLAN section 4, rule 5). */

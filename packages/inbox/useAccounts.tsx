@@ -12,7 +12,7 @@ export function accountsFailure(view: AccountsView): AccountsFailure | null {
   return view.state === 'unreachable' ? view.state : null;
 }
 
-/** A linked machine and what it last answered. Each answers for itself, so a slow one holds up nothing else. */
+/** A linked machine and what it last answered. Each answers for itself, a machine that does not as `offline`, so a slow one holds up nothing else. */
 export interface MachineAccounts {
   id: string;
   name: string;
@@ -33,18 +33,38 @@ export interface Accounts {
   read: (options?: { fresh?: boolean }) => Promise<void>;
 }
 
-/** Each linked machine's read, answered as it comes. A machine that does not answer is offline, never an error. */
-async function readMachines(fresh: boolean, setMachines: (change: (machines: MachineAccounts[]) => MachineAccounts[]) => void) {
+type SetMachines = (change: (machines: MachineAccounts[]) => MachineAccounts[]) => void;
+
+/**
+ * One machine's read, one at a time. A Refresh that finds it reading asks again
+ * when that read ends, so a slow machine holds up its own Refresh and no other.
+ */
+async function readMachine(id: string, fresh: boolean, going: Map<string, { again: boolean }>, setMachines: SetMachines) {
+  const held = going.get(id);
+  if (held) {
+    held.again ||= fresh;
+    return;
+  }
+  const turn = { again: false };
+  going.set(id, turn);
+  let ask = fresh;
+  do {
+    turn.again = false;
+    // The call to this Inbox failing says nothing of the machine: it may be wide awake.
+    const read = await inboxApi.machineAccounts(id, ask).catch((): InboxMachineAccountsRead => ({ state: 'unreachable' }));
+    setMachines((machines) => machines.map((machine) => (machine.id === id ? { ...machine, read } : machine)));
+    ask = true;
+  } while (turn.again);
+  going.delete(id);
+}
+
+/** Each linked machine's read, answered as it comes. */
+async function readMachines(fresh: boolean, going: Map<string, { again: boolean }>, setMachines: SetMachines) {
   const answer = await inboxApi.machines().catch(() => null);
   if (!answer) return;
   const linked = answer.machines.filter((machine) => !machine.self);
   setMachines((held) => linked.map(({ id, name }) => ({ id, name, read: held.find((machine) => machine.id === id)?.read ?? null })));
-  await Promise.all(
-    linked.map(async ({ id }) => {
-      const read = await inboxApi.machineAccounts(id, fresh).catch((): InboxMachineAccountsRead => ({ state: 'offline' }));
-      setMachines((held) => held.map((machine) => (machine.id === id ? { ...machine, read } : machine)));
-    }),
-  );
+  for (const { id } of linked) void readMachine(id, fresh, going, setMachines);
 }
 
 function useAccountsRead(): Accounts {
@@ -54,12 +74,10 @@ function useAccountsRead(): Accounts {
   const [machines, setMachines] = useState<MachineAccounts[]>([]);
   const latest = useRef<AccountsView | null>(null);
   const running = useRef<Promise<void> | null>(null);
-  const runningMachines = useRef<Promise<void> | null>(null);
+  const machineReads = useRef(new Map<string, { again: boolean }>());
 
   const read = useCallback(({ fresh = false }: { fresh?: boolean } = {}) => {
-    runningMachines.current ??= readMachines(fresh, setMachines).finally(() => {
-      runningMachines.current = null;
-    });
+    void readMachines(fresh, machineReads.current, setMachines);
     const run = async () => {
       setReading(true);
       let next: AccountsView;

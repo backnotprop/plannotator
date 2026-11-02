@@ -17,10 +17,14 @@
  *    out. A run a stopped Inbox left behind can overlap the next Inbox's:
  *    `cswap` holds its own locks for that. Nothing polls: a run starts when a
  *    window, the page or the Usage peek opens, or on Refresh.
- *  - A good answer serves for `INBOX_ACCOUNTS_CACHE_MS`, so a reloading window
- *    starts no process per load. `cswap` refreshes a login at most once per
- *    its own 3 minutes however often it runs: this saves processes, not logins.
- *    Refresh skips it: someone may have just run `cswap add`.
+ *  - At most one process per `INBOX_ACCOUNTS_CACHE_MS` in this Inbox, whoever
+ *    asks and however: an answer serves that long, a failure as well as a good
+ *    one, so a broken `cswap` runs once however often a window opens. Refresh
+ *    (`fresh`, from a window here or a machine linked here) reads again only
+ *    once that time has passed since the last run started, and otherwise gets
+ *    the last reading. `cswap` refreshes a login at most once per its own 3
+ *    minutes however often it runs: this saves processes, not logins.
+ *  - `cswap` gone shows at once: finding that out starts no process.
  *
  * Its output sits next to secrets:
  *
@@ -33,22 +37,28 @@
  * its door (`accountsOf` in inbox-machines.ts) and picked by name again here.
  */
 
-import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxUsageWindow } from "@plannotator/core/inbox-types";
+import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxMachineAccountsRead, InboxUsageWindow } from "@plannotator/core/inbox-types";
 import { runUntilExit, type AgentEnvironment } from "./inbox-agents";
 
 /** The `schemaVersion` of `cswap list --json` this build reads. Extra fields are fine; another version is not. */
 const CSWAP_SCHEMA_VERSION = 1;
 /** How long a person waits. The Keychain and Anthropic's usage endpoint are behind this read. The run goes on. */
 export const INBOX_ACCOUNTS_TIMEOUT_MS = 20_000;
+/** How long this Inbox waits for a linked machine: past its limit above, so a slow run comes back as its own `timed_out`. */
+export const INBOX_MACHINE_ACCOUNTS_WAIT_MS = INBOX_ACCOUNTS_TIMEOUT_MS + 5_000;
 /** Last resort for a run that is truly stuck; a slow login refresh ends long before this. */
 export const INBOX_ACCOUNTS_HARD_LIMIT_MS = 120_000;
-/** How long a good answer serves. A failure or "not installed" never does, and drops the one kept, so a change shows at once. */
+/** How long a run's answer serves, a failure's too, and so the least time between two runs. */
 export const INBOX_ACCOUNTS_CACHE_MS = 30_000;
+/** The most of a linked machine's answer this Inbox reads: 16 times what a run may print (the 64 KiB cap in inbox-agents.ts). */
+export const INBOX_MACHINE_ACCOUNTS_MAX_BYTES = 1024 * 1024;
+/** No address, alias or name is this long: past it a field is dropped, so a far answer can't fill a window with one. */
+const TEXT_MAX = 1_024;
 /** The address `cswap` gives an API-key account (`api-key-3@token.local`). */
 const PLACEHOLDER_EMAIL = /@token\.local$/i;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const text = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null);
+const text = (value: unknown): string | null => (typeof value === "string" && value !== "" && value.length <= TEXT_MAX ? value : null);
 /** A status or error kind (`api_key`, `http-429`): a word, or nothing, so a sentence of `cswap`'s never travels in it. */
 const word = (value: unknown): string | null => (typeof value === "string" && /^[\w-]{1,40}$/.test(value) ? value : null);
 
@@ -107,14 +117,33 @@ function accountList(rows: unknown[]): InboxAccount[] | null {
 /**
  * What a linked machine's door answered, picked by name here too: its Inbox
  * may be older, newer or hostile, so nothing it adds reaches this window, and
- * its failure stays a fixed code. Null: not an answer this build can read.
+ * its failure stays a fixed code. An object this build can't read comes from a
+ * version apart; anything else is no answer to this read.
  */
-export function parsePeerAccounts(value: unknown): InboxAccountsRead | null {
-  if (!isRecord(value)) return null;
+export function parsePeerAccounts(value: unknown): InboxMachineAccountsRead {
+  if (!isRecord(value)) return { state: "unreachable" };
   if (value.state === "not_installed") return { state: "not_installed" };
   if (value.state === "failed") return failed(typeof value.reason === "string" && FAILURES.includes(value.reason) ? (value.reason as InboxAccountsFailure) : "run_failed");
   const accounts = value.state === "accounts" && Array.isArray(value.accounts) ? accountList(value.accounts) : null;
-  return accounts && { state: "accounts", accounts };
+  return accounts ? { state: "accounts", accounts } : { state: "needs_update" };
+}
+
+/** A far answer's body as text, reading no further than `maxBytes`: past that it cancels the stream and answers null. */
+export async function readCapped(response: Response, maxBytes: number): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks).toString("utf8");
+    size += value.length;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
 }
 
 /** What the window may know of `cswap list --json`'s output. */
@@ -142,10 +171,19 @@ export interface InboxAccountsOptions {
   cacheMs?: number;
 }
 
+/**
+ * What a spec may set on a compiled binary, heard only in a sandbox (loopback
+ * links need one, and it empties the agent PATH): the folder of a fake `cswap`,
+ * and the time an answer serves, for a spec that changes it between reads.
+ */
+export function accountsTestOptions(env: Record<string, string | undefined>): { cswapDir?: string; cacheMs?: number } {
+  if (!env.PLANNOTATOR_TEST_SANDBOX) return {};
+  const cache = env.PLANNOTATOR_TEST_ACCOUNTS_CACHE_MS;
+  return { ...(env.PLANNOTATOR_TEST_CSWAP_DIR ? { cswapDir: env.PLANNOTATOR_TEST_CSWAP_DIR } : {}), ...(cache ? { cacheMs: Number(cache) } : {}) };
+}
+
 export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS, cacheMs = INBOX_ACCOUNTS_CACHE_MS }: InboxAccountsOptions) {
-  const runOnce = async (): Promise<InboxAccountsRead> => {
-    const cswap = environment.which("cswap");
-    if (!cswap) return { state: "not_installed" };
+  const runOnce = async (cswap: string): Promise<InboxAccountsRead> => {
     const run = await runUntilExit([cswap, "list", "--json"], environment.env, hardLimitMs);
     if (run.timedOut) return failed("timed_out");
     // The shell's "command not found": a shim whose tool is gone, which is not installed. The e2e stubs exit this way too.
@@ -155,20 +193,30 @@ export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TI
   };
   /** The run going now, until it has really ended. */
   let running: Promise<InboxAccountsRead> | null = null;
+  let startedAt = Number.NEGATIVE_INFINITY;
   let last: { at: number; answer: InboxAccountsRead } | null = null;
   return {
     /** Whether `cswap` is on this PATH. Looks only: runs nothing. */
     installed: (): boolean => environment.which("cswap") !== null,
     read({ fresh = false }: { fresh?: boolean } = {}): Promise<InboxAccountsRead> {
-      if (!fresh && last && Date.now() - last.at < cacheMs) return Promise.resolve(last.answer);
-      running ??= runOnce()
-        .then((answer) => {
-          last = answer.state === "accounts" ? { at: Date.now(), answer } : null;
-          return answer;
-        })
-        .finally(() => {
-          running = null;
-        });
+      const cswap = environment.which("cswap");
+      if (!cswap) {
+        last = null;
+        return Promise.resolve({ state: "not_installed" });
+      }
+      const now = Date.now();
+      if (last && now - last.at < cacheMs && (!fresh || now - startedAt < cacheMs)) return Promise.resolve(last.answer);
+      if (!running) {
+        startedAt = now;
+        running = runOnce(cswap)
+          .then((answer) => {
+            last = { at: Date.now(), answer };
+            return answer;
+          })
+          .finally(() => {
+            running = null;
+          });
+      }
       // Each caller waits its own limit, so a Refresh during a slow run can still get that run's answer.
       let limit: ReturnType<typeof setTimeout>;
       const tooLong = new Promise<InboxAccountsRead>((done) => {

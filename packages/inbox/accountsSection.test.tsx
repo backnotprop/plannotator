@@ -838,6 +838,27 @@ test.skipIf(!hasDom)('Tab past either end of the peek closes it; Tab between its
   await openPeek(el);
   await tab(peek()!.querySelector('[data-usage-block]')!, true);
   await until(() => peek() === null, 'Shift+Tab past the first block');
+
+  // Focus on the popup itself, after a click on its padding: it is the first stop going back.
+  await openPeek(el);
+  await tab(peek()!, true);
+  await until(() => peek() === null, 'Shift+Tab from the popup');
+});
+
+test.skipIf(!hasDom)('a far answer that grows an open peek leaves it in place, with focus where it was', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true, usage: { fiveHour: limit(41) } }) });
+  let letGo = (_read: unknown) => {};
+  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => new Promise((done) => (letGo = done)) }];
+  const el = await openInbox();
+  await openPeek(el);
+  await until(() => machineReads.length > 0, 'the far read');
+  const popup = peek()!;
+  const block = popup.querySelector('[data-usage-block]') as HTMLButtonElement;
+  await act(async () => block.focus());
+  await act(async () => letGo(farList({ alias: 'far', active: true, usage: { fiveHour: limit(95) } })));
+  await until(() => nearBlock() !== null, 'the machine at 95%');
+  expect(peek()).toBe(popup);
+  expect(document.activeElement).toBe(block);
 });
 
 /** Linked machines: a `GET accounts/<machine>` answer holding these rows. */
@@ -904,6 +925,129 @@ test.skipIf(!hasDom)('rows one machine keeps apart stay apart, whatever they sha
   await until(() => machineRows(el).length === 2 && !refresh(el).disabled, 'the read');
   await until(() => machineRows(el)[1]?.[1] === 'No account in use', "the other machine's answer");
   expect(listNames(el)).toEqual(['one', 'two']);
+});
+
+test.skipIf(!hasDom)('a number never names two logins: what two machines each call #1 is two numbers, a login keeps its own, and the machines say the same', async () => {
+  answer({ stdout: listOf({ email: 'ramos@one.test', active: true }, { email: 'ramos@two.test', usageAgeSeconds: 900, usage: { fiveHour: limit(10) } }, { email: 'key@token.local', usageStatus: 'api_key' }) });
+  linked = [
+    {
+      id: 'ibx_mini',
+      name: 'Mini',
+      // Here `ramos@two.test` is #1, with the newer reading: its row stays #2 all the same.
+      answer: () => farList({ email: 'ramos@two.test', usage: { fiveHour: limit(20) } }, { email: null, usageStatus: 'api_key' }),
+    },
+    { id: 'ibx_lap', name: 'Lap', answer: () => farList({ email: 'ramos@three.test', active: true }) },
+  ];
+  const el = await open('accounts');
+  await until(() => el.querySelectorAll('.ib-acct').length === 5, 'every row');
+  const shown = [...el.querySelectorAll('.ib-acct-l')].map((name) => name.textContent);
+  expect(shown).toHaveLength(5);
+  expect(new Set(shown).size).toBe(5);
+  expect(shown.slice(0, 3)).toEqual(['ramos #1', 'ramos #2', 'API key #3']);
+  const numbers = [...el.querySelectorAll('[data-account]')].map((item) => item.getAttribute('data-account'));
+  expect(new Set(numbers).size).toBe(5);
+  await until(() => machineRows(el)[2]?.[1]?.startsWith('ramos') === true, 'the last machine');
+  expect(shown).toContain(machineRows(el)[2]![1]!);
+});
+
+test.skipIf(!hasDom)('a login dead on one machine says so whatever another reads for it, and the open row says where', async () => {
+  answer({ stdout: listOf({ alias: 'work', email: 'same@fake.test', active: true, usageStatus: 'relogin_required' }) });
+  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ email: 'same@fake.test', active: true, usage: { fiveHour: limit(40) } }) }];
+  const el = await open('accounts');
+  await until(() => bars(el.querySelector('.ib-acct')!).length > 0, "the other machine's reading");
+  const work = el.querySelector('.ib-acct')!;
+  expect(work.querySelector('.ib-acct-why')?.textContent).toBe('Sign in again');
+  expect(bars(work)).toEqual(['5h 40%']);
+  await act(async () => toggle(work)!.click());
+  expect(work.querySelector('.ib-acct-more')!.textContent).toContain(`Sign in again on ${machineRows(el)[0]![0]}`);
+  act(() => root?.unmount());
+  host?.remove();
+
+  // The other way round, and a login that is only renewing is nothing to act on.
+  answer({ stdout: listOf({ email: 'same@fake.test', active: true, usage: { fiveHour: limit(40) } }, { email: 'other@fake.test', usage: { fiveHour: limit(50) } }) });
+  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ email: 'same@fake.test', usageStatus: 'relogin_required' }, { email: 'other@fake.test', usageStatus: 'token_expired' }) }];
+  const again = await open('accounts');
+  await until(() => again.querySelector('.ib-acct-why') !== null, "the other machine's state");
+  const [same, other] = [...again.querySelectorAll('.ib-acct')];
+  expect(same!.querySelector('.ib-acct-why')?.textContent).toBe('Sign in again');
+  await act(async () => toggle(same!)!.click());
+  expect(same!.querySelector('.ib-acct-more')!.textContent).toContain('Sign in again on Mini');
+  expect(other!.querySelector('.ib-acct-why')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Refresh while one machine is slow reads the others now, and that one again when it answers', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }) });
+  let name = 'first';
+  const answers: ((read: unknown) => void)[] = [];
+  linked = [
+    { id: 'ibx_slow', name: 'Slow', answer: () => new Promise((done) => answers.push(done)) },
+    { id: 'ibx_mini', name: 'Mini', answer: () => farList({ alias: name, active: true }) },
+  ];
+  const el = await open('accounts');
+  await until(() => machineRows(el)[2]?.[1] === 'first' && !refresh(el).disabled, 'the rest of the first read');
+  name = 'second';
+  machineReads = [];
+  act(() => refresh(el).click());
+  await until(() => machineRows(el)[2]?.[1] === 'second', 'Refresh to reach the fast machine');
+  expect(machineReads).toEqual(['/api/inbox/accounts/ibx_mini?fresh=1']);
+  await act(async () => answers[0]!(farList({ alias: 'old', active: true })));
+  await until(() => machineReads.length === 2, 'the slow machine to be read again');
+  expect(machineReads[1]).toBe('/api/inbox/accounts/ibx_slow?fresh=1');
+  await act(async () => answers[1]!(farList({ alias: 'new', active: true })));
+  await until(() => machineRows(el)[1]?.[1] === 'new', 'its second answer');
+  await act(async () => new Promise((r) => setTimeout(r, 30)));
+  expect(machineReads).toHaveLength(2);
+});
+
+test.skipIf(!hasDom)('a late machine lands under what is showing, and no other machine shows before this one', async () => {
+  let letSelf = () => {};
+  const self = new Promise<void>((go) => {
+    letSelf = go;
+  });
+  answer({ stdout: listOf({ alias: 'work', active: true }) });
+  accountsRoute = async () => {
+    await self;
+    const { text } = await call('/api/inbox/accounts');
+    return new Response(text, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  let letGo = (_read: unknown) => {};
+  linked = [
+    { id: 'ibx_slow', name: 'Slow', answer: () => new Promise((done) => (letGo = done)) },
+    { id: 'ibx_mini', name: 'Mini', answer: () => farList({ alias: 'fast', active: true }) },
+  ];
+  const el = await openAccounts();
+  await until(() => machineRows(el)[2]?.[1] === 'fast', 'the fast machine');
+  expect(el.querySelector('[data-accounts-wait]')).not.toBeNull();
+  expect(listNames(el)).toEqual([]);
+  await act(async () => letSelf());
+  await until(() => listNames(el).length === 2, 'this machine');
+  expect(listNames(el)).toEqual(['work', 'fast']);
+  await act(async () => letGo(farList({ alias: 'late', email: 'late@fake.test', active: true })));
+  await until(() => listNames(el).length === 3, 'the slow machine');
+  expect(listNames(el)).toEqual(['work', 'fast', 'late']);
+});
+
+test.skipIf(!hasDom)('a machine that answers with something else is not asleep: it says so on its own row, with no alert', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }) });
+  linked = [
+    { id: 'ibx_slow', name: 'Slow', answer: () => ({ state: 'failed', reason: 'timed_out' }) },
+    { id: 'ibx_odd', name: 'Odd', answer: () => ({ state: 'unreachable' }) },
+    {
+      id: 'ibx_near',
+      name: 'Near',
+      answer: () => {
+        throw new TypeError('Failed to fetch');
+      },
+    },
+  ];
+  const el = await open('accounts');
+  await until(() => machineRows(el).slice(1).every(([, words]) => words !== 'Reading accounts…'), 'the machines');
+  expect(machineRows(el).slice(1)).toEqual([
+    ['Slow', 'claude-swap timed out.'],
+    ['Odd', 'The Inbox did not answer.'],
+    ['Near', 'The Inbox did not answer.'],
+  ]);
+  expect(el.querySelector('[role="alert"]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('with no machine linked the open row names none, and no machine is read', async () => {
@@ -973,7 +1117,7 @@ test.skipIf(!hasDom)('this machine without cswap still says how to install it, u
   expect(usageRow(el)).toBeNull();
 });
 
-test.skipIf(!hasDom)('Refresh reads every machine again and skips what each one keeps; a read asked for during another joins it', async () => {
+test.skipIf(!hasDom)('Refresh reads every machine again', async () => {
   answer({ stdout: listOf({ alias: 'work', active: true }) });
   let name = 'first';
   linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ alias: name, active: true }) }];
