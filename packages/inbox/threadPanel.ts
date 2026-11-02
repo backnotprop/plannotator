@@ -3,7 +3,7 @@
  * thread's pane stays on the right with no thread open, showing EmptyThreadPanel until one is. A choice in the
  * list's ⋮ menu, off by default, so the wide list stays what every window opens to.
  *
- * Remembered like the list's look options (listLook.ts): per browser, in a cookie through `storage`, "1" while on
+ * Remembered per browser, in a cookie through `storage` (as the list's look options were before they synced), "1" while on
  * and removed when off, never on the server. Kept apart from them because it is not a look: the one-time list
  * options dialog does not offer it, and the window's layout reads it, not only the list.
  *

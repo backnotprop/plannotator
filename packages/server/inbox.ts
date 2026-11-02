@@ -57,6 +57,7 @@ import {
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
   INBOX_TEXT_SIZE_DEFAULT,
+  INBOX_ROWS_OPTIONS,
   INBOX_TOUR_VERSION,
   type InboxTourChange,
   type InboxTourState,
@@ -73,6 +74,8 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  inboxRowsList,
+  type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
@@ -844,6 +847,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
+  /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[]) => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -1603,6 +1608,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
+   * Null until a window first saves it, so the first window adopts its browser's old cookies; a hand-edited value
+   * with a name no build knows reads as null too. Every window open hears a save (`event: rows`).
+   */
+  const rowsState = (): InboxRowsOption[] | null => inboxRowsList(loadConfig().inboxRows);
+
+  const saveRows = (input: unknown, validateOnly = false): InboxRowsOption[] => {
+    const rows = inboxRowsList(input);
+    if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
+    if (validateOnly) return rows;
+    saveConfig({ inboxRows: rows });
+    if (rowsState()?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    for (const listener of rowsListeners) listener(rows);
+    return rows;
+  };
+
+  /**
    * The onboarding tour (config.json `inboxTour`, approval
    * "inbox-onboarding-tour"): when it was started, finished or skipped, and
    * whether the first real thread offers notifications once more. Kept per
@@ -1886,6 +1908,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** How the list's rows look (config.json `inboxRows`): the options that are on; null until first saved. */
+    rows: rowsState(),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. */
     diff_style: diffStyleState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
@@ -2033,6 +2057,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
+        // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
+        const onRows = (rows: readonly InboxRowsOption[]) => send(`event: rows\ndata: ${JSON.stringify({ rows })}\n\n`);
+        if (windowId) rowsListeners.add(onRows);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
         const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
@@ -2061,6 +2088,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           snoozeListeners.delete(onSnoozes);
+          rowsListeners.delete(onRows);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();
@@ -2989,6 +3017,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.rows === undefined &&
           body.diff_style === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
@@ -2998,7 +3027,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -3037,6 +3066,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        if (body.rows !== undefined) saveRows(body.rows, true);
         if (body.diff_style !== undefined) saveDiffStyle(body.diff_style, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
@@ -3054,13 +3084,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const rows = body.rows === undefined ? rowsState() : saveRows(body.rows);
         const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {

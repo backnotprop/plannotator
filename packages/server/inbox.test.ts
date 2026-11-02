@@ -805,6 +805,68 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  // Approval "inbox-customize-rows" (the owner, 2026-11-02: "Whatever they set goes wherever they're using the app").
+  test("the rows' look saves into config.json `inboxRows`, null until first saved, and every open window hears it", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
+      const server = await start(dataDir);
+      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).rows;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxRows?: unknown; inboxTextSize?: unknown };
+      // Never saved: null, so the first window adopts its browser's old cookies.
+      expect(await read()).toBeNull();
+      for (const bad of ["compact", ["compact", "sparkles"], [1], null, { compact: true }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      const cross = await post(server, "/api/inbox/settings", { rows: ["compact"] }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(onDisk().inboxRows).toBeUndefined();
+
+      // A window listening (another browser, a phone's page): it hears the save, with the look.
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-rows-1&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+      // Saved in the options' order, each once; the other settings stay.
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["roomy", "compact", "roomy"] });
+      expect(saved.status).toBe(200);
+      expect((await saved.json()).rows).toEqual(["compact", "roomy"]);
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "roomy"] });
+      expect(await read()).toEqual(["compact", "roomy"]);
+
+      const deadline = Date.now() + 1500;
+      while (!text.includes("event: rows") && Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.value) text += decoder.decode(chunk.value);
+      }
+      controller.abort();
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "roomy"] })}`);
+
+      // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
+      const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });
+      expect((await none.json()).rows).toEqual([]);
+      expect(await read()).toEqual([]);
+      // Another setting's save keeps the look and answers it.
+      const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 15 });
+      expect((await other.json()).rows).toEqual([]);
+      // A hand-edited name no build knows reads as never saved.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["compact", "sparkles"] }));
+      expect(await read()).toBeNull();
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("the guided review's diff layout saves into config.json `diffOptions.diffStyle`, shared with code review", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");

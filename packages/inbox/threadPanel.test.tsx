@@ -101,17 +101,17 @@ describe('the choice', () => {
 });
 
 describe.skipIf(!hasDom)('the ⋮ menu item', () => {
-  test('a checkbox after the look options, unchecked with no ✓ while off', async () => {
+  test('a checkbox after the look options, unchecked, its box empty, while off', async () => {
     const popup = await menu({ on: false, onChange: () => {} });
     expect([...popup.querySelectorAll('[role="menuitemcheckbox"]')].at(-1)).toBe(item(popup)!);
     expect(item(popup)!.getAttribute('aria-checked')).toBe('false');
-    expect(item(popup)!.querySelector('.ib-pmi-check')).toBeNull();
+    expect(item(popup)!.querySelector('.ib-pmi-box[data-on]')).toBeNull();
   });
 
-  test('checked with a ✓ while on, like its neighbours', async () => {
+  test('checked, its box ticked, while on, like its neighbours', async () => {
     const popup = await menu({ on: true, onChange: () => {} });
     expect(item(popup)!.getAttribute('aria-checked')).toBe('true');
-    expect(item(popup)!.querySelector('.ib-pmi-check')).not.toBeNull();
+    expect(item(popup)!.querySelector('.ib-pmi-box[data-on]')).not.toBeNull();
   });
 
   test('a click says the new value and leaves the menu open', async () => {
