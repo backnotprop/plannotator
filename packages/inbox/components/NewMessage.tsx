@@ -8,6 +8,7 @@ import { InboxComposerField } from './ComposerField';
 import { VoiceFootRow } from './VoiceMic';
 import { usePhone } from '../phone';
 import { useVoiceSession } from '../voice';
+import { newUuid } from '../uuid';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -193,7 +194,7 @@ export function NewMessageComposer({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(newUuid());
   const textRef = useRef<HTMLTextAreaElement>(null);
   const name = hostName(target.host);
   const phone = usePhone();
