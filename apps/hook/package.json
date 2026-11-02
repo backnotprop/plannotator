@@ -22,7 +22,7 @@
     "@tailwindcss/vite": "^4.3.3"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/client": "2.4.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
