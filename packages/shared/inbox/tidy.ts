@@ -7,6 +7,7 @@
 
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_LIVE_COLUMNS,
   INBOX_HOST_NAMES,
   INBOX_TIDY_CARD_IDLE_MS,
   INBOX_TIDY_COOLDOWN_MS,
@@ -31,8 +32,8 @@ import {
 import { inboxSearchReplyText } from "./search";
 import type { InboxStore } from "./store";
 
-/** The columns where a card that has not moved is asked about. */
-const TIDY_CARD_COLUMNS: ReadonlySet<InboxCardColumn> = new Set(["backlog", "designing", "building"]);
+/** The columns where a card that has not moved is asked about: the agent's own work (Backlog is not asked for yet; In review waits on the person). */
+const TIDY_CARD_COLUMNS: ReadonlySet<InboxCardColumn> = new Set(["todo", "in_progress"]);
 
 /** Where Tidy was pressed: the list (every open thread in scope) or the Board (the agents owning cards in view). */
 export type InboxTidySurface = "list" | "board";
@@ -120,7 +121,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   if (options.surface === "board") {
     for (const card of cards) {
       if (card.agent?.kind !== "agent" || !card.agent.session) continue;
-      if (!["backlog", "designing", "your_look", "building", "your_review"].includes(card.column)) continue;
+      if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column)) continue;
       boardSessions.add(card.agent.session);
       for (const id of card.threads) boardThreads.add(id);
     }

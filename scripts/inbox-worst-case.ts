@@ -27,7 +27,7 @@
  *
  *   bun scripts/inbox-worst-case.ts --data-dir /tmp/inbox-worst/data [--bulk 1284]
  *   PLANNOTATOR_DATA_DIR=/tmp/inbox-worst/data HOME=/tmp/inbox-worst PLANNOTATOR_INBOX_CONNECT=0 \
- *     .local/plannotator inbox --background
+ *     PLANNOTATOR_TEST_SANDBOX=/tmp/inbox-worst/data .local/plannotator inbox --background
  */
 
 import { spawnSync } from 'node:child_process';

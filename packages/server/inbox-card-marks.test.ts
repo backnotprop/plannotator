@@ -203,7 +203,9 @@ async function world(board: boolean) {
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const forge = scriptedGh({ "acme/widgets": { 12: pr("MERGED", "vite 8"), 14: pr("OPEN", "Delivery ticks"), 11: issue("OPEN", "Icon") } });
+  const forge = scriptedGh({
+    "acme/widgets": { 12: pr("MERGED", "vite 8"), 13: pr("CLOSED", "abandoned"), 14: pr("OPEN", "Delivery ticks"), 15: pr("MERGED", "electron-forge 7"), 11: issue("OPEN", "Icon") },
+  });
   const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, phones: false, board });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -231,8 +233,45 @@ describe("POST /api/inbox/cards/marks", () => {
     expect(marks[iss.id]).toMatchObject({ kind: "issue", state: "open" });
     expect(marks[plain.id]).toBeUndefined();
     expect(w.forge.graphql()).toHaveLength(1);
-    // A mark never moves a card.
-    expect(w.server.store.card(merged.id)!.column).toBe("backlog");
+    // The marks' own read ships a card whose every PR merged (columns v2, Q3), in that one query; an open PR stays put.
+    expect(w.server.store.card(merged.id)!.column).toBe("done");
+    expect(w.server.store.card(open.id)!.column).toBe("todo");
+    expect(w.server.store.card(iss.id)!.column).toBe("todo");
+  });
+
+  // Columns v2, Q3: "robust and simple. If PR state is unknown, do nothing." What regresses: a card moved to
+  // Done with a PR still open or unknown, a parked or cancelled card moved there, or a card the person
+  // moved back moved to Done again by the next Board read.
+  test("auto-ship: every own PR merged moves the card to Done once; open, closed, unknown, context-only, Backlog and Cancelled never do", async () => {
+    const w = await world(true);
+    const { store } = w.server;
+    const both = w.make("Two merged", ["acme/widgets#12", "acme/widgets#15"]);
+    const half = w.make("One open", ["acme/widgets#12", "acme/widgets#14"]);
+    // Closed without merging is not done, alone or beside a merged PR.
+    const closed = w.make("Closed", ["acme/widgets#13"]);
+    const closedAndMerged = w.make("Closed and merged", ["acme/widgets#12", "acme/widgets#13"]);
+    // A merged PR linked through `ref` is context, never the card's own.
+    const context = w.make("Context only", [], ["acme/widgets#12"]);
+    const unknown = w.make("Unknown repo", ["acme/gone#3"]);
+    const bitbucket = w.make("No reader", ["https://bitbucket.org/ws/r/pull-requests/7"]);
+    const review = w.make("In review", ["acme/widgets#12"]);
+    store.updateCard(review.id, { by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, column: "in_review", you: "merge" });
+    const parked = w.make("Parked", ["acme/widgets#12"]);
+    store.updateCard(parked.id, { by: { kind: "person" }, column: "backlog" });
+    const cancelled = w.make("Cancelled", ["acme/widgets#12"]);
+    store.updateCard(cancelled.id, { by: { kind: "person" }, column: "dropped" });
+    const all = [both, half, closed, closedAndMerged, context, unknown, bitbucket, review, parked, cancelled];
+    const ids = all.map((card) => card.id);
+    expect((await w.post({ cards: ids })).status).toBe(200);
+    const column = (id: string) => store.card(id)!.column;
+    expect(all.map((card) => column(card.id))).toEqual(["done", "todo", "todo", "todo", "todo", "todo", "todo", "done", "backlog", "dropped"]);
+    const shipped = store.card(review.id)!;
+    expect(shipped).toMatchObject({ you: null, auto_shipped: { prs: ["https://github.com/acme/widgets/pull/12"] } });
+    expect(store.cardHistory(review.id)[0]).toMatchObject({ kind: "auto_shipped" });
+    // The person moves it back: the next read leaves it there.
+    store.updateCard(review.id, { by: { kind: "person" }, column: "in_progress" });
+    expect((await w.post({ cards: ids, refresh: true })).status).toBe(200);
+    expect(column(review.id)).toBe("in_progress");
   });
 
   test("refused while the Board is off, to another site, to a stale tab, and for bad ids; nothing runs", async () => {

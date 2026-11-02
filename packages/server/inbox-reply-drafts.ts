@@ -6,15 +6,19 @@
  * `serverSession`; another site's read refused):
  *
  *   GET  /api/inbox/threads/:id/draft          `{ draft }` (null when none)
- *   POST /api/inbox/threads/:id/draft          `{ body, base }`: save (a compare-and-set on
+ *   POST /api/inbox/threads/:id/draft          `{ body, base, files? }`: save (a compare-and-set on
  *                                              `updated_at`; 409 `draft_conflict` with the newer
- *                                              draft); an empty body deletes it
+ *                                              draft); an empty body with no files deletes it
  *   POST /api/inbox/threads/:id/draft/delete   Discard
  *
+ * `files`: the box's long pastes (approval "inbox-paste-attachment"), each a
+ * pending upload with where it goes back in the words (`pasted`).
  * The Send that carries the words deletes the draft (`clear_draft: <updated_at>`
  * on the reply route: only while the draft is still the one those words were
- * saved as, or holds exactly the reply's words). A save may name `base_body` (the words the window saved last),
- * which the page's save as it goes uses when its `base` is a step behind. Drafts are files under `inbox/reply-drafts/`, outside the
+ * saved as, or holds exactly the reply's words and only pastes the reply
+ * carried). A save may name `base_body` and `base_files` (the words and paste
+ * ids the window saved last), which the page's save as it goes uses when its
+ * `base` is a step behind. Drafts are files under `inbox/reply-drafts/`, outside the
  * event log (shared/inbox/reply-drafts.ts): agents, the MCP and search never
  * see them. A change tells every open window (`event: drafts` on the window's
  * stream), so its list reads the rows' `unsent` again. The phone's door

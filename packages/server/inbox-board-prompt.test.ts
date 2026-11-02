@@ -3,8 +3,9 @@
  * argument and every column it puts in backticks or lists is one the tool
  * accepts (INBOX_CARD_OP_FIELDS in packages/server/inbox-mcp-cards.ts). What
  * regresses: a field renamed in the tool (the agent's call is refused), a
- * column the store no longer has, the prompt telling agents to use the
- * Icebox, or the prompt losing the CLI path when there is no tool.
+ * column the store no longer has (or an id from before v2), the prompt
+ * sending a mid-work question to In review, or the prompt losing the CLI
+ * path when there is no tool.
  */
 import { expect, test } from 'bun:test';
 import { INBOX_CARD_COLUMNS } from '@plannotator/core/inbox-types';
@@ -30,13 +31,15 @@ test('every op and argument the prompt names is one the card action takes', () =
   expect(INBOX_CARD_OP_FIELDS.list).toContain('asked_by');
 });
 
-test('the columns it lists are the store’s, Backlog takes work not started, and the Icebox is left to the person', () => {
+test('the columns it lists are the store’s v2 ids, Todo takes work not started, and only a hand-over goes to In review', () => {
   const prompt = boardPrompt(BIN);
   const listed = [...prompt.matchAll(/^- ([a-z_]+): /gm)].map((match) => match[1]);
-  expect(listed).toEqual(['backlog', 'designing', 'your_look', 'building', 'your_review']);
+  expect(listed).toEqual(['todo', 'in_progress', 'in_review', 'backlog']);
   for (const column of listed) expect(INBOX_CARD_COLUMNS).toContain(column as (typeof INBOX_CARD_COLUMNS)[number]);
-  expect(prompt).toMatch(/- backlog: work you were asked to do and have not started\./);
-  expect(prompt).toMatch(/Icebox[^\n]*is mine\. Never put a card there/);
+  expect(prompt).toMatch(/- todo: work you were asked to do and have not started\./);
+  expect(prompt).toMatch(/- in_review: [^\n]*handed to me on purpose/);
+  expect(prompt).toMatch(/A question you ask me mid-work leaves the card in in_progress\./);
+  expect(prompt).not.toMatch(/icebox|designing|your_look|your_review|\bbuilding\b/i);
 });
 
 // Approved 2026-10-27: agents wrote sentence titles and linked no thread to decide in.

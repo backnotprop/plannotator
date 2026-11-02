@@ -6,8 +6,9 @@ import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
-import { LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
+import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook';
 import { shortProjectNames } from '../projectLabels';
+import { THREAD_PANEL_LABEL } from '../threadPanel';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -87,6 +88,33 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
 }
 
 
+/**
+ * One of the ⋮ menu's options: a plain checkbox, no icon (the owner, 2026-11-02: "Honestly, those could all just be
+ * check boxes anyways. They don't look right as icons"). The box sits where Tidy's and Refresh's icons sit, so every
+ * label starts at one edge. A tick leaves the menu open, so the next can be tried, unless `closeOnClick`.
+ */
+function MenuCheckbox({
+  label,
+  checked,
+  onChange,
+  closeOnClick = false,
+  ...data
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (on: boolean) => void;
+  closeOnClick?: boolean;
+} & { [data: `data-${string}`]: string }) {
+  return (
+    <Menu.CheckboxItem className="ib-pmi" label={label} checked={checked} onCheckedChange={(on: boolean) => onChange(on)} closeOnClick={closeOnClick} {...data}>
+      <span className="ib-pmi-box" aria-hidden="true" data-on={checked ? '' : undefined}>
+        {checked && <Icon name="check" size={11} />}
+      </span>
+      <span className="ib-pmi-l">{label}</span>
+    </Menu.CheckboxItem>
+  );
+}
+
 /** "Tidy · 3/4" while a run shows. */
 const runLabel = (run: InboxTidyRun) => `Tidy · ${run.done}/${run.agents.length}`;
 
@@ -104,6 +132,8 @@ export function TidyMenu({
   hideAway,
   look,
   onLook,
+  threadPanel,
+  onCustomize,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -112,7 +142,11 @@ export function TidyMenu({
   /** Linked machines: "Hide offline machines", checked while their rows are hidden. Absent (nothing linked): no item. */
   hideAway?: { on: boolean; onChange: (hide: boolean) => void };
   look?: ListLook;
-  onLook?: (key: ListLookKey, on: boolean) => void;
+  onLook?: (key: MenuLookKey, on: boolean) => void;
+  /** The thread panel view (threadPanel.ts), checked while it is the default. Absent (a phone, the tour): no item. */
+  threadPanel?: { on: boolean; onChange: (on: boolean) => void };
+  /** "Customize rows…", last in the Rows group: Settings → Rows. Absent (the tour): no item. */
+  onCustomize?: () => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -159,39 +193,37 @@ export function TidyMenu({
               {look && onLook && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  {/* A tick changes the list at once and leaves the menu open, so the next can be tried. */}
-                  {LIST_LOOK_OPTIONS.map((option) => (
-                    <Menu.CheckboxItem
-                      key={option.key}
-                      className="ib-pmi"
-                      label={option.label}
-                      checked={look[option.key]}
-                      onCheckedChange={(on) => onLook(option.key, on)}
-                      closeOnClick={false}
-                      data-list-look={option.key}
-                    >
-                      <Icon name={option.icon} size={15} />
-                      <span className="ib-pmi-l">{option.label}</span>
-                      {look[option.key] && <Icon name="check" size={15} className="ib-pmi-check" />}
-                    </Menu.CheckboxItem>
-                  ))}
+                  <Menu.Group>
+                    <Menu.GroupLabel className="ib-pm-glabel">Rows</Menu.GroupLabel>
+                    {/* A tick changes the list at once and leaves the menu open, so the next can be tried. */}
+                    {LIST_LOOK_OPTIONS.map((option) => (
+                      <MenuCheckbox key={option.key} label={option.label} checked={look[option.key]} onChange={(on) => onLook(option.key, on)} data-list-look={option.key} />
+                    ))}
+                    {onCustomize && (
+                      // No icon (the owner, 2026-11-02): its words line up with the checkboxes' labels above it.
+                      <Menu.Item className="ib-pmi ib-pmi-noicon" label="Customize rows…" onClick={onCustomize} data-customize-rows="">
+                        <span className="ib-pmi-l">Customize rows…</span>
+                      </Menu.Item>
+                    )}
+                  </Menu.Group>
+                  {threadPanel && (
+                    <>
+                      <Menu.Separator className="ib-pm-sep" />
+                      <Menu.Group>
+                        <Menu.GroupLabel className="ib-pm-glabel">Thread panel</Menu.GroupLabel>
+                        <MenuCheckbox label={THREAD_PANEL_LABEL} checked={threadPanel.on} onChange={threadPanel.onChange} data-thread-panel-option="" />
+                      </Menu.Group>
+                    </>
+                  )}
                 </>
               )}
               {hideAway && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  <Menu.CheckboxItem
-                    className="ib-pmi"
-                    label="Hide offline machines"
-                    checked={hideAway.on}
-                    onCheckedChange={(checked: boolean) => hideAway.onChange(checked)}
-                    closeOnClick
-                    data-hide-offline-machines=""
-                  >
-                    <Icon name="eyeOff" size={15} />
-                    <span className="ib-pmi-l">Hide offline machines</span>
-                    {hideAway.on && <Icon name="check" size={15} className="ib-pmi-check" />}
-                  </Menu.CheckboxItem>
+                  <Menu.Group>
+                    <Menu.GroupLabel className="ib-pm-glabel">Machines</Menu.GroupLabel>
+                    <MenuCheckbox label="Hide offline machines" checked={hideAway.on} onChange={hideAway.onChange} closeOnClick data-hide-offline-machines="" />
+                  </Menu.Group>
                 </>
               )}
             </Menu.Popup>
