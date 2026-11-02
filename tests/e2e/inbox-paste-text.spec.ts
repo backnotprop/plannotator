@@ -163,8 +163,12 @@ test.afterAll(async () => {
   }
 });
 
+/**
+ * A thread of its own for each test: named by `subject`, so no test opens another's reply draft
+ * (a saved draft reopens the reply box, and the footer's Reply button is gone).
+ */
 async function newThread(subject: string): Promise<string> {
-  const sent = await world.agent.send({ project_path: world.ledger, subject, body: 'The nightly import failed on worker-3. Can you send me the log?' });
+  const sent = await world.agent.send({ project_path: world.ledger, subject, thread: subject, body: 'The nightly import failed on worker-3. Can you send me the log?' });
   return sent.thread_id as string;
 }
 
@@ -296,11 +300,52 @@ test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, th
   await tile.locator('[data-pasted-put-back]').click();
   await expect(tile).toHaveCount(0);
   expect((await field(page, BOX)).value).toBe(LOG);
-  // Leave nothing behind for the next test: the box emptied and closed.
-  await text.fill('');
-  await page.keyboard.press('Escape');
-  await expect(box).toHaveCount(0);
   expect(world.errors).toEqual([]);
+});
+
+/** The thread's reply draft as the Inbox holds it (null: none). */
+async function serverDraft(threadId: string): Promise<{ body: string } | null> {
+  const answer = await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url));
+  return ((await answer.json()) as { draft: { body: string } | null }).draft;
+}
+
+/** Type `words` at the end of a long draft in a fresh page, close that page at once (within the 500 ms save pause), and reopen. */
+async function closeRightAfterEdit(threadId: string, draft: string, words: string): Promise<Page> {
+  const tab = await world.context.newPage();
+  await tab.goto(`${world.url}#thread=${threadId}`);
+  const pane = tab.locator('section.ib-pane');
+  await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  await pane.locator('.ib-rbox').getByRole('textbox').fill(draft);
+  await expect.poll(async () => (await serverDraft(threadId))?.body, { timeout: 10_000 }).toBe(draft);
+  await caretAt(tab, BOX, draft.length);
+  await tab.keyboard.type(words);
+  await tab.close();
+  const again = await world.context.newPage();
+  await again.goto(`${world.url}#thread=${threadId}`);
+  return again;
+}
+
+test('a long draft edited and its page closed within the save pause keeps the edit: the draft read back after reopening holds it', async () => {
+  // Over 32 KB: the words, and the last save's words beside them (`base_body`), are more than a keepalive carries.
+  const threadId = await newThread('Long draft closed at once');
+  const again = await closeRightAfterEdit(threadId, LOG, ' Sent from the train.');
+  try {
+    await expect.poll(async () => (await serverDraft(threadId))?.body, { timeout: 10_000 }).toBe(`${LOG} Sent from the train.`);
+    await expect(again.locator('section.ib-pane .ib-rbox').getByRole('textbox')).toHaveValue(`${LOG} Sent from the train.`);
+  } finally {
+    await again.close();
+  }
+});
+
+test('words alone over a keepalive (64 KiB), edited and closed at once: the edit still reaches the Inbox', async () => {
+  // Too big for a keepalive even without `base_body`: the save goes as a plain request.
+  const threadId = await newThread('Huge draft closed at once');
+  const again = await closeRightAfterEdit(threadId, LOG + LOG, ' Huge edit.');
+  try {
+    await expect.poll(async () => (await serverDraft(threadId))?.body, { timeout: 10_000 }).toBe(`${LOG}${LOG} Huge edit.`);
+  } finally {
+    await again.close();
+  }
 });
 
 test('New message: a pasted tile and no words sends; the new thread shows the file', async () => {
