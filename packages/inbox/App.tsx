@@ -68,6 +68,9 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
 import { ThreadPane } from './components/Thread';
+import { unsavedComposer } from './components/AttachmentPane';
+import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
+import { inboxLinkHash } from './links';
 import { SearchHost, type SearchLanding } from './components/SearchHost';
 import { onOpenSearchKey } from './search/searchShortcut';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
@@ -517,6 +520,18 @@ function focusFirst(selectors: readonly string[]): boolean {
   return false;
 }
 
+/**
+ * A search result or a link just opened a screen: one with nothing to land on (a reply box already open with a
+ * draft, no Reply to focus) leaves focus nowhere, so the thread's subject takes it, never the page. Not once the
+ * person has acted since (a Send closing the box leaves focus nowhere for a moment too).
+ */
+function focusAfterOpen(): void {
+  const mark = inputMark();
+  setTimeout(() => {
+    if (!actedSince(mark) && focusLost(document.activeElement) && !modalOpen()) focusFirst(['section.ib-pane [data-reply-button]', 'section.ib-pane h2.ib-subject', '.ib-main h1']);
+  }, 400);
+}
+
 /** A tour setting that did not save is tried again after these waits (ms), then said. */
 const TOUR_SAVE_RETRY_MS = [1000, 4000];
 /** How long the first-run screen waits for the settings before it draws without them. */
@@ -893,6 +908,59 @@ function Inbox() {
     },
   });
   const { observe: observeEvent, flush: flushNotifications, setReach: setNotifyReach, windowReport, reportWindow } = notifications;
+
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  /**
+   * How a link to this Inbox opens in this window (links.ts), or null when it does not: the same history as a row or
+   * a search result, so Back and a phone's stack treat it as one. The thread already open replaces its entry (once
+   * `msg=` drops, a new one would equal the last and the first Back would do nothing).
+   */
+  const inboxLink = useCallback((href: string): (() => void) | null => {
+    const now = settingsRef.current;
+    const hash = inboxLinkHash(href, { origin: window.location.origin, addresses: [now?.url, now?.tailscale?.url] });
+    if (hash === null) return null;
+    return () => {
+      searchLanding.current = null;
+      const from = routeRef.current;
+      const next = routeOf(hash);
+      const beside = !!(from.file || from.guide || next.file || next.guide);
+      if (from.page === 'inbox' && from.thread && from.thread === next.thread && !beside) writeRoute({ ...from, msg: next.msg }, { replace: true });
+      // As a row click does (openRow): the list stays the one on screen, unless the link names its own.
+      else if (from.page === 'inbox' && next.page === 'inbox' && next.thread) writeRoute({ ...next, project: next.project ?? from.project, machine: next.machine ?? from.machine });
+      else writeRoute(next);
+      focusAfterOpen();
+    };
+  }, []);
+  // Capture: ui's anchors would use the click first. They draw every full URL as a new tab, and a bare `#thread=` as a
+  // heading link that finds no heading.
+  useEffect(() => {
+    const onClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || !(event.target instanceof Element)) return;
+      const link = event.target.closest('a[href]');
+      // `data-local-link`: a link to an attached file, whose own click opens it as its tile does.
+      if (!(link instanceof HTMLAnchorElement) || link.hasAttribute('download') || link.hasAttribute('data-local-link')) return;
+      const open = inboxLink(link.getAttribute('href') ?? '');
+      if (!open) return;
+      if (isNewTabClick(event) || event.altKey) {
+        // The browser's own new tab, which ui's handler on a bare `#thread=` link would cancel.
+        event.stopPropagation();
+        return;
+      }
+      // Over a dialog the screen would change out of sight, and a comment not saved yet would go with its file: a new tab keeps both.
+      if (link.closest('dialog') || inOverlay(link) || unsavedComposer(document.querySelector<HTMLElement>('[data-attachment-pane]'))) {
+        if (link.target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        window.open(link.href, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      event.preventDefault();
+      open();
+    };
+    window.addEventListener('click', onClick, true);
+    return () => window.removeEventListener('click', onClick, true);
+  }, [inboxLink]);
 
   useEffect(() => {
     const onHash = () => {
@@ -1971,13 +2039,7 @@ function Inbox() {
     const sameThread = now.page === 'inbox' && !!now.thread && now.thread === next.thread && !now.file && !now.guide;
     // Otherwise a new history entry: Back returns to where the search started (on a phone, the list).
     writeRoute(next, sameThread ? { replace: true } : {});
-    // The landing puts focus on the result in the thread; a thread with nothing to land on (its reply box already
-    // open with a draft, no Reply to focus) leaves it nowhere: the thread's subject then, never the page. Not once
-    // the person has acted since (a Send closing the box leaves focus nowhere for a moment too).
-    const mark = inputMark();
-    setTimeout(() => {
-      if (!actedSince(mark) && focusLost(document.activeElement) && !modalOpen()) focusFirst(['section.ib-pane [data-reply-button]', 'section.ib-pane h2.ib-subject', '.ib-main h1']);
-    }, 400);
+    focusAfterOpen();
   };
   // ── Compose: a new message to a connected agent (compose/ComposeDialog.tsx) ──
   const openCompose = (request: ComposeRequest, opener?: HTMLElement | null) => {
@@ -4579,6 +4641,7 @@ function Inbox() {
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
             onToast={(t) => showToast(t)}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
+            onInboxLink={inboxLink}
             onBackToList={(fileName) => {
               // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
               holdSidebarIfTight();
