@@ -118,7 +118,7 @@ beforeEach(async () => {
     if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     const answer = await loopback(path, method, body);
     if (method === 'GET' && path.startsWith('/api/inbox/settings') && answer.status === 200 && tailnetPage) {
-      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet' });
+      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet', guest: true });
     }
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': answer.type } });
   }) as typeof fetch;

@@ -198,11 +198,14 @@ test('the toggle\'s dot: neutral for a failing check, and an update always wins'
   expect(sidebarUpdateNotice(null, true, true)).toBeNull();
 });
 
-test('a page opened over the tailnet offers nothing about updating; the computer\'s own page does', () => {
+test('a tailnet guest\'s page offers nothing about updating; the computer\'s own page and the owner\'s phone do', () => {
+  expect(pageOffersUpdates({ via: 'tailnet', guest: true })).toBe(false);
   expect(pageOffersUpdates({ via: 'tailnet' })).toBe(false);
   expect(pageOffersUpdates(null)).toBe(false);
   expect(pageOffersUpdates({ via: 'local' })).toBe(true);
-  expect(updateForPage(update('available'), { via: 'tailnet' })).toBeNull();
+  expect(pageOffersUpdates({ via: 'tailnet', guest: false })).toBe(true);
+  expect(updateForPage(update('available'), { via: 'tailnet', guest: true })).toBeNull();
+  expect(updateForPage(update('available'), { via: 'tailnet', guest: false })?.state).toBe('available');
   expect(updateForPage(update('available'), { via: 'local' })?.state).toBe('available');
 });
 

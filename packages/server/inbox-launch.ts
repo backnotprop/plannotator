@@ -757,13 +757,14 @@ export function createInboxLaunch(options: {
       }
       case "open": {
         if (via === "tailnet") return localOnly();
-        if (options.platform !== "darwin") throw new InboxError("open_unavailable", "Open in Terminal is for macOS; copy the command instead.");
+        const e = await environment();
+        // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
+        // first: `terminal` may hand a session over, and a refused Open must change nothing.
+        const osascript = e.which("osascript");
+        if (!osascript) throw new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
         // A start or restart the agent refused for trust: the host's command where trust is accepted.
         const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
         const command = host.terminal(launch, untrusted);
-        const e = await environment();
-        const osascript = e.which("osascript");
-        if (!osascript) throw new InboxError("open_unavailable", "osascript is not on PATH; copy the command instead.");
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
