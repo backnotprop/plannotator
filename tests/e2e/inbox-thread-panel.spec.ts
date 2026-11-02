@@ -214,9 +214,13 @@ const drawnMask = (p: Page) => p.locator('.ib-pempty-piece').evaluate((el) => (e
 
 /**
  * What the screen shows in the art's box, read from a real screenshot, so a mask the CSP blocked (nothing drawn) or a
- * mask ignored (a solid square) both fail. The clip starts outside the box, so its first pixel is the pane.
+ * mask ignored (a solid square) both fail. The clip starts outside the box, so its first pixel is the pane. `ink` says
+ * the piece is the line's color, compared as sRGB pixels, so how a browser writes a color does not matter. Colors are
+ * read after the panel's fade: the pane's color changes as it fills, and the nested elements follow it a beat apart,
+ * so a read during the fade, or a retry until the colors agree, can pass or fail on a passing moment.
  */
 async function painted(p: Page): Promise<{ share: number; ink: boolean; bitmap: string }> {
+  await expect.poll(() => empty(p).evaluate((el) => el.getAnimations({ subtree: true }).length)).toBe(0);
   const box = await artBox(p);
   const margin = 4;
   const shot = await p.screenshot({ clip: { x: box.x - margin, y: box.y - margin, width: box.width + margin * 2, height: box.height + margin * 2 } });
@@ -238,18 +242,19 @@ async function painted(p: Page): Promise<{ share: number; ink: boolean; bitmap: 
     draw.fillRect(0, 0, 1, 1);
     const ink = [...draw.getImageData(0, 0, 1, 1).data].slice(0, 3);
     let marked = 0;
-    let closest = Number.POSITIVE_INFINITY;
+    // The pixel furthest from the pane is the piece's own color: a dot's soft edge is always nearer the pane.
+    let strongest = paper;
     let bitmap = '';
     for (let y = margin; y < image.height - margin; y++) {
       for (let x = margin; x < image.width - margin; x++) {
         const pixel = at((y * image.width + x) * 4);
         const on = distance(pixel, paper) > 24;
         if (on) marked += 1;
-        if (on) closest = Math.min(closest, distance(pixel, ink));
+        if (distance(pixel, paper) > distance(strongest, paper)) strongest = pixel;
         bitmap += on ? '1' : '0';
       }
     }
-    return { share: marked / (image.width - margin * 2) / (image.height - margin * 2), ink: closest < 12, bitmap };
+    return { share: marked / (image.width - margin * 2) / (image.height - margin * 2), ink: distance(strongest, ink) < 12, bitmap };
   }, { png: shot.toString('base64'), margin });
 }
 
@@ -263,7 +268,6 @@ for (const theme of ['light', 'dark'] as const) {
     expect(keycap.ink).toBe(true);
     expect(keycap.share).toBeGreaterThan(0.05);
     expect(keycap.share).toBeLessThan(0.8);
-    await expect(page.locator('.ib-pempty-piece')).toHaveCSS('background-color', await page.locator('[data-thread-panel-empty] p').evaluate((el) => getComputedStyle(el).color));
 
     await art(page).click();
     await page.mouse.move(0, 0);
