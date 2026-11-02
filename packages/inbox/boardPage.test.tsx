@@ -530,8 +530,8 @@ test.if(hasDom)('a card linking only a Jira issue (a link only) draws no lane ma
   seeEveryCard();
   const jira = { kind: 'issue', source: 'jira', ref: 'DEMO-123', url: 'https://example.atlassian.net/browse/DEMO-123' };
   const cards = [
-    card('crd_jira', { title: 'Payment retries', column: 'building', refs: [jira] }),
-    card('crd_both', { title: 'vite 8 and Jira', column: 'building', refs: [{ kind: 'pr', source: 'github', ref: 'acme/widgets#12', url: 'https://github.com/acme/widgets/pull/12' }, jira] }),
+    card('crd_jira', { title: 'Payment retries', column: 'in_progress', refs: [jira] }),
+    card('crd_both', { title: 'vite 8 and Jira', column: 'in_progress', refs: [{ kind: 'pr', source: 'github', ref: 'acme/widgets#12', url: 'https://github.com/acme/widgets/pull/12' }, jira] }),
   ];
   draw({ marks: true, model: { serverSession: 's', cursor: 1, cards, dropped_unseen: 0, seen_seq: LOOK } });
   expect($('.ib-bcard[data-card-id="crd_jira"] [data-card-mark]')).toBeNull();
