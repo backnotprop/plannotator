@@ -741,6 +741,15 @@ function Inbox() {
     firstList.current = { done: false, promise, resolve };
   }
   const threadReadApplied = useRef(0);
+  /**
+   * The open thread's first read numbered after its open (`after`: the last number before it), and the ids of the
+   * messages that read had. Until it lands, the thread on screen may be a copy from an earlier visit (App keeps
+   * `thread` while another thread's read is out): a permission card is counted as arrived only against this read.
+   */
+  const openRead = useRef<{ threadId: string; after: number } | null>(null);
+  /** The thread the open effect last opened: Try again on the same thread is not a new open. */
+  const openedFor = useRef<string | null>(null);
+  const [openedWith, setOpenedWith] = useState<{ threadId: string; ids: ReadonlySet<string> } | null>(null);
   /** The open thread as last read, for the open effect when another read (the event stream's) landed first. */
   const threadLoaded = useRef<InboxThread | null>(null);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
@@ -1295,6 +1304,12 @@ function Inbox() {
         setThreadRow(next.row ?? null);
         setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
         setThreadLoad(null);
+        // The open's first fresh read: what the thread opened with (never a stale copy shown before it landed).
+        const opening = openRead.current;
+        if (opening?.threadId === threadId && mine > opening.after) {
+          openRead.current = null;
+          setOpenedWith({ threadId, ids: new Set(next.thread.messages.map((m) => m.id)) });
+        }
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
@@ -1774,7 +1789,16 @@ function Inbox() {
       setThreadRun(null);
       setLook(null);
       setThreadLoad(null);
+      openRead.current = null;
+      openedFor.current = null;
+      setOpenedWith(null);
       return;
+    }
+    // A new open (not Try again on the same thread): what it opened with comes from its first read numbered after now.
+    if (openedFor.current !== threadId) {
+      openedFor.current = threadId;
+      openRead.current = { threadId, after: threadReadSeq.current };
+      setOpenedWith(null);
     }
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
@@ -4902,6 +4926,7 @@ function Inbox() {
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
             attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
             onRunChanged={() => void refreshThread(thread.thread_id)}
+            openedWith={openedWith?.threadId === thread.thread_id ? openedWith.ids : null}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}
