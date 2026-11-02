@@ -97,14 +97,16 @@ test.beforeAll(async () => {
   mkdirSync(join(alpha, 'docs'));
   writeFileSync(join(alpha, 'docs', 't2.md'), '# T2 file\n\nA file of the second thread.\n');
 
-  const t2 = await agent.send({ project_path: alpha, subject: 'Second thread', body: `T2 first message.\n\n${filler(40, 'T2')}` });
+  // A named thread each: an agent's next message in a project otherwise joins the thread it is in.
+  const t2 = await agent.send({ project_path: alpha, subject: 'Second thread', thread: 'second-thread', body: `T2 first message.\n\n${filler(40, 'T2')}` });
   const T2 = t2.thread_id as string;
   const t2b = await agent.send({ project_path: alpha, reply_to: T2, body: 'T2 second message, the target of the link.', attachments: ['docs/t2.md'] });
-  const t3 = await agent.send({ project_path: beta, subject: 'Beta thread', body: 'T3 in project beta.' });
+  const t3 = await agent.send({ project_path: beta, subject: 'Beta thread', thread: 'beta-thread', body: 'T3 in project beta.' });
   const T3 = t3.thread_id as string;
   const t4 = await agent.send({
     project_path: alpha,
     subject: 'Decide thread',
+    thread: 'decide-thread',
     body: [
       ':::question',
       `Pick one, see [T2 from a dialog](${origin}/#thread=${T2}).`,
@@ -122,8 +124,9 @@ test.beforeAll(async () => {
     ].join('\n'),
   });
 
-  const t1 = await agent.send({ project_path: alpha, subject: 'First thread', body: 'T1 opening message.' });
+  const t1 = await agent.send({ project_path: alpha, subject: 'First thread', thread: 'first-thread', body: 'T1 opening message.' });
   const T1 = t1.thread_id as string;
+  expect(new Set([T1, T2, T3, t4.thread_id]).size).toBe(4);
   await agent.send({ project_path: alpha, reply_to: T1, body: filler(45, 'T1') });
   writeFileSync(
     join(alpha, 'docs', 'notes.md'),
@@ -383,18 +386,18 @@ for (const view of ['desktop', 'phone'] as const) {
     test('an unsent draft stays through a link and Back', async ({ browser }) => {
       await scene(browser, view, async (s) => {
         const { page, press } = s;
-        const box = () => page.locator('section.ib-pane').locator('textarea, [contenteditable="true"]').first();
-        const words = () => box().evaluate((el) => (el instanceof HTMLTextAreaElement ? el.value : el.textContent));
+        const box = page.locator('section.ib-pane .ib-rbox textarea');
         await openFirstThread(page);
         await press(page.locator('section.ib-pane [data-reply-button]').first());
-        await expect(box()).toBeVisible();
-        await page.keyboard.type('Still here after the link');
+        await expect(box).toBeVisible();
+        await box.pressSequentially('Still here after the link');
+        // At once: the draft's save has not run yet.
         await press(inMessage('link to T2')(page));
         await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
         await noTabOpened(s);
         await page.goBack();
         await expect(subject(page)).toHaveText(/First thread/);
-        await expect.poll(words).toBe('Still here after the link');
+        await expect(box).toHaveValue('Still here after the link');
       });
     });
 
