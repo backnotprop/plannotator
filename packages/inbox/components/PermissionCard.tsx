@@ -329,6 +329,7 @@ export function PermissionCard({
   run,
   phone,
   newest,
+  arrived,
   followUp,
   terminal,
   fullUsed,
@@ -341,6 +342,8 @@ export function PermissionCard({
   phone: boolean;
   /** The prompt is the thread's newest item: Allow once takes focus. */
   newest: boolean;
+  /** The prompt came after the thread opened (not among the messages it opened with): only then may Allow once take focus. */
+  arrived: boolean;
   /** The follow-up that withdrew it ("Answered in Terminal."), or null. */
   followUp: string | null;
   /** Open in Terminal and Copy attach command, as the thread's ⋯ menu has them (Approve in Terminal opens it); null outside a launch. */
@@ -391,11 +394,12 @@ export function PermissionCard({
   }, [message.id]);
   const ready = () => Date.now() - armedAt.current >= ARM_MS;
 
-  // Newest and waiting, and nothing has focus: Allow once takes it, so Enter answers it, with the answers
-  // brought into view (never a button out of sight). Never taken from a control the person is on.
-  // One frame later than the thread's own: a card already there when the thread opens leaves Reply its focus.
+  // Newest and waiting, arrived while the thread was open, and nothing has focus: Allow once takes it, so Enter
+  // answers it, with the answers brought into view (never a button out of sight). Never taken from a control the
+  // person is on. A card already there when the thread opens never takes focus (`arrived` false): opening a thread
+  // focuses nothing (Reply included), so the page body alone could not tell an open from an arrival.
   useEffect(() => {
-    if (!newest || !waiting) return;
+    if (!newest || !waiting || !arrived) return;
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => {
         const button = onceRef.current;
@@ -406,7 +410,7 @@ export function PermissionCard({
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [newest, waiting, message.id]);
+  }, [newest, waiting, arrived, message.id]);
 
   if (!q) return null;
   const outcome = outcomeOf(q, labels);
