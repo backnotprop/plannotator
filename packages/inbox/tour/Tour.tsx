@@ -310,7 +310,7 @@ const TARGET_SELECTORS: Record<TourTarget, string> = {
   'film-send': '[data-tour-film-send]',
   'compose-btn': '[data-open-compose]',
   'compose-to': '[data-compose] [data-compose-to]',
-  'compose-send': '[data-compose] .ib-cp-foot [data-compose-send], [data-compose] .ib-cp-bar [data-compose-send]',
+  'compose-send': '[data-compose] .ib-cp-foot [data-compose-send]',
   arrival: '[data-tour-arrival-last]',
 };
 

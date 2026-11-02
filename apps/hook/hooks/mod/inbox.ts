@@ -49,12 +49,19 @@
  * for reviews); a delivery is also claimed once per reply (mkdir), so a lease
  * race can never deliver twice. A reply another process claimed and never
  * delivered (it quit while the turn waited) is said once, with a toast.
+ *
+ * Ask AI: a poll answer can say a question waits on this session, and only
+ * then does this link start a client on the session's Ask AI bridge
+ * (`startAskClient`; the Inbox's setting off means none ever waits).
  */
 
+import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import type { Host, HttpResult, LoadedPluginInfo } from './host'
 import {
+  INBOX_ASK_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
   inboxToolCallParams,
@@ -67,6 +74,7 @@ import {
   inboxSessionThreadsText,
   inboxWakeText,
   mcpAnswerOfResponse,
+  parseInboxAskWaits,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -76,6 +84,7 @@ import {
 } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { privateDirArgv } from './launch'
+import type { TurnTracker } from './turns'
 
 /**
  * The first Claude Code whose published hooks-module API documents
@@ -453,6 +462,8 @@ export interface InboxLinkOptions {
   root?: () => Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
+  /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
+  turns?: TurnTracker
 }
 
 export class InboxLink {
@@ -515,6 +526,8 @@ export class InboxLink {
   private loaded: Promise<{ plugin: LoadedPluginInfo | null; engine: string | null }> | null = null
   /** Where the session started, read once (`folderNow`). */
   private folder: Promise<string | null> | null = null
+  /** The Ask AI client, from a poll saying a question waits until it stops (`startAskClient`). */
+  private askClient: BridgeHandle | null = null
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -859,8 +872,47 @@ export class InboxLink {
       ...(loaded.plugin ? { plugin: loaded.plugin } : {}),
       ...(loaded.engine ? { engine: loaded.engine } : {}),
       ...(folder ? { session_folder: folder } : {}),
+      // Ask AI: a question for this session can run here, and `ask_waits` will be read.
+      ...(this.options.turns ? { [INBOX_ASK_POLL_FIELD]: true } : {}),
     })
-    return response && response.status === 200 ? parseInboxBridgeCommands(response.text) : null
+    if (!response || response.status !== 200) return null
+    if (parseInboxAskWaits(response.text)) void this.startAskClient()
+    return parseInboxBridgeCommands(response.text)
+  }
+
+  /**
+   * A question from Ask AI waits on this session: the same client as a review
+   * server's "Ask this session", on the Inbox's own bridge for the session. It
+   * runs in the lease holder, the only process that polls, and stays while its
+   * process has a question running, so a lease move does not strand the answer.
+   */
+  private async startAskClient(): Promise<void> {
+    const { turns } = this.options
+    if (!turns) return
+    const registry = await this.registry()
+    // After the read: two polls can answer together, and the lease or the session can move.
+    if (!registry || this.askClient || this.disposed || !this.leader) return
+    const client = createBridge({
+      host: this.host,
+      baseUrl: `${bridgeBaseUrl(registry.port)}${inboxAskBridgeBase(this.options.sessionId)}`,
+      token: registry.token,
+      turns,
+      isLive: () => !this.disposed && (this.leader || turns.askInFlight),
+    })
+    this.askClient = client
+    this.host.debug('inbox: a question waits on this session; Ask AI client started')
+    void client.run().then(async (end) => {
+      this.host.debug(`inbox: Ask AI client stopped (${end.reason})`)
+      // This process let go: the next question makes a new bridge, and the Inbox
+      // tells the lease holder. Never when another client polls this bridge now.
+      if (end.reason === 'ended' && end.connected && !end.superseded) await client.leave()
+      if (this.askClient === client) this.askClient = null
+    })
+  }
+
+  /** A turn started or ended: the Ask AI client says so now, not at its next poll. */
+  pushAskStatus(): void {
+    this.askClient?.pushStatus()
   }
 
   private async poll(): Promise<void> {

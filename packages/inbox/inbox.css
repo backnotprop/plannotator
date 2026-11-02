@@ -3809,7 +3809,6 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-iconbtn.ib-cp-trustcircle { flex: none; }
 .pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning]:hover { color: var(--warning, oklch(0.75 0.15 85)); }
 .pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"]:hover { background: var(--muted); color: var(--foreground); }
-.ib-cp-barspace { visibility: hidden; }
 .ib-cp-trustask { display: flex; flex-direction: column; overflow-wrap: anywhere; }
 dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12px; width: 440px; }
 .ib-cp-trustask p span { display: block; }
@@ -3947,7 +3946,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .pn-inbox .ib-draft-del { flex: none; width: 32px; height: 32px; border-radius: 7px; border: 0; background: none; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; }
 .pn-inbox .ib-draft-del:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 8%, transparent); }
 
-/* A phone (PHONE_QUERY): compose is a full-screen sheet with Cancel · title · Send (or Save draft); the picker a second sheet. */
+/* A phone (PHONE_QUERY): compose is a full-screen sheet with Cancel · title (Save draft at the right only when nothing can be sent) and Send on the foot's row (approval inbox-phone-compose-send); the picker a second sheet. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-lhead-compose { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none; border-radius: 8px; color: var(--foreground); background: none; border: 0; }
   .ib-lhead .ib-lhead-search + .ib-lhead-compose { margin-left: 0; }
@@ -3955,18 +3954,23 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   .ib-drafts .ib-dh .ib-lhead-compose { margin-left: auto; }
   .ib-sp-entryrow { margin-bottom: 8px; }
   .pn-inbox .ib-compose-btn { width: 44px; height: 44px; }
-  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, 100%); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, var(--ib-cp-vvh, 100%)); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   dialog.ib-cp[data-phone]::backdrop { animation: none; }
-  .ib-cp-bar { display: flex; align-items: center; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); flex: none; }
-  .ib-cp-bar h2 { flex: 1; text-align: center; margin: 0; font-size: var(--ib-fs-17, 17px); font-weight: 650; }
+  .ib-cp-head { flex: none; }
+  /* Two equal sides, so the title stays centred with Save draft at the right or nothing there. */
+  .ib-cp-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: start; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); }
+  .ib-cp-bar h2 { grid-column: 2; margin: 0; font-size: var(--ib-fs-17, 17px); font-weight: 650; }
+  .ib-cp-bar [data-compose-save] { grid-column: 3; justify-self: end; }
   .pn-inbox .ib-cp-barb { min-width: 44px; height: 44px; padding: 0 10px; border: 0; background: none; color: var(--primary); font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-cp-barb.ib-strong { font-weight: 650; }
-  .pn-inbox .ib-cp-barb.ib-dis { opacity: 0.5; }
   .ib-cp-to { min-height: 56px; padding-top: 6px; padding-bottom: 6px; --ib-cp-tdlh: 22px; }
   .pn-inbox .ib-cp-tobtn { height: 44px; padding-top: 11px; padding-bottom: 11px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-cp-none-to { padding-top: 11px; padding-bottom: 11px; }
-  .ib-cp-body { flex: 1; }
+  /* The message field takes the whole body, so what is under the words is still the field: no gap above the foot that a tap misses. */
+  .ib-cp-body { flex: 1; display: flex; flex-direction: column; }
+  .ib-cp-field, .ib-cp-field .ib-cfield, .ib-cp-field .ib-cfield > .relative { flex: 1 0 auto; display: flex; flex-direction: column; }
   .pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { font-size: var(--ib-fs-16-in, 16px); min-height: 200px; max-height: none; }
+  .pn-inbox .ib-cp-field .ib-rtext { flex: 1 0 auto; }
   .ib-cp-files { grid-template-columns: 1fr; }
   /* A file's × keeps its look and takes a 44 px hit area (compose's tiles and the reply box's). */
   .pn-inbox .ib-cp-fx { position: relative; }
@@ -3980,8 +3984,58 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }
   .ib-key.ib-cp-tname::after { content: ''; position: absolute; inset: -5px -2px; }
   .pn-inbox .ib-cp-tname-in { font-size: var(--ib-fs-16-in, 16px); position: relative; z-index: 1; }
-  .ib-cp-foot { min-height: 52px; }
-  .pn-inbox .ib-cp-clip { width: 44px; height: 44px; }
+  /* The foot: one row of 44 px targets, attachments and mic at the left, the one action at the right. Whatever else is on
+     the row gives way first, so the action keeps at least 12 px from the buttons on its left. */
+  .ib-cp-foot { min-height: 0; padding: 4px 12px 4px 4px; gap: 0; }
+  .pn-inbox .ib-cp-clip { flex: none; width: 44px; height: 44px; }
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic { width: 44px; height: 44px; }
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic::after { inset: 0; }
+  .ib-cp-foot .ib-dtfoot { flex: none; }
+  .ib-cp-foot > .ib-sp { flex: 1 1 12px; min-width: 12px; }
+  .pn-inbox .ib-cp-send { flex: none; padding: 0 14px; gap: 6px; }
+  .ib-cp-clipn { display: none; }
+  /* The saved state: the check, the word, the time on one line; what does not fit wraps out of sight whole. */
+  .ib-cp-foot > .ib-cp-savedline { display: flex; flex-wrap: wrap; column-gap: 5px; flex: 0 1 auto; min-width: 14px; height: 20px; margin-left: 6px; overflow: hidden; line-height: 20px; white-space: nowrap; }
+  .ib-cp-foot > .ib-cp-savedline > svg { margin-block: 3px; }
+  /* Dictating: the row is the status, as the reply row's is, and the clip and mic stay under the finger. Send is off
+     until the words land; on the narrowest phones it is the bare arrow, its name kept for a screen reader. */
+  .ib-cp-foot .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+  .ib-cp-foot .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ib-cp-foot:has(.ib-vline) > :is(.ib-cp-savedline, .ib-sp) { display: none; }
+  .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { margin-left: 8px; }
+  @media (max-width: 359px) {
+    .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { width: 44px; padding: 0; justify-content: center; }
+    .ib-cp-foot:has(.ib-vline) .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  }
+  /* The keyboard is up (phone.ts): the head folds to one line. To takes the top bar's line in the title's place, with
+     the room Cancel and Save draft leave. Thread, the notes and the tiles step aside until it closes (the row says how
+     many files), except a Thread row in use or saying something, and a tile that was refused. */
+  :root[data-ib-keyboard] .ib-cp-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border-bottom: 1px solid var(--ib-line); }
+  :root[data-ib-keyboard] .ib-cp-bar { grid-area: 1 / 1 / 2 / -1; grid-template-columns: subgrid; height: 48px; border-bottom: 0; }
+  :root[data-ib-keyboard] .ib-cp-bar [data-compose-cancel] { grid-column: 1; }
+  :root[data-ib-keyboard] .ib-cp-bar h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  :root[data-ib-keyboard] .ib-cp-to { grid-area: 1 / 2; min-height: 0; padding: 0; border: 0; align-items: center; justify-content: flex-end; }
+  :root[data-ib-keyboard] .ib-cp-to .ib-cp-tol { display: none; }
+  /* A session that ended has Save draft beside it: To stays in its box with its chevron, the name gives way, and "ended" replaces the detail, whole. */
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] s { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] .ib-cp-tod { flex: none; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] :is(.ib-cp-tdsep, .ib-cp-tdw) { display: none; }
+  /* The narrowest phones, Save draft beside it: a struck letter says nothing. The mark says who, the button's name the rest. */
+  @media (max-width: 359px) {
+    :root[data-ib-keyboard] .ib-cp-head:has([data-compose-save]) .ib-cp-tobtn[data-compose-to="ended"] s { display: none; }
+  }
+  /* One line whatever the room: the narrowest phone has Save draft beside it. */
+  :root[data-ib-keyboard] .ib-cp-none-to { display: block; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-thread:not(:focus-within, :has([data-compose-thread-name-error], [data-compose-thread-name-note])) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+  /* The home bar is under the keyboard, and the foot must stay on screen in the little room left: what is over it gives way and scrolls. */
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] { padding-bottom: 0; }
+  :root[data-ib-keyboard] .ib-cp-body { padding-top: 8px; padding-bottom: 6px; overscroll-behavior: contain; }
+  :root[data-ib-keyboard] .pn-inbox .ib-cp-field :is(.ib-rtext, .ib-rmirror) { min-height: 72px; }
+  :root[data-ib-keyboard] :is(.ib-cp-thread, .ib-cp-error) { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
   .ib-cp-ask { flex-wrap: wrap; border-radius: 0; }
   .ib-cp-ask > span:first-child { flex-basis: 100%; }
   .ib-cp-picker[data-phone] { position: fixed; inset: 0; top: 0; left: 0; width: 100%; max-height: none; height: var(--ib-vvh, 100%); border-radius: 0; border: 0; box-shadow: none; background: var(--card); padding-top: env(safe-area-inset-top); z-index: 60; }
@@ -5513,6 +5567,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-tour-chip { padding: 0 10px; }
   .ib-tour-coach { left: 10px; right: 10px; width: auto; max-width: none; bottom: calc(10px + env(safe-area-inset-bottom)); top: auto; }
   .ib-tour-coach[data-at="top"] { top: calc(var(--ib-tour-bar-h, 52px) + 8px); bottom: auto; }
+  /* "Press Send" with the keyboard up (a tap on the message): the room left is Send's; the card is back when it closes. */
+  :root[data-ib-keyboard] .ib-tour-coach[data-tour-coach="9-to"] { display: none; }
   .pn-inbox .ib-tc-next, .pn-inbox .ib-tc-back { height: 44px; min-width: 44px; }
   .ib-te-paths { grid-template-columns: minmax(0, 1fr); }
   .ib-te-pic { aspect-ratio: 16 / 6; }

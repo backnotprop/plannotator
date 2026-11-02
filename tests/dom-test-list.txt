@@ -138,6 +138,7 @@ packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
 packages/inbox/tour.test.tsx
+packages/inbox/tailnetOwner.test.tsx
 packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx

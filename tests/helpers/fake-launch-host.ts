@@ -68,7 +68,7 @@ export function fakeLaunchHost() {
     },
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
-    terminal: (launch) => `fake attach ${launch.session_ref}`,
+    terminal: (launch) => (calls.push(`terminal ${launch.session_ref}`), `fake attach ${launch.session_ref}`),
     // Pushed prompts: no hook route; its questions are written by the shared question code.
     permissions(ctx) {
       questions = createLaunchQuestions({ store: ctx.store, name: "Fake Agent", displayFolder: ctx.displayFolder, onChange: ctx.onChange, log: () => {} });
