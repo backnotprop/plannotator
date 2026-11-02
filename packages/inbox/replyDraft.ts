@@ -580,6 +580,14 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     held.current.set(target, [...ids]);
   }, []);
 
+  /**
+   * The draft's files as this box shows them when it opens again: with this window's changes not landed yet (a file
+   * added whose save got no answer is still here; one removed stays out).
+   */
+  const withMyChanges = useCallback(<F extends ReplyDraftFileRef>(files: readonly F[]): F[] => {
+    return applyReplyDraftFileOps(files, outstanding(current.current) as ReplyDraftFileOps<F>);
+  }, []);
+
   /** Discard: the draft goes, here and on the server. */
   const discard = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -751,7 +759,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   /** A save is waiting for the pause in typing (the words are not on the server yet). */
   const waiting = useCallback(() => pending.current !== null, []);
 
-  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook };
+  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, withMyChanges };
 }
 
 /** The thread's draft in the store (null: none), or undefined when it could not be read. */

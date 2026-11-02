@@ -20,11 +20,14 @@
  * A draft keeps the box's files beside the words (`files`): every file the
  * person attached (paperclip, drop, paste), each a pending upload, and a long
  * paste (approval "inbox-paste-attachment") with where it goes back
- * (`pasted`). The compare-and-set covers both: any save moves `updated_at`, and
- * `base_body`'s shortcut holds only while the draft also holds `base_files`.
- * A save that says it carries every file (`all_files: true`) sets the list; an
- * older page's save (long pastes only) leaves the other files where they are
- * (`replyDraftFilesAfterSave`, @plannotator/core/inbox-reply-draft).
+ * (`pasted`). The window's save names its file changes (`files_add`,
+ * `files_remove`, `files_place`), applied to the draft's files as they are
+ * (`applyReplyDraftFileOps`, @plannotator/core/inbox-reply-draft); then the
+ * compare-and-set is on the words alone. A save with a list instead: one that
+ * says it carries every file (`all_files: true`) sets the list; an older page's
+ * save (long pastes only) leaves the other files where they are, and its
+ * `base_body` shortcut holds only while the draft also holds its `base_files`
+ * (`replyDraftFilesAfterSave`).
  * The upload sweep keeps the uploads a reply draft names.
  */
 

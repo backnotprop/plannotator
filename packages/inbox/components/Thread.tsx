@@ -1341,7 +1341,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * The reply box's words, kept per thread as a server draft (approval
    * "inbox-reply-drafts"): saved while typing, back when the thread opens.
    */
-  /** Two windows' file changes merged quietly: the box takes the draft's files (set below, once the tiles exist). */
+  /** A save of this window's landed: the box takes the draft's files (set below, once the tiles exist). */
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
   const replyDraft = useReplyDraft(thread.thread_id, { onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted) });
   /** The words a Send carries: the box's, or (the box closed) those kept as its draft. */
@@ -1389,6 +1389,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     filesSaved.current = pastedSignature(held);
     replyDraft.boxTook(threadRef.current.thread_id, held.map((file) => file.upload_id));
   };
+  /** Every upload this pane's box finished: a file whose save has not landed comes back as a tile when the box opens again. */
+  const uploadsSeen = useRef(new Map<string, InboxUpload>());
+  for (const upload of replyFiles.uploaded) uploadsSeen.current.set(upload.upload_id, upload);
+  /**
+   * The draft's files with this window's changes not saved yet (`withMyChanges`), as tiles. A file added here whose
+   * upload this pane no longer knows is left out: it still goes with the next save, and the box takes it from that.
+   */
+  const draftFilesWithMine = (files: readonly InboxDraftFile[]): InboxDraftFile[] =>
+    replyDraft.withMyChanges<InboxDraftFile | { upload_id: string; pasted?: InboxDraftFile['pasted'] }>(files).flatMap((file) => {
+      if ('name' in file) return [file];
+      const upload = uploadsSeen.current.get(file.upload_id);
+      return upload ? [{ ...upload, ...(file.pasted ? { pasted: file.pasted } : {}) }] : [];
+    });
   const filesNow = pastedSignature(replyFiles.draftFiles());
   /** Files that leave the box still uploading go on, and join this thread's draft once in (not another machine's thread). */
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
@@ -2839,7 +2852,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setBox({ open: true, text: kept });
     // Its files come back as tiles (a long paste's Put back still works), beside any the person attached before the
     // draft was read. Words a conflict left here have none.
-    if (replyDraft.conflict === null) takeDraftFiles(replyDraft.draft?.files ?? [], kept, 'add');
+    if (replyDraft.conflict === null) takeDraftFiles(draftFilesWithMine(replyDraft.draft?.files ?? []), kept, 'add');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
@@ -3153,8 +3166,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? '';
     const text = kept.trim() ? kept : '';
     setBox({ open: true, text });
-    // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft).
-    if (replyDraft.conflict === null && replyDraft.draft?.files?.length) takeDraftFiles(replyDraft.draft.files, text);
+    // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft), with
+    // this window's changes not saved yet; the box's next save counts from them.
+    if (replyDraft.conflict === null) {
+      const files = draftFilesWithMine(replyDraft.draft?.files ?? []);
+      if (files.length > 0) takeDraftFiles(files, text);
+      else replyDraft.boxTook(thread.thread_id, replyFiles.draftFiles(text).map((file) => file.upload_id));
+    }
     setError(null);
   };
 

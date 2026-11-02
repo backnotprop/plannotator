@@ -9,11 +9,16 @@
  *  - another window's file comes into a box with no edits, and a file it
  *    removed goes; two windows adding files at once both keep theirs, with no
  *    "Keep mine / Discard" line, which only different words bring;
- *  - a save taken from the box while a quiet merge (or the save it follows)
- *    is on its way (a slow phone link) still keeps the other window's file;
- *    a file attached or removed meanwhile stays so, in the box and the draft;
- *    a file the other window swaps meanwhile is followed; a merged file whose
- *    upload is gone before a later save runs is dropped once, with no loop;
+ *  - saves carry the box's file changes, not its list: a save held on its way
+ *    (a slow phone link) keeps the other window's file; a file attached or
+ *    removed meanwhile stays so, in the box and the draft; a file the other
+ *    window adds, swaps or removes meanwhile is followed; a save refused twice
+ *    keeps both phone files; Keep mine never brings back a file the phone took
+ *    out; an added file whose upload is gone is left out, with no loop, and an
+ *    older save never lands after a newer one; a file change whose save gets
+ *    no answer waits for the next save (the restart guard asks); Discard and
+ *    Discard mine drop waiting file changes. After each step the box's tiles
+ *    are the saved draft's files;
  *  - a file still uploading when Cancel closes the box lands in the draft
  *    once in (the restart guard asks meanwhile), and the foot's Send carries
  *    it; so does one when the pane is given another thread, or closes;
@@ -330,7 +335,7 @@ test.skipIf(!hasDom)("another window's file comes into a box with no edits, and 
   const theirs = await uploadAsOther('theirs.png', 1);
   await saveAsOther('Both shots', [theirs.upload_id], (await serverDraft())!.updated_at);
   attach(el, [image('mine.png', 2)]);
-  // This window's save was a step behind: merged quietly, both files kept, the box shows both.
+  // This window's save was a step behind: its added file joins the other window's, both kept, the box shows both.
   await until(async () => (await draftNames()).join() === 'theirs.png,mine.png', 'both files in the draft');
   await until(() => tiles(el).sort().join() === 'mine.png:done,theirs.png:done', 'both tiles in the box');
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
@@ -768,11 +773,90 @@ test.skipIf(!hasDom)('a file whose save gets no answer waits for the next save: 
   expect((await serverDraft())?.body).toBe('Hi');
   expect(await draftNames()).toEqual([]);
   expect(unsentReply()).not.toBeNull();
-  await settle(1000);
+  // The box closed (its own save gets no answer either): the file change still waits, and the guard still asks.
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
+  await settle(1500);
   expect(unsentReply()).not.toBeNull();
   offline = false;
+  act(() => button(el, 'Edit draft').click());
+  await until(() => replyBox(el) !== null, 'the box again');
+  // The tile is back with the draft's words: this window's file not saved yet.
+  expect(tiles(el)).toEqual(['late.png:done']);
   type(replyText(el)!, 'Hi there!');
   await until(async () => (await serverDraft())?.body === 'Hi there!' && (await draftNames()).join() === 'late.png', 'the words and the file saved');
+  await until(() => tiles(el).join() === 'late.png:done', 'the tile back in the box');
   expect(await boxMatchesDraft(el)).toBe(true);
   await until(() => unsentReply() === null, 'the guard at rest');
+}, 30_000);
+
+test.skipIf(!hasDom)('Discard mine drops the file this window attached during the conflict: it never lands later', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  attach(el, [image('mine.png', 95)]);
+  await until(() => tiles(el).join() === 'mine.png:done', 'my tile in');
+  type(replyText(el)!, 'Hi mine');
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict line');
+  act(() => (el.querySelector('[data-draft-conflict] [data-draft-discard]') as HTMLButtonElement).click());
+  await until(() => replyText(el)?.value === 'Phone words', "the other window's words in the box");
+  expect(tiles(el)).toEqual([]);
+  await until(() => unsentReply() === null, 'the guard at rest');
+  type(replyText(el)!, 'Phone words!');
+  await until(async () => (await serverDraft())?.body === 'Phone words!', 'the next words saved');
+  await settle(800);
+  expect(await draftNames()).toEqual([]);
+  expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+test.skipIf(!hasDom)('Discard drops a file change that is still waiting for a save: the next draft starts without it', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  offline = true;
+  attach(el, [image('waiting.png', 97)]);
+  await until(() => tiles(el).join() === 'waiting.png:done', 'the tile in');
+  type(replyText(el)!, 'Hi there');
+  await settle(1500);
+  offline = false;
+  expect(unsentReply()).not.toBeNull();
+  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  await until(async () => (await serverDraft()) === null, 'the draft gone');
+  await until(() => unsentReply() === null, 'the guard at rest');
+  type(await openReply(el), 'New words');
+  await until(async () => (await serverDraft())?.body === 'New words', 'the new words saved');
+  await settle(800);
+  expect(await draftNames()).toEqual([]);
+  expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+test.skipIf(!hasDom)('a save refused for words its unanswered save left behind never lands after the newer save queued behind it', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  // A save gets no answer and never landed.
+  offline = true;
+  type(replyText(el)!, 'Hi a');
+  await settle(1500);
+  offline = false;
+  expect((await serverDraft())?.body).toBe('Hi');
+  // The other window adds a file (the same words): the next save here is refused, its known words behind.
+  const theirs = await uploadAsOther('theirs.png', 91);
+  await saveAsOther('Hi', [theirs.upload_id], (await serverDraft())!.updated_at);
+  const slow = holdSaveWhere((body) => body.includes('"Hi ab"'));
+  type(replyText(el)!, 'Hi ab');
+  await until(slow.held, 'the save held');
+  // A newer save queues behind it.
+  type(replyText(el)!, 'Hi abc');
+  await settle(800);
+  const before = posted.length;
+  slow.release();
+  await until(async () => (await serverDraft())?.body === 'Hi abc', 'the newest words saved');
+  await settle(1500);
+  expect((await serverDraft())?.body).toBe('Hi abc');
+  expect(await draftNames()).toEqual(['theirs.png']);
+  await until(() => tiles(el).join() === 'theirs.png:done', 'their tile in the box');
+  expect(await boxMatchesDraft(el)).toBe(true);
+  expect(posted.slice(before).filter((p) => p.path.endsWith('/draft')).length).toBeLessThan(4);
 }, 30_000);

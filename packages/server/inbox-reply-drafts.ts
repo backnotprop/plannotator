@@ -6,14 +6,17 @@
  * `serverSession`; another site's read refused):
  *
  *   GET  /api/inbox/threads/:id/draft          `{ draft }` (null when none)
- *   POST /api/inbox/threads/:id/draft          `{ body, base, files?, all_files? }`: save (a compare-and-set on
- *                                              `updated_at`; 409 `draft_conflict` with the newer
- *                                              draft); an empty body with no files deletes it
+ *   POST /api/inbox/threads/:id/draft          `{ body, base, files_add?, files_remove?, files_place? }`: save (a
+ *                                              compare-and-set on `updated_at`; 409 `draft_conflict` with the
+ *                                              newer draft); an empty body with no files deletes it
  *   POST /api/inbox/threads/:id/draft/delete   Discard
  *
- * `files`: every file in the box (paperclip, drop, paste), each a pending
- * upload, a long paste (approval "inbox-paste-attachment") with where it goes
- * back in the words (`pasted`). `all_files: true` says the list is all of them;
+ * The draft's files are every file in the box (paperclip, drop, paste), each a
+ * pending upload, a long paste (approval "inbox-paste-attachment") with where
+ * it goes back in the words (`pasted`). The window's save names its changes to
+ * them (`files_add`, `files_remove`, `files_place`), applied to the draft's
+ * files as they are, and then only different words refuse it. A save with a
+ * list (`files`) instead: `all_files: true` says the list is all of them;
  * without it (an older page, which knew long pastes only) the draft's other
  * files stay. The Send that carries the draft settles it (`clear_draft:
  * <updated_at>` on the reply route): the words and the files it carried go, a
