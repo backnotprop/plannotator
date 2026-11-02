@@ -60,6 +60,7 @@ import {
   type QueueState,
   type SessionChip,
 } from './model';
+import { newUuid } from '../uuid';
 
 export { DECISION_HOLD_MS } from './model';
 /**
@@ -514,7 +515,7 @@ export function DecisionMode(props: DecisionModeProps) {
         const last = sendContents.current.get(keyId);
         // A replay of a key answers the reply it wrote: a changed answer (a new revision) takes a new key.
         const renew = !sendKeys.current.has(keyId) || (last !== undefined && replyKeysToRenew(new Map([[keyId, last]]), new Map([[keyId, contents]])).length > 0);
-        if (renew) sendKeys.current.set(keyId, crypto.randomUUID());
+        if (renew) sendKeys.current.set(keyId, newUuid());
         sendContents.current.set(keyId, contents);
         const result = await inboxApi.reply(target.message.id, {
           idempotency_key: sendKeys.current.get(keyId)!,

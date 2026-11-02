@@ -108,7 +108,8 @@ export async function removeInboxScratch(root?: string): Promise<void> {
   }
   await stopProvenInboxes(targets);
   for (const dir of chosen) {
-    rmSync(dir, { recursive: true, force: true });
+    // A short retry: a process that is still exiting may write into the folder while it is removed (ENOTEMPTY).
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     roots.delete(dir);
   }
 }

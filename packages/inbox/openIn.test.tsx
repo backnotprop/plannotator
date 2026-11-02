@@ -25,6 +25,7 @@ import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const { resetPageSessionForTests } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -107,6 +108,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   if (!hasDom) return;
+  // The api module keeps the first server session it read; an earlier file's server is not this one's (CI runs each file with --isolate).
+  resetPageSessionForTests();
   world = worlds.shift()!;
   viaTailnet = false;
   document.cookie = 'plannotator-open-in-app=; path=/; max-age=0';
