@@ -304,9 +304,9 @@ test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, th
 });
 
 /** The thread's reply draft as the Inbox holds it (null: none). */
-async function serverDraft(threadId: string): Promise<{ body: string } | null> {
+async function serverDraft(threadId: string): Promise<{ body: string; files?: { upload_id: string }[] } | null> {
   const answer = await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url));
-  return ((await answer.json()) as { draft: { body: string } | null }).draft;
+  return ((await answer.json()) as { draft: { body: string; files?: { upload_id: string }[] } | null }).draft;
 }
 
 /** Type `words` at the end of a long draft in a fresh page, close that page at once (within the 500 ms save pause), and reopen. */
@@ -346,6 +346,30 @@ test('words alone over a keepalive (64 KiB), edited and closed at once: the edit
   } finally {
     await again.close();
   }
+});
+
+test('a reload brings the draft back with its long paste as the tile, past its Undo; Put back reads the words from the upload', async () => {
+  const { page } = world;
+  const threadId = await newThread('Draft with a log');
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  const box = pane.locator('.ib-rbox');
+  await box.getByRole('textbox').pressSequentially(`${BEFORE}${AFTER}`);
+  await caretAt(page, BOX, BEFORE.length);
+  expect(await pasteText(page, LOG)).toBe(true);
+  await expect.poll(async () => (await serverDraft(threadId))?.files?.length ?? 0, { timeout: 10_000 }).toBe(1);
+  await page.reload();
+  const tile = box.locator('[data-pasted-text]');
+  await expect(tile).toHaveCount(1);
+  await expect(tile).not.toHaveAttribute('data-pasted-fresh', /.*/);
+  expect((await field(page, BOX)).value).toBe(`${BEFORE}${AFTER}`);
+  await page.mouse.move(0, 0);
+  await shot(page, '09-reload-draft-tile');
+  await tile.locator('[data-pasted-put-back]').click();
+  await expect(tile).toHaveCount(0);
+  expect((await field(page, BOX)).value).toBe(`${BEFORE}${LOG}${AFTER}`);
+  expect(world.errors).toEqual([]);
 });
 
 test('New message: a pasted tile and no words sends; the new thread shows the file', async () => {
