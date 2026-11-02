@@ -123,6 +123,9 @@ const refusedThreads = new Set<string>();
 const conflictFileBase = new Map<string, readonly string[]>();
 /** Files that left the box still uploading (Cancel, another thread) and have not landed in their draft yet. */
 let landing = 0;
+/** Per thread: raised by each Discard here. A file still landing from before one joins no draft (it was thrown away). */
+const discards = new Map<string, number>();
+const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
 export function replyDraftUnsaved(): boolean {
   return unsaved > 0 || landing > 0 || conflictWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0;
 }
@@ -131,17 +134,19 @@ export function replyDraftUnsaved(): boolean {
  * A file that left the reply box still uploading (the box closed, or the person went to another thread): once
  * its upload is in, it joins that thread's draft, beside whatever words and files the draft holds then (read,
  * then saved on that version; read again if another window saved meanwhile). Until then the restart guard asks.
- * An upload that fails or is stopped joins nothing.
+ * An upload that fails or is stopped joins nothing, nor does one whose draft this window discarded meanwhile.
  */
 export function landInReplyDraft(threadId: string, upload: Promise<InboxUpload | null>, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
   landing += 1;
   unsavedChanged();
+  const discarded = discardsOf(threadId);
   return (async () => {
     const done = await upload.catch(() => null);
     if (!done) return;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (discardsOf(threadId) !== discarded) return;
       const latest = await store.read(threadId).catch(() => undefined);
-      if (latest === undefined) return;
+      if (latest === undefined || discardsOf(threadId) !== discarded) return;
       const files = draftFilesOf(latest);
       if (files.some((file) => file.upload_id === done.upload_id)) return;
       const body = latest?.body ?? '';
@@ -178,9 +183,10 @@ export interface ReplyDraftOptions {
   store?: ReplyDraftStore;
   /**
    * Two windows' file changes were merged quietly and saved: the box takes the draft's files (the thread
-   * whose draft it is, and the draft as saved).
+   * whose draft it is, and the draft as saved). `base`: the file ids the box held when the merge was made,
+   * so a change the person made to the box since then is kept on top (`mergeReplyDraftFiles`).
    */
-  onFiles?: (threadId: string, draft: InboxReplyDraft) => void;
+  onFiles?: (threadId: string, draft: InboxReplyDraft, base: readonly string[]) => void;
 }
 
 export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {}) {
@@ -193,7 +199,28 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   onFilesRef.current = options.onFiles;
   const readDraft = (target: string) => readStoredDraft(storeRef.current, target);
   const chain = useRef<Promise<void>>(Promise.resolve());
-  const pending = useRef<{ threadId: string; text: string; files: ReplyDraftFiles } | null>(null);
+  const pending = useRef<{ threadId: string; text: string; files: ReplyDraftFiles; seq: number } | null>(null);
+  /** Raised each time the box's words and files are taken for a save: a save's place among the box's states. */
+  const captures = useRef(0);
+  const capture = () => captures.current++;
+  /**
+   * Per thread, the last quiet file merge saved: the box took its files (`onFiles`) once saves captured before
+   * `before` were already taken. Those saves (queued, or waiting for the pause in typing) carry the box's files
+   * from before the merge, so each applies its own change since `base` to the merged list (`theirs`) as it goes:
+   * a file the other window added stays in the draft.
+   */
+  const merges = useRef(new Map<string, { before: number; base: readonly string[]; theirs: ReplyDraftFiles }>());
+  /** `files` as a save captured at `seq` sends them: on the last merge's list when the box took it after. */
+  const rebased = (target: string, text: string, files: ReplyDraftFiles, seq: number): ReplyDraftFiles => {
+    const merge = merges.current.get(target);
+    if (!merge || seq >= merge.before) return files;
+    return placedIn(mergeReplyDraftFiles(merge.base, files, merge.theirs), text);
+  };
+  /** A quiet merge's files are in the draft as `draft`: the box takes them (its own change since `base` kept). */
+  const tookMerge = (target: string, draft: InboxReplyDraft, base: readonly string[]) => {
+    merges.current.set(target, { before: captures.current, base, theirs: draftFilesOf(draft) });
+    onFilesRef.current?.(target, draft, base);
+  };
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = useRef(threadId);
   current.current = threadId;
@@ -286,18 +313,20 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   };
 
   /**
-   * Save `text` and `files`. `merged`: the files are a quiet merge of two windows' changes, so once saved the
-   * box takes them (`onFiles`).
+   * Save `text` and `files`, taken from the box at `seq`. `mergedFrom`: the files are a quiet merge of two
+   * windows' changes onto the box's files with these ids, so once saved the box takes them (`onFiles`).
    */
-  const write = useCallback((target: string, text: string, files: ReplyDraftFiles = NO_FILES, merged = false) => {
+  const write = useCallback((target: string, text: string, captured: ReplyDraftFiles = NO_FILES, mergedFrom: readonly string[] | null = null, seq = capture()) => {
     unsaved += 1;
     unsavedChanged();
     const generation = generationOf(target);
     if (target === current.current) {
       lastWords.current = text;
-      lastFiles.current = files;
+      lastFiles.current = captured;
     }
     chain.current = chain.current.then(async () => {
+      // Taken before the box took a quiet merge's files: sent on the merged list, never without the other window's file.
+      const files = rebased(target, text, captured, seq);
       // `base_body` / `base_files`: a save of this window's that landed without its answer still counts as its own.
       const baseBody = sentWords.current.get(target);
       const baseFiles = sentFiles.current.get(target);
@@ -339,7 +368,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
             unsend();
             const gone = /^files\[(\d+)\]$/.exec(fieldOf(cause) ?? '');
             const rest = gone ? files.filter((_, index) => index !== Number(gone[1])) : NO_FILES;
-            if (generation === generationOf(target)) write(target, text, rest, merged);
+            if (generation === generationOf(target)) write(target, text, rest, mergedFrom, seq);
             return;
           }
           if (codeOf(cause) !== 'draft_conflict') throw cause;
@@ -354,7 +383,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
             ownClears.current.delete(target);
             learn(target, latest);
             show(target, latest);
-            if (generation === generationOf(target)) write(target, text, files);
+            if (generation === generationOf(target)) write(target, text, files, null, seq);
             return;
           }
           // What this window last knew of the draft: its own change since is what it adds to the newer one.
@@ -366,8 +395,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
             learn(target, latest);
             show(target, latest);
             const together = placedIn(mergeReplyDraftFiles(knownFiles, files, draftFilesOf(latest)), text);
-            if (replyContentKey(text, together) !== draftKey(latest)) write(target, text, together, true);
-            else onFilesRef.current?.(target, latest);
+            const mine = files.map((file) => file.upload_id);
+            if (replyContentKey(text, together) !== draftKey(latest)) write(target, text, together, mine, seq);
+            else tookMerge(target, latest, mine);
             return;
           }
           learn(target, latest);
@@ -385,7 +415,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         markRefused(target, false);
         learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
-        if (merged && answer.draft) onFilesRef.current?.(target, answer.draft);
+        if (mergedFrom && answer.draft) tookMerge(target, answer.draft, mergedFrom);
       } catch {
         // No answer: read back what may have landed. Otherwise kept in the box; the next pause in typing tries again.
         await readBack(target, text, generation, files);
@@ -402,7 +432,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     timer.current = null;
     const next = pending.current;
     pending.current = null;
-    if (next) write(next.threadId, next.text, next.files);
+    if (next) write(next.threadId, next.text, next.files, null, next.seq);
   }, [write]);
 
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
@@ -434,6 +464,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
       if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
+      const files = rebased(next.threadId, next.text, next.files, next.seq);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
         .save(
@@ -442,15 +473,15 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
             body: next.text,
             base: baseOf(next.threadId),
             baseBody: lastWords.current,
-            files: next.files,
+            files,
             baseFiles: lastWords.current !== null ? lastFiles.current.map((file) => file.upload_id) : null,
           },
           { keepalive: true },
         )
         .catch(() => {});
       sentWords.current.set(next.threadId, next.text);
-      sentFiles.current.set(next.threadId, next.files);
-      keptAlive.current = { threadId: next.threadId, text: next.text, files: next.files, generation: generationOf(next.threadId) };
+      sentFiles.current.set(next.threadId, files);
+      keptAlive.current = { threadId: next.threadId, text: next.text, files, generation: generationOf(next.threadId) };
     };
     // Back from the back/forward cache: the keepalive's answer was never read, and the `drafts` frames
     // sent meanwhile are not replayed. Read back what it saved.
@@ -493,7 +524,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         } else setConflict(target, text);
         return;
       }
-      pending.current = { threadId: target, text, files };
+      pending.current = { threadId: target, text, files, seq: capture() };
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(flush, REPLY_DRAFT_SAVE_MS);
     },
@@ -507,6 +538,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     pending.current = null;
     const target = current.current;
     bump(target);
+    // A file still landing from an earlier Cancel or thread switch was thrown away with the rest.
+    discards.set(target, discardsOf(target) + 1);
     setConflict(target, null);
     // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
@@ -641,7 +674,13 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       setConflict(target, null);
       setState((s) => ({ ...s, conflict: null }));
       if (base === undefined || theirs === null) write(target, text, files);
-      else write(target, text, placedIn(mergeReplyDraftFiles(base, files, draftFilesOf(theirs)), text), true);
+      else
+        write(
+          target,
+          text,
+          placedIn(mergeReplyDraftFiles(base, files, draftFilesOf(theirs)), text),
+          files.map((file) => file.upload_id),
+        );
     },
     [write],
   );

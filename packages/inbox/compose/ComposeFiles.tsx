@@ -413,13 +413,13 @@ export function useComposeFiles(
    * the box opened again): its tiles become the draft's, a long paste anchored
    * in `words`. `add`: tiles already here all stay, the draft's join them (the
    * person attached before the draft was read). Otherwise a finished tile the
-   * draft no longer holds goes (another window removed it). Tiles already here
-   * keep their state. A file here that is not uploaded yet (or whose upload was
-   * refused) is in no draft: it stays, a paste's text still to put back,
-   * carried into `words`.
+   * draft no longer holds goes (another window removed it), unless `alsoKeep`
+   * names it (attached here since). Tiles already here keep their state. A file
+   * here that is not uploaded yet (or whose upload was refused) is in no draft:
+   * it stays, a paste's text still to put back, carried into `words`.
    */
-  const restoreDraft = useCallback((list: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace') => {
-    const wanted = new Set(list.map((file) => file.upload_id));
+  const restoreDraft = useCallback((list: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
+    const wanted = new Set([...list.map((file) => file.upload_id), ...alsoKeep]);
     const here = new Set(filesRef.current.filter((file) => file.upload).map((file) => file.upload!.upload_id));
     const keep = (file: ComposeFile) => mode === 'add' || !file.upload || wanted.has(file.upload.upload_id);
     for (const file of filesRef.current) {

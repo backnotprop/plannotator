@@ -49,7 +49,7 @@ function parse(text: string): InboxReplyDraft | null {
     const value = JSON.parse(text) as InboxReplyDraft;
     if (!value || value.v !== 1 || !isInboxId("msg", value.thread_id)) return null;
     if (typeof value.body !== "string" || typeof value.updated_at !== "string" || typeof value.created_at !== "string") return null;
-    // Every file the box held; a long paste also names its place (an Inbox before 0.28.46 kept only those).
+    // Every file the box held; a long paste also names its place (an Inbox of 0.28.46 or earlier kept only those).
     const files = Array.isArray(value.files)
       ? value.files.filter((file) => file && typeof file.upload_id === "string" && (file.pasted === undefined || (!!file.pasted && typeof file.pasted.at === "number")))
       : [];

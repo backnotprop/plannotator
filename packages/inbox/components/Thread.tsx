@@ -47,6 +47,7 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { landInReplyDraft, useReplyDraft } from '../replyDraft';
+import { mergeReplyDraftFiles } from '@plannotator/core/inbox-reply-draft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -1342,8 +1343,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * "inbox-reply-drafts"): saved while typing, back when the thread opens.
    */
   /** Two windows' file changes merged quietly: the box takes the draft's files (set below, once the tiles exist). */
-  const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft) => void>(() => {});
-  const replyDraft = useReplyDraft(thread.thread_id, { onFiles: (threadId, draft) => takeMergedFiles.current(threadId, draft) });
+  const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, base: readonly string[]) => void>(() => {});
+  const replyDraft = useReplyDraft(thread.thread_id, { onFiles: (threadId, draft, base) => takeMergedFiles.current(threadId, draft, base) });
   /** The words a Send carries: the box's, or (the box closed) those kept as its draft. */
   const boxWords = box.open ? box.text.trim() : ((replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '');
   /** The box closed: the files its draft keeps (attached, dropped, pasted, long pastes), which a Send carries too. */
@@ -1381,8 +1382,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * removed saves the draft; one a draft brought back does not save it again.
    */
   const filesSaved = useRef('');
-  const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace') => {
-    replyFiles.restoreDraft(files, words, mode);
+  const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
+    replyFiles.restoreDraft(files, words, mode, alsoKeep);
     // What the draft holds is saved already; tiles the person attached before it was read (`add`) are saved with it.
     filesSaved.current = mode === 'add' ? pastedSignature(files) : pastedSignature(replyFiles.draftFiles());
   };
@@ -1391,9 +1392,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
-  takeMergedFiles.current = (threadId, draft) => {
+  takeMergedFiles.current = (threadId, draft, base) => {
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;
-    takeDraftFiles(draft.files ?? [], boxRef.current.text);
+    // A tile attached or removed here while the merge saved stays so: the person's change since `base` goes on top
+    // (the saves taken before this carry it to the draft, replyDraft.ts `rebased`).
+    const text = boxRef.current.text;
+    const theirs = (draft.files ?? []).map((file) => ({ upload_id: file.upload_id }));
+    const keep = new Set(mergeReplyDraftFiles(base, replyFiles.draftFiles(text), theirs).map((file) => file.upload_id));
+    const onlyHere = [...keep].filter((id) => !theirs.some((file) => file.upload_id === id));
+    takeDraftFiles((draft.files ?? []).filter((file) => keep.has(file.upload_id)), text, 'replace', onlyHere);
   };
   // The sessions the reply box's text tags with `@` (approval "inbox-tag-agents"), as the field reports them.
   const [taggedIds, setTaggedIds] = useState<readonly string[]>([]);
