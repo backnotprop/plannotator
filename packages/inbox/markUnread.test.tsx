@@ -268,7 +268,7 @@ test.skipIf(!hasDom)("a plain update opened from New, its row held in New: the h
   await until(async () => (await serverSection(id)) === 'quiet', 'the look');
   // Held in New (held.ts), read on the server: the header says Mark unread, not Mark read (v0.28.45 and before:
   // Mark read, with Mark unread only in ⋯ More). Labels compared as text: an action label, pinned on purpose.
-  await until(() => sectionOfRow(id) === 'new' && head()!.querySelector('[data-mark-unread]')?.textContent?.trim() === 'Mark unread', 'Mark unread in the header');
+  await until(() => sectionOfRow(id) === 'new' && head()!.querySelector('[data-mark-unread]')?.getAttribute('aria-label') === 'Mark unread', 'Mark unread in the header');
   expect(head()!.querySelector('[data-mark-read]') === null).toBe(true);
   // The header's button is on screen: ⋯ More does not offer it twice.
   expect((await moreUnreadItem()) === null).toBe(true);

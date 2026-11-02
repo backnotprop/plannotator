@@ -2732,9 +2732,15 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-npill-wrap { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; z-index: 60; pointer-events: none; }
 .pn-inbox .ib-npill { pointer-events: auto; transform: translateY(-100%); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 11px; border-radius: 999px; border: 1px solid color-mix(in oklch, var(--primary) 50%, var(--border)); background: var(--popover); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--primary); transition: opacity 160ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .pn-inbox .ib-npill[data-off] { opacity: 0; transform: translateY(-60%); pointer-events: none; visibility: hidden; transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s 120ms; }
-/* the header: the subject once it scrolls away, and Expand all / Fold all */
-.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 120ms ease-out; }
+/* the header: its title (the thread's name; with none, the subject once the body's heading has scrolled away) and
+   Expand all / Fold all. `text-align: left` with `dir="auto"`: a short right-to-left title still sits after the icons
+   before it, and a long one still cuts at its logical end. */
+.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; opacity: 0; transition: opacity 120ms ease-out; }
 .ib-phsubj[data-on] { opacity: 1; }
+/* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
+   pressed over its grid; dimmed when nothing here waits on the person. */
+.pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pn-inbox .ib-iconbtn.ib-readbtn:disabled { opacity: 0.45; background: none; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
@@ -2789,12 +2795,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* ── Mark read, the skip chip and the toast (design record "inbox-mark-read", 2026-10-11) ── */
 /* The header: Archive (icon) | Mark read (labelled), then the thread's own tools. */
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
-.pn-inbox .ib-hbtn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 11px 0 9px; border-radius: 7px; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); border: 1px solid var(--border); flex: none; white-space: nowrap; }
-.pn-inbox .ib-hbtn:hover:not(:disabled) { background: var(--muted); }
-.pn-inbox .ib-hbtn:disabled { opacity: 0.45; }
-.pn-inbox .ib-hbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 13%, transparent); border-color: color-mix(in oklch, var(--primary) 40%, transparent); color: var(--primary); }
 .ib-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 16px; font-weight: 500; }
-.ib-hbtn[aria-pressed="true"] .ib-kbd { color: inherit; border-color: color-mix(in oklch, var(--primary) 40%, transparent); }
 /* The line under the subject while the thread is marked read. */
 .ib-readline { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 14px; padding: 9px 12px; border-radius: 8px; background: var(--ib-band); font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
 .ib-readline > .ib-ic { margin-top: 2px; color: var(--muted-foreground); flex: none; }
@@ -3048,11 +3049,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-pback svg.ib-ic { width: 22px; height: 22px; stroke-width: 2; }
   .ib-pback-l { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ib-phead > .ib-sp { flex: 1; }
-  .ib-phsubj { padding: 0 4px; text-align: center; }
+  .ib-phead .ib-phsubj { padding: 0 4px; }
   .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
   .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
-  /* Mark read beside Back (no hover action on a phone's rows) */
-  .pn-inbox .ib-phead .ib-hbtn { height: 44px; padding: 0 10px; margin: 0 2px; }
   .ib-ptool-l { display: none; }
   .ib-pbody { padding: 16px 16px 24px; }
   .ib-subject { font-size: var(--ib-fs-20, 20px); overflow-wrap: anywhere; }
@@ -4414,18 +4413,6 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
   --ib-tosep-o-s: var(--ib-soft-quiet) 1;
 }
 .ib-phead { border-bottom-color: var(--ib-sep-s, var(--ib-hair)); }
-/* The header's buttons are one family: borderless, the label in the text colour and the icon quiet (audit 12:
-   nothing in the row reads as the primary action). */
-.pn-inbox .ib-hbtn { border-color: var(--ib-hb-line-s, var(--border)); border-radius: var(--ib-r10-s, 7px); font-weight: var(--ib-hb-w-s, 550); transition: var(--ib-fade-s, var(--ib-ui-fade)); }
-.pn-inbox .ib-hbtn svg.ib-ic { color: var(--ib-hb-icon-s); }
-.pn-inbox .ib-hbtn:hover:not(:disabled) { background: var(--ib-hb-hover-s, var(--muted)); }
-.pn-inbox .ib-hbtn[aria-pressed="true"] { background: var(--ib-hb-on-bg-s, color-mix(in oklch, var(--primary) 13%, transparent)); border-color: var(--ib-hb-line-s, color-mix(in oklch, var(--primary) 40%, transparent)); color: var(--ib-hb-on-fg-s, var(--primary)); }
-.pn-inbox .ib-hbtn[aria-pressed="true"] svg.ib-ic { color: var(--ib-hb-on-icon-s); }
-.ib-hbtn .ib-kbd { border-color: var(--ib-hb-line-s, var(--border)); background: var(--ib-hb-kbd-bg-s); color: var(--ib-hb-kbd-fg-s, var(--muted-foreground)); border-radius: var(--ib-hb-kbd-r-s, 4px); min-width: var(--ib-hb-kbd-w-s); text-align: center; }
-.ib-hbtn[aria-pressed="true"] .ib-kbd { border-color: var(--ib-hb-line-s, color-mix(in oklch, var(--primary) 40%, transparent)); color: var(--ib-hb-kbd-fg-s); }
-/* The keycap ends the button: it reaches into the button's end padding, so the space after it matches the
-   space around its letter and label, icon and key read as one control. Off, no margin (today's). */
-.ib-hbtn .ib-kbd { margin-inline-end: var(--ib-hb-kbd-end-s); }
 .pn-inbox .ib-iconbtn { border-radius: var(--ib-r10-s, 7px); transition: var(--ib-fade2-s, var(--ib-ui-fade)); }
 .pn-inbox .ib-iconbtn:hover { background: var(--ib-hb-hover-s, var(--muted)); color: var(--ib-hb-fg-s, var(--muted-foreground)); }
 .pn-inbox .ib-ptool { border-radius: var(--ib-r10-s, 7px); }
@@ -5281,19 +5268,16 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .ib-art-top { margin-bottom: 12px; }
   .ib-art-who { display: none; }
   .pn-inbox .ib-iconbtn.ib-artbtn { min-width: 44px; height: 44px; }
-  /* The header's icons keep their 44 px. Short of room it gives way (headFit.ts, `data-fit`): Mark read and the
-     way back tighten, the Artifacts count leaves the button (its name keeps it), Mark read shows its icon alone
-     (its words kept as its name, visually hidden), then the way back shows its chevron alone (its name says where). */
+  /* The header's icons keep their 44 px. Short of room for the subject it gives way (headFit.ts, `data-fit`): the
+     way back tightens, the Artifacts count leaves the button (its name keeps it), then the way back shows its
+     chevron alone (its name says where). */
   .ib-phead > .ib-iconbtn, .ib-phead > .ib-artbtn { flex: none; }
-  .pn-inbox .ib-phead[data-fit~="tight"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { padding: 0 7px; margin: 0; }
   .pn-inbox .ib-phead[data-fit~="tight"] .ib-pback { padding-right: 6px; }
   .ib-phead[data-fit~="count"] .ib-artbtn-n { display: none; }
   .pn-inbox .ib-phead[data-fit~="count"] .ib-iconbtn.ib-artbtn { width: 44px; padding: 0; }
-  .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) .ib-hbtn-l { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .pn-inbox .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { width: 44px; min-width: 44px; padding: 0; margin: 0; justify-content: center; }
   .ib-phead[data-fit~="back"] .ib-pback-l { display: none; }
   .pn-inbox .ib-phead[data-fit~="back"] .ib-pback { width: 44px; padding: 0; justify-content: center; }
-  /* The scrolled-away subject with no room to be read: a sliver of it is a stray glyph. */
+  /* The subject with no room to be read even then: a sliver of it is a stray glyph. */
   .ib-phead[data-subject-off] .ib-phsubj { visibility: hidden; }
 }
 
