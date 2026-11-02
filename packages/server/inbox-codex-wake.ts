@@ -8,8 +8,8 @@
  * <thread id>` (Codex names its thread on every tool call,
  * `params._meta.threadId`), and the message is marked `wakes` when the call
  * comes from a thread that keeps running (its turn metadata's `turn_trigger`
- * is not `exec`: a `codex exec` run exits after its turn, so its agent keeps
- * wait_for_reply) and this Inbox can run a Codex CLI that queues
+ * is not `exec`: a `codex exec` run exits after its turn, so its agent reads
+ * the thread) and this Inbox can run a Codex CLI that queues
  * (packages/server/inbox-mcp.ts). A command the thread's shell runs carries no
  * turn metadata, so it wakes only for a thread that already woke from a call
  * of its own and that Codex has not disowned since. Then each item waiting for that session
@@ -25,8 +25,8 @@
  *    before the call), and never queued twice, across restarts too;
  *  - exit 0 means queued, not delivered: the item is "Delivered" once the
  *    thread calls an Inbox tool from a turn that started after it was queued
- *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when the agent
- *    reads it (wait_for_reply, read_thread). A turn that starts while the
+ *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when that thread
+ *    reads it itself (read_thread, `recordOwnRead`). A turn that starts while the
  *    call still runs counts, once the call exits 0. Until then the window says
  *    "Queued for Codex; it gets this as its next turn.";
  *  - a call that ran out of time (or that the Inbox's stop cut short) may or
@@ -48,7 +48,7 @@
  *
  * A sweep is one pass over the person's messages (bucketed by recipient), and
  * runs only when it can find something: a store line, a retry coming due, a
- * thread coming back, a wait_for_reply ending, and once at start. No Send now
+ * thread coming back, and once at start. No Send now
  * and no going in by itself after five minutes: Codex never takes a message
  * mid-turn.
  */
@@ -126,7 +126,7 @@ export interface InboxCodexWake {
   uncertain(session: string, itemId: string): boolean;
   /** The items of `session` that are uncertain (see `uncertain`). */
   uncertainItems(session: string): string[];
-  /** Look for items to queue now (the Inbox runs it on every store line, a retry coming due, a wait ending). */
+  /** Look for items to queue now (the Inbox runs it on every store line and a retry coming due). */
   sweep(): Promise<void>;
   stop(): void;
 }
@@ -194,8 +194,6 @@ export function createInboxCodexWake(options: {
   environment: AgentEnvironment;
   /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
-  /** The session holds a wait_for_reply open now that returns items of this thread: those are not queued as well. */
-  waitingOverMcp?: (session: string, threadId: string) => boolean;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
   extraClis?: readonly string[];
   now?: () => number;
@@ -406,8 +404,6 @@ export function createInboxCodexWake(options: {
         const key = `${item.id}.${session}`;
         pendingKeys.add(key);
         if (dead.has(session) || claimed.has(key)) continue;
-        // An open wait_for_reply returns it: it is not queued as a turn as well.
-        if (options.waitingOverMcp?.(session, item.thread_id)) continue;
         work.push({ item, session });
       }
     }

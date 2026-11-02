@@ -11,9 +11,9 @@
  * and the test asserts nothing ever ran it.
  *
  *  1. B offers, A links both ways; each sees the other online.
- *  2. An agent on B asks and long-polls B (wait_for_reply over MCP); A's
- *     merged list and event stream show it; the person answers from A
- *     through the forward; B's waiting agent wakes with the answer.
+ *  2. An agent on B asks; A's merged list and event stream show it; the
+ *     person answers from A through the forward; B's agent reads the answer
+ *     (read_thread over MCP).
  *  3. B sleeps (its Inbox killed): A shows it offline, keeps its rows, and
  *     holds the answer; B starts again, and the answer lands exactly once.
  *  4. Late words: an agent writes again after the person read; the held
@@ -104,7 +104,7 @@ function link(from: Machine, to: Machine): string {
   return code;
 }
 
-/** An agent session on a machine: send_message and wait_for_reply over the real MCP client. */
+/** An agent session on a machine: send_message and read_thread over the real MCP client. */
 async function agentOn(m: Machine) {
   const client = new Client({ name: "inbox-machines-e2e", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base(m)}/mcp`)));
@@ -117,10 +117,13 @@ async function agentOn(m: Machine) {
           arguments: { project_path: m.w.project, agent_session: SESSION, agent_name: "Claude Code", agent_host: "claude-code", body, ...extra },
         })) as { structuredContent: { thread_id: string; message_id: string } }
       ).structuredContent,
-    wait: (threadId: string, seconds: number) =>
-      client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: SESSION, timeout_seconds: seconds } }, undefined, {
-        timeout: (seconds + 30) * 1000,
-      }) as Promise<{ structuredContent: { status: string; reply?: { body: string; message_id: string } } }>,
+    /** The person's newest message in the thread, as this session reads it. */
+    lastReply: async (threadId: string) => {
+      const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: SESSION } })) as {
+        structuredContent: { thread: { messages: { id: string; body: string; author: { kind: string } }[] } };
+      };
+      return read.structuredContent.thread.messages.findLast((m) => m.author.kind === "person");
+    },
   };
 }
 
@@ -247,7 +250,7 @@ describe("linked machines, on three real Inboxes", () => {
     expect(own.err).toContain("own link code");
   }, 60_000);
 
-  test("2. an agent on B asks and waits; the person answers from A; B's agent wakes", async () => {
+  test("2. an agent on B asks; the person answers from A; B's agent reads the answer", async () => {
     const agent = await agentOn(B);
     try {
       // A's merged stream (opened first, as a window holds it) raises B's question as a live record of B's.
@@ -262,7 +265,6 @@ describe("linked machines, on three real Inboxes", () => {
       );
       await subscribed;
       const sent = await agent.send(QUESTION(1), { thread: "case-1" });
-      const waiting = agent.wait(sent.thread_id, 30);
       const frames = await watching;
       expect(frames.find((f) => f.event === "machines")).toBeDefined();
       expect(frames.some((f) => f.event === "machine" && f.data.record?.message?.id === sent.message_id)).toBe(true);
@@ -285,10 +287,9 @@ describe("linked machines, on three real Inboxes", () => {
       expect(answered.status).toBe(200);
       expect(answered.headers.get("x-plannotator-outbox")).toBe("delivered");
       const reply = (await answered.json()) as Json;
-      const woke = await waiting;
-      expect(woke.structuredContent.status).toBe("replied");
-      expect(woke.structuredContent.reply!.body).toContain("Retry with the same key.");
-      expect(woke.structuredContent.reply!.message_id).toBe(reply.reply.id);
+      const read = await agent.lastReply(sent.thread_id);
+      expect(read!.body).toContain("Retry with the same key.");
+      expect(read!.id).toBe(reply.reply.id);
       // A retried Send (the page lost the answer) answers the same reply and writes nothing.
       const again = await windowPost(A, `/api/inbox/m/${B.id}/messages/${sent.message_id}/reply`, {
         idempotency_key: "window-answer-1",
@@ -385,12 +386,10 @@ describe("linked machines, on three real Inboxes", () => {
     const replies = thread.thread.messages.filter((m: Json) => m.author.kind === "person");
     expect(replies).toHaveLength(1);
     expect(replies[0].body).toContain("Alert, do not retry.");
-    // The agent on B, back after the restart, gets the answer that waited: the wake.
+    // The agent on B, back after the restart, reads the answer that waited.
     const back = await agentOn(B);
     try {
-      const woke = await back.wait(sent.thread_id, 10);
-      expect(woke.structuredContent.status).toBe("replied");
-      expect(woke.structuredContent.reply!.body).toContain("Alert, do not retry.");
+      expect((await back.lastReply(sent.thread_id))!.body).toContain("Alert, do not retry.");
     } finally {
       await back.client.close().catch(() => {});
     }

@@ -456,3 +456,4 @@ packages/inbox/heldPick.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
+packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx

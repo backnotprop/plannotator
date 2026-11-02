@@ -10,8 +10,8 @@
  *
  * Two arguments are filled on the Inbox's own tools when the agent left them
  * out: `project_path` (this shim's working folder, the agent's project) and
- * `agent_session`, so `asked_by: "me"` and a thread-less `wait_for_reply` mean
- * this agent session. The session is the agent host's own when the shim runs
+ * `agent_session`, so `asked_by: "me"` means this agent session. The session
+ * is the agent host's own when the shim runs
  * inside one (`inboxHostSessionFromEnv`: a Claude Code session's
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`), so a script or
  * command the session runs sends as that session, exactly as its
@@ -54,7 +54,7 @@ import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 
-const FILLED_TOOLS = new Set(["send_message", "read_thread", "wait_for_reply", "submit_guide", "card"]);
+const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card"]);
 /** The tools that take the project but no session: search (its schema is strict, so no `agent_session`). */
 const PROJECT_ONLY_TOOLS = new Set(["search"]);
 /** The tools that record an author, and so take `agent_host` / `agent_name` (their schemas are strict). A card records who made and moved it. */
