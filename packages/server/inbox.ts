@@ -194,6 +194,7 @@ import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/c
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
+import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -400,6 +401,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
+  cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
   /**
@@ -883,6 +886,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
+  const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
   const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
 
@@ -3305,6 +3309,40 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (prs) store.autoShipCard(id, prs);
         }
         return json({ serverSession, marks });
+      }
+      // A web link's favicon on the opened card (inbox-card-favicons.ts): only a link the person added
+      // (`by: "person"`), https, fetched here and served from this origin, since the window's CSP never
+      // loads a remote image. An agent's link is refused before anything is fetched. Never on the device door.
+      const faviconMatch = /^\/api\/inbox\/cards\/([A-Za-z0-9_]+)\/favicon$/.exec(path);
+      if (faviconMatch) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        const refused = crossSiteCardRead(req);
+        if (refused) return refused;
+        const card = store.card(faviconMatch[1]!);
+        if (!card) throw new InboxError("card_not_found", `No card ${faviconMatch[1]}.`);
+        const href = url.searchParams.get("url") ?? "";
+        const ref = inboxCardRefsOf(card).find((r) => r.url === href && r.source === "web");
+        if (!ref) return json({ error: "No such web link on this card.", code: "favicon_no_link" }, 404);
+        if (ref.by !== "person") return json({ error: "Only a link you added shows its site's icon.", code: "favicon_not_yours" }, 404);
+        let host: string;
+        try {
+          const parsed = new URL(ref.url);
+          if (parsed.protocol !== "https:") return json({ error: "Only an https link shows its site's icon.", code: "favicon_not_https" }, 404);
+          host = parsed.host;
+        } catch {
+          return json({ error: "No such web link on this card.", code: "favicon_no_link" }, 404);
+        }
+        const icon = await cardFavicons.get(host);
+        if (!icon.ok) return json({ error: "No icon for this site.", code: "favicon_miss", miss: icon.miss }, 404);
+        return new Response(icon.body, {
+          headers: {
+            "content-type": icon.type,
+            "cache-control": "private, max-age=86400",
+            "x-content-type-options": "nosniff",
+            "content-security-policy": "sandbox; default-src 'none'",
+            "cross-origin-resource-policy": "same-origin",
+          },
+        });
       }
       // The opened card's links, resolved now (read only; each source's resolver, inbox-card-refs.ts).
       // Never on the device door, like /api/inbox/ref.
