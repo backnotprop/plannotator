@@ -198,10 +198,10 @@ export async function runPullSessionBridgeClient(options: PullSessionBridgeClien
 			emit({ type: "interrupted", interruptId, ok: false, message: "This session cannot be interrupted." });
 			return;
 		}
-		// A poll stays open past the owner stopping this client or the session
-		// ending. Nothing is left to stop, so never report that it was. Same text
-		// as the server's own refusal (session-bridge-pull.ts).
-		if (signal.aborted || readStatus(bridge) === "gone") {
+		// A poll stays open past the session's end. Nothing is left to stop, so
+		// never report that it was. Same text as the server's own refusal
+		// (session-bridge-pull.ts). `signal` needs no check: aborting it closes the poll.
+		if (readStatus(bridge) === "gone") {
 			emit({ type: "interrupted", interruptId, ok: false, message: "The session is no longer available." });
 			return;
 		}

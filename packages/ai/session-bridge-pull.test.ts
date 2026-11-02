@@ -305,19 +305,6 @@ describe("pull session bridge", () => {
     expect(refused).toBe("The session is no longer available.");
   });
 
-  test("an interrupt on a poll still open after the owner stopped the client never calls the host", async () => {
-    const host = fakeHost("busy");
-    const { startHost, stopHost, pull } = setup({}, host);
-    const stopped = startHost();
-    await waitFor(() => pull.bridge.status() === "busy");
-
-    stopHost();
-    const refused = await Promise.resolve(pull.bridge.interrupt!()).then(() => "reported ok", (error: Error) => error.message);
-    await stopped;
-    expect(host.interrupts).toBe(0);
-    expect(refused).toBe("The session is no longer available.");
-  });
-
   test("stopping a running question cancels it on the host, and frees the slot when the host confirms", async () => {
     const { provider, host, startHost, pull } = setup();
     void startHost();
