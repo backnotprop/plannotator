@@ -30,6 +30,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -424,12 +425,21 @@ test('a phone: Hide, then Show tools, brings the reply back working (the card, a
       }
       // The reply works as it is: not inert, and a tap in it types.
       await expect(card(page)).toHaveJSProperty('inert', false);
+      // A tap, then a real finger (touch events from the DevTools protocol), each focus the field and leave the
+      // tools out. Focus moving off the handle into the reply used to tuck the toolbar, which took the reply with it.
       await replyField(page).tap({ timeout: 10_000 });
-      // The press in the reply did not tuck the tools again, and the words go in.
+      await expect(replyField(page)).toBeFocused();
       await expect(dock).toHaveAttribute('data-bar', 'revealed');
-      await replyField(page).fill(`${WORDS} ${minimized ? 'two' : 'one'}`);
-      await expect(replyField(page)).toHaveValue(/ (one|two)$/);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      const box = (await replyField(page).boundingBox())!;
+      const touch = await finger(page, 'chromium');
+      await touch.down(box.x + box.width / 2, box.y + box.height / 2, 0, 0, 0);
+      await touch.up();
+      await expect(replyField(page)).toBeFocused();
       await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await page.keyboard.type(' ok');
+      // The words land where the finger put the caret.
+      await expect(replyField(page)).toHaveValue(/ ok/);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       // Pin the tools back (the revealed toolbar's last button) for the next round.
       await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
