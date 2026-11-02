@@ -118,13 +118,13 @@ describe("the Board page's routes", () => {
     // User feedback #9's exact call.
     const linked = await mcp({ op: "link", card_id: card.id, ref: "https://example.atlassian.net/browse/DEMO-123" });
     expect(linked.isError ?? false).toBe(false);
-    const jira = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://example.atlassian.net/browse/DEMO-123" };
+    const jira = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://example.atlassian.net/browse/DEMO-123", via: "ref" };
     expect(linked.structuredContent?.card?.refs).toEqual([jira]);
     // The same issue pasted from a board is the same link, not a second one.
     const again = await mcp({ op: "link", card_id: card.id, ref: "https://example.atlassian.net/jira/software/projects/DEMO/boards/1?selectedIssue=DEMO-123" });
     expect(again.structuredContent?.card?.refs).toEqual([jira]);
     // The same key on another Jira site is another issue: both are kept.
-    const other = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://jira.acme.corp/browse/DEMO-123" };
+    const other = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://jira.acme.corp/browse/DEMO-123", via: "ref" };
     const twoSites = await mcp({ op: "link", card_id: card.id, ref: other.url });
     expect(twoSites.structuredContent?.card?.refs).toEqual([jira, other]);
     // An ordinary page is still refused, with the accepted forms in the answer.
@@ -143,7 +143,7 @@ describe("the Board page's routes", () => {
   test("a card and its history, newest first", async () => {
     const { server, base, project } = await world();
     const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Roadmap" });
-    server.store.updateCard(card.id, { by: { kind: "person" }, column: "designing" });
+    server.store.updateCard(card.id, { by: { kind: "person" }, column: "in_progress" });
     const answer = (await (await fetch(`${base}/api/inbox/cards/${card.id}`)).json()) as { card: { id: string }; history: { kind: string }[] };
     expect(answer.card.id).toBe(card.id);
     expect(answer.history.map((entry) => entry.kind)).toEqual(["moved", "created"]);

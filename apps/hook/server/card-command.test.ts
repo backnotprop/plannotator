@@ -116,34 +116,34 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(made.stderr).toBe("");
     expect(made.code).toBe(0);
     const created = JSON.parse(made.stdout) as { card: { id: string; agent: unknown } };
-    expect(created.card).toMatchObject({ column: "backlog", said: "lane started" });
+    expect(created.card).toMatchObject({ column: "todo", said: "lane started" });
     // Outside an agent session, the card is nobody's in particular.
     expect(created.card.agent).toMatchObject({ kind: "agent", session: null });
     expect(existsSync(box.browserMarker)).toBe(false);
     const id = created.card.id;
 
-    const moved = await card(box, ["move", id, "your_look", "--you", "pick one of five options"]);
+    const moved = await card(box, ["move", id, "in_review", "--you", "pick one of five options"]);
     expect(moved.code).toBe(0);
-    expect(moved.stdout).toContain("Moved to Your look");
+    expect(moved.stdout).toContain("Moved to In review");
     expect(moved.stdout).toContain('You: "pick one of five options"');
     expect((await card(box, ["say", id, "--you", "pick one of five options, or none"])).code).toBe(0);
-    expect((await card(box, ["move", id, "building", "--pr", "backnotprop/plannotator#2020"])).stdout).toContain("links backnotprop/plannotator#2020");
+    expect((await card(box, ["move", id, "in_progress", "--pr", "backnotprop/plannotator#2020"])).stdout).toContain("links backnotprop/plannotator#2020");
     const shipped = await card(box, ["ship", id, "--say", "merged"]);
     expect(shipped.stderr).toBe("");
-    expect(shipped.stdout).toContain("Shipped");
+    expect(shipped.stdout).toContain("Moved to Done");
 
     const live = await card(box, ["list"]);
     expect(live.code).toBe(0);
     expect(live.stdout).toContain("0 cards");
     const all = await card(box, ["list", "--all", "--json"]);
-    expect((JSON.parse(all.stdout) as { cards: { id: string; column: string }[] }).cards).toEqual([expect.objectContaining({ id, column: "shipped" })]);
+    expect((JSON.parse(all.stdout) as { cards: { id: string; column: string }[] }).cards).toEqual([expect.objectContaining({ id, column: "done" })]);
   }, 30_000);
 
   test("inside a Claude Code session the card is that session's, and list shows the session's own", async () => {
     const box = sandbox();
     await seed(box);
     const session = { PLANNOTATOR_SESSION_TAG: "claude-code:0193abcd-1111" };
-    const made = await card(box, ["create", "Delivery ticks", "--column", "building", "--json"], session);
+    const made = await card(box, ["create", "Delivery ticks", "--column", "in_progress", "--json"], session);
     expect(made.code).toBe(0);
     expect(JSON.parse(made.stdout).card.agent).toEqual({ kind: "agent", host: "claude-code", session: "0193abcd-1111", name: "Claude Code" });
     await card(box, ["create", "Somebody else's"]);
@@ -156,10 +156,12 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     const box = sandbox();
     await seed(box);
     const id = (JSON.parse((await card(box, ["create", "Triage", "--json"])).stdout) as { card: { id: string } }).card.id;
-    const iced = await card(box, ["move", id, "icebox"]);
-    expect(iced.code).toBe(1);
-    expect(iced.stdout).toBe("");
-    expect(iced.stderr).toStartWith("card_icebox_person_only: Only the person puts a card in the Icebox");
+    const handover = await card(box, ["move", id, "in_review"]);
+    expect(handover.code).toBe(1);
+    expect(handover.stdout).toBe("");
+    expect(handover.stderr).toStartWith("validation_error: you:");
+    // An agent from before v2 says its old column ids: still taken.
+    expect(JSON.parse((await card(box, ["move", id, "designing", "--json"])).stdout).card.column).toBe("in_progress");
     const dropped = await card(box, ["drop", id]);
     expect(dropped.code).toBe(2);
     expect(dropped.stderr).toContain("card drop needs: card_id, reason.");
@@ -222,14 +224,16 @@ describe.if(!INBOX_CARD_ACTION_ON)("plannotator card while the card action is he
 
 describe("parseCardCommand", () => {
   test("maps words and flags onto the tool's fields", () => {
-    expect(parseCardCommand(["move", "crd_x", "building", "--say", "PR open", "--pr", "o/r#1", "--project", "../web", "--json"])).toEqual({
+    expect(parseCardCommand(["move", "crd_x", "in_progress", "--say", "PR open", "--pr", "o/r#1", "--project", "../web", "--json"])).toEqual({
       ok: true,
       op: "move",
-      args: { op: "move", card_id: "crd_x", column: "building", say: "PR open", pr: "o/r#1" },
+      args: { op: "move", card_id: "crd_x", column: "in_progress", say: "PR open", pr: "o/r#1" },
       project: "../web",
       json: true,
     });
     expect(parseCardCommand(["create", "--thread", "msg_1"])).toMatchObject({ ok: true, args: { op: "create", thread_id: "msg_1" } });
+    // `card done` is `card ship` (its column is Done).
+    expect(parseCardCommand(["done", "crd_x", "--say", "merged"])).toMatchObject({ ok: true, args: { op: "ship", card_id: "crd_x", say: "merged" } });
     expect(parseCardCommand(["say", "crd_x", "a", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["say", "crd_x", "a", "--say", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["create"])).toMatchObject({ ok: false });

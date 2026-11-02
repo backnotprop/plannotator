@@ -24,7 +24,7 @@ describe('heldNotice', () => {
       row('b', 'docs-site', '2026-10-07T10:06:00Z', 'agent'),
       row('c', 'docs-site', '2026-10-07T10:07:00Z', 'agent'),
     );
-    expect(heldNotice(shown, fresh)).toEqual({ count: 2, text: '2 new in docs-site' });
+    expect(heldNotice(shown, fresh)).toEqual({ count: 2, text: '2 new in docs-site', project: 'docs-site' });
     const across = sections(...fresh[0]!.threads, row('d', 'billing-svc', '2026-10-07T10:08:00Z', 'agent'));
     expect(heldNotice(shown, across)).toEqual({ count: 3, text: '3 new' });
   });
@@ -36,7 +36,7 @@ describe('heldNotice', () => {
     const home = (id: string, at: string) => ({ ...row(id, 'api', at, 'agent'), project: { id: 'prj_home', name: 'api' } }) as InboxListRow;
     const shown = sections(work('a', '2026-10-07T10:00:00Z'));
     expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z'), home('c', '2026-10-07T10:06:00Z')))).toEqual({ count: 2, text: '2 new' });
-    expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z')))).toEqual({ count: 1, text: '1 new in api' });
+    expect(heldNotice(shown, sections(work('a', '2026-10-07T10:00:00Z'), work('b', '2026-10-07T10:05:00Z')))).toEqual({ count: 1, text: '1 new in api', project: 'api' });
   });
 
   // The notice sits above rows that read the window's short name (projectLabels.ts): it names the project the same way.
@@ -57,7 +57,7 @@ describe('heldNotice', () => {
     const noteOnly = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:00Z' } as InboxListRow);
     expect(heldNotice(shown, noteOnly).count).toBe(0);
     const agentThenNote = sections({ ...row('a', 'billing-svc', '2026-10-07T10:00:10Z', 'person'), last_agent_at: '2026-10-07T10:00:05Z' } as InboxListRow);
-    expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(heldNotice(shown, agentThenNote)).toEqual({ count: 1, text: '1 new in billing-svc', project: 'billing-svc' });
   });
 
   // The failure this guards (inbox-replaced.spec.ts): the agent replaced a
@@ -74,10 +74,10 @@ describe('heldNotice', () => {
     expect(heldNotice(shown, sections(noteAfter)).count).toBe(0);
     // The agent writes after the reply: news.
     const later = { ...row('a', 'billing-svc', '2026-10-12T10:04:00Z', 'agent'), last_agent_at: '2026-10-12T10:04:00Z', sent: null } as InboxListRow;
-    expect(heldNotice(shown, sections(later))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(heldNotice(shown, sections(later))).toEqual({ count: 1, text: '1 new in billing-svc', project: 'billing-svc' });
     // Not on screen, a new thread beside it: only the new thread counts.
     const fresh = { ...row('b', 'billing-svc', '2026-10-12T10:05:00Z', 'agent'), last_agent_at: '2026-10-12T10:05:00Z', sent: null } as InboxListRow;
-    expect(heldNotice(shown, sections(replacedThenSent, fresh))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(heldNotice(shown, sections(replacedThenSent, fresh))).toEqual({ count: 1, text: '1 new in billing-svc', project: 'billing-svc' });
   });
 
   // The failure this guards: a row not on screen counted as news whenever it
@@ -97,7 +97,7 @@ describe('heldNotice', () => {
       { id: 'sent', label: 'Sent', threads: [replied] },
       { id: 'quiet', label: 'Quiet', threads: [checked] },
     ];
-    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(heldNotice(shown, latest)).toEqual({ count: 1, text: '1 new in docs-site', project: 'docs-site' });
     const settled = settleOwn(shown, latest);
     expect(Object.fromEntries(settled.map((s) => [s.id, s.threads.map((t) => t.thread_id)]))).toEqual({ waiting: ['other'], new: [], sent: ['replied'], quiet: ['checked'] });
   });
@@ -158,7 +158,7 @@ describe('settleOwn', () => {
     expect(ids(settled)).toEqual({ waiting: ['wrote'], new: ['next'], sent: ['answered'], quiet: ['read'] });
     // The held row keeps the state that was on screen.
     expect(settled.find((s) => s.id === 'waiting')!.threads[0]!.last_at).toBe(at(2));
-    expect(heldNotice(settled, latest)).toEqual({ count: 2, text: '2 new in docs-site' });
+    expect(heldNotice(settled, latest)).toEqual({ count: 2, text: '2 new in docs-site', project: 'docs-site' });
   });
 
   test("each section is in the list's order (newest first, ties on the id), with held rows among the rest", () => {
@@ -208,7 +208,7 @@ describe('a thread the person brought back', () => {
       { id: 'new', label: 'New since you looked', threads: [fresh] },
     ];
     const here = new Set(['back']);
-    expect(heldNotice(shown, latest, here)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(heldNotice(shown, latest, here)).toEqual({ count: 1, text: '1 new in docs-site', project: 'docs-site' });
     expect(settleOwn(shown, latest, here).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other', 'back'], []]);
   });
 
@@ -223,7 +223,7 @@ describe('a thread the person brought back', () => {
       { id: 'waiting', label: 'Waiting on you', threads: [other] },
       { id: 'quiet', label: 'Quiet', threads: [readOnPhone] },
     ];
-    expect(heldNotice(shown, latest, new Set(['other']))).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(heldNotice(shown, latest, new Set(['other']))).toEqual({ count: 1, text: '1 new in docs-site', project: 'docs-site' });
     expect(settleOwn(shown, latest, new Set(['other'])).map((s) => s.threads.map((t) => t.thread_id))).toEqual([['other'], []]);
   });
 });
@@ -272,7 +272,7 @@ describe('the open thread', () => {
 
   test('an arrival in the open thread is never in "N new"; another thread\'s still is, and the line names only that one', () => {
     expect(heldNotice(shown, bySection(arrived, other), undefined, OPEN)).toEqual({ count: 0, text: null });
-    expect(heldNotice(shown, bySection(arrived, other, elsewhere), undefined, OPEN)).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(heldNotice(shown, bySection(arrived, other, elsewhere), undefined, OPEN)).toEqual({ count: 1, text: '1 new in docs-site', project: 'docs-site' });
     // Without the exemption (no thread open), the same arrival is news as before.
     expect(heldNotice(shown, bySection(arrived, other)).count).toBe(1);
   });
@@ -295,7 +295,7 @@ describe('the open thread', () => {
     expect(ids(settled)).toEqual(['waiting:open', 'new:other']);
     expect(settled.find((s) => s.id === 'waiting')!.threads[0]).toMatchObject({ unread: true });
     // Another thread's agent activity still waits behind Show.
-    expect(heldNotice(settled, bySection(asked, other, elsewhere))).toEqual({ count: 1, text: '1 new in docs-site' });
+    expect(heldNotice(settled, bySection(asked, other, elsewhere))).toEqual({ count: 1, text: '1 new in docs-site', project: 'docs-site' });
     // Without the exemption (the old rule) the unseen arrival waited behind Show and the row kept its old state.
     expect(ids(settleOwn(shown, bySection(asked, other)))).toEqual(['new:open,other']);
   });
@@ -317,7 +317,7 @@ describe('the open thread', () => {
     // Closed with nothing new (the row as on screen); then the agent asks in it.
     const atClose = { ...openShown, section: 'quiet', unseen: 0 } as InboxListRow;
     const onScreen = bySection({ ...atClose }, other);
-    expect(heldNotice(onScreen, bySection(asked, other), undefined, closedAs(atClose))).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(heldNotice(onScreen, bySection(asked, other), undefined, closedAs(atClose))).toEqual({ count: 1, text: '1 new in billing-svc', project: 'billing-svc' });
     expect(refreshHeldRows(onScreen, bySection(asked, other), closedAs(atClose)).find((s) => s.id === 'quiet')!.threads[0]).toMatchObject({ unseen: 0 });
     expect(ids(settleOwn(onScreen, bySection(asked, other), undefined, closedAs(atClose)))).toEqual(['new:other', 'quiet:open']);
     // No row for it at the close (an older list): nothing is exempt.
@@ -502,7 +502,7 @@ describe('the Snoozed band', () => {
     expect(heldNotice(shown, asked).count).toBe(0);
     // Its time came: back in Waiting with `snooze_back`. News, and held where it was drawn until shown.
     const back = model([{ ...a, snooze_back: '2026-10-08T12:00:00Z', last_at: '2026-10-08T12:00:00Z' } as InboxListRow], []);
-    expect(heldNotice(shown, back)).toEqual({ count: 1, text: '1 new in billing-svc' });
+    expect(heldNotice(shown, back)).toEqual({ count: 1, text: '1 new in billing-svc', project: 'billing-svc' });
     const held = settleOwn(shown, back);
     expect(held.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['a']);
     expect(held.find((s) => s.id === 'waiting')!.threads).toEqual([]);

@@ -19,6 +19,7 @@ import type {
   InboxQuestion,
   InboxSoundSettings,
   InboxTextSize,
+  InboxRowsOption,
   InboxTourChange,
   InboxTourState,
   InboxThread,
@@ -377,6 +378,13 @@ export interface SettingsModel {
   theme?: InboxThemeConfig | null;
   /** The window's text size in px (config.json `inboxTextSize`): 12 to 15, 14 unless chosen. Absent from an older Inbox. */
   text_size?: InboxTextSize;
+  /**
+   * How the list's rows look (config.json `inboxRows`): the options that are on. Null until a window first saves it
+   * (this browser's old cookies are adopted then); absent from an older Inbox.
+   */
+  rows?: InboxRowsOption[] | null;
+  /** How many times `rows` was saved (config.json `inboxRowsRev`): a window takes a look only when it is newer. */
+  rows_rev?: number;
   /**
    * The diff layout guided reviews draw (config.json `diffOptions.diffStyle`),
    * shared with code review: null when never chosen. Absent from an older Inbox.
@@ -1225,6 +1233,8 @@ export const inboxApi = {
   tourFixture: () => get<unknown>(inboxUrl('/tour/fixture.json')),
   /** The window's text size, written to config.json `inboxTextSize`. */
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
+  /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
+  saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
   /** The diff layout, written to config.json `diffOptions.diffStyle` (shared with code review). */
   saveDiffStyle: (diffStyle: InboxDiffStyle) => post<{ diff_style: InboxDiffStyle | null }>(inboxUrl('/settings'), { diff_style: diffStyle }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
@@ -1294,13 +1304,13 @@ export const inboxApi = {
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
   cards: () => get<CardsModel>(inboxUrl('/cards')),
   /**
-   * The person's New card: a title, notes and links, in Backlog or the Icebox; or sent: `thread_id` is
-   * the thread compose's Send just started for it (the card lands in that thread's project).
+   * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
+   * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
-  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'icebox'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
+  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
     post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
-  /** The person's move: `move` to a column, `icebox`, `drop` (reason optional), `restore`. */
-  moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'icebox' } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
+  /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
+  moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
   /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
   editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
@@ -1554,6 +1564,8 @@ export interface InboxEventHandlers {
   onPins?: () => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
+  /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
+  onRows?: (rows: unknown, rev: unknown) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1589,7 +1601,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1663,6 +1675,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'snoozes':
       handlers.onSnoozes?.();
+      return;
+    case 'rows':
+      try {
+        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
+        handlers.onRows?.(data.rows, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
       return;
     case 'machine':
       try {

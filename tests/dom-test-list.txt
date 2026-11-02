@@ -126,6 +126,8 @@ packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listIntroDialog.test.tsx
+packages/inbox/rowsSettings.test.tsx
+packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
@@ -169,6 +171,7 @@ packages/inbox/threadReadRetry.test.tsx
 packages/inbox/tabCountWindow.test.tsx
 packages/inbox/phoneList.test.tsx
 packages/inbox/listHeaderPath.test.tsx
+packages/inbox/heldNoticeLine.test.tsx
 packages/inbox/listLabels.test.tsx
 packages/inbox/projectLabelRows.test.tsx
 packages/inbox/projectLabelHeld.test.tsx

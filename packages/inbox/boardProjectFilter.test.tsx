@@ -3,7 +3,7 @@
  * Project button in the Board's header, as the window draws it over a
  * scripted fetch. What regresses: a Board of one project growing a control
  * it does not need; another project's card on the lanes, in the counts, on
- * the Shipped or Icebox page or in the drops; "in" coming back on the
+ * the Done or Cancelled page or in the drops; "in" coming back on the
  * button; the menu offering a project with no card; × or Show all projects
  * not clearing; a card opened from another project closing under the
  * filter; the phone's button squeezed into the header instead of its own
@@ -61,16 +61,16 @@ const PROJECTS = [
 ] as BoardPageProps['projects'];
 
 const CARDS: InboxCardWire[] = [
-  card('web_backlog', WEB),
-  card('web_design', WEB, { column: 'designing' }),
-  card('web_look', WEB, { column: 'your_look', you: 'Pick a dialog' }),
-  card('web_shipped', WEB, { column: 'shipped' }),
-  card('web_ice', WEB, { column: 'icebox', aside_from: 'backlog' }),
-  card('web_drop', WEB, { column: 'dropped', aside_from: 'building', dropped: { at: AT, by: CLAUDE, reason: 'Superseded', seen_at: null } }),
-  card('api_build', API, { column: 'building' }),
-  card('api_review', API, { column: 'your_review', you: 'Merge #3' }),
-  card('api_shipped', API, { column: 'shipped' }),
-  card('docs_ship', 'prj_docs', { column: 'shipped' }),
+  card('web_backlog', WEB, { column: 'todo' }),
+  card('web_design', WEB, { column: 'in_progress' }),
+  card('web_look', WEB, { column: 'in_review', you: 'Pick a dialog' }),
+  card('web_shipped', WEB, { column: 'done' }),
+  card('web_ice', WEB, { column: 'dropped', aside_from: 'backlog', dropped: { at: AT, by: { kind: 'person' }, reason: null, seen_at: AT } }),
+  card('web_drop', WEB, { column: 'dropped', aside_from: 'in_progress', dropped: { at: AT, by: CLAUDE, reason: 'Superseded', seen_at: null } }),
+  card('api_build', API, { column: 'in_progress' }),
+  card('api_review', API, { column: 'in_review', you: 'Merge #3' }),
+  card('api_shipped', API, { column: 'done' }),
+  card('docs_ship', 'prj_docs', { column: 'done' }),
 ];
 
 let root: Root | null = null;
@@ -186,7 +186,6 @@ test.if(hasDom)('a Board whose cards are all in one project has no Project butto
   expect($('[data-board-project-filter]')).toBeNull();
   expect($('.ib-bfbar')).toBeNull();
   expect(shownCards()).toEqual(['web_backlog', 'web_design', 'web_look']);
-  expect($('[data-board-summary]')!.textContent).toBe('3 in flight · 1 on you');
 });
 
 test.if(hasDom)('All projects shows every card; picking a project narrows the lanes, the counts and the links', async () => {
@@ -196,8 +195,7 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   // Unfiltered: today's Board, with the button reading All projects.
   expect(chipWords()).toBe('All projects');
   expect(shownCards()).toEqual(['api_build', 'api_review', 'web_backlog', 'web_design', 'web_look']);
-  expect($('[data-board-summary]')!.textContent).toBe('5 in flight · 2 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 3');
+  expect($('[data-board-link="done"]')!.textContent).toBe('Done 3');
   expect($('[data-dropped-notice]')!.getAttribute('data-dropped-notice')).toBe('1');
   // The button is the Board header's, beside the counts.
   expect($('.ib-bhead [data-board-project-chip]')).not.toBeNull();
@@ -214,11 +212,10 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
 
   expect(drawn.picks).toEqual([API]);
   expect(shownCards()).toEqual(['api_build', 'api_review']);
-  expect(laneIds('building')).toEqual(['api_build']);
-  expect(laneIds('backlog')).toEqual([]);
-  expect($('[data-board-summary]')!.textContent).toBe('2 in flight · 1 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
-  expect($('[data-board-link="icebox"]')!.textContent).toBe('Icebox 0');
+  expect(laneIds('in_progress')).toEqual(['api_build']);
+  expect(laneIds('todo')).toEqual([]);
+  expect($('[data-board-link="done"]')!.textContent).toBe('Done 1');
+  expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 0');
   // web's drop is not api's news.
   expect($('[data-dropped-notice]')).toBeNull();
   // The project's name alone: no "in" (the owner, 2026-10-28), and a way to clear it.
@@ -241,17 +238,16 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(cleared).not.toContain('api');
 });
 
-test.if(hasDom)('Shipped and Icebox (with Dropped) list only the filtered project', async () => {
+test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {
   scriptFetch();
-  const drawn = draw({ view: 'shipped', project: API });
+  const drawn = draw({ view: 'done', project: API });
   await settle();
   expect(shownCards()).toEqual(['api_shipped']);
   expect(chipWords()).toBe('api');
-  drawn.rerender({ view: 'icebox', project: WEB });
+  drawn.rerender({ view: 'cancelled', project: WEB });
   await settle();
-  expect(shownCards()).toEqual(['web_ice']);
-  expect($$('[data-dropped-row]').map((el) => el.getAttribute('data-dropped-row'))).toEqual(['web_drop']);
-  drawn.rerender({ view: 'icebox', project: API });
+  expect($$('[data-dropped-row]').map((el) => el.getAttribute('data-dropped-row')).sort()).toEqual(['web_drop', 'web_ice']);
+  drawn.rerender({ view: 'cancelled', project: API });
   await settle();
   expect(shownCards()).toEqual([]);
   expect($$('[data-dropped-row]')).toEqual([]);
@@ -309,7 +305,7 @@ test.if(hasDom)('a phone: the Project button on its own row under the header, it
   expect($('.ib-bfbar [data-board-project-chip]')).not.toBeNull();
   expect(chipWords()).toBe('web');
   // The stacked list holds only web's cards.
-  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design', 'web_look', 'web_shipped', 'web_ice'].sort());
+  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design', 'web_look', 'web_shipped'].sort());
   await press($('[data-board-project-chip]')!);
   expect($('[data-board-project-menu]')).not.toBeNull();
   expect($('.ib-pm-pos[data-phone] [data-board-project-menu]')).not.toBeNull();
