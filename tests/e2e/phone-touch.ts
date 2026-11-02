@@ -67,6 +67,13 @@ export async function pinch(page: Page, from: [Point, Point], to: [Point, Point]
   await cdp.detach();
 }
 
+/** A real long press (Chromium only, the browser's own gesture): it selects the word under it, as on Android. */
+export async function longPress(page: Page, at: Point, duration = 1_000): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Input.synthesizeTapGesture', { x: at.x, y: at.y, duration, tapCount: 1, gestureSourceType: 'touch' });
+  await cdp.detach();
+}
+
 export interface Finger {
   /** Put one finger down at (x, y) and move it by (dx, dy) in `moves` moves. */
   down(x: number, y: number, dx: number, dy: number, moves?: number): Promise<void>;
