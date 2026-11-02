@@ -94,6 +94,7 @@ import {
 	HTML_ASSET_DOCUMENT_CSP,
 	HTML_ASSET_ERROR_CSP,
 	HTML_ASSET_ROUTE_PREFIX,
+	HTML_NO_NETWORK_MARKER,
 	buildHtmlAssetErrorDocument,
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
@@ -195,18 +196,21 @@ function createHtmlAssetRegistry(
 
 	function rewriteHtml(htmlContent: string, htmlFilePath: string): string {
 		if (/^https?:\/\//i.test(htmlFilePath)) return htmlContent;
+		// Outside the session's roots the viewer's srcdoc frame gets no network
+		// either (HTML_NO_NETWORK_MARKER), as the asset route's document does (mirrors the Bun registry).
+		const outside = isOutside(htmlFilePath);
 		try {
 			const { root, basePath, docDir } = htmlAssetContext(htmlFilePath, folderPath);
-			const token = register(root, docDir, isOutside(htmlFilePath));
+			const token = register(root, docDir, outside);
 			return rewriteHtmlAssetReferences(
 				htmlContent,
 				(assetPath) => `${HTML_ASSET_ROUTE_PREFIX}/${token}/${encodeHtmlAssetPath(assetPath)}`,
 				// Root-relative on purpose: a srcdoc document resolves its own
 				// <base href> against the PARENT's URL, which is this server.
-				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath },
+				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath, noNetwork: outside },
 			);
 		} catch {
-			return htmlContent;
+			return outside ? HTML_NO_NETWORK_MARKER + htmlContent : htmlContent;
 		}
 	}
 

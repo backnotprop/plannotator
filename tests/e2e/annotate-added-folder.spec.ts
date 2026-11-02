@@ -4,7 +4,8 @@
  * in `demo-app`, and the Files sidebar lists `reference-docs`, a folder beside
  * the project (the issue's layout). Clicking a document there renders it.
  * Before the fix the sidebar listed the folder, and opening a document from
- * it answered 403 "Access denied: path is outside project root".
+ * it answered 403 "Access denied: path is outside project root". An HTML page
+ * there renders with no network: its fetch is refused by `connect-src 'none'`.
  *
  * The annotate CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no
  * browser, and is closed with /api/exit. Build the binary first (see
@@ -34,6 +35,18 @@ test('a document in a folder added under Settings → Files opens from the Files
   mkdirSync(added, { recursive: true });
   writeFileSync(join(project, 'notes.md'), '# Project notes\n\nThe session document.\n');
   writeFileSync(join(added, 'intro.md'), '# Reference intro\n\nA document outside the project.\n');
+  // An HTML page outside the project: its script tries the network, which the viewer's frame refuses.
+  writeFileSync(
+    join(added, 'page.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>Outside page</title><script>
+      var seen = [];
+      document.addEventListener('securitypolicyviolation', function (e) { seen.push(e.violatedDirective); });
+      fetch('pic.png', { mode: 'no-cors' }).then(function () { return 'reached'; }, function () { return 'refused'; }).then(function (fetched) {
+        setTimeout(function () { document.getElementById('net').textContent = 'fetch: ' + fetched + ' | violated: ' + seen.join(','); }, 100);
+      });
+    </script></head><body><h1>Outside page</h1><p id="net">probing</p></body></html>`,
+  );
+  writeFileSync(join(added, 'pic.png'), 'PNG-BYTES');
   const readyFile = join(root, 'ready.jsonl');
   const env = {
     PATH: process.env.PATH ?? '',
@@ -82,6 +95,12 @@ test('a document in a folder added under Settings → Files opens from the Files
     expect((await docRead).status()).toBe(200);
     await expect(page.locator('main h1', { hasText: 'Reference intro' })).toBeVisible();
     await expect(page.getByText('A document outside the project.')).toBeVisible();
+
+    // An HTML page there renders in the viewer's frame with no network (connect-src 'none').
+    await page.locator('button[title="page.html"]').click();
+    const frame = page.frameLocator('iframe[srcdoc]').first();
+    await expect(frame.getByRole('heading', { name: 'Outside page' })).toBeVisible();
+    await expect(frame.locator('#net')).toHaveText(/^fetch: refused \| violated: connect-src/);
   } finally {
     await context.close();
     if (url) await fetch(new URL('/api/exit', url), { method: 'POST' }).catch(() => {});

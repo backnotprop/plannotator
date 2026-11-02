@@ -276,8 +276,11 @@ body[data-plannotator-vim-focus-owner]:focus {
  * they match by construction; the check exists for hosts that serve the
  * generated `bridge-script.asset.js` separately (`bridgeScriptUrl`), where a
  * cached asset from a previous package version can outlive the parent code.
+ *
+ * 2: link-clicks travel on a MessagePort the parent hands over in a
+ * `link-port` message after each ready, never on the window.
  */
-export const BRIDGE_PROTOCOL_VERSION = 1;
+export const BRIDGE_PROTOCOL_VERSION = 2;
 
 export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
@@ -311,6 +314,60 @@ export const BRIDGE_SCRIPT = `(function() {
       return;
     }
     parent.postMessage(msg, '*');
+  }
+
+  // --- Private link channel (srcdoc sessions only) ---
+  // A link the person followed moves the host (in the Inbox: to another
+  // thread), so it never rides the window-wide postMessage the page's own
+  // script can forge. The host hands this bridge a MessagePort after every
+  // ready, and link-clicks go out on that port only. The listener is
+  // registered now, at the end of <head>, before any body script exists, and
+  // in the capture phase, so it runs first and stops the event: a page
+  // listener added later never sees the port. Everything it touches is read
+  // now too (the parent, the event getters, the port's methods), so a body
+  // script that later replaces window.parent or a prototype method cannot
+  // reach the port either. A script placed before the bridge in <head> runs
+  // first and owns the realm; nothing in the frame can stop that.
+  var linkPort = null;
+  var sendOnLinkPort = null;
+  if (!LIVE) {
+    var bridgeParent = window.parent;
+    var callOf = Function.prototype.bind.bind(Function.prototype.call);
+    var getterOf = function(proto, name) {
+      var d = proto && Object.getOwnPropertyDescriptor(proto, name);
+      return d && typeof d.get === 'function' ? callOf(d.get) : function(target) { return target[name]; };
+    };
+    var eventSource = getterOf(window.MessageEvent && MessageEvent.prototype, 'source');
+    var eventData = getterOf(window.MessageEvent && MessageEvent.prototype, 'data');
+    var eventPorts = getterOf(window.MessageEvent && MessageEvent.prototype, 'ports');
+    var stopImmediate = callOf(Event.prototype.stopImmediatePropagation);
+    // The prototype of the ports a channel really makes (not whatever the
+    // global MessagePort names), so the methods below are the ones a handed
+    // port answers to.
+    var portProto = null;
+    try {
+      var probeChannel = new MessageChannel();
+      portProto = Object.getPrototypeOf(probeChannel.port1);
+      probeChannel.port1.close();
+      probeChannel.port2.close();
+    } catch (ex) {}
+    var portPost = portProto && portProto.postMessage ? callOf(portProto.postMessage) : null;
+    var portClose = portProto && portProto.close ? callOf(portProto.close) : null;
+    sendOnLinkPort = function(msg) {
+      if (!linkPort || !portPost) return;
+      try { portPost(linkPort, msg); } catch (ex) {}
+    };
+    window.addEventListener('message', function(e) {
+      if (eventSource(e) !== bridgeParent) return;
+      var data = eventData(e);
+      if (!data || data.type !== PREFIX + 'link-port') return;
+      stopImmediate(e);
+      var ports = eventPorts(e);
+      var port = ports && ports[0];
+      if (!port) return;
+      if (linkPort && portClose) { try { portClose(linkPort); } catch (ex) {} }
+      linkPort = port;
+    }, true);
   }
   // Page identity for multi-page live sessions: annotations are stamped with
   // the page they were made on, and restore filters to the current page.
@@ -4543,7 +4600,9 @@ export const BRIDGE_SCRIPT = `(function() {
         try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
         return;
       }
-      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+      // On the host's private port only (see "Private link channel"): the
+      // host takes a link from nowhere else.
+      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
     }, true);
   }
 

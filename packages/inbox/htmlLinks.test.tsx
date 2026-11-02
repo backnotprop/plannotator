@@ -2,8 +2,8 @@
  * Links inside an attached HTML page: the whole window (InboxApp) over a REAL
  * Inbox server in a temp data dir (its own process,
  * tests/helpers/inbox-dom-server.ts in its `html-links` mode). The page's
- * bridge is played by a `link-click` message from the page's own frame, as
- * the bridge posts it in Interact. What is proved: a sibling page that is not
+ * bridge is played by a `link-click` on the port the viewer hands the frame,
+ * as the bridge posts it in Interact. What is proved: a sibling page that is not
  * attached opens read-only over the page with Back, the note and Open in new
  * tab, and Back returns; a link to another attachment of the thread opens it
  * in the pane as a new history entry; an image in the folder that is not
@@ -23,12 +23,12 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../../tests/helpers/no-browser';
+import { followLinkInFrame } from '../ui/test-setup/bridgeLinkPort';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
-const LINK_CLICK = 'plannotator-bridge-link-click';
 
 type World = { project: string; htmlLinks: { thread: string; ids: Record<string, string> } };
 
@@ -154,11 +154,9 @@ async function renderSheet() {
   return host;
 }
 
-/** The page's bridge relaying a link click (in Interact), from the frame it lives in. */
+/** The page's bridge relaying a link click (in Interact), on the port the viewer handed it. */
 async function clickLink(frame: HTMLIFrameElement, href: string) {
-  await act(async () => {
-    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: LINK_CLICK, href } }));
-  });
+  await followLinkInFrame(frame, href);
 }
 
 const sheetFrame = (el: ParentNode) => el.querySelector<HTMLIFrameElement>('.ib-view .ib-htmlframe iframe')!;

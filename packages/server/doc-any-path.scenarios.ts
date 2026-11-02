@@ -295,14 +295,20 @@ export function defineDocAnyPathScenarios(
             symlinkSync(join(dir, ".hidden/pic.png"), join(dir, "link-hidden.png"));
           }
           const server = await open(kind);
+          /** The no-network marker the viewer turns into connect-src 'none' for its srcdoc frame. */
+          const noNetwork = /<meta name="plannotator-network" content="none">/;
+          const rawHtmlOf = new Map<string, string>();
           const assetBase = async (dir: string) => {
             const doc = await get(server, docUrl(join(dir, "page.html"), dir));
             expect(doc.status).toBe(200);
+            rawHtmlOf.set(dir, String(doc.body?.rawHtml));
             const base = /\/api\/html-assets\/[0-9a-f]+\//.exec(String(doc.body?.rawHtml))?.[0];
             expect(base).toBeTruthy();
             return base!;
           };
           const outside = await assetBase(added);
+          // The document the viewer frames as srcdoc is marked: no network there either.
+          expect(rawHtmlOf.get(added)).toMatch(noNetwork);
           // What the page needs to render is served, but only fonts are readable by its scripts.
           const pic = await get(server, `${outside}pic.png`);
           expect(pic.status).toBe(200);
@@ -327,6 +333,7 @@ export function defineDocAnyPathScenarios(
           expect(forwarded.text).not.toContain("PNG-BYTES");
           // An HTML document inside the project keeps its folder's assets, as before.
           const inside = await assetBase(project);
+          expect(rawHtmlOf.get(project)).not.toMatch(noNetwork);
           const config = await get(server, `${inside}config.json`);
           expect(config.status).toBe(200);
           expect(config.headers["access-control-allow-origin"]).toBe("*");
