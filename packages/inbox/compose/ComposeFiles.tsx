@@ -87,9 +87,6 @@ export interface DraftPastedFile {
   pasted: InboxDraftPasted;
 }
 
-/** Any finished tile as a reply draft names it: its upload, and for a long paste where it goes back. */
-export type DraftTileFile = ReplyDraftFileRef;
-
 /** Which long pastes a draft holds (their upload ids, in order): a change of them alone is saved. */
 export function pastedSignature(files: readonly { upload_id: string }[]): string {
   return files.map((file) => file.upload_id).join(',');
@@ -404,7 +401,7 @@ export function useComposeFiles(
    * Every finished file as a reply draft keeps it: its upload, and for a long
    * paste where it goes back in `words` (as `pastedDraft` places it).
    */
-  const draftFiles = useCallback((words?: string): DraftTileFile[] => {
+  const draftFiles = useCallback((words?: string): ReplyDraftFileRef[] => {
     const pasted = new Map(pastedDraft(words).map((file) => [file.upload_id, file]));
     return filesRef.current.flatMap((file) =>
       file.state === 'done' && file.upload ? [pasted.get(file.upload.upload_id) ?? { upload_id: file.upload.upload_id }] : [],
