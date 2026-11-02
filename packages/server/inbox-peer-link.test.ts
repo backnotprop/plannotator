@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxOutbox } from "./inbox-outbox";
-import { PeerLink, type PeerRecord } from "./inbox-peer-link";
+import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -262,5 +262,53 @@ describe("the tailnet transport's address", () => {
     // Two Inboxes on one computer stand in for two machines only inside a test sandbox.
     expect(checkTailnetAddress("http://127.0.0.1:4100", { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" })).toBe("http://127.0.0.1:4100");
     expect(checkTailnetAddress("http://192.168.1.4:4100", { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" })).toBeNull();
+  });
+});
+
+// The near side's own count: a body with no socket under it, so what its stream gives is what the reader takes.
+// Over a socket the far side can write more than this, into buffers the reader never drains (inbox-accounts.test.ts).
+describe("readCapped", () => {
+  const CHUNK = 64 * 1024;
+  const CAP = 16 * CHUNK;
+  /** A body that never ends, and how much of it was drawn. */
+  const endless = () => {
+    const seen = { drawn: 0, cancelled: false };
+    const chunk = new Uint8Array(CHUNK).fill(32);
+    const response = new Response(
+      new ReadableStream({
+        pull(controller) {
+          seen.drawn += CHUNK;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          seen.cancelled = true;
+        },
+      }),
+    );
+    return { response, seen };
+  };
+
+  test("reads an answer up to the cap whole, and one byte past it not at all", async () => {
+    expect(await readCapped(new Response("x".repeat(CAP)), CAP)).toBe("x".repeat(CAP));
+    expect(await readCapped(new Response("x".repeat(CAP + 1)), CAP)).toBeNull();
+    expect(await readCapped(new Response(null), CAP)).toBe("");
+  });
+
+  test("draws no more than the cap and the read that crossed it from a body that never ends, and stops it", async () => {
+    const { response, seen } = endless();
+    expect(await readCapped(response, CAP)).toBeNull();
+    expect(seen.drawn).toBeLessThanOrEqual(CAP + 2 * CHUNK);
+    await Bun.sleep(20);
+    expect(seen.cancelled).toBe(true);
+  });
+
+  test("a 401's look at its code through a clone stops at its own cap, and the answer's read at its cap, as the link reads a refusal", async () => {
+    const { response, seen } = endless();
+    expect(await readCapped(response.clone(), CHUNK)).toBeNull();
+    expect(await readCapped(response, CAP)).toBeNull();
+    // The tee under a clone draws one more ahead for the other branch: a fixed few chunks, never the flood.
+    expect(seen.drawn).toBeLessThanOrEqual(CAP + 4 * CHUNK);
+    await Bun.sleep(20);
+    expect(seen.cancelled).toBe(true);
   });
 });

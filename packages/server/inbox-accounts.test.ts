@@ -656,9 +656,11 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
     }
   });
 
-  // A flood that outlived the cap would run to the wait, so the wait is short: this fails on a figure, not on the machine's memory.
+  // A flood that outlived the cap would run to the wait, so the wait is short: this fails on the answer and the time, not on the machine's memory.
+  // What the door writes is no measure of what this side read: loopback buffers take megabytes the reader never drains, more on a Linux
+  // runner than on a Mac. How much the read itself draws is pinned exactly in inbox-peer-link.test.ts (readCapped).
   for (const status of [200, 401]) {
-    test(`a far answer past the cap is a failed read, a ${status} too: its door's stream stops there, and nothing past the cap is read`, async () => {
+    test(`a far answer past the cap is a failed read, a ${status} too: read no further, so it ends at once and its door's stream stops`, async () => {
       let sent = 0;
       let stopped = false;
       const chunk = new Uint8Array(64 * 1024).fill(32);
@@ -675,11 +677,16 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
           }),
           { status },
         );
-      const near = await world({ linkedTo: standInDoor(flood), accountsMs: 1_000 });
+      const near = await world({ linkedTo: standInDoor(flood), accountsMs: 3_000 });
       await onlineMachine(near);
+      const started = Date.now();
       expect(await near.readOf(FAR)).toEqual({ state: "failed", reason: "bad_output" });
+      // Ended by the cap, not the clock: a read that went on would have run to the wait.
+      expect(Date.now() - started).toBeLessThan(1_500);
       await waitFor("the door's stream to stop", () => stopped);
-      expect(sent).toBeLessThan(INBOX_MACHINE_ACCOUNTS_MAX_BYTES * 4);
+      const atStop = sent;
+      await Bun.sleep(200);
+      expect(sent).toBe(atStop);
     });
   }
 
