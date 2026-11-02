@@ -22,7 +22,7 @@
   "files": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
   "dependencies": {
     "@plannotator/core": "workspace:*",
-    "lucide-react": "^1.59.0"
+    "lucide-react": "^1.61.0"
   },
   "peerDependencies": {
     "react": "^19.2.8",
