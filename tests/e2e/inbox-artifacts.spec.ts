@@ -238,7 +238,8 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(button).not.toHaveAttribute('title');
-  await expect(header().locator('[data-mark-read]')).toContainText('Mark read');
+  // The read button is an icon (approval "inbox-thread-header"): its words are its name.
+  await expect(header().locator('[data-mark-read]')).toHaveAccessibleName('Mark read');
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);

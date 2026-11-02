@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.15",
+  "version": "0.25.16",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -44,6 +44,7 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",
@@ -54,6 +55,7 @@
     "./inbox-permission": "./inbox-permission.ts",
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
+    "./inbox-snooze": "./inbox-snooze.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
     "./image-region": "./image-region.ts",
     "./open-in-apps": "./open-in-apps.ts",

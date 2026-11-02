@@ -1,16 +1,20 @@
 /**
  * A phone's thread header stays on one line with nothing cut (the owner,
  * 2026-10-29: "Mobile thread header needs to be better responsive"; his
- * iPhone read "‹ I…", Mark read, a stray glyph, then the icons). headFit.ts
- * gives way in order: tighter padding, the Artifacts count, Mark read's words,
- * and last the way back's label; the scrolled-away subject is drawn only with
- * room to read it (the stray glyph was a few pixels of it).
+ * iPhone read "‹ I…", Mark read, a stray glyph, then the icons). Since the
+ * approval "inbox-thread-header" (2026-11-02) the bar is ‹ Inbox, its title,
+ * Artifacts, Expand, ⋯ (the read actions and Snooze lead the ⋯ sheet), with
+ * the room the read button left. The title is the thread's name (this thread
+ * is named, so it shows at once; with no name, the subject once the heading
+ * scrolls away). headFit.ts gives way so the title has room to be read:
+ * tighter padding, the Artifacts count, and last the way back's label; the
+ * title is never a sliver (the stray glyph was a few pixels of it).
  *
  * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
  * default text size and the largest (15), on a thread with 11 artifacts and a
- * waiting question, scrolled so the subject moves into the header, opened from
- * the whole list ("‹ Inbox") and from a project with a long name. Build the
- * binary first (see inbox.spec.ts). PNGs land in .local/proof/phone-thread-header/.
+ * waiting question, opened from the whole list ("‹ Inbox") and from a project
+ * with a long name. Build the binary first (see inbox.spec.ts). PNGs land in
+ * .local/proof/phone-thread-header/.
  */
 
 import { devices, expect, test, type Browser, type BrowserContext } from '@playwright/test';
@@ -102,9 +106,9 @@ for (const size of [14, 15]) {
           await expect(pane.locator('[data-phone-back]')).toBeVisible();
           await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
           await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : '15');
-          // Scrolled: the subject moves into the header.
+          // A named thread's title is in the header from the start, scrolled or not.
+          await expect(pane.locator('.ib-phead [data-header-subject][data-on]')).toHaveCount(1);
           await pane.locator('.ib-pbody').evaluate((body) => body.scrollBy(0, 900));
-          await expect(pane.locator('[data-header-subject][data-on]')).toHaveCount(1);
           await page.waitForTimeout(200);
           await page.screenshot({ path: join(proofDir, `${width}-text${size}-${from}.png`), clip: { x: 0, y: 0, width, height: 140 } });
 
@@ -143,12 +147,14 @@ for (const size of [14, 15]) {
           if (from === 'inbox') expect(m.label, '"Inbox" is drawn').not.toBeNull();
           if (from === 'inbox') expect(m.label!.shown).toBeGreaterThanOrEqual(m.label!.whole - 0.5);
           await expect(pane.locator('[data-phone-back]')).toHaveAccessibleName(from === 'inbox' ? 'Back to Inbox' : /^Back to checkout-redesign-storefront/);
-          // The scrolled-away subject: drawn with room to read it, or not at all (never a sliver).
-          if (m.subject !== null) expect(m.subject).toBeGreaterThanOrEqual(SUBJECT_FLOOR);
+          // The title: drawn at every phone width, with room to read it (never a sliver).
+          expect(m.subject, 'the title is drawn').not.toBeNull();
+          expect(m.subject!).toBeGreaterThanOrEqual(SUBJECT_FLOOR - 0.5);
           // No keyboard hints on a phone.
           expect(m.kbds).toBe(0);
+          // The read button and the clock are in the ⋯ sheet, not the bar.
+          await expect(head.locator('[data-mark-read], [data-mark-unread], [data-thread-snooze]')).toHaveCount(0);
           // Whatever gave way keeps its name.
-          await expect(pane.locator('[data-mark-read]')).toHaveAccessibleName(/Mark read/);
           await expect(pane.locator('[data-artifacts-button]')).toHaveAccessibleName('Artifacts, 11');
         } finally {
           await context.close();
@@ -158,7 +164,7 @@ for (const size of [14, 15]) {
   }
 }
 
-test('the widest phone keeps every word: "‹ Inbox", "Mark read" and the count', async ({ browser }) => {
+test('the widest phone keeps every word: "‹ Inbox", the title and the count', async ({ browser }) => {
   await textSize(14);
   const context = await phone(browser, 430, 'light');
   try {
@@ -167,8 +173,12 @@ test('the widest phone keeps every word: "‹ Inbox", "Mark read" and the count'
     const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
     await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
     await expect(pane.locator('[data-phone-back] .ib-pback-l')).toBeVisible();
-    await expect(pane.locator('[data-mark-read] .ib-hbtn-l')).toHaveText('Mark read');
-    expect(await pane.locator('[data-mark-read] .ib-hbtn-l').evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThan(20);
+    // A named thread: the bar shows its name (the list's rule); the body's heading stays the subject.
+    const title = pane.locator('.ib-phead [data-header-subject]');
+    await expect(title).toHaveAttribute('data-header-name', '');
+    await expect(title).toHaveText('qa');
+    await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Visual QA for the checkout drawer redesign');
+    await expect(pane.locator('.ib-phead')).not.toHaveAttribute('data-fit', /./);
     await expect(pane.locator('[data-artifacts-button] .ib-artbtn-n')).toBeVisible();
   } finally {
     await context.close();

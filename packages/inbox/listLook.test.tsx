@@ -1,10 +1,13 @@
 /**
  * The list's look options (approval "inbox-list-options", listLook.ts): four checkboxes in the list's ⋮ menu,
- * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names", off by default and
- * remembered per browser.
- * What this catches: an option on in a browser that never chose it (today's list must stay today's); a choice
- * forgotten on the next load, or one that leaves a cookie behind when turned off; a menu item a screen reader does
- * not hear as a checkbox (role and aria-checked) or that closes the menu; a compact row that keeps the title on its
+ * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names", off by default, and
+ * since "inbox-customize-rows" the person's look wherever they use the Inbox (config.json `inboxRows`).
+ * What this catches: an option on in a browser that never chose it (today's list must stay today's); a change that
+ * waits for the server, is not saved, or is undone by a read that predates it; saves that land out of order leaving a
+ * page on an older look, or more than one on its way; rival options both on; another window's save not reaching an
+ * open list; a browser's old cookies not adopted once (or adopted over the server's look, or written again); a menu
+ * item a screen reader does not hear as a checkbox (role and aria-checked), that draws an icon, or that closes the
+ * menu; "Customize rows…" missing from the Rows group; a compact row that keeps the title on its
  * own line, or loses the time; a highlighted title outside its pill on any row shape; the agents' words lost to a
  * screen reader when their icons are hidden; smaller names that change the rows' markup; the onboarding tour drawing
  * the person's saved look. Geometry (the project giving way first, the time never, an unread name's size with
@@ -19,30 +22,56 @@ import { join } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { TidyController } from './components/Tidy';
+import { whenTime } from './format';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, readListLook, writeListLookOption } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
-// The choices persist through Plannotator's storage (cookies in the app); a map stands in for them here.
+// This browser's cookies (Plannotator's storage); a map stands in for them here.
 const stored = new Map<string, string>();
+// The server (POST /api/inbox/settings `{ rows }`): each save is recorded, counted (`rows_rev`) when it arrives, and
+// answered with what it saved (or `answerRows`), at once or when the test lets it (`held`); `offline` refuses it.
+// The round trip through a real Inbox is packages/server/inbox.test.ts's.
+const saves: unknown[][] = [];
+let held: (() => void)[] | null = null;
+let serverRev = 0;
+let answerRows: unknown[] | null = null;
+let offline = false;
+const realFetch = globalThis.fetch;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
 beforeEach(() => {
   stored.clear();
+  saves.length = 0;
+  held = null;
+  serverRev = 0;
+  answerRows = null;
+  offline = false;
   setStorageBackend({
     getItem: (key) => stored.get(key) ?? null,
     setItem: (key, value) => void stored.set(key, value),
     removeItem: (key) => void stored.delete(key),
   });
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+    const rows = (JSON.parse(init?.body ?? '{}') as { rows: unknown[] }).rows;
+    saves.push(rows);
+    if (offline) throw new TypeError('Failed to fetch');
+    const rev = ++serverRev;
+    if (held) await new Promise<void>((go) => held!.push(go));
+    return new Response(JSON.stringify({ rows: answerRows ?? rows, rows_rev: rev }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  // A fresh page: nothing read yet, nothing saving.
+  resetListLookForTests();
 });
 
 afterEach(() => {
+  globalThis.fetch = realFetch;
   resetStorageBackend();
   if (!hasDom) return;
   act(() => root?.unmount());
@@ -87,7 +116,7 @@ const TIDY: TidyController = { surface: 'list', scope: null, plan: null, run: nu
 
 type Shape = 'wide' | 'narrow' | 'phone';
 
-function render(shape: Shape): HTMLElement {
+function render(shape: Shape, onCustomizeRows?: () => void): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -108,6 +137,7 @@ function render(shape: Shape): HTMLElement {
           onShowNew={() => {}}
           onOpen={() => {}}
           tidy={TIDY}
+          onCustomizeRows={onCustomizeRows}
         />
       </SidebarProvider>,
     );
@@ -159,31 +189,290 @@ function part(c: Element): string {
   return c.className;
 }
 
-describe('the remembered choice', () => {
-  test('a browser that never chose: every option off', () => {
-    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
-  });
+/** The saves still on their way answer. */
+async function answer() {
+  const waiting = held ?? [];
+  held = null;
+  for (const go of waiting) go();
+  await new Promise((r) => setTimeout(r, 10));
+}
 
-  test('each option is its own cookie, "1" while on, removed when turned off', () => {
-    writeListLookOption('compact', true);
-    writeListLookOption('hideAgents', true);
-    writeListLookOption('smallNames', true);
-    expect(readListLook()).toEqual({ highlight: false, compact: true, hideAgents: true, smallNames: true });
-    expect([...stored.entries()]).toEqual([
-      [LIST_LOOK_COOKIES.compact, '1'],
-      [LIST_LOOK_COOKIES.hideAgents, '1'],
-      [LIST_LOOK_COOKIES.smallNames, '1'],
-    ]);
-    writeListLookOption('compact', false);
-    writeListLookOption('hideAgents', false);
-    writeListLookOption('smallNames', false);
+/** A reload: the page forgets its look and paints from this browser's cookie. */
+function reload() {
+  if (hasDom) act(() => resetListLookForTests());
+  else resetListLookForTests();
+}
+
+// The look is the person's, wherever they use the Inbox (the owner, 2026-11-02), kept in config.json `inboxRows`.
+describe('the saved look', () => {
+  test('a browser that never chose, with no saved look: every option off, and nothing is saved', async () => {
+    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    adoptSavedRows(null);
+    await answer();
+    expect(saves).toEqual([]);
     expect(stored.size).toBe(0);
-    expect(readListLook()).toEqual({ highlight: false, compact: false, hideAgents: false, smallNames: false });
   });
 
-  test('a cookie with anything but "1" is off', () => {
-    stored.set(LIST_LOOK_COOKIES.highlight, 'true');
-    expect(readListLook().highlight).toBe(false);
+  test('a change shows at once, then is saved; this browser keeps only the look it showed, never the old cookies', async () => {
+    held = [];
+    void writeListLookOptions({ roomy: true, highlight: true });
+    // Before the server answers: on screen, and sent as the whole look in the options' order.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true, highlight: true });
+    expect(saves).toEqual([['highlight', 'roomy']]);
+    await answer();
+    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'highlight,roomy' });
+    void writeListLookOption('roomy', false);
+    void writeListLookOption('highlight', false);
+    await answer();
+    expect(saves.at(-1)).toEqual([]);
+    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'none' });
+    // A reload paints the last look shown (all off), not the defaults' absence of a cookie.
+    reload();
+    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+  });
+
+  test("the server's look is taken from a settings read and from another window's save, and paints the next reload", async () => {
+    adoptSavedRows(['titleFirst', 'relativeTime'], 1);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true, relativeTime: true });
+    adoptSavedRows(['previewTwo'], 2);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
+    reload();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
+    expect(saves).toEqual([]);
+  });
+
+  test('upgrading: the old cookies are saved once when the server has no look, then the server wins', async () => {
+    stored.set(LIST_LOOK_COOKIES.compact, '1');
+    stored.set(LIST_LOOK_COOKIES.hideAgents, '1');
+    stored.set(LIST_LOOK_COOKIES.highlight, 'true'); // anything but "1" is off
+    reload();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true, hideAgents: true });
+    held = [];
+    adoptSavedRows(null, 0);
+    // A second read while the adoption is on its way, and one sent before it that answers after it: never again.
+    adoptSavedRows(null, 0);
+    await answer();
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(saves).toEqual([['compact', 'hideAgents']]);
+    // Another browser's look, saved later: it wins here. The old cookies are left as they were, never written.
+    adoptSavedRows(['roomy'], 2);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    expect(stored.get(LIST_LOOK_COOKIES.compact)).toBe('1');
+    reload();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+  });
+
+  test('upgrading offline: the adoption that failed is offered again by the next read, and the look stays meanwhile', async () => {
+    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    reload();
+    offline = true;
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, smallNames: true });
+    offline = false;
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(saves).toEqual([['smallNames'], ['smallNames']]);
+    expect(serverRev).toBe(1);
+  });
+
+  test("a browser whose old cookies differ from the server's look takes the server's and saves nothing", async () => {
+    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    reload();
+    adoptSavedRows([], 3);
+    await answer();
+    expect(readListLook()).toEqual(LIST_LOOK_OFF);
+    expect(saves).toEqual([]);
+  });
+
+  test('one save on its way at a time: changes meanwhile wait, and only the latest is sent next', async () => {
+    held = [];
+    void writeListLookOption('highlight', true);
+    void writeListLookOption('compact', true);
+    void writeListLookOption('hideAgents', true);
+    // On screen at once, every change; one request.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
+    expect(saves).toEqual([['highlight']]);
+    await answer();
+    expect(saves).toEqual([['highlight'], ['highlight', 'compact', 'hideAgents']]);
+    // The first answer (only highlight) never showed over the changes after it.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
+  });
+
+  test("a read that arrives while this page saves waits, and an older one is dropped: the page ends on the server's newest", async () => {
+    adoptSavedRows(['relativeTime'], 4);
+    serverRev = 4;
+    held = [];
+    void writeListLookOption('unreadDot', true);
+    // A read sent before the change answers while it saves: not shown over it, not even after it.
+    adoptSavedRows(['relativeTime'], 4);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
+    adoptSavedRows([], 4);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
+  });
+
+  // Saves land out of order: another window's save, made after this page's, is heard before this page's answer.
+  test("another window's newer save, heard while this page saves, wins once this page's older answer arrives", async () => {
+    held = [];
+    void writeListLookOption('compact', true);
+    adoptSavedRows(['roomy'], 2);
+    // This page's save is still on its way: its change stays on screen meanwhile.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    expect(stored.get(ROWS_COOKIE)).toBe('roomy');
+  });
+
+  test("this page's save made after another window's: its answer is the newest and wins over the event heard before it", async () => {
+    held = [];
+    serverRev = 1;
+    void writeListLookOption('compact', true);
+    adoptSavedRows(['roomy'], 1);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+  });
+
+  test("the last save's answer is the server's look: shown when it differs from what this page sent", async () => {
+    answerRows = ['titleFirst'];
+    void writeListLookOption('compact', true);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true });
+  });
+
+  test('a save that fails keeps the look on this page', async () => {
+    adoptSavedRows(['highlight'], 1);
+    offline = true;
+    void writeListLookOption('compact', true);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+  });
+
+  test('rivals never both on: the option turned on wins, and the Dot keeps the smaller names', async () => {
+    adoptSavedRows(['highlight', 'roomy', 'previewTwo'], 1);
+    void writeListLookOption('compact', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true });
+    void writeListLookOption('roomy', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    void writeListLookOption('hidePreview', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, hidePreview: true });
+    void writeListLookOption('previewTwo', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    void writeListLookOption('unreadDot', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true, unreadDot: true, smallNames: true });
+    void writeListLookOption('smallNames', false);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    await answer();
+    expect(saves.at(-1)).toEqual(['highlight', 'roomy', 'previewTwo']);
+    // A hand-edited or older look with both: Compact, no "2 lines" under no preview, the Dot with its names.
+    adoptSavedRows(['compact', 'roomy', 'hidePreview', 'previewTwo', 'unreadDot'], 9);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true, hidePreview: true, unreadDot: true, smallNames: true });
+  });
+
+  // Review of #2516: the one-time list dialog's Done saved all eleven options from the look it opened with.
+  test("the list dialog's Done saves what it changed only: the others keep what was saved while it was open", async () => {
+    const opened = readListLook();
+    adoptSavedRows(['previewTwo', 'relativeTime', 'titleFirst'], 1);
+    void writeMenuLook({ ...opened, compact: true, highlight: true }, opened);
+    await answer();
+    expect(saves).toEqual([['highlight', 'compact', 'previewTwo', 'relativeTime', 'titleFirst']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true, relativeTime: true, titleFirst: true });
+  });
+
+  // Delta review of #2516: the dialog's "smaller names" as it opened (off) turned off a Dot saved meanwhile.
+  test("the list dialog's Done keeps a Dot another window turned on while it was open; nothing changed saves nothing", async () => {
+    const opened = readListLook();
+    adoptSavedRows(['smallNames', 'unreadDot'], 1);
+    void writeMenuLook({ ...opened, hideAgents: true }, opened);
+    await answer();
+    expect(saves).toEqual([['hideAgents', 'smallNames', 'unreadDot']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, hideAgents: true, smallNames: true, unreadDot: true });
+    void writeMenuLook(opened, opened);
+    await answer();
+    expect(saves).toHaveLength(1);
+  });
+
+  // Delta review of #2516: config.json reset, restored or hand-edited takes the count back to 0.
+  test('the count gone back (config.json reset): a change stays on screen, and reads and events are taken again', async () => {
+    adoptSavedRows(['highlight'], 9);
+    void writeListLookOption('compact', true);
+    await answer();
+    // The server counted the save 1, below the 9 this page had heard: still Compact, and counting starts from 1.
+    expect(saves).toEqual([['highlight', 'compact']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+
+    // A window that only reads: a settings read answers below what it had heard when it was sent.
+    reload();
+    adoptSavedRows(['highlight'], 9);
+    const mark = listLookReadMark();
+    adoptSavedRows(['roomy'], 2, mark);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    // An event at or below the last event's count is not taken (gone back, or a late copy?): it asks for a read, and
+    // the read, below what the page had heard when it was sent, is taken.
+    let doubts = 0;
+    hearRowsEvent(['highlight'], 7);
+    const sent = listLookReadMark();
+    hearRowsEvent(['titleFirst'], 1, () => (doubts += 1));
+    expect(doubts).toBe(1);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true });
+    adoptSavedRows(['titleFirst'], 1, sent);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true });
+  });
+
+  // Delta review of #2516: in a leader steal two tabs relay the same frames, and a rows frame has no seq.
+  test("a late copy of an old event never undoes this page's newer save: it asks for a read instead", async () => {
+    let doubts = 0;
+    serverRev = 4;
+    hearRowsEvent(['highlight'], 4);
+    void writeListLookOption('compact', true);
+    await answer();
+    hearRowsEvent(['highlight', 'compact'], 5);
+    hearRowsEvent(['highlight'], 4, () => (doubts += 1));
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+    expect(doubts).toBe(1);
+    // The read it asks for answers the server's count, 5: at the mark, so nothing changes.
+    adoptSavedRows(['highlight', 'compact'], 5, listLookReadMark());
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+  });
+
+  // The count went back to exactly the one heard before the save, while a newer one was heard during it.
+  test("a save's answer equal to the count heard before it is the count gone back: this page's look is taken", async () => {
+    hearRowsEvent(['highlight'], 2);
+    held = [];
+    serverRev = 1;
+    void writeListLookOption('compact', true);
+    // Before it lands: another window's save (3), then config.json reset and that window's next save (1).
+    hearRowsEvent(['roomy'], 3);
+    hearRowsEvent(['titleFirst'], 1, () => {});
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+  });
+
+  test('a read is old, not gone back, when it answers at least the count heard when it was sent', () => {
+    adoptSavedRows(['highlight'], 5);
+    const mark = listLookReadMark();
+    hearRowsEvent(['roomy'], 6);
+    adoptSavedRows(['highlight'], 5, mark);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+  });
+
+  test("an event older than this page's own save's answer, arriving after it, is old, not gone back", async () => {
+    serverRev = 2;
+    void writeListLookOption('compact', true);
+    await answer();
+    hearRowsEvent(['roomy'], 2);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+  });
+
+  test('an older Inbox (no `rows`) or not a list changes nothing; a name no build knows is dropped', () => {
+    adoptSavedRows(['hidePreview'], 1);
+    adoptSavedRows(undefined);
+    adoptSavedRows('hidePreview', 2);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, hidePreview: true });
+    adoptSavedRows(['previewTwo', 'sparkles'], 3);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
   });
 });
 
@@ -211,7 +500,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
     act(() => item('compact').click());
     await settle();
     expect(item('compact').getAttribute('aria-checked')).toBe('true');
-    expect(item('compact').querySelector('.ib-pmi-check')).not.toBeNull();
+    expect(item('compact').querySelector('.ib-pmi-box[data-on] svg')).not.toBeNull();
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
     expect(lookClasses(el)).toEqual(['ib-lk-compact']);
     act(() => item('highlight').click());
@@ -220,19 +509,73 @@ describe.if(hasDom)('the ⋮ menu', () => {
     await settle();
     expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents', 'ib-lk-small']);
 
+    expect(saves.at(-1)).toEqual(['highlight', 'compact', 'hideAgents', 'smallNames']);
+
+    reload();
     const again = remount('narrow');
     expect(lookClasses(again)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-noagents', 'ib-lk-small']);
     await openMenu(again);
     expect(['highlight', 'compact', 'hideAgents', 'smallNames'].map((k) => item(k).getAttribute('aria-checked'))).toEqual(['true', 'true', 'true', 'true']);
 
-    // Turned off again: the list is today's and no cookie is left.
+    // Turned off again: the list is today's, and that is what is saved.
     act(() => item('highlight').click());
     act(() => item('compact').click());
     act(() => item('hideAgents').click());
     act(() => item('smallNames').click());
     await settle();
     expect(lookClasses(again)).toEqual([]);
-    expect(stored.size).toBe(0);
+    expect(saves.at(-1)).toEqual([]);
+  });
+
+  test("another window's save reaches an open list at once", () => {
+    const el = render('narrow');
+    act(() => adoptSavedRows(['compact', 'unreadDot'], 1));
+    expect(lookClasses(el)).toEqual(['ib-lk-compact', 'ib-lk-small', 'ib-lk-dot']);
+  });
+
+  // Review of #2516: the menu's Compact over Settings → Rows' Roomy left both on (a Custom look no control shows).
+  test('from Detailed, ticking Compact turns Roomy off, on screen and in the save; unticking smaller names turns the Dot off', async () => {
+    adoptSavedRows(['highlight', 'roomy', 'previewTwo'], 1);
+    const el = render('narrow');
+    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    await openMenu(el);
+    act(() => item('compact').click());
+    await settle();
+    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-pv2']);
+    expect(saves.at(-1)).toEqual(['highlight', 'compact', 'previewTwo']);
+
+    serverRev = 5;
+    act(() => adoptSavedRows(['unreadDot', 'smallNames'], 5));
+    expect(item('smallNames').getAttribute('aria-checked')).toBe('true');
+    act(() => item('smallNames').click());
+    await settle();
+    expect(lookClasses(el)).toEqual([]);
+    expect(saves.at(-1)).toEqual([]);
+  });
+
+  // The owner, 2026-11-02: "those could all just be check boxes anyways. They don't look right as icons."
+  test('plain checkboxes: a box and the label, no icon; then "Customize rows…", no icon, last in Rows', async () => {
+    let customized = 0;
+    stored.set(LIST_LOOK_COOKIES.hideAgents, '1');
+    await openMenu(render('narrow', () => customized++));
+    const rows = document.querySelector<HTMLElement>('[data-tidy-menu-popup] [role="group"]')!;
+    const items = [...rows.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
+    expect(items.map((i) => [i.getAttribute('role'), i.textContent])).toEqual([
+      ['menuitemcheckbox', 'Highlight thread subject'],
+      ['menuitemcheckbox', 'Compact rows'],
+      ['menuitemcheckbox', 'Hide agent icons'],
+      ['menuitemcheckbox', 'Smaller thread names'],
+      ['menuitem', 'Customize rows…'],
+    ]);
+    // Each checkbox: its box first (the icon's place), the only drawing a tick inside it.
+    for (const i of items.slice(0, 4)) {
+      expect(i.firstElementChild!.className).toBe('ib-pmi-box');
+      expect([...i.querySelectorAll('svg')].every((svg) => svg.closest('.ib-pmi-box[data-on]'))).toBe(true);
+    }
+    expect(items.map((i) => i.querySelectorAll('svg').length)).toEqual([0, 0, 1, 0, 0]);
+    act(() => items[4]!.click());
+    await settle();
+    expect(customized).toBe(1);
   });
 });
 
@@ -280,6 +623,36 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect(phoneLines(remount('phone'), 'msg_unread').m1).toEqual(['from', 'pill(ib-keyt ib-m2:Name of msg_unread)', 'time']);
   });
 
+  // Settings → Rows' First line "Thread name" (approval "inbox-customize-rows"): the name leads, the time stays on line 1.
+  test('name first: the name and the time on line 1, the agents and project under it; compact keeps one line, name first', () => {
+    adoptSavedRows(['titleFirst']);
+    const el = render('narrow');
+    expect(narrowLines(el, 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'time'], 'ib-l2 ib-l2-lead': ['from'], 'ib-l3': ['ib-pv', 'ib-c ib-qn'] });
+    expect(phoneLines(remount('phone'), 'msg_unread')).toEqual({ m1: ['title(Name of msg_unread)', 'time'], rest: ['ib-m1 ib-m1-lead', 'ib-m3'] });
+    act(() => adoptSavedRows(['titleFirst', 'compact']));
+    expect(narrowLines(remount('narrow'), 'msg_unread')).toEqual({ 'ib-l1': ['title(Name of msg_unread)', 'from', 'time'], 'ib-l3': ['ib-pv', 'ib-c ib-qn'] });
+    expect(phoneLines(remount('phone'), 'msg_unread')).toEqual({ m1: ['title(Name of msg_unread)', 'from', 'time'], rest: ['ib-m3'] });
+    // The full-width row keeps its columns (approval: name first there is out of scope).
+    const wide = remount('wide');
+    expect([...wide.querySelector<HTMLElement>('.ib-row[data-thread-id="msg_unread"] .ib-subj')!.children].map(part)).toEqual(['title(Name of msg_unread)', 'ib-pv']);
+  });
+
+  // The time, the questions and the warnings always show: no option hides them, on any shape.
+  test('every option on: the time and the question count still on every row and shape', () => {
+    adoptSavedRows(['highlight', 'compact', 'hideAgents', 'smallNames', 'hideProject', 'hidePreview', 'unreadDot', 'relativeTime', 'titleFirst']);
+    for (const shape of ['narrow', 'phone', 'wide'] as const) {
+      const el = remount(shape);
+      const r = el.querySelector<HTMLElement>(`[data-thread-id="msg_unread"]`)!;
+      expect(r.querySelector('.ib-t')!.textContent, `${shape}: time`).toBeTruthy();
+      // Relative: the short form is hidden from a screen reader, which hears the words; the tooltip is the clock time.
+      const rel = r.querySelector<HTMLElement>('.ib-t [data-relative-time]')!;
+      expect(rel.title, `${shape}: tooltip`).toBe(whenTime('2026-10-10T10:00:00.000Z'));
+      expect([...rel.children].map((c) => c.getAttribute('aria-hidden') ?? c.className), `${shape}: spoken once`).toEqual(['true', 'ib-sr']);
+      expect(r.querySelector('.ib-qn'), `${shape}: question count`).not.toBeNull();
+      expect(r.querySelector('.ib-pv'), `${shape}: no preview`).toBeNull();
+    }
+  });
+
   // Whether a screen reader still hears them once hidden is Chromium's accessibility tree: the e2e checks that.
   test('hide agent icons: the rows keep the agents\' label and their layout', () => {
     stored.set(LIST_LOOK_COOKIES.hideAgents, '1');
@@ -294,7 +667,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     // React's generated ids differ per mount; everything else must match.
     const markup = (el: HTMLElement) => el.innerHTML.replace(/_r_[a-z0-9]+_/g, 'id');
     const today = { narrow: markup(render('narrow')), phone: markup(remount('phone')) };
-    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    act(() => adoptSavedRows(['smallNames']));
     const el = remount('narrow');
     expect(lookClasses(el)).toEqual(['ib-lk-small']);
     column(el).classList.remove('ib-lk-small');
@@ -334,6 +707,6 @@ describe.if(hasDom)('the onboarding tour', () => {
     expect(host.querySelector('.ib-listcol')).not.toBeNull();
     expect(lookClasses(host)).toEqual([]);
     expect(host.querySelector('.ib-rowkey')).toBeNull();
-    expect(readListLook()).toEqual({ highlight: true, compact: true, hideAgents: true, smallNames: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true, smallNames: true });
   });
 });

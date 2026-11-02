@@ -80,7 +80,10 @@ import {
  * per decision (the owner: agents hand decisions over as prose); v5 is on
  * users' disks, v6 was on no tag when this line went in, so it was amended in
  * place. v7 (2026-11-01): v6 with the reply line naming read_thread, since
- * wait_for_reply is gone from the Inbox; v6 is on users' disks. An earlier
+ * wait_for_reply is gone from the Inbox; v6 is on users' disks. v8
+ * (2026-11-02): v7 with the hand-over clause putting a summary's pictures in
+ * place in the body (the owner: agents left them at the bottom as
+ * attachments); v7 is on users' disks. An earlier
  * block Plannotator wrote is brought
  * up to date at the Inbox's next start (refreshInboxNotes) or when the note
  * is added again (`--notes`, the Settings switch); a block the person edited
@@ -88,7 +91,7 @@ import {
  * pinned (inbox-agent-notes-refresh.test.ts): a released note's bytes never
  * change without a new version, or the notes on disk would read as edited.
  */
-export const INBOX_NOTE_VERSION = 7;
+export const INBOX_NOTE_VERSION = 8;
 const noteStart = (version: number) =>
   `<!-- plannotator-inbox:start v${version} · added by Plannotator. Remove it in the Inbox's Settings or with \`plannotator uninstall\` -->`;
 export const INBOX_NOTE_START = noteStart(INBOX_NOTE_VERSION);
@@ -164,6 +167,21 @@ const INBOX_NOTE_BODY_V6 = [
   'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
 ].join("\n");
 
+/** v7's body, exactly as builds before v8 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V7 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
 /**
  * The note (DESIGN.md section 2.3): true with or without the tool, so a
  * session without it is not misled. Loaded in every session of the agent, so
@@ -177,13 +195,15 @@ const INBOX_NOTE_BODY_V6 = [
  * owner, 2026-10-31): choices stay in their natural order; only the
  * `Recommended:` line marks the pick, never its place; a decision inside a
  * report still goes in its own `:::question` block. v7 (2026-11-01): the reply
- * line says to read the thread later, wait_for_reply being gone.
+ * line says to read the thread later, wait_for_reply being gone. v8
+ * (2026-11-02): a hand-over's pictures sit in place in the body, the files
+ * to read in `attachments`.
  */
 export const INBOX_NOTE_BODY = [
   "## Plannotator Inbox",
   "",
   "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
-  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (a short summary with its pictures in place, `![alt](path)` in the body, and the files to read in `attachments`). Then keep working.",
   "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
   "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
   "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
@@ -206,6 +226,7 @@ export const INBOX_NOTE_EARLIER_BLOCKS: readonly string[] = [
   `${noteStart(4)}\n${INBOX_NOTE_BODY_V4}\n${INBOX_NOTE_END}`,
   `${noteStart(5)}\n${INBOX_NOTE_BODY_V5}\n${INBOX_NOTE_END}`,
   `${noteStart(6)}\n${INBOX_NOTE_BODY_V6}\n${INBOX_NOTE_END}`,
+  `${noteStart(7)}\n${INBOX_NOTE_BODY_V7}\n${INBOX_NOTE_END}`,
 ];
 
 export const INBOX_AGENT_NOTES_FILE = "agent-notes.json";
