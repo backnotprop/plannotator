@@ -9,7 +9,10 @@
  *  - on a thread read by opening it, the header's Mark unread closes the
  *    thread and the row is back in New, bold;
  *  - the row's hover action toggles: on a read row it is Mark unread, which
- *    puts the row back in New, bold, without opening the thread.
+ *    puts the row back in New, bold, without opening the thread;
+ *  - the owner's report (2026-11-02): the open row (while its look is still
+ *    on its way) and the row just left offer Mark unread on hover, and
+ *    marking it unread sticks through the close and a reload.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-mark-unread.spec.ts`.
@@ -191,6 +194,71 @@ test('the row’s hover action on a read row is Mark unread: the row is back in 
   await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
   await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
   await expect(pane).toHaveCount(0);
+  expect(await messageCount(threads.nightly)).toBe(1);
+  expect(world.errors).toEqual([]);
+});
+
+/** Where the Inbox itself puts the thread (not the list on screen, which holds still while a thread is open). */
+async function serverSection(threadId: string): Promise<string | null> {
+  const list = (await (await fetch(new URL('/api/inbox/threads', world.url))).json()) as { sections: { id: string; threads: { thread_id: string }[] }[] };
+  return list.sections.find((s) => s.threads.some((t) => t.thread_id === threadId))?.id ?? null;
+}
+
+test('the owner’s report (2026-11-02): the open row, and the row just left, offer Mark unread on hover at once, and it sticks', async () => {
+  const { page, threads } = world;
+  await page.goto(world.url);
+  await expect.poll(() => sectionOf(page, threads.nightly)).toBe('new');
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  // The look on its way: held back a moment, so the hover is checked before the server has it.
+  let releaseLook: () => void = () => {};
+  const lookHeld = new Promise<void>((done) => (releaseLook = done));
+  const seen = `**/api/inbox/threads/${threads.nightly}/seen`;
+  await page.route(seen, async (route) => {
+    await lookHeld;
+    await route.continue();
+  });
+  const pane = page.locator('section.ib-pane');
+  const action = (id: string, kind: 'read' | 'unread') => page.locator(`.ib-lbody [data-row="${id}"] [data-row-mark-${kind}]`);
+
+  // Open it: the row is drawn read and its hover action is Mark unread while the look is still on its way
+  // (v0.28.45: Mark read, bold, until the look and the list read after it landed).
+  await row(page, threads.nightly).click();
+  await expect(pane.getByRole('heading', { name: 'Nightly build is green' })).toBeVisible();
+  await row(page, threads.nightly).hover();
+  await expect(action(threads.nightly, 'unread')).toBeVisible();
+  await expect(action(threads.nightly, 'read')).toHaveCount(0);
+  await expect(row(page, threads.nightly)).not.toHaveClass(/\bib-u\b/);
+  expect(await serverSection(threads.nightly)).toBe('new');
+  releaseLook();
+  await expect.poll(() => serverSection(threads.nightly)).toBe('quiet');
+  await page.unroute(seen);
+  // The look landed; the list still holds the row in New, and it still offers Mark unread (v0.28.45: Mark read).
+  await row(page, threads.nightly).hover();
+  await expect(action(threads.nightly, 'unread')).toBeVisible();
+  expect(await sectionOf(page, threads.nightly)).toBe('new');
+
+  // Move to another thread: the row just left keeps Mark unread (v0.28.45: Mark read).
+  await row(page, threads.deploy).click();
+  await expect(pane.getByRole('heading', { name: 'Docs deploy finished' })).toBeVisible();
+  await row(page, threads.nightly).hover();
+  await expect(action(threads.nightly, 'unread')).toBeVisible();
+  await expect(action(threads.nightly, 'read')).toHaveCount(0);
+  await action(threads.nightly, 'unread').click();
+
+  // It sticks: bold in place with the other thread still open, New on the server, after the close and a reload.
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
+  await expect(pane.getByRole('heading', { name: 'Docs deploy finished' })).toBeVisible();
+  expect(await serverSection(threads.nightly)).toBe('new');
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+  await page.waitForTimeout(600);
+  expect(await sectionOf(page, threads.nightly)).toBe('new');
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  await page.reload();
+  await expect(row(page, threads.nightly)).toBeVisible();
+  expect(await sectionOf(page, threads.nightly)).toBe('new');
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
   expect(await messageCount(threads.nightly)).toBe(1);
   expect(world.errors).toEqual([]);
 });

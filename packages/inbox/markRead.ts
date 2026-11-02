@@ -38,9 +38,9 @@ export function canToggleRead(
 }
 
 /**
- * The list row's quiet hover action: on rows that wait on the person, never
- * on Sent or Quiet, except a row the list still draws in New
- * (`seenHeldInNew`).
+ * Mark read in the row menu (and, where the row offers no Mark unread, its
+ * hover action): on rows that wait on the person, never on Sent or Quiet,
+ * except a row the list still draws in New (`seenHeldInNew`).
  */
 export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxListGroupId | null): boolean {
   return inboxRowOffersMarkRead(row) || seenHeldInNew(row, drawn);
@@ -51,8 +51,9 @@ export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>
  * (`drawn`, the group the row sits in on screen): the look put it in Quiet on
  * the server, but while a thread is open the list holds still (held.ts), so
  * the row waits in New until the list settles. Mark read stays offered on it
- * there (the header, the row's hover action and menu, `E`), and only moves the
- * row to Quiet now: nothing is written, since the thread is already Quiet.
+ * there (the header, the row menu, `E`), and only moves the row to Quiet now:
+ * nothing is written, since the thread is already Quiet. The row's hover
+ * action is Mark unread on it (the owner, 2026-11-02: the person read it).
  * Not a thread with a question or unsent work (the server keeps those out of
  * Quiet), one marked read, or an archived one.
  */

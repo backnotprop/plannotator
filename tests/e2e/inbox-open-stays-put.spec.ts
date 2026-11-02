@@ -558,7 +558,8 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
 });
 
 // A plain update the person opened: Quiet on the server (the look), still drawn in New while the thread is
-// open. Mark read stays on it (the header, the row's hover action, E) and moves the row to Quiet now.
+// open. Mark read stays on it (the header, the row menu, E) and moves the row to Quiet now; the row's hover
+// action is Mark unread (the owner, 2026-11-02: the person read it).
 test('desktop: a seen update held in New keeps Mark read; it moves the row to Quiet now, and Undo puts it back', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   const page = await context.newPage();
@@ -587,7 +588,8 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
   await shot(page, 'seen-held-01-opened');
   await expect(header).toBeEnabled();
-  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toBeVisible();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
   const markReadBox = (await header.boundingBox())!;
   const moreBox = (await more.boundingBox())!;
 
@@ -638,14 +640,11 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
 
-  // The row's hover action. It is drawn only while the mouse is on the row (display: none
-  // otherwise), and an action waits with no time limit: on CI this test twice hung here to its
-  // 4-minute timeout (the shots stop at 03-undone), the action never shown to the click, as when
-  // the row is still settling back from the Undo as the mouse arrives. Hover until the action
-  // shows (each try bounded, all tries within 15 s: toPass has no limit of its own), then click it.
-  const rowMarkRead = page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`);
+  // The row menu's Mark read (the hover action is Mark unread here). Bounded tries: on CI the row once
+  // was still settling back from the Undo as the pointer arrived, and an action waits with no time limit.
+  const rowMarkRead = page.locator(`[data-row-menu="${first}"] [data-row-action="read"]`);
   await expect(async () => {
-    await page.locator(`.ib-lbody [data-row="${first}"]`).hover({ timeout: 2_000 });
+    await row.click({ button: 'right', timeout: 2_000 });
     await expect(rowMarkRead).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
   await rowMarkRead.click({ timeout: 5_000 });

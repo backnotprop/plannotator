@@ -354,6 +354,27 @@ export function putRowBack(shown: readonly InboxListSection[], before: readonly 
 }
 
 /**
+ * The look the window sends when a thread opens has gone out: the open row
+ * reads as looked at now, before the server takes the look and the list is
+ * read again (which then puts the server's row in its place,
+ * refreshHeldRows). Its news is seen (`unseen` 0); a row in New for that news
+ * alone is no longer bold, so its hover action is Mark unread at once
+ * (markRead.ts `canMarkUnread`). A row that still waits on the person
+ * (questions, picks not sent) stays bold and keeps Mark read. The group it is
+ * drawn in never changes: the list holds still while a thread is open.
+ */
+export function markHeldRowLooked(shown: readonly InboxListSection[], threadId: string): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) =>
+      row.thread_id === threadId && row.unseen > 0
+        ? { ...row, unseen: 0, unread: row.unread && !(row.section === 'new' && !row.answered_not_sent) }
+        : row,
+    ),
+  }));
+}
+
+/**
  * The person archived a thread while its row is on screen (the thread is
  * open). The list the window reads leaves archived threads out, so
  * refreshHeldRows would keep the row as it was; this shows it archived in

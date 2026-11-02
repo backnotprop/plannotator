@@ -43,7 +43,7 @@ import {
 } from './api';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { hasMovingDelivery } from './rowDelivery';
 import {
@@ -1758,6 +1758,8 @@ function Inbox() {
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
       // The look covers what this read showed, not a message that lands before the server takes it.
+      // The row reads as looked at from now (held.ts markHeldRowLooked): its hover action is Mark unread at once.
+      setShown((current) => (current ? markHeldRowLooked(current, threadId) : current));
       const look = (async () => {
         await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
         if (!cancelled) await refreshList(false);
@@ -2487,6 +2489,21 @@ function Inbox() {
   };
 
   /**
+   * The looks this tab sent on the thread and the server has not taken yet,
+   * waited for (never longer than MARK_READ_LOOK_WAIT_MS), so Mark read and
+   * Mark unread decide on the state the look gives the thread whenever they
+   * are pressed. Undefined: none was on its way.
+   */
+  const awaitLooks = async (threadId: string): Promise<Set<Promise<unknown>> | undefined> => {
+    const looks = looksInFlight.current.get(threadId);
+    if (!looks) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all(looks), new Promise<void>((done) => (timer = setTimeout(done, MARK_READ_LOOK_WAIT_MS)))]);
+    clearTimeout(timer);
+    return looks;
+  };
+
+  /**
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
    * reopens them as they were. An agent stopped or held up on it makes the
@@ -2496,12 +2513,7 @@ function Inbox() {
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
-    const looks = read ? looksInFlight.current.get(threadId) : undefined;
-    if (looks) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([Promise.all(looks), new Promise<void>((done) => (timer = setTimeout(done, MARK_READ_LOOK_WAIT_MS)))]);
-      clearTimeout(timer);
-    }
+    const looks = read ? await awaitLooks(threadId) : undefined;
     const before = rowOf(threadId);
     if (read && before) {
       const drawn = drawnSection(shownRef.current, threadId);
@@ -2594,6 +2606,9 @@ function Inbox() {
    * already) the row just shows what is true: no toast, nothing to undo.
    */
   const markUnread = async (threadId: string) => {
+    // The row is drawn read from the moment its look goes out (held.ts markHeldRowLooked), so Mark unread can come first: the server
+    // would find the message new still and write nothing, and the look landing after would read the thread again.
+    await awaitLooks(threadId);
     const before = rowOf(threadId);
     let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
     try {
