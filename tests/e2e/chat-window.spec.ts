@@ -31,11 +31,12 @@ const store = new ChatWindowStore({ onGeometryChange: (geometry) => reports.push
 const root = createRoot(document.getElementById('frame')!);
 let messages: unknown[] = [];
 let status = 'ready';
+let richMarkdown = false;
 function draw() {
   root.render(
     h('div', { id: 'host-tree', style: { position: 'absolute', inset: 0 } },
       h(ChatFrame, { store, label: 'Chat' }, () => [
-        h(ChatTranscript, { key: 't', messages, status, agentName: 'Agent' }),
+        h(ChatTranscript, { key: 't', messages, status, agentName: 'Agent', richMarkdown }),
         h(ChatComposer, { key: 'c', value: 'hello', onChange: () => {}, onSend: () => sent.push('sent') }),
       ]),
     ),
@@ -45,6 +46,7 @@ function draw() {
   store, reports, sent,
   open() { flushSync(() => { store.setMinimized(false); draw(); }); },
   show(next: unknown[], nextStatus = 'ready') { flushSync(() => { messages = next; status = nextStatus; draw(); }); },
+  rich() { flushSync(() => { richMarkdown = true; draw(); }); },
 };
 `);
   const out = join(work, 'bundle.js');
@@ -126,6 +128,160 @@ test('hostile text in either role comes out inert', async ({ page }) => {
   expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align'].includes(name))).toEqual([]);
   expect(found.hrefs.filter((href) => /^\s*(javascript|data):/i.test(href))).toEqual([]);
   expect(seen).toMatchObject({ requests: [], errors: [], dialogs: 0 });
+});
+
+// The DOM lanes walk a list, not a real NodeIterator, so what the sanitizer's hook
+// does to a node mid-walk is only proved here. A hook that broke the walk would
+// fail the rich proof, and then nothing below would draw.
+test('with richMarkdown what Workspaces draws draws, and hostile text is still inert', async ({ page }) => {
+  const seen = await open(page);
+  await page.route('https://evil.test/**', (route) => route.abort());
+  await page.route('https://images.test/**', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'),
+    }),
+  );
+  await page.evaluate(() => (window as any).__chat.rich());
+  const drawn = [
+    '![a](https://images.test/a.png "Title")',
+    '<img src="https://images.test/b.png" width="20" height="10" alt="b">',
+    '~~gone~~',
+    '- [ ] open\n- [x] done',
+    '[x](https://images.test/c "Hint")',
+    '7. seven\n8. eight',
+  ].join('\n\n');
+  const attacks = [
+    '<script>window.__pwned = 1</script>',
+    '<img src="https://evil.test/a.png" onerror="window.__pwned = 2" onload="window.__pwned = 3" class="fixed inset-0" style="position:fixed" data-text-part="" aria-hidden="true" id="host-button">',
+    '<img src="javascript:window.__pwned = 4">',
+    '<input type="text" name="q" autofocus onfocus="window.__pwned = 5">',
+    '<input type="checkbox" onclick="window.__pwned = 6" id="host-button">',
+    '<form action="https://evil.test"><input type="submit"><button>go</button></form>',
+    '<iframe src="https://evil.test"></iframe>',
+    '<svg onload="window.__pwned = 7"><script>window.__pwned = 8</script></svg>',
+    '[click](javascript:window.__pwned=9)',
+  ].join('\n\n');
+  await show(page, [say('a', 'assistant', `${drawn}\n\n${attacks}`), say('u', 'user', `![p](https://images.test/p.png)\n\n${attacks}`)]);
+
+  const agent = page.locator('[data-message-role="assistant"][data-text-part]');
+  await expect(agent.locator('img[src="https://images.test/a.png"][alt="a"][title="Title"]')).toHaveCount(1);
+  await expect(agent.locator('img[src="https://images.test/b.png"][width="20"][height="10"]')).toHaveCount(1);
+  await expect(agent.locator('del')).toHaveText('gone');
+  await expect(agent.locator('a[title="Hint"][target="_blank"]')).toHaveCount(1);
+  await expect(agent.locator('ol[start="7"]')).toHaveCount(1);
+  await expect(page.locator('[data-message-role="user"] img[src="https://images.test/p.png"]')).toHaveCount(1);
+  const loaded = await agent.locator('img[src="https://images.test/a.png"]').evaluate((image: HTMLImageElement) => {
+    return image.decode().then(() => image.naturalWidth);
+  });
+  expect(loaded).toBe(1);
+
+  const found = await page.evaluate(() => {
+    const parts = Array.from(document.querySelectorAll('[data-text-part] *'));
+    return {
+      pwned: (window as any).__pwned,
+      tags: [...new Set(parts.map((el) => el.tagName.toLowerCase()))],
+      attributes: [...new Set(parts.flatMap((el) => el.getAttributeNames()))],
+      inputs: Array.from(document.querySelectorAll<HTMLInputElement>('[data-text-part] input')).map((el) => `${el.type}:${el.disabled}`),
+      sources: Array.from(document.querySelectorAll('[data-text-part] img')).map((el) => el.getAttribute('src')),
+      loading: [...new Set(Array.from(document.querySelectorAll('[data-text-part] [loading]')).map((el) => `${el.tagName.toLowerCase()}:${el.getAttribute('loading')}`))],
+    };
+  });
+  expect(found.pwned).toBeUndefined();
+  expect(found.tags.filter((tag) => /script|iframe|form|button|style|svg/.test(tag))).toEqual([]);
+  // `loading` is not in the sanitizer's allowlist, so a model's own is dropped. The
+  // sanitizer's hook then writes `loading="lazy"` on every image it keeps
+  // (`loadWhenNear` in chatMarkdown.ts), which is why it is the only value here.
+  expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align', 'title', 'start', 'src', 'alt', 'width', 'height', 'type', 'checked', 'disabled', 'loading'].includes(name))).toEqual([]);
+  expect(found.loading).toEqual(['img:lazy']);
+  expect([...new Set(found.inputs)]).toEqual(['checkbox:true']);
+  expect(found.sources.filter((address) => address?.startsWith('javascript:'))).toEqual([]);
+  expect(seen.errors).toEqual([]);
+  expect(seen.dialogs).toBe(0);
+  expect(await page.evaluate(() => document.getElementById('host-button')?.tagName)).toBe('BUTTON');
+});
+
+test.describe('with richMarkdown, images', () => {
+  const TALL = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="900"></svg>';
+  const PANE = '[aria-label="Conversation"]';
+  /** The bare host has no Tailwind: the pane's scrolling, and the image rule preflight gives every real host. */
+  const looks = `${PANE} { overflow-y: auto; height: 200px; display: flex; flex-direction: column } img { display: block; max-width: 100%; height: auto }`;
+
+  /** One tall image that arrives only when the test says so. */
+  async function holdAnImage(page: Page) {
+    let arrive = () => {};
+    const arrival = new Promise<void>((resolve) => { arrive = resolve; });
+    await page.route('https://images.test/tall.svg', async (route) => {
+      await arrival;
+      await route.fulfill({ contentType: 'image/svg+xml', body: TALL });
+    });
+    return arrive;
+  }
+
+  const gapToBottom = (page: Page) =>
+    page.locator(PANE).evaluate((pane) => pane.scrollHeight - pane.scrollTop - pane.clientHeight);
+  const loaded = (page: Page) =>
+    expect.poll(() => page.locator(`${PANE} img`).evaluate((image: HTMLImageElement) => image.naturalHeight)).toBe(900);
+
+  test('that arrive after the last delta leave the pane at its live edge', async ({ page }) => {
+    await open(page);
+    await page.addStyleTag({ content: looks });
+    const arrive = await holdAnImage(page);
+    await page.evaluate(() => (window as any).__chat.rich());
+    await show(page, [say('a', 'assistant', '![x](https://images.test/tall.svg)\n\nThe last line.')]);
+    expect(await gapToBottom(page)).toBe(0);
+
+    arrive();
+    await loaded(page);
+    await expect.poll(() => gapToBottom(page)).toBe(0);
+  });
+
+  test('that arrive late leave a person who scrolled away where they are', async ({ page }) => {
+    await open(page);
+    await page.addStyleTag({ content: `${looks} p { min-height: 400px }` });
+    const arrive = await holdAnImage(page);
+    await page.evaluate(() => (window as any).__chat.rich());
+    await show(page, [say('a', 'assistant', 'First.\n\n![x](https://images.test/tall.svg)\n\nThe last line.')]);
+
+    // Scrolled up, with the image on screen: it grows below the line the person is reading.
+    await page.locator(PANE).evaluate(async (pane) => {
+      pane.scrollTop = 300;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    arrive();
+    await loaded(page);
+    expect(await page.locator(PANE).evaluate((pane) => pane.scrollTop)).toBe(300);
+  });
+
+  for (const [name, write] of [
+    ['markdown', (at: number) => `![a](https://images.test/${at}.png)`],
+    ['raw tags', (at: number) => `<img src="https://images.test/${at}.png" alt="a">`],
+  ] as const) {
+    test(`in ${name} make no more than a hundred requests, however far the person scrolls`, async ({ page }) => {
+      const requested = new Set<string>();
+      const body = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+      await page.route('https://images.test/**', (route) => {
+        requested.add(route.request().url());
+        return route.fulfill({ contentType: 'image/png', body });
+      });
+      await open(page);
+      await page.addStyleTag({ content: `${looks} img { min-height: 50px }` });
+      await page.evaluate(() => (window as any).__chat.rich());
+      await show(page, [say('a', 'assistant', Array.from({ length: 500 }, (_, at) => write(at)).join(' '))]);
+      await expect(page.locator(`${PANE} img`)).toHaveCount(100);
+
+      // Past the limit there is no element to come near, so scrolling all the way adds none.
+      await page.locator(PANE).evaluate(async (pane) => {
+        for (let top = 0; top <= pane.scrollHeight; top += 150) {
+          pane.scrollTop = top;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+      });
+      await expect(page.locator(`${PANE} img`)).toHaveCount(100);
+      expect(requested.size).toBeGreaterThan(0);
+      expect(requested.size).toBeLessThanOrEqual(100);
+    });
+  }
 });
 
 test('agent text cannot lay a link over the host', async ({ page }) => {

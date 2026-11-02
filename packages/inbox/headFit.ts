@@ -1,64 +1,64 @@
 /**
  * Fitting a phone's thread header on one line (the owner, 2026-10-29: "Mobile
  * thread header needs to be better responsive"; his iPhone showed "‹ I…" and a
- * sliver of the scrolled-away subject).
+ * sliver of the scrolled-away subject), with room for the subject (approval
+ * "inbox-thread-header", 2026-11-02: the bar is ‹ Inbox, the subject,
+ * Artifacts, Expand, ⋯; the read button and Snooze moved into ⋯, and their
+ * room is the subject's).
  *
  * The header's icons keep their 44 px. When the row is short it gives way in
  * this order, trying each way in turn and keeping the first that fits:
- *   tight  Mark read's side padding and margins, and the way back's end padding, get smaller
+ *   tight  the way back's end padding gets smaller
  *   count  the Artifacts count leaves the button ("Artifacts, 11" stays its name)
- *   mark   Mark read shows its icon alone (its words stay as visually hidden text);
- *          the count comes back when that leaves room for it
  *   back   the way back shows its chevron alone ("Back to Inbox" stays its name)
+ * A way fits when nothing is past the edge, the way back's label shows whole
+ * or at least its floor, and the subject has room to be read (`SUBJECT_FLOOR`).
  * The way back's label is never cut short of its floor: "Inbox" shows whole or
  * not at all; a long project name may end in "…" once it shows `BACK_LABEL_FLOOR`.
- * The subject that moves into the header once it scrolls away is drawn only
- * with room for `SUBJECT_FLOOR`: it never takes a step's room, and a sliver of
- * it reads as a stray glyph.
+ * When even the last way leaves the subject less than its floor, the subject is
+ * not drawn (a sliver of it reads as a stray glyph), and the first way that fits
+ * without it is drawn, so "Inbox" does not go for nothing.
  *
  * The rules are pure; `fitPhoneHead` tries them against the page's own layout
  * (before paint: the caller runs in a layout effect), as footFit.ts does for the foot.
  */
 
 /** One way the header gives way. */
-export type PhoneHeadStep = 'tight' | 'count' | 'mark' | 'back';
+export type PhoneHeadStep = 'tight' | 'count' | 'back';
 
 /**
- * The ways to try, best first, as the header's `data-fit` tokens. Mark read's
- * words outrank the Artifacts count (the count goes first), the count comes
- * back once Mark read's words have gone if it fits, and the way back's label goes last.
+ * The ways to try, best first, as the header's `data-fit` tokens: the count
+ * goes before the way back's label, which goes last.
  */
-export const PHONE_HEAD_FITS: readonly (readonly PhoneHeadStep[])[] = [
-  [],
-  ['tight'],
-  ['tight', 'count'],
-  ['tight', 'mark'],
-  ['tight', 'count', 'mark'],
-  ['tight', 'count', 'mark', 'back'],
-];
+export const PHONE_HEAD_FITS: readonly (readonly PhoneHeadStep[])[] = [[], ['tight'], ['tight', 'count'], ['tight', 'count', 'back']];
 
 /** The least of a long way-back label (a project's name) shown before it goes: about six letters at 16 px. */
 export const BACK_LABEL_FLOOR = 56;
 
-/** The least room (the subject's box, its 4 px sides included) the scrolled-away subject is drawn in. */
+/** The least room (the subject's box, its 4 px sides included) the subject is drawn in. */
 export const SUBJECT_FLOOR = 88;
 
-/** What one try measured: how far the last control ends past the row's edge, and the way back's label (null: none drawn). */
+/**
+ * What one try measured: how far the last control ends past the row's edge, the way back's label (null: none
+ * drawn), and the subject's width (null: the bar has no subject, as over a phone's Artifacts screen).
+ */
 export interface PhoneHeadMeasure {
   overflow: number;
   label: { shown: number; whole: number } | null;
+  subject?: number | null;
 }
 
-/** Fits: nothing past the edge, and the label shown whole, or at least its floor when it is longer than that. */
-export function phoneHeadFits({ overflow, label }: PhoneHeadMeasure): boolean {
+/** Fits: nothing past the edge, the label shown whole or at least its floor, and the subject with room to be read. */
+export function phoneHeadFits({ overflow, label, subject = null }: PhoneHeadMeasure): boolean {
   if (overflow > 0.5) return false;
+  if (subject !== null && !subjectHasRoom(subject)) return false;
   if (label === null) return true;
   return label.shown >= Math.min(label.whole, BACK_LABEL_FLOOR) - 0.5;
 }
 
-/** Whether the scrolled-away subject has room to be read. */
+/** Whether the subject has room to be read. */
 export function subjectHasRoom(width: number): boolean {
-  return width >= SUBJECT_FLOOR;
+  return width >= SUBJECT_FLOOR - 0.5;
 }
 
 // ── DOM ──
@@ -73,7 +73,12 @@ function measure(head: HTMLElement): PhoneHeadMeasure {
   }
   const label = head.querySelector<HTMLElement>('.ib-pback-l');
   const drawn = label !== null && label.getBoundingClientRect().width > 1;
-  return { overflow: right - end, label: drawn ? { shown: label.clientWidth, whole: label.scrollWidth } : null };
+  const subject = head.querySelector<HTMLElement>('.ib-phsubj');
+  return {
+    overflow: right - end,
+    label: drawn ? { shown: label.clientWidth, whole: label.scrollWidth } : null,
+    subject: subject ? subject.getBoundingClientRect().width : null,
+  };
 }
 
 function draw(head: HTMLElement, fit: readonly PhoneHeadStep[]): void {
@@ -88,10 +93,15 @@ function draw(head: HTMLElement, fit: readonly PhoneHeadStep[]): void {
  */
 export function fitPhoneHead(head: HTMLElement): readonly PhoneHeadStep[] | null {
   if (head.getBoundingClientRect().width <= 0) return null;
-  const fit = PHONE_HEAD_FITS.find((candidate) => {
-    draw(head, candidate);
-    return phoneHeadFits(measure(head));
-  }) ?? PHONE_HEAD_FITS[PHONE_HEAD_FITS.length - 1]!;
+  head.removeAttribute('data-subject-off');
+  const tryEach = (withSubject: boolean) =>
+    PHONE_HEAD_FITS.find((candidate) => {
+      draw(head, candidate);
+      const measured = measure(head);
+      return phoneHeadFits(withSubject ? measured : { ...measured, subject: null });
+    });
+  // No way leaves the subject room: it is not drawn, and the controls keep the most they can ("Inbox" whole).
+  const fit = tryEach(true) ?? tryEach(false) ?? PHONE_HEAD_FITS[PHONE_HEAD_FITS.length - 1]!;
   draw(head, fit);
   const subject = head.querySelector<HTMLElement>('.ib-phsubj');
   head.toggleAttribute('data-subject-off', subject !== null && !subjectHasRoom(subject.getBoundingClientRect().width));

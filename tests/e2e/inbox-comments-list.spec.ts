@@ -434,6 +434,8 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   const page = await context.newPage();
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
+  await page.locator('[data-fcomp-pill]').tap();
   await cardChip(page).tap();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).tap();
   await expect(rowOf(page, t.onMessage)).toHaveCount(0);

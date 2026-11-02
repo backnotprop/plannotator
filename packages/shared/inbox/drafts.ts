@@ -17,7 +17,17 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_CARD_TITLE_MAX, isInboxId, type InboxDraft, type InboxDraftTo, type InboxUpload } from "@plannotator/core/inbox-types";
+import {
+  INBOX_CARD_TITLE_MAX,
+  INBOX_DRAFT_BODY_MAX,
+  INBOX_DRAFT_PASTED_LEAD_MAX,
+  INBOX_DRAFT_PASTED_PREVIEW_MAX,
+  isInboxId,
+  type InboxDraft,
+  type InboxDraftFile,
+  type InboxDraftPasted,
+  type InboxDraftTo,
+} from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { readInboxUpload } from "./uploads";
 
@@ -25,8 +35,8 @@ export const INBOX_DRAFTS_DIR = "drafts";
 /** The longest thread name a draft keeps while the person types (a Send takes at most INBOX_THREAD_NAME_MAX). */
 export const INBOX_DRAFT_THREAD_NAME_MAX = 500;
 
-/** The longest draft body, in characters (the store takes any body, but a draft is saved on every pause). */
-export const INBOX_DRAFT_BODY_MAX = 1_000_000;
+/** The longest draft body, in characters (the store takes any body, but a draft is saved on every pause). Defined in core so the window can name it. */
+export { INBOX_DRAFT_BODY_MAX };
 const SHORT_MAX = 4096;
 
 function draftsDir(inboxDirPath: string): string {
@@ -138,8 +148,51 @@ function checkCard(value: unknown): InboxDraft["card"] | null {
   return { id: card.id, title: card.title };
 }
 
+/** A long paste's place in a draft's words (`InboxDraftPasted`), checked; null when the file is not one. */
+function checkPasted(value: unknown, index: number, bodyLength: number): InboxDraftPasted | null {
+  if (value === undefined || value === null) return null;
+  const pasted = value as Record<string, unknown>;
+  const field = `files[${index}].pasted`;
+  if (typeof value !== "object" || Array.isArray(value)) throw new InboxError("validation_error", `${field}: { at, lead?, preview } or null.`, { field });
+  const at = pasted.at;
+  if (typeof at !== "number" || !Number.isInteger(at) || at < 0 || at > bodyLength) {
+    throw new InboxError("validation_error", `${field}.at: a place in the words (0 to ${bodyLength}).`, { field: `${field}.at` });
+  }
+  const lead = pasted.lead === undefined || pasted.lead === null ? "" : pasted.lead;
+  if (typeof lead !== "string" || lead.length > INBOX_DRAFT_PASTED_LEAD_MAX || /\S/.test(lead)) {
+    throw new InboxError("validation_error", `${field}.lead: at most ${INBOX_DRAFT_PASTED_LEAD_MAX} spaces or line breaks.`, { field: `${field}.lead` });
+  }
+  const preview = pasted.preview;
+  if (typeof preview !== "string" || preview.length > INBOX_DRAFT_PASTED_PREVIEW_MAX) {
+    throw new InboxError("validation_error", `${field}.preview: a string of at most ${INBOX_DRAFT_PASTED_PREVIEW_MAX} characters.`, { field: `${field}.preview` });
+  }
+  return { at, ...(lead ? { lead } : {}), preview };
+}
+
 /**
- * Create or replace a draft. `input.files` are upload ids (or `{ upload_id }`),
+ * A draft's files: upload ids (or `{ upload_id, pasted? }`), each an upload
+ * still pending; the draft keeps the upload's facts, and for a long paste where
+ * it goes back in the words (`pasted`, approval "inbox-paste-attachment").
+ * `onlyPasted`: a reply draft keeps long pastes only.
+ */
+export function checkInboxDraftFiles(inboxDirPath: string, input: unknown, bodyLength: number, options: { onlyPasted?: boolean } = {}): InboxDraftFile[] {
+  const files: InboxDraftFile[] = [];
+  const listed = input === undefined || input === null ? [] : input;
+  if (!Array.isArray(listed)) throw new InboxError("validation_error", "files: a list of upload ids.", { field: "files" });
+  listed.forEach((entry, index) => {
+    const object = entry && typeof entry === "object" ? (entry as { upload_id?: unknown; pasted?: unknown }) : null;
+    const uploadId = typeof entry === "string" ? entry : object ? object.upload_id : null;
+    const pasted = checkPasted(object?.pasted, index, bodyLength);
+    if (options.onlyPasted && !pasted) throw new InboxError("validation_error", `files[${index}]: a reply draft keeps long pastes only.`, { field: `files[${index}]` });
+    const upload = readInboxUpload(inboxDirPath, uploadId);
+    if (!upload) throw new InboxError("upload_not_found", `files[${index}]: that file is no longer here; attach it again.`, { field: `files[${index}]` });
+    if (!files.some((file) => file.upload_id === upload.upload_id)) files.push(pasted ? { ...upload, pasted } : upload);
+  });
+  return files;
+}
+
+/**
+ * Create or replace a draft. `input.files` are upload ids (or `{ upload_id, pasted? }`),
  * each an upload still pending; the draft keeps the upload's facts.
  * `base` is the `updated_at` this writer read, or null to create one.
  */
@@ -159,15 +212,7 @@ export function saveInboxDraft(
   if (typeof threadName !== "string" || threadName.length > INBOX_DRAFT_THREAD_NAME_MAX) {
     throw new InboxError("validation_error", `thread_name: a string of at most ${INBOX_DRAFT_THREAD_NAME_MAX} characters.`, { field: "thread_name" });
   }
-  const files: InboxUpload[] = [];
-  const listed = input.files === undefined || input.files === null ? [] : input.files;
-  if (!Array.isArray(listed)) throw new InboxError("validation_error", "files: a list of upload ids.", { field: "files" });
-  listed.forEach((entry, index) => {
-    const uploadId = typeof entry === "string" ? entry : entry && typeof entry === "object" ? (entry as { upload_id?: unknown }).upload_id : null;
-    const upload = readInboxUpload(inboxDirPath, uploadId);
-    if (!upload) throw new InboxError("upload_not_found", `files[${index}]: that file is no longer here; attach it again.`, { field: `files[${index}]` });
-    if (!files.some((file) => file.upload_id === upload.upload_id)) files.push(upload);
-  });
+  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length);
   const to = checkTo(input.to);
   const project = checkProject(input.project);
   const card = checkCard(input.card);

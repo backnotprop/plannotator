@@ -12,7 +12,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { idsIn, InboxApiError, inboxApi, type MachineView, type OutboxView } from './api';
 import { inboxUrl, isContested, machineOf, rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, outboxLine, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, outboxLine, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
 const MAC = `ibx_01K${'0'.repeat(22)}M`;
@@ -102,6 +102,16 @@ describe('linked', () => {
     expect(threadAwayLine(machine(MAC, 'MacBook', 'needs_update'))).toBe('Update Plannotator on MacBook to see its threads here.');
     expect(threadAwayLine(machines[2])).toBeNull();
     expect(threadAwayLine(undefined)).toBeNull();
+  });
+
+  test("Snooze is offered on this machine's rows, and on a linked machine's only when its Inbox keeps snoozes", () => {
+    const keeps = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { snoozes: true }), machine(MINI, 'Mini', 'online', { snoozes: false })]);
+    expect(rowSnoozes(row('own', 'waiting'), keeps)).toBe(true);
+    expect(rowSnoozes(row('mac', 'waiting', MAC), keeps)).toBe(true);
+    // Mini runs an older Inbox (its list said nothing), and the model above is one whose views name no `snoozes` at all.
+    expect(rowSnoozes(row('mini', 'waiting', MINI), keeps)).toBe(false);
+    expect(rowSnoozes(row('mini', 'waiting', MINI), model)).toBe(false);
+    expect(rowSnoozes(row('own', 'waiting'), model)).toBe(true);
   });
 });
 

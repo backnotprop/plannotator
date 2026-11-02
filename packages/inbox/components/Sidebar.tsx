@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { ClaudeIcon, CodexIcon, OpenCodeIcon, PiIcon } from '@plannotator/ui/components/icons/AgentIcons';
@@ -22,6 +23,7 @@ import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { CheckFailingRow, UpdateButton } from './Updates';
+import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -137,6 +139,13 @@ export interface SidebarProps {
   connectPrompt?: boolean;
   /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
   onFeedback?: () => void;
+  /** Opens or closes the Usage peek from its row (components/Usage.tsx), which shows only where `cswap` is. Absent: no row. */
+  onUsage?: (row: HTMLElement) => void;
+  usageOpen?: boolean;
+  /** `cswap` is on this computer: the row is there before the first read answers. */
+  usageInstalled?: boolean;
+  /** The foot stays hidden until it knows every row it will hold, so none arrives late and moves the others. */
+  footHeld?: boolean;
   /**
    * Pinned and Projects open and close as this browser last left them (the
    * cookie in sidebarSections.ts; default true). The onboarding tour's
@@ -195,7 +204,8 @@ export function Sidebar(props: SidebarProps) {
   const projectsClosed = sections.closed('projects');
   const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
   // A closed Pinned counts the pins waiting on the person (a question, Stopped, Holds), so a Stopped thread never hides.
-  const pinsWaiting = pinnedClosed ? pins.filter((row) => ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
+  // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
+  const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
   const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}`);
   /**
@@ -551,7 +561,7 @@ export function Sidebar(props: SidebarProps) {
           )}
         </div>
       </div>
-      <div className="ib-side-foot">
+      <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
         {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
         {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
@@ -571,6 +581,7 @@ export function Sidebar(props: SidebarProps) {
             Feedback
           </button>
         )}
+        {props.onUsage && <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button

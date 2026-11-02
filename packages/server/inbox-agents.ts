@@ -154,12 +154,36 @@ export function liveAgentRunCount(): number {
  * group may hold a daemon it started on purpose). `killGroup: false` kills
  * only the CLI itself, so a daemon it is starting survives even a time-out.
  */
-function runWithTimeout(
+export function runWithTimeout(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
   timeoutMs: number,
   signal?: AbortSignal,
   cwd?: string,
+  killGroup = true,
+): Promise<AgentRunResult> {
+  return spawnRun(argv, env, timeoutMs, signal, cwd, false, killGroup);
+}
+
+/**
+ * For a CLI that must not be stopped partway, because it may be holding
+ * something only it can save (`cswap` with a one-time token it just spent).
+ * This process ending, however it ends, leaves the run to finish by itself.
+ * While this process lives, the group is killed only at `hardLimitMs`, a last
+ * resort for one that is truly stuck. Its stderr is not piped: a pipe with
+ * nobody left reading could fail a write in the middle of its work.
+ */
+export function runUntilExit(argv: readonly string[], env: Readonly<Record<string, string | undefined>>, hardLimitMs: number): Promise<AgentRunResult> {
+  return spawnRun(argv, env, hardLimitMs, undefined, undefined, true);
+}
+
+function spawnRun(
+  argv: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+  cwd: string | undefined,
+  outlivesThisProcess: boolean,
   killGroup = true,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
@@ -170,7 +194,7 @@ function runWithTimeout(
     let child: ReturnType<typeof spawnChild>;
     try {
       child = spawnChild(argv[0]!, argv.slice(1), {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", outlivesThisProcess ? "ignore" : "pipe"],
         env: { ...env } as NodeJS.ProcessEnv,
         ...(cwd ? { cwd } : {}),
         detached: process.platform !== "win32",
@@ -217,10 +241,17 @@ function runWithTimeout(
       done(result);
     };
     const timer = setTimeout(stopRun, timeoutMs);
-    liveRuns.add(kill);
-    if (!exitHandlerInstalled) {
-      exitHandlerInstalled = true;
-      process.on("exit", killLiveRuns);
+    if (outlivesThisProcess) {
+      // Not in liveRuns, and nothing here keeps this process up for it.
+      timer.unref?.();
+      child.unref();
+      (child.stdout as { unref?: () => void } | null)?.unref?.();
+    } else {
+      liveRuns.add(kill);
+      if (!exitHandlerInstalled) {
+        exitHandlerInstalled = true;
+        process.on("exit", killLiveRuns);
+      }
     }
     signal?.addEventListener("abort", stopRun, { once: true });
     child.on("error", (error) => {

@@ -7,6 +7,7 @@
  * row's accessible name (the glyph's `aria-label`), and the thread's own
  * delivery line is the tooltip. Send now stays in the thread.
  */
+import type { ReactNode } from 'react';
 import type { InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { rowDeliveryLine, rowDeliverySpoken } from '../rowDelivery';
@@ -52,7 +53,7 @@ export function DeliveryTick({ delivery }: { delivery: InboxRowDelivery }) {
 }
 
 /** The row's time cell: the glyph, then the time (the delivery time once delivered). */
-export function TimeWithTick({ delivery, time }: { delivery: InboxRowDelivery | null | undefined; time: string }) {
+export function TimeWithTick({ delivery, time }: { delivery: InboxRowDelivery | null | undefined; time: ReactNode }) {
   if (!delivery) return <>{time}</>;
   return (
     <span className="ib-tickt">

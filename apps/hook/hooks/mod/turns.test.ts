@@ -67,6 +67,116 @@ describe('TurnTracker claims only its own prompt', () => {
   })
 })
 
+// The failures these guard (/clear or a resume moves the process to another session while a question's
+// prompt still waits in the engine, which can't withdraw it): a question Stopped while queued, or carried
+// through two switches, ran as a live turn nobody owned; and a carried prompt the engine never ran aborted
+// the same words asked again, leaving the tracker busy for good.
+describe('TurnTracker: question prompts carried to the next session', () => {
+  const OUR_TURN = 'The plannotator plugin sent a message:\nwhy?'
+
+  test('a question Stopped while still queued is carried, and its turn is aborted in the next session', () => {
+    const before = new TurnTracker()
+    before.beginAsk('a1', 'why?', sink())
+    expect(before.cancelAsk('a1')).toBeNull()
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    expect(after.onTurnStart('t1', OUR_TURN)).toBe('t1')
+  })
+
+  test('a second switch before the turn starts still carries it', () => {
+    const a = new TurnTracker()
+    a.beginAsk('a1', 'why?', sink())
+    const b = new TurnTracker()
+    b.dropQueued(a.queuedPrompts())
+    const c = new TurnTracker()
+    c.dropQueued(b.queuedPrompts())
+    expect(c.onTurnStart('t1', OUR_TURN)).toBe('t1')
+  })
+
+  test('a carried prompt whose submit failed is forgotten: the same words asked again are answered', async () => {
+    const before = new TurnTracker()
+    before.beginAsk('a1', 'why?', sink())
+    let reject!: (error: Error) => void
+    const submit = new Promise((_resolve, fail) => (reject = fail))
+    submit.catch(() => undefined) // the bridge's own catch
+    before.followSubmit('a1', submit)
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    reject(new Error('discarded'))
+    await Bun.sleep(0)
+
+    const s = sink()
+    expect(after.beginAsk('a2', 'why?', s)).toBe(true)
+    expect(after.onTurnStart('t2', OUR_TURN)).toBeNull()
+    after.onTurnComplete('t2', 'because', false)
+    expect(s.answers).toEqual(['because'])
+    expect(after.busy).toBe(false)
+  })
+
+  test('a carried prompt the engine took is forgotten once a turn ended after it', async () => {
+    const before = new TurnTracker()
+    before.beginAsk('a1', 'why?', sink())
+    let taken!: () => void
+    before.followSubmit('a1', new Promise<void>((resolve) => (taken = resolve)))
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    taken()
+    await Bun.sleep(0)
+    // Its turn would have started before this one ended.
+    after.onTurnStart('t1', 'something else')
+    after.onTurnComplete('t1', 'ok', false)
+
+    const s = sink()
+    after.beginAsk('a2', 'why?', s)
+    expect(after.onTurnStart('t2', OUR_TURN)).toBeNull()
+    after.onTurnComplete('t2', 'because', false)
+    expect(s.answers).toEqual(['because'])
+  })
+
+  // The engine may resolve the submit (idle, prompt taken) before the hook for the turn it waited behind completes.
+  test('a prompt taken before the turn it waited behind completes is still aborted when its turn starts', async () => {
+    // Stopped while queued, in the same session.
+    const turns = new TurnTracker()
+    turns.onTurnStart('person', 'My own work.')
+    turns.beginAsk('a1', 'why?', sink())
+    let taken!: () => void
+    turns.followSubmit('a1', new Promise<void>((resolve) => (taken = resolve)))
+    expect(turns.cancelAsk('a1')).toBeNull()
+    taken()
+    await Bun.sleep(0)
+    turns.onTurnComplete('person', 'Done.', false)
+    expect(turns.onTurnStart('t2', OUR_TURN)).toBe('t2')
+
+    // Carried by a /clear queued in the person's turn: the new session's tracker hears that turn complete, never start.
+    const before = new TurnTracker()
+    before.onTurnStart('person-2', 'My own work.')
+    before.beginAsk('a2', 'why?', sink())
+    let takenToo!: () => void
+    before.followSubmit('a2', new Promise<void>((resolve) => (takenToo = resolve)))
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    takenToo()
+    await Bun.sleep(0)
+    after.onTurnComplete('person-2', 'Done.', false)
+    expect(after.onTurnStart('t3', OUR_TURN)).toBe('t3')
+  })
+
+  test('a prompt still waiting is dropped before the same words asked again claim their own turn', () => {
+    const before = new TurnTracker()
+    before.beginAsk('a1', 'why?', sink())
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    const s = sink()
+    after.beginAsk('a2', 'why?', s)
+    // The engine runs them in order: the carried one first.
+    expect(after.onTurnStart('t1', OUR_TURN)).toBe('t1')
+    after.onTurnComplete('t1', '', true)
+    expect(after.onTurnStart('t2', OUR_TURN)).toBeNull()
+    after.onTurnComplete('t2', 'because', false)
+    expect(s.answers).toEqual(['because'])
+  })
+})
+
 // #1748 put the reviewer's draft list between the surface line and the
 // question. The failure this guards: the mod no longer recognizing its own
 // question turn, so the answer never streams back to Plannotator. The turn is

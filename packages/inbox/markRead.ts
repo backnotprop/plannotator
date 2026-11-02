@@ -8,7 +8,7 @@
  * once not to wait on them. It comes back when an agent writes again.
  */
 
-import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId } from '@plannotator/core/inbox-types';
 import { agentName, plural, shortAgentName } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
@@ -19,6 +19,13 @@ export const MARK_READ_UNDO_MS = 7_000;
  * (App.tsx `markRead`): past it, it decides on the state it has.
  */
 export const MARK_READ_LOOK_WAIT_MS = 1_500;
+
+/**
+ * Mark unread that the server answered with nothing to do while this tab's
+ * look was still on its way (slower than MARK_READ_LOOK_WAIT_MS): how long it
+ * waits for that look before it tries once more (App.tsx `markUnread`).
+ */
+export const MARK_UNREAD_RETRY_WAIT_MS = 10_000;
 
 /** Something here waits on the person: a question, or news they have not looked at. */
 export const waitsOnPerson = inboxRowWaitsOnPerson;
@@ -31,18 +38,18 @@ export const waitsOnPerson = inboxRowWaitsOnPerson;
  */
 export function canToggleRead(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'read_at' | 'agent_after_archive'>,
-  drawn?: InboxSectionId | null,
+  drawn?: InboxListGroupId | null,
 ): boolean {
   if (row.resolved_at !== null && row.agent_after_archive !== true) return false;
   return (row.read_at ?? null) !== null || waitsOnPerson(row) || seenHeldInNew(row, drawn);
 }
 
 /**
- * The list row's quiet hover action: on rows that wait on the person, never
- * on Sent or Quiet, except a row the list still draws in New
- * (`seenHeldInNew`).
+ * Mark read in the row menu (and, where the row offers no Mark unread, its
+ * hover action): on rows that wait on the person, never on Sent or Quiet,
+ * except a row the list still draws in New (`seenHeldInNew`).
  */
-export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxSectionId | null): boolean {
+export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxListGroupId | null): boolean {
   return inboxRowOffersMarkRead(row) || seenHeldInNew(row, drawn);
 }
 
@@ -51,12 +58,16 @@ export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>
  * (`drawn`, the group the row sits in on screen): the look put it in Quiet on
  * the server, but while a thread is open the list holds still (held.ts), so
  * the row waits in New until the list settles. Mark read stays offered on it
- * there (the header, the row's hover action and menu, `E`), and only moves the
- * row to Quiet now: nothing is written, since the thread is already Quiet.
+ * there (the row menu, `E`; a phone has neither, so its thread ⋯ sheet offers
+ * it), and only moves the row to Quiet now: nothing is written, since the
+ * thread is already Quiet. The row's hover action and the header's read button
+ * are Mark unread on it (the owner, 2026-11-02: "If I open a thread, and it
+ * transitions to [read] ... I need the ability to mark unread"); a phone's
+ * bar has no read button, so its ⋯ sheet offers both.
  * Not a thread with a question or unsent work (the server keeps those out of
  * Quiet), one marked read, or an archived one.
  */
-export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxSectionId | null | undefined): boolean {
+export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxListGroupId | null | undefined): boolean {
   return drawn === 'new' && row.section === 'quiet' && row.resolved_at === null && (row.read_at ?? null) === null;
 }
 
@@ -66,16 +77,17 @@ export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'>
  * wrote after the person's last reply (`sent` is null; a reply is a look, so
  * there would be nothing to make new). The store's `markUnread` makes the
  * latest agent message new again: the row goes to New, bold. Never on a row
- * that waits on the person (Mark read's). With `drawn` (the header's button,
- * which shows one or the other), not on a seen update the list still holds
- * in New either: Mark read stays that button, and the menus offer both.
+ * that waits on the person (Mark read's). A seen update the list still holds
+ * in New takes it too, on the row's hover action and the header's read button
+ * (the owner, 2026-11-02); its Mark read stays in the row menu and on `E`. A
+ * phone has neither the row menu nor `E` (nor a read button in its bar), so
+ * its thread ⋯ sheet offers Mark read and Mark unread there.
  */
 export function canMarkUnread(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
-  drawn?: InboxSectionId | null,
 ): boolean {
   if (row.resolved_at !== null || row.unread) return false;
-  if (waitsOnPerson(row) || seenHeldInNew(row, drawn)) return false;
+  if (waitsOnPerson(row)) return false;
   return row.sent === null;
 }
 

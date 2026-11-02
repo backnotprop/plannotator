@@ -392,6 +392,30 @@ describe("uploads", () => {
     expect(command!.body).toBe(`See the files.\n\nAttached: notes.md (${attachments[0]!.path})\nAttached: shot.png (${attachments[1]!.path})`);
   });
 
+  test("words or files, as a reply: a long paste attached alone starts a thread; neither is refused and writes nothing", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const before = server.store.cursor();
+    const empty = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "  ", idempotency_key: "c0" });
+    expect(empty.status).toBe(422);
+    expect(((await empty.json()) as { code: string }).code).toBe("validation_error");
+    expect(server.store.cursor()).toBe(before);
+
+    const log = "2026-11-01T21:10:04Z retry 3 charged twice\n".repeat(900);
+    const pasted = ((await (await upload(server, "pasted-text-2026-11-01-2256.txt", log)).json()) as { upload: InboxUpload }).upload;
+    const sent = await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "", idempotency_key: "c1", uploads: [pasted.upload_id] });
+    expect(sent.status).toBe(200);
+    const { message } = (await sent.json()) as { message: InboxMessage };
+    expect(message.body).toBe("");
+    expect(message.attachments!.map((a) => a.name)).toEqual(["pasted-text-2026-11-01-2256.txt"]);
+    expect(readFileSync(message.attachments![0]!.path, "utf8")).toBe(log);
+    // A thread with no words is named by its file.
+    expect(message.subject).toBe("pasted-text-2026-11-01-2256.txt");
+    // The agent's turn is the usual Attached line, and no words before it.
+    const [command] = await poll(server, "ses-pi", "pi", billing);
+    expect(command!.body).toBe(`Attached: pasted-text-2026-11-01-2256.txt (${message.attachments![0]!.path})`);
+  });
+
   test("the dotenv family, path separators and control characters are refused, and nothing is kept", async () => {
     const { server, dataDir } = await setup();
     for (const name of [".env", "prod.env", ".env.local", "a/b.txt", "..", "x\ny.txt", "x\u0085y.txt", "x\u2028y.txt", "evil\u202egnp.txt"]) {

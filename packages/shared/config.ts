@@ -397,6 +397,16 @@ export interface PlannotatorConfig {
    */
   inboxTextSize?: number;
   /**
+   * How the Inbox list's rows look: the names of the row options that are on
+   * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
+   * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮
+   * menu and Settings → Rows through POST /api/inbox/settings `{ rows }`. A
+   * name this build does not know is dropped on read.
+   */
+  inboxRows?: string[];
+  /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
+  inboxRowsRev?: number;
+  /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
    * offers notifications once more. Written by the server only, through POST
@@ -430,8 +440,8 @@ export interface PlannotatorConfig {
    * announcement (`POST /api/inbox/settings` `{ voice }`).
    */
   inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
-  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. */
-  inboxVoiceIntro?: { dueAt?: string; shownAt?: string };
+  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
+  inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,

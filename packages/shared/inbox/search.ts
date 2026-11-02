@@ -980,11 +980,14 @@ export class InboxSearchIndex {
     }
     const groups: Record<InboxSearchGroupId, { doc: number; score: number }[]> = { threads: [], messages: [], files: [], projects: [] };
 
-    const statusOk = (facts: ThreadFacts | null): boolean => {
+    // A snoozed thread stays in search, but it has left its section, so a Status never finds it. Read here, not in the
+    // cached facts: a snooze writes no line, and it ends by the clock.
+    const snoozed = query.status ? this.store.snoozedThreads() : null;
+    const statusOk = (facts: ThreadFacts | null, threadId: string | null): boolean => {
       if (!query.status) return true;
       if (!facts) return false;
       if (query.status === "archived") return facts.archived;
-      if (facts.archived) return false;
+      if (facts.archived || (threadId !== null && snoozed?.has(threadId))) return false;
       if (query.status === "waiting") return facts.section === "stopped" || facts.section === "holding" || facts.section === "waiting";
       return facts.section === query.status;
     };
@@ -1016,7 +1019,7 @@ export class InboxSearchIndex {
       }
       const facts = doc.threadId ? this.factsOf(doc.threadId) : null;
       if (doc.threadId && !facts) return null;
-      if (!statusOk(facts) || !fromOk(doc, facts)) return null;
+      if (!statusOk(facts, doc.threadId ?? null) || !fromOk(doc, facts)) return null;
       return { group, facts };
     };
     const score = (tier: number, title: boolean, archived: boolean, current: boolean, at: number): number =>
