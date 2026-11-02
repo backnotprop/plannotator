@@ -228,7 +228,9 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
       return
     }
     emit({ type: 'started', askId })
-    host.submit(command.text).catch((error: unknown) => {
+    const submit = host.submit(command.text)
+    turns.followSubmit(askId, submit)
+    submit.catch((error: unknown) => {
       turns.failAsk(askId, error instanceof Error ? error.message : String(error))
     })
   }
