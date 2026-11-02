@@ -1349,6 +1349,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
   const restoringRef = useRef(false);
+  /** The box as the focus effect last saw it, and the thread it was in: Reply takes focus only when that box closes. */
+  const boxSeen = useRef({ open: false, thread: thread.thread_id });
   /** The thread whose draft was put back already (once per visit). */
   const restoredFor = useRef<string | null>(null);
   /**
@@ -2806,6 +2808,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
   useEffect(() => {
+    const before = boxSeen.current;
+    boxSeen.current = { open: box.open, thread: thread.thread_id };
     if (restoringRef.current) {
       restoringRef.current = false;
       return;
@@ -2813,7 +2817,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (box.open) textRef.current?.focus();
     // The box closed (Escape, Cancel, a Send that did not go) and took focus with it: the foot's Reply (or Edit
     // draft) has it next. A Send that went gives focus to the reply in the thread instead (send, `focusSent`).
-    else if (!focusSent.current && !sendingFromComposer.current) {
+    // Only a box that was open in THIS thread: a thread opening (this effect's first run) or another thread
+    // closing the last one's box leaves focus where the person put it, so a click or a tap that opens a thread
+    // never rings Reply (the browser draws a ring for a script's focus that no key or click of the page's came
+    // before, as on the first thread after a load).
+    else if (before.open && before.thread === thread.thread_id && !focusSent.current && !sendingFromComposer.current) {
       const active = document.activeElement;
       if (!active || active === document.body || !active.isConnected) {
         requestAnimationFrame(() => {
@@ -2823,6 +2831,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the box opens or closes, never on a thread change alone
   }, [box.open]);
 
   // The update control's restart guard: an unsent reply is the one thing a

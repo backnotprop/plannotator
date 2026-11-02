@@ -247,9 +247,11 @@ function isInside(path: string, root: string): boolean {
 
 /**
  * The filesystem paths a src may mean, in order: as written, without a
- * `?query` / `#fragment`, and percent-decoded (`my%20shot.png`).
+ * `?query` / `#fragment`, and percent-decoded (`my%20shot.png`). Exported
+ * for send_message's attached-pictures advice (attached-images.ts), which
+ * must count a picture as shown exactly when the window would find it.
  */
-function pathCandidates(src: string): string[] {
+export function pathCandidates(src: string): string[] {
   const out = [src];
   const stripped = src.replace(/[?#].*$/s, "");
   if (stripped && stripped !== src) out.push(stripped);
