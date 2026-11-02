@@ -76,6 +76,28 @@ describe("resolveAdvertisedSessionUrl", () => {
     }
   });
 
+  test("warns once for a nonlocal host on an SSH loopback listener, but preserves proxy URLs", () => {
+    const spy = spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
+      expect(resolveAdvertisedSessionUrl(19432, true, true)).toBe("https://plannotator.example.com");
+      expect(spy.mock.calls).toHaveLength(0);
+
+      delete process.env.PLANNOTATOR_PUBLIC_URL;
+      expect(resolveAdvertisedSessionUrl(19432, true, true)).toBe("http://localhost:19432");
+      process.env.PLANNOTATOR_URL_HOST = "100.64.0.1";
+      expect(resolveAdvertisedSessionUrl(19432, true, false)).toBe("http://100.64.0.1:19432");
+      expect(spy.mock.calls).toHaveLength(0);
+
+      expect(resolveAdvertisedSessionUrl(19432, true, true)).toBe("http://100.64.0.1:19432");
+      expect(resolveAdvertisedSessionUrl(19433, true, true)).toBe("http://100.64.0.1:19433");
+      expect(spy.mock.calls).toHaveLength(1);
+      expect(String(spy.mock.calls[0]?.[0])).toContain("requires forwarding or a proxy");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test("ignores display overrides for a local session", () => {
     process.env.PLANNOTATOR_PUBLIC_URL = "https://plannotator.example.com";
     expect(resolveAdvertisedSessionUrl(1234, false)).toBe("http://localhost:1234");

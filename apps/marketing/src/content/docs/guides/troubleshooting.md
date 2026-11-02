@@ -76,7 +76,7 @@ Plan saving is enabled by default. You can change the save directory or disable 
 
 If the UI doesn't open automatically, check:
 
-- **Remote/SSH session?** Set `PLANNOTATOR_REMOTE=1` and `PLANNOTATOR_PORT` to a port you'll forward. See the [remote guide](/docs/guides/remote-and-devcontainers/).
+- **Remote/SSH session?** Set `PLANNOTATOR_PORT` to a port you'll forward, leave `PLANNOTATOR_REMOTE` unset for loopback binding, and open the forwarded URL manually. See the [remote guide](/docs/guides/remote-and-devcontainers/).
 - **Wrong browser?** Set `PLANNOTATOR_BROWSER` to the app name or path, or use `--browser` for a one-off override.
 - **`Not opening a browser (PLANNOTATOR_BROWSER=none)`?** That is on purpose: `PLANNOTATOR_BROWSER` (or `--browser`) is set to `none`, `false`, `0`, `off`, `no`, `true`, `1` or `:`. Open the printed URL, or unset the variable. (`BROWSER=true` does not do this; only `PLANNOTATOR_BROWSER` does.)
 - **URL still works** — even if the browser didn't open, the server is running. Check `plannotator sessions` for the URL and open it manually.

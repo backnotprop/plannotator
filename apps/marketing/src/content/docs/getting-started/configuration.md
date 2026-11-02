@@ -167,7 +167,7 @@ You can customize the messages Plannotator sends to the agent when you approve, 
 
 ## Remote mode
 
-When working over SSH, in a devcontainer, or in Docker, set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` to a port you'll forward. Set `PLANNOTATOR_REMOTE=0` / `false` if you need to force local behavior even when SSH env vars are present. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
+Over SSH, leave `PLANNOTATOR_REMOTE` unset and set `PLANNOTATOR_PORT` to a port you'll forward. SSH detection keeps the server on loopback. For a devcontainer or Docker setup that needs all-interface binding, explicitly set `PLANNOTATOR_REMOTE=1` or `true`. Set `PLANNOTATOR_REMOTE=0` / `false` if you need to force local behavior even when SSH env vars are present. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
 
 ## Custom browser
 

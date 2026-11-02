@@ -10,25 +10,34 @@ Plannotator works in remote environments — SSH sessions, VS Code Remote, devco
 
 ## Remote mode
 
-Set `PLANNOTATOR_REMOTE=1` (or `true`) to force remote mode:
+For SSH forwarding, leave `PLANNOTATOR_REMOTE` unset:
+
+```bash
+unset PLANNOTATOR_REMOTE
+export PLANNOTATOR_PORT=9999
+```
+
+Remove an existing `PLANNOTATOR_REMOTE=1` export to get the safer SSH default. SSH detection keeps remote behavior but binds only loopback. For Docker, a devcontainer, or direct-network access that requires all interfaces, explicitly opt in:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
-export PLANNOTATOR_PORT=9999  # Choose a port you'll forward
+export PLANNOTATOR_PORT=9999
 ```
+
+This exposes the unauthenticated server to network peers that can reach the port.
 
 Remote mode changes these behaviors:
 
 1. **Fixed port** — Uses `PLANNOTATOR_PORT` (default: `19432`) instead of a random port, so you can set up port forwarding once
 2. **Browser handling changes** — In headless setups you may need to open the forwarded URL manually instead of relying on browser auto-open
-3. **Wider bind** — The server listens on every interface (`0.0.0.0`), not only loopback, so a forwarder or another device can reach it
+3. **Explicit wider bind** — With `PLANNOTATOR_REMOTE=1` / `true`, the server listens on every interface (`0.0.0.0`). SSH detection alone keeps it on `127.0.0.1` for forwarding
 4. **These features are turned off** — Ask AI's "Ask this session" (Ask AI uses a separate AI agent instead), the annotate agent terminal (unless `PLANNOTATOR_AGENT_TERMINAL_REMOTE=1`), Open in, Update now from a review window, live app annotation, the agent closing a review it opened, and auto-dismiss of an abandoned `--gate --json` session
 
 Every other route stays reachable by anyone who can reach the URL: approving or denying the plan, sending feedback, starting agent review jobs, staging files, posting to the pull request, saving Edit Mode changes, and Ask AI with a separate agent. Bind or forward the port only on networks you trust. Use remote mode only when the browser cannot reach the machine's loopback address; `PLANNOTATOR_PORT` works in local mode too.
 
 ### Legacy detection
 
-Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` environment variables for automatic remote mode when `PLANNOTATOR_REMOTE` is unset. Use `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `PLANNOTATOR_REMOTE=0` / `false` to force local mode.
+Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` when `PLANNOTATOR_REMOTE` is unset. This keeps the fixed remote port and feature restrictions, but binds only `127.0.0.1`. SSH port forwarding still works without exposing the unauthenticated server to the network. Use `PLANNOTATOR_REMOTE=1` / `true` only when you need all-interface binding, or `PLANNOTATOR_REMOTE=0` / `false` to force local behavior.
 
 ## WSL2
 
@@ -46,6 +55,8 @@ export PLANNOTATOR_URL_HOST=my-machine.tailnet.ts.net
 ```
 
 Plannotator then advertises `http://my-machine.tailnet.ts.net:<port>` (the port is chosen at runtime and always appended), so you can open review sessions straight from a phone or another computer. The setting is host-only and strictly display-only — it never changes which interface the server binds; remote mode (`PLANNOTATOR_REMOTE=1`) is what makes the server reachable beyond localhost, and a local session ignores the override entirely (localhost is advertised, with a warning). It can also be set persistently via `~/.plannotator/config.json` (`{ "urlHost": "my-machine.tailnet.ts.net" }`); the env var takes precedence.
+
+If only SSH detection enabled remote behavior, a nonlocal `PLANNOTATOR_URL_HOST` warns that the server is still loopback-bound. That URL needs forwarding or a proxy. The setting does not publish the session; use SSH forwarding, `--tailscale` on the Bun CLI, or explicitly opt into wider binding when needed.
 
 Note that the session is served over plain `http`, so some in-app features that require a secure context (such as creating short share links from the UI) are unavailable from other devices unless you put the session behind HTTPS (e.g. `tailscale serve`). The core review, annotate, and approve flows work over plain `http`.
 
@@ -110,7 +121,7 @@ If the automatic `BROWSER` detection doesn't work for your setup, you can fall b
 
 ## SSH port forwarding
 
-For direct SSH connections, forward the port in your `~/.ssh/config`:
+For direct SSH connections, leave `PLANNOTATOR_REMOTE` unset and set `PLANNOTATOR_PORT=9999` on the server. SSH detection keeps the server on loopback. Forward the port in your `~/.ssh/config`:
 
 ```
 Host your-server

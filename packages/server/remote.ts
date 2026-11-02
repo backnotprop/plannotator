@@ -5,7 +5,7 @@
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" to force remote, "0"/"false" to force local
  *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
  *
- * Legacy (still supported): SSH_TTY, SSH_CONNECTION
+ * Legacy: SSH_TTY, SSH_CONNECTION select remote behavior but keep a loopback bind.
  */
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
@@ -185,11 +185,11 @@ export async function startBunServerOnAvailablePort<TServer>(
 }
 
 /**
- * Bind local sessions to loopback, but keep remote sessions reachable via the
- * container or host network interface for SSH/devcontainer/Docker forwarding.
+ * Only an explicit remote override may expose the unauthenticated server.
+ * SSH detection keeps remote behavior and its fixed port for loopback forwarding.
  */
 export function getServerHostname(): string {
-  return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+  return getRemoteOverride() === true ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
 /**
@@ -204,5 +204,5 @@ export function getLocalUrlHostname(): string | undefined {
 
 /** Compose the display-only URL advertised for a bound server port. */
 export function buildAdvertisedUrl(port: number): string {
-  return resolveAdvertisedSessionUrl(port, isRemoteSession());
+  return resolveAdvertisedSessionUrl(port, isRemoteSession(), getServerHostname() === LOOPBACK_HOST);
 }
