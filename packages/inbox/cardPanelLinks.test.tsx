@@ -16,6 +16,7 @@ import type { CardPanelProps } from './board/CardPanel';
 
 const hasDom = typeof document !== 'undefined';
 const { CardPanel, LinkFavicon } = (hasDom ? await import('./board/CardPanel') : {}) as typeof import('./board/CardPanel');
+const { splitRefs } = (hasDom ? await import('./board/NewCardDialog') : {}) as typeof import('./board/NewCardDialog');
 // The window's own origin, so the favicon route's relative address parses (happy-dom loads no image from it).
 if (hasDom) (window as unknown as { happyDOM: { setURL: (url: string) => void } }).happyDOM.setURL('http://localhost:4000/');
 
@@ -197,5 +198,15 @@ describe('LinkFavicon', () => {
     expect(real.querySelector('img')!.hasAttribute('data-shown')).toBe(true);
     expect(real.querySelector('[data-icon="link"]')).toBeNull();
     expect(real.querySelector('[data-ref-mark="web"]')!.getAttribute('data-favicon')).toBe('shown');
+  });
+});
+
+describe("New card's links field", () => {
+  test.if(hasDom)('splits on spaces and commas, but a URL keeps the commas inside it', () => {
+    expect(splitRefs('acme/widgets#1, acme/widgets#2,acme/widgets#3')).toEqual(['acme/widgets#1', 'acme/widgets#2', 'acme/widgets#3']);
+    expect(splitRefs('https://www.google.com/maps/@37.77,-122.41,14z, https://www.notion.so/acme/Roadmap')).toEqual([
+      'https://www.google.com/maps/@37.77,-122.41,14z',
+      'https://www.notion.so/acme/Roadmap',
+    ]);
   });
 });
