@@ -41,6 +41,8 @@ let seq = 1_000_000;
 let saves = 0;
 let reads: string[] = [];
 let slow = false;
+/** The next saves never answer, as on a connection that went away without a word. */
+let hang = false;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -57,7 +59,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
 
-const TESTS = 3;
+const TESTS = 5;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -105,6 +107,7 @@ beforeEach(() => {
   saves = 0;
   reads = [];
   slow = false;
+  hang = false;
   frames = new Map();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -113,6 +116,7 @@ beforeEach(() => {
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
+      if (hang) await new Promise(() => {});
       if (slow) {
         const { questions } = JSON.parse(answer.text) as { questions: { key: string }[] };
         // The record frame beats the save's own answer.
@@ -218,6 +222,56 @@ test.skipIf(!hasDom)('a record that is not a question line is read at once, what
   frame('record', { seq, kind: 'message', first: false, message: { id: 'msg_x', thread_id: world.waiting, author: { kind: 'agent' }, body: '' } });
   await wait(100);
   expect(count(threadRoute())).toBe(1);
+});
+
+const ownQuestion = async () => {
+  const { thread } = JSON.parse((await loopback(threadRoute())).text) as { thread: { messages: { questions?: object[] }[] } };
+  return thread.messages[0]!.questions![0]!;
+};
+/** Another question's line: another window's pick, or anything else that only moves a question. */
+const otherQuestion = async () => ({ ...(await ownQuestion()), message_id: 'msg_01OTHERTHREAD00000000000000', key: 'q-other' });
+
+test.skipIf(!hasDom)("another question's record is read at once while this one saves", async () => {
+  const field = await open();
+  const question = await otherQuestion();
+  slow = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_other', question });
+  await wait(100);
+  expect(count(threadRoute())).toBe(1);
+});
+
+test.skipIf(!hasDom)("a save that never answers holds back only its own question's records, and nothing once the pane closes", async () => {
+  const field = await open();
+  const question = await otherQuestion();
+  hang = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  await wait(100);
+  expect(count(threadRoute())).toBe(0);
+
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_other', question });
+  await wait(120);
+  expect(count(threadRoute())).toBe(1);
+  expect(count('/api/inbox/drafts')).toBe(1);
+
+  // The pane closes on the save that never answered: the list reads now, and records read as they come.
+  reads = [];
+  await act(async () => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
+  await until(() => count('/api/inbox/threads') > 0, 'the list read');
+  reads = [];
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', question: await ownQuestion() });
+  await wait(120);
+  expect(count('/api/inbox/threads')).toBeGreaterThan(0);
+  expect(count('/api/inbox/drafts')).toBe(1);
 });
 
 test.skipIf(!hasDom)('no stream at all: the list still follows a saved answer', async () => {

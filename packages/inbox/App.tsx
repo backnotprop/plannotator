@@ -644,9 +644,9 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
-  /** The open thread's answers saving, whether a question record came meanwhile, and the read it owes (`onPickSaves`). */
-  const pickSaves = useRef({ saving: false, owed: false, read: () => {} });
-  const subscribeQuestions =useCallback((listener: (question: InboxQuestion) => void) => {
+  /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
+  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
+  const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
   }, []);
@@ -1474,8 +1474,8 @@ function Inbox() {
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
           if (event?.kind === 'question') for (const listener of questionListeners.current) listener(event.question);
-          // A question line while this window saves answers: read once, when the last of them lands (onPickSaves).
-          if (event?.kind === 'question' && pickSaves.current.saving) {
+          // The record of a question this window is saving: read once, when the last of them lands (onPickSaves).
+          if (event?.kind === 'question' && pickSaves.current.saving.has(`${event.question.message_id}/${event.question.key}`)) {
             pickSaves.current.owed = true;
             return;
           }
@@ -2209,14 +2209,15 @@ function Inbox() {
   };
 
   /**
-   * Answers to the open thread's question cards are saving (a card saves on
-   * every change). Each save's answer already brought its questions, so what
-   * the reads show waits for the last one: one read for the lot. Only the
-   * records of those saves wait; anything else is read as it comes.
+   * The questions the open thread is saving answers to (a card saves on every
+   * change). Each save's answer already brought its questions, so what the
+   * reads show waits for the last one: one read for the lot. Only the records
+   * of those questions wait, and only while the pane is open, so a save that
+   * never answers holds back nothing else; any other record is read as it comes.
    */
-  const onPickSaves = useCallback((saving: boolean) => {
+  const onPickSaves = useCallback((saving: ReadonlySet<string>) => {
     pickSaves.current.saving = saving;
-    if (saving) return;
+    if (saving.size > 0) return;
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
     // the list catches up when the thread closes (settle.ts).

@@ -2,12 +2,14 @@
  * A question card saves on every change, so a dictated "Other" answer changes
  * faster than it saves (the owner's debug log, 2026-11-02: 81 saves in a line,
  * a Send 7.2 s behind them, on a phone over a tailnet). While a save runs, each
- * question keeps only its newest answer waiting; a Send waits for the save
- * running and that answer, and nothing else. A reply names its questions by
- * revision and the server sends what is saved, so the fake server's saved
- * answer at the moment of the reply is what the Send carried.
+ * question keeps only its newest answer waiting; a Send saves what the field
+ * shows before its reply leaves, within a bound. The rule: no answer the person
+ * typed is lost or sent stale. A reply names its questions by revision and the
+ * server sends what is saved, so the fake server's saved answer at the moment
+ * of the reply is what the Send carried.
  *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ * The queue's own rules run everywhere; the window's parts are DOM-gated: they
+ * run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
@@ -15,6 +17,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import type { InboxToastModel } from './components/Toast';
+import { createPickQueue } from './pickQueue';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -45,6 +49,7 @@ interface Saved {
   answer: QuestionAnswer | null;
   revision: number;
   superseded: boolean;
+  sent: boolean;
 }
 interface PickPost {
   key: string;
@@ -62,16 +67,19 @@ const [FIRST, SECOND] = [parsed[0]!.key, parsed[1]!.key];
 
 /** The fake Inbox: what it saved, what it was asked, in order, and the gates a test holds saves at. */
 let saved: Map<string, Saved>;
-let log: ('pick' | 'reply')[];
+let log: ('pick' | 'reply' | 'reask')[];
 let picks: PickPost[];
 let replies: ReplyPost[];
 let attachmentReads: number;
+let toasts: Omit<InboxToastModel, 'id'>[];
 /** Set: each save waits here until the test releases it, the POST already seen. */
 let gate: (() => void)[] | null;
 /** Each save takes this long. */
 let saveMs: number;
 /** What the next saves answer instead of saving, one per save. */
 let refusals: { status: number; code: string; error: string }[];
+
+const FULL = { status: 500, code: 'error', error: 'The disk is full.' };
 
 function wire(): InboxQuestion[] {
   return parsed.map((q) => {
@@ -89,13 +97,13 @@ function wire(): InboxQuestion[] {
       holds_up: q.holds_up,
       asked_by_agent_id: AGENT.session,
       orphaned: false,
-      state: held.superseded ? 'superseded' : held.answer ? 'picked' : 'open',
+      state: held.superseded ? 'superseded' : held.sent ? 'sent' : held.answer ? 'picked' : 'open',
       answer: held.answer,
       revision: held.revision,
-      sent_revision: 0,
+      sent_revision: held.sent ? held.revision : 0,
       picked_by: held.answer ? { kind: 'person' } : null,
       picked_at: held.answer ? '2026-11-01T10:20:00.000Z' : null,
-      sent_reply_id: null,
+      sent_reply_id: held.sent ? 'msg_reply' : null,
       message_id: M1,
       superseded_by: held.superseded ? { message_id: M1, key: null } : null,
     } as InboxQuestion;
@@ -120,17 +128,20 @@ function threadNow(): InboxThread {
   return { thread_id: M1, project: { ...PROJECT }, subject: 'Retry', thread_name: null, resolved_at: null, messages: [message] };
 }
 
+const held = () => Object.fromEntries([...saved].map(([key, q]) => [key, q.answer?.other ?? q.answer?.selected[0]]));
+
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 
 beforeEach(() => {
   if (!hasDom) return;
-  saved = new Map(parsed.map((q) => [q.key, { answer: null, revision: 3, superseded: false }]));
+  saved = new Map(parsed.map((q) => [q.key, { answer: null, revision: 3, superseded: false, sent: false }]));
   log = [];
   picks = [];
   replies = [];
   attachmentReads = 0;
+  toasts = [];
   gate = null;
   saveMs = 0;
   refusals = [];
@@ -138,7 +149,8 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path.endsWith('/picks') && init?.method === 'POST') {
-      const entry = (JSON.parse(String(init.body)) as { questions: PickPost[] }).questions[0]!;
+      const body = JSON.parse(String(init.body)) as { questions: PickPost[]; unsent_only?: boolean };
+      const entry = body.questions[0]!;
       picks.push(entry);
       log.push('pick');
       const waiting = gate;
@@ -146,18 +158,29 @@ beforeEach(() => {
       else if (saveMs > 0) await new Promise((resolve) => setTimeout(resolve, saveMs));
       const refusal = refusals.shift();
       if (refusal) return Response.json({ error: refusal.error, code: refusal.code }, { status: refusal.status });
-      const held = saved.get(entry.key)!;
-      if (held.superseded) return Response.json({ error: 'Replaced.', code: 'question_superseded' }, { status: 422 });
+      const question = saved.get(entry.key)!;
+      if (question.superseded) return Response.json({ error: 'Replaced.', code: 'question_superseded' }, { status: 422 });
       // As the store does: a stale revision is refused, so a test that passes sent the right one.
-      if (held.revision !== entry.revision) return Response.json({ error: 'Stale revision.', code: 'question_revision_conflict' }, { status: 409 });
-      saved.set(entry.key, { ...held, answer: entry.answer, revision: held.revision + 1 });
+      if (question.revision !== entry.revision) return Response.json({ error: 'That question changed since you read it.', code: 'question_revision_conflict' }, { status: 409 });
+      if (body.unsent_only === true && question.sent) return Response.json({ error: 'Already sent.', code: 'question_already_sent' }, { status: 409 });
+      saved.set(entry.key, { ...question, answer: entry.answer, revision: question.revision + 1, sent: false });
       return Response.json({ message_id: M1, questions: wire(), reply: null });
     }
     if (path.endsWith('/reply') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { questions: ReplyPost['questions'] };
       log.push('reply');
-      replies.push({ questions: body.questions, saved: Object.fromEntries([...saved].map(([key, held]) => [key, held.answer?.other ?? held.answer?.selected[0]])) });
+      replies.push({ questions: body.questions, saved: held() });
+      for (const q of body.questions) {
+        const question = saved.get(q.key)!;
+        if (question.superseded) return Response.json({ error: 'Replaced.', code: 'question_superseded' }, { status: 422 });
+        if (question.revision !== q.revision) return Response.json({ error: 'That question changed since you read it.', code: 'question_revision_conflict' }, { status: 409 });
+      }
+      for (const q of body.questions) saved.set(q.key, { ...saved.get(q.key)!, sent: true });
       return Response.json({ reply: { id: 'msg_reply', thread_id: M1, author: { kind: 'person' } }, questions: wire(), replayed: false });
+    }
+    if (path.endsWith('/reask') && init?.method === 'POST') {
+      log.push('reask');
+      return Response.json({ message: { id: 'msg_note', thread_id: M1 } });
     }
     if (path.includes('/attachments')) {
       attachmentReads += 1;
@@ -206,6 +229,9 @@ function Pane() {
       file={null}
       onOpenFile={() => {}}
       onOpenGuide={() => {}}
+      onToast={(toast) => {
+        toasts.push(toast);
+      }}
     />
   );
 }
@@ -237,7 +263,7 @@ function type(el: HTMLElement, words: string) {
 const sendButton = (el: HTMLElement) => [...el.querySelectorAll('button')].find((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Send') ?? null;
 
 async function press(el: HTMLElement) {
-  await until(() => sendButton(el) !== null, 'the Send');
+  await until(() => sendButton(el) !== null && !sendButton(el)!.disabled, 'the Send');
   await act(async () => sendButton(el)!.click());
 }
 
@@ -251,12 +277,16 @@ async function release() {
   await act(async () => resolve());
 }
 
+/** The first answer saved, and the Send drawn: the state a person dictating is in. */
+async function answered(el: HTMLElement, words = 'p') {
+  type(el, words);
+  await until(() => saved.get(FIRST)!.answer?.other === words, 'the first answer saved');
+  await until(() => sendButton(el) !== null, 'the Send');
+}
+
 test.skipIf(!hasDom)('80 changes behind a slow save: one POST for the lot, and the Send goes right after it with the final answer', async () => {
   const el = await render();
-  type(el, 'p');
-  await until(() => saved.get(FIRST)!.answer !== null, 'the first answer saved');
-  await until(() => sendButton(el) !== null, 'the Send');
-
+  await answered(el);
   gate = [];
   type(el, 'pi');
   await until(() => picks.length === 2, 'the save in flight');
@@ -304,6 +334,17 @@ test.skipIf(!hasDom)('a question changing 80 times against a slow server: far fe
   expect(otherField(el).value).toBe(final);
 });
 
+test.skipIf(!hasDom)('the last key and the Send in one tick, nothing saving: the reply carries that key', async () => {
+  const el = await render();
+  await answered(el, 'almost');
+  saveMs = 5;
+  type(el, 'almost there');
+  await act(async () => sendButton(el)!.click());
+  await until(() => replies.length === 1, 'the reply');
+  expect(replies[0]!.saved[FIRST]).toBe('almost there');
+  expect(log).toEqual(['pick', 'pick', 'reply']);
+});
+
 test.skipIf(!hasDom)('two questions answered behind a slow save: both save, each once, and the Send carries both', async () => {
   const el = await render();
   await act(async () => option(el, 'One minute').click());
@@ -331,10 +372,9 @@ test.skipIf(!hasDom)('two questions answered behind a slow save: both save, each
 
 test.skipIf(!hasDom)('a save refused with a newer answer waiting: the newer one goes and decides, and no error stays', async () => {
   const el = await render();
-  type(el, 'p');
-  await until(() => sendButton(el) !== null, 'the Send');
+  await answered(el);
   gate = [];
-  refusals = [{ status: 500, code: 'error', error: 'The disk is full.' }];
+  refusals = [FULL];
   type(el, 'pi');
   await until(() => picks.length === 2, 'the save in flight');
   type(el, 'pin it');
@@ -349,27 +389,185 @@ test.skipIf(!hasDom)('a save refused with a newer answer waiting: the newer one 
   expect(el.textContent).not.toContain('The disk is full.');
 });
 
-test.skipIf(!hasDom)('the newest answer refused: the Send stops and says why, never sending the older answer', async () => {
+test.skipIf(!hasDom)('the newest answer refused while the Send waits: the words stay, the error shows, nothing older goes, and the next Send saves them', async () => {
   const el = await render();
-  type(el, 'older');
-  await until(() => sendButton(el) !== null, 'the Send');
+  await answered(el, 'older');
   gate = [];
   type(el, 'older, then more');
   await until(() => picks.length === 2, 'the save in flight');
-  refusals = [{ status: 500, code: 'error', error: 'The disk is full.' }];
+  refusals = [FULL];
   await press(el);
   await release();
   await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
   await settle(5);
   expect(replies).toHaveLength(0);
-  // Not stuck: the next Send goes, with what the card shows now.
+  expect(otherField(el).value).toBe('older, then more');
+
   gate = null;
   await press(el);
   await until(() => replies.length === 1, 'the next Send');
-  expect(replies[0]!.saved[FIRST]).toBe('older');
+  expect(replies[0]!.saved[FIRST]).toBe('older, then more');
+  expect(el.textContent).not.toContain('The disk is full.');
 });
 
-test.skipIf(!hasDom)('a question replaced behind the saves: no error, and the Send still goes with the rest', async () => {
+test.skipIf(!hasDom)('the newest answer refused just before the press: one try per press, and the Send stops until it lands', async () => {
+  const el = await render();
+  await answered(el, 'older');
+  refusals = [FULL];
+  type(el, 'older, then more');
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  await settle(5);
+  expect(otherField(el).value).toBe('older, then more');
+  const tries = picks.length;
+
+  // Still refused: nothing goes, older or newer, and only this press tried again.
+  refusals = [FULL];
+  await press(el);
+  await until(() => picks.length === tries + 1, 'the try of this press');
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said again');
+  await settle(10);
+  expect(picks).toHaveLength(tries + 1);
+  expect(replies).toHaveLength(0);
+  expect(otherField(el).value).toBe('older, then more');
+
+  await press(el);
+  await until(() => replies.length === 1, 'the Send once it saves');
+  expect(replies[0]!.saved[FIRST]).toBe('older, then more');
+});
+
+test.skipIf(!hasDom)('a first answer refused stays on the card, and later keys build on it', async () => {
+  const el = await render();
+  refusals = [FULL];
+  type(el, 'never saved');
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  await settle(5);
+  expect(otherField(el).value).toBe('never saved');
+  type(el, 'never saved, until now');
+  await until(() => saved.get(FIRST)!.answer?.other === 'never saved, until now', 'the answer saved');
+  expect(el.textContent).not.toContain('The disk is full.');
+});
+
+test.skipIf(!hasDom)('another window took the revision: the words stay, the conflict shows, and the Send goes with what the field shows', async () => {
+  const el = await render();
+  await answered(el, 'mine');
+  saved.set(FIRST, { ...saved.get(FIRST)!, answer: { ...saved.get(FIRST)!.answer!, other: 'theirs' }, revision: 9 });
+  type(el, 'mine, longer');
+  await until(() => el.textContent?.includes('That question changed since you read it.') === true, 'the conflict said');
+  await settle(5);
+  expect(otherField(el).value).toBe('mine, longer');
+  await press(el);
+  await until(() => replies.length === 1, 'the reply');
+  expect(replies[0]!.saved[FIRST]).toBe('mine, longer');
+});
+
+test.skipIf(!hasDom)('a change after the press, the save running refused: the newer save decides and the Send goes', async () => {
+  const el = await render();
+  await answered(el);
+  gate = [];
+  type(el, 'pi');
+  await until(() => picks.length === 2, 'the save in flight');
+  refusals = [FULL];
+  await press(el);
+  type(el, 'pin it');
+  await release();
+  await until(() => picks.length === 3, 'the newer answer');
+  await release();
+  await until(() => replies.length === 1, 'the reply');
+  expect(replies[0]!.saved[FIRST]).toBe('pin it');
+  expect(el.textContent).not.toContain('The disk is full.');
+});
+
+test.skipIf(!hasDom)('a change after the press, both saves refused: the error shows and the Send is back, never a silent stop', async () => {
+  const el = await render();
+  await answered(el);
+  gate = [];
+  type(el, 'pi');
+  await until(() => picks.length === 2, 'the save in flight');
+  refusals = [FULL, FULL];
+  await press(el);
+  type(el, 'pin it');
+  await release();
+  await until(() => picks.length === 3, 'the newer answer');
+  await release();
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  await until(() => sendButton(el)?.disabled === false, 'the Send back');
+  expect(replies).toHaveLength(0);
+  expect(otherField(el).value).toBe('pin it');
+});
+
+test.skipIf(!hasDom)('changes after the press go in the Send, up to the point the line closes; one after that never reopens the question', async () => {
+  const el = await render();
+  await answered(el, 'a');
+  gate = [];
+  type(el, 'ab');
+  await until(() => picks.length === 2, 'the save running at the press');
+  await press(el);
+
+  type(el, 'abc');
+  await release();
+  await until(() => picks.length === 3, 'the first change after the press');
+  type(el, 'abcd');
+  await release();
+  await until(() => picks.length === 4, 'the second change after the press');
+  expect(picks[3]!.answer?.other).toBe('abcd');
+  // The third round has started, so the line is closed: this one waits for the reply.
+  type(el, 'abcde');
+  await release();
+  await until(() => replies.length === 1, 'the reply');
+  expect(replies[0]!.saved[FIRST]).toBe('abcd');
+  expect(replies[0]!.questions.map((q) => [q.key, q.revision])).toEqual([[FIRST, 7]]);
+
+  // It leaves after the reply, and the sent question stays as sent.
+  await until(() => picks.length === 5, 'the late change');
+  expect(log.indexOf('reply')).toBeLessThan(log.lastIndexOf('pick'));
+  await release();
+  await until(() => toasts.length === 1, 'the notice');
+  expect(toasts[0]!.lead).toBe('Pick not saved. That question was already sent, so your last change did not go.');
+  expect(saved.get(FIRST)!.answer?.other).toBe('abcd');
+  expect(saved.get(FIRST)!.sent).toBe(true);
+});
+
+test.skipIf(!hasDom)('dictation that never stops cannot hold the Send: it goes within the rounds, and no save runs beside it', async () => {
+  const el = await render();
+  await answered(el, 'word');
+  saveMs = 4;
+  let words = 'word';
+  for (let i = 0; i < 5; i += 1) {
+    words += ' more';
+    type(el, words);
+    await settle(1);
+  }
+  await until(() => sendButton(el)?.disabled === false, 'the Send');
+  await act(async () => sendButton(el)!.click());
+  const atPress = picks.length;
+  for (let i = 0; i < 400 && replies.length === 0; i += 1) {
+    words += ' more';
+    type(el, words);
+    await settle(1);
+  }
+  expect(replies).toHaveLength(1);
+  // The save running, then the answers of three rounds: never one per change.
+  expect(picks.length - atPress).toBeLessThanOrEqual(4);
+  // The server took the reply at the revision it named: no save raced it.
+  expect(saved.get(FIRST)!.sent).toBe(true);
+  expect(el.textContent).not.toContain('That question changed since you read it.');
+  await settle(30);
+});
+
+test.skipIf(!hasDom)('a question replaced behind the saves, with an answer saved on it: nothing goes until the person has read that', async () => {
+  const el = await render();
+  await answered(el, 'first');
+  gate = [];
+  type(el, 'first answer');
+  await until(() => picks.length === 2, 'the save in flight');
+  saved.set(FIRST, { ...saved.get(FIRST)!, superseded: true });
+  await press(el);
+  await release();
+  await until(() => el.textContent?.includes('will not be sent.') === true, 'the guard');
+  expect(replies).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('a first answer on a question replaced during the wait: the words were the only copy, so a notice says so and the Send stops for the guard', async () => {
   const el = await render();
   await act(async () => option(el, 'One minute').click());
   await until(() => saved.get(SECOND)!.answer !== null, 'the second question saved');
@@ -381,12 +579,45 @@ test.skipIf(!hasDom)('a question replaced behind the saves: no error, and the Se
   saved.set(FIRST, { ...saved.get(FIRST)!, superseded: true });
   await press(el);
   await release();
-  // The newest answer is refused too: it asks nothing of the person.
+  // The newest answer is refused too: only it speaks.
   await until(() => picks.length === 3, 'the newest answer');
   await release();
+  await until(() => toasts.length > 0, 'the notice');
+  expect(toasts.map((toast) => toast.lead)).toEqual(["Pick not saved. That question was replaced, so this answer won't be sent."]);
+  await until(() => el.textContent?.includes('Your pick on it will not be sent.') === true, 'the guard');
+  expect(replies).toHaveLength(0);
+  expect(el.textContent).not.toContain('Replaced.');
+
+  // Having read it, the person sends the rest.
+  await act(async () => el.querySelector<HTMLElement>('[data-guard-send-rest]')!.click());
   await until(() => replies.length === 1, 'the reply');
   expect(replies[0]!.questions.map((q) => q.key)).toEqual([SECOND]);
-  expect(el.textContent).not.toContain('Replaced.');
+});
+
+test.skipIf(!hasDom)('a save refused after the pane closed: a notice says so, naming the thread', async () => {
+  const el = await render();
+  gate = [];
+  refusals = [FULL];
+  type(el, 'left behind');
+  await until(() => picks.length === 1, 'the save in flight');
+  act(() => root!.unmount());
+  root = null;
+  await release();
+  await until(() => toasts.length === 1, 'the notice');
+  expect(toasts[0]!.icon).toBe('warn');
+  expect(toasts[0]!.lead).toBe('Pick not saved. Your answer in "Retry" did not reach the Inbox.');
+});
+
+test.skipIf(!hasDom)('leaving the pane with words not saved: a notice says so as it closes', async () => {
+  const el = await render();
+  refusals = [FULL];
+  type(el, 'left behind');
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  await settle(5);
+  expect(toasts).toHaveLength(0);
+  act(() => root!.unmount());
+  root = null;
+  expect(toasts.map((toast) => toast.lead)).toEqual(['Pick not saved. Your answer in "Retry" did not reach the Inbox.']);
 });
 
 test.skipIf(!hasDom)('a saved pick reads the files once at most: only a read of the thread reads them again', async () => {
@@ -400,4 +631,164 @@ test.skipIf(!hasDom)('a saved pick reads the files once at most: only a read of 
   }
   expect(picks).toHaveLength(4);
   expect(attachmentReads).toBe(1);
+});
+
+/** Re-ask, at the foot of the open questions' list. */
+async function reask(el: HTMLElement) {
+  const trigger = el.querySelector<HTMLElement>('[data-open-questions]')!;
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    trigger.click();
+  });
+  for (let i = 0; i < 30 && !document.querySelector('[data-open-questions-list]'); i += 1) await settle();
+  const item = document.querySelector<HTMLElement>('[data-open-questions-list] [data-reask]')!;
+  await act(async () => item.click());
+}
+
+test.skipIf(!hasDom)('Re-ask waits for the newest answer: the note goes after it lands', async () => {
+  const el = await render();
+  gate = [];
+  type(el, 'first');
+  await until(() => picks.length === 1, 'the save in flight');
+  await reask(el);
+  await settle(5);
+  expect(log).toEqual(['pick']);
+  await release();
+  await until(() => log.includes('reask'), 'the note');
+  expect(log).toEqual(['pick', 'reask']);
+});
+
+test.skipIf(!hasDom)('Re-ask stops on an answer not saved: the error shows and nothing is asked', async () => {
+  const el = await render();
+  gate = [];
+  refusals = [FULL];
+  type(el, 'first');
+  await until(() => picks.length === 1, 'the save in flight');
+  await reask(el);
+  await release();
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  await settle(5);
+  expect(log).toEqual(['pick']);
+  expect(otherField(el).value).toBe('first');
+});
+
+/** Mod+Enter, with the layout happy-dom has none of: the Send counts as on screen while `shown()` says so. */
+function modEnterLayout(shown: () => boolean) {
+  const real = HTMLElement.prototype.getClientRects;
+  HTMLElement.prototype.getClientRects = function (this: HTMLElement) {
+    return (shown() ? [new DOMRect(0, 0, 100, 30)] : []) as unknown as DOMRectList;
+  };
+  return () => {
+    HTMLElement.prototype.getClientRects = real;
+  };
+}
+
+async function modEnter(from: Element) {
+  await act(async () => {
+    from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
+  });
+}
+
+test.skipIf(!hasDom)('Mod+Enter before the Send is drawn waits for the save, then sends the newest answer', async () => {
+  const restore = modEnterLayout(() => true);
+  try {
+    const el = await render();
+    gate = [];
+    type(el, 'first');
+    await until(() => picks.length === 1, 'the save in flight');
+    await modEnter(otherField(el));
+    // Past the eight frames the key gives the Send to draw: only a wait for the save can still press it.
+    await settle(200);
+    expect(replies).toHaveLength(0);
+    await release();
+    await until(() => replies.length === 1, 'the reply');
+    expect(replies[0]!.saved[FIRST]).toBe('first');
+  } finally {
+    restore();
+  }
+});
+
+test.skipIf(!hasDom)('Mod+Enter on an answer not saved: the key is spent, the error shows and nothing goes', async () => {
+  let shown = false;
+  const restore = modEnterLayout(() => shown);
+  try {
+    const el = await render();
+    await answered(el);
+    gate = [];
+    refusals = [FULL];
+    type(el, 'pi');
+    await until(() => picks.length === 2, 'the save in flight');
+    await modEnter(otherField(el));
+    shown = true;
+    await release();
+    await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+    await settle(200);
+    expect(picks).toHaveLength(2);
+    expect(replies).toHaveLength(0);
+    expect(otherField(el).value).toBe('pi');
+  } finally {
+    restore();
+  }
+});
+
+/** The queue, on its own: a save held until the test says. */
+function heldSave(ran: string[], name: string) {
+  let finish!: (saved: boolean) => void;
+  const done = new Promise<boolean>((resolve) => (finish = resolve));
+  return {
+    save: () => {
+      ran.push(name);
+      return done;
+    },
+    finish,
+  };
+}
+
+test('a newer answer keeps the place its question first took in the line', async () => {
+  const ran: string[] = [];
+  const queue = createPickQueue();
+  const first = heldSave(ran, 'a');
+  queue.put('a', first.save);
+  const stale = heldSave(ran, 'stale b');
+  queue.put('b', stale.save);
+  const c = heldSave(ran, 'c');
+  queue.put('c', c.save);
+  const newest = heldSave(ran, 'newest b');
+  queue.put('b', newest.save);
+  first.finish(true);
+  await Bun.sleep(0);
+  newest.finish(true);
+  await Bun.sleep(0);
+  c.finish(true);
+  await queue.settled();
+  expect(ran).toEqual(['a', 'newest b', 'c']);
+});
+
+test('a save that throws saved nothing, and the line goes on', async () => {
+  const queue = createPickQueue();
+  let reached = false;
+  queue.put('a', () => Promise.reject(new Error('thrown')));
+  queue.put('b', async () => {
+    reached = true;
+    return true;
+  });
+  await queue.settled();
+  await Bun.sleep(0);
+  expect(reached).toBe(true);
+  expect(queue.unsaved()).toBe(1);
+});
+
+test('the questions saving are reported as they change, and none once the last lands', async () => {
+  const seen: string[][] = [];
+  const queue = createPickQueue((ids) => seen.push([...ids]));
+  const a = heldSave([], 'a');
+  queue.put('a', a.save);
+  const b = heldSave([], 'b');
+  queue.put('b', b.save);
+  a.finish(true);
+  await Bun.sleep(0);
+  b.finish(true);
+  await Bun.sleep(0);
+  expect(seen).toEqual([['a'], ['a', 'b'], ['b'], []]);
 });

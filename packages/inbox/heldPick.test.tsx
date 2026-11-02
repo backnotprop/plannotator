@@ -109,6 +109,7 @@ let picks: { url: string; body: { questions: { key: string; revision: number; an
 let toasts: Omit<InboxToastModel, 'id'>[] = [];
 /** Set: each pick waits here until the test releases it, the POST already seen. */
 let gate: (() => void)[] | null = null;
+let replies = 0;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -118,9 +119,14 @@ beforeEach(() => {
   picks = [];
   toasts = [];
   gate = null;
+  replies = 0;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path.endsWith('/reply') && init?.method === 'POST') {
+      replies += 1;
+      return Response.json({ reply: { id: 'msg_reply', thread_id: M1, author: { kind: 'person' } }, questions: [], replayed: false });
+    }
     if (path.endsWith('/picks') && init?.method === 'POST') {
       picks.push({ url: path, body: JSON.parse(String(init.body)) });
       const number = picks.length;
@@ -236,6 +242,25 @@ test.skipIf(!hasDom)('a second pick on the same question while the first waits g
   expect(picks.map((pick) => pick.body.questions[0]!.revision)).toEqual([3, 4]);
   await settle();
   expect(option(el, 'Loosen it').checked).toBe(true);
+});
+
+test.skipIf(!hasDom)('a held pick counts as saved: a Send of the words goes, never stopped by it', async () => {
+  const el = await render();
+  await choose(el, 'Pin it');
+  await until(() => picks.length === 1, 'the held pick');
+  const reply = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement;
+  await act(async () => reply.click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, 'Pin it, as held.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  const send = [...el.querySelectorAll('section.ib-pane button')].find((b) => b.textContent?.trim() === 'Send') as HTMLButtonElement;
+  await act(async () => send.click());
+  await until(() => replies === 1, 'the reply');
 });
 
 test.skipIf(!hasDom)('an answer typed behind a held pick: only its newest words are held next, and a refusal of them unpicks them', async () => {
