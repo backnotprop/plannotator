@@ -1140,6 +1140,11 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
 const REPLY_BOX_CONTROLS =
   'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
 
+/** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
+function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
+  return <InboxComposerField {...props} value={useReplyText(replyText)} />;
+}
+
 /**
  * A press anywhere else in the reply box puts the caret in its text, as a
  * press anywhere in an input does. The box is drawn as one field with a focus
@@ -1150,11 +1155,6 @@ const REPLY_BOX_CONTROLS =
  * The default is prevented so the press neither blurs the textarea nor starts
  * a selection; a textarea that already has focus keeps its caret.
  */
-/** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
-function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
-  return <InboxComposerField {...props} value={useReplyText(replyText)} />;
-}
-
 function focusReplyFromBox(event: ReactMouseEvent<HTMLElement>, field: HTMLTextAreaElement | null): void {
   if (event.button !== 0 || !field || field.disabled) return;
   const target = event.target;
