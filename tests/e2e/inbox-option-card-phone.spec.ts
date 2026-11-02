@@ -9,10 +9,12 @@
  * zoomed, a tall picture or a panorama zoomed below its Fit, a double tap, a
  * swipe between pictures and a drag down to close. A zoomed picture still
  * slides under the bars. Hide takes the card too and gives the picture the
- * whole screen. The card keeps one height, its "Last option" note showing for
- * its time in the question's place, measured to fit with its pill never cut,
- * and said in the live region on the step onto it. Desktop and a phone on its
- * side stay as they were.
+ * whole screen, and so does minimizing the comment box (restoring it brings
+ * the card and the picture back, with no jump). The card is one row and one height (approval
+ * "inbox-option-card-lean": the letter and the name, no arrows on a phone, no
+ * question, dots or end note), a long name giving way with an ellipsis, and the
+ * last option is said in the live region on the step onto it. A phone on its
+ * side stays as it was; a desktop has its own spec.
  *
  * Chromium: real touches, through the DevTools protocol. WebKit has no way to
  * send them from Playwright (phone-touch.ts): its checks use the mouse for a
@@ -36,8 +38,6 @@ import { finger, pinch, png, type Finger, type Point } from './phone-touch';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_OPTION_CARD_SHOTS ?? join(repo, '.local/proof/option-card-phone'));
-
-const NOTE_MS = 2400;
 
 const QUESTION = [
   ':::question',
@@ -65,6 +65,7 @@ async function world() {
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_NOTES: '0',
+    CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -173,29 +174,6 @@ async function openChoice(page: Page, url: string, thread: string, letter: strin
   await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
   await expect(caption(page)).toHaveAttribute('data-option-caption', letter);
   await atRest(page);
-}
-
-/** The end note as drawn: whether its words are cut, and where the pill it points to ends up. */
-function noteLine(page: Page) {
-  return caption(page)
-    .locator('[data-option-end]')
-    .evaluate((line) => {
-      const note = line.querySelector<HTMLElement>('.ib-optcap-note')!;
-      const pill = line.querySelector<HTMLElement>('.ib-optcap-pill')!.getBoundingClientRect();
-      const dots = line.parentElement!.querySelector('.ib-optcap-dots')!.getBoundingClientRect();
-      const room = line.clientWidth - pill.width - parseFloat(getComputedStyle(line).columnGap);
-      return {
-        text: line.textContent,
-        wordsCut: note.scrollWidth > note.clientWidth,
-        wordsRoom: room,
-        wordsWant: note.scrollWidth,
-        wordsEllipsis: getComputedStyle(note).textOverflow === 'ellipsis',
-        pillOverlapsWords: pill.left < note.getBoundingClientRect().right - 0.5,
-        pillPastLine: pill.right > line.getBoundingClientRect().right + 0.5,
-        pillOverlapsDots: pill.right > dots.left + 0.5,
-        pillWidth: pill.width,
-      };
-    });
 }
 
 /** The picture's middle, on the stage, where a finger lands without touching a button. */
@@ -383,12 +361,39 @@ for (const { name, width, height } of [
       inTheClear(await layout(page));
       await page.getByRole('radio', { name: /Comment/ }).first().tap();
       await settled(page);
+      // Minimizing the comment box takes the card (the owner: "I also want that options panel to go away"):
+      // the picture refits above the toolbar, a pinch and a swipe still work, and restoring brings the card and the picture back.
+      const beforeMinimize = await layout(page);
       await page.locator('.ib-fcomp-min').tap();
-      await settled(page);
+      await atRest(page);
       const minimized = await layout(page);
+      expect(minimized.card, 'the card goes with the comment box').toBeNull();
+      expect(minimized.toolbar).not.toBeNull();
       inTheClear(minimized);
-      await page.locator('.ib-fcomp-pill').tap();
+      expect(minimized.image.height).toBeGreaterThanOrEqual(beforeMinimize.image.height);
+      await shot(page, `${tag}-A-minimized`);
+      await spread(page, middle(minimized), 90, 320);
       await settled(page);
+      expect((await layout(page)).scale).toBeGreaterThan(minimized.scale * 2);
+      await spread(page, middle(minimized), 320, 50);
+      await settled(page);
+      await spread(page, middle(minimized), 200, 60);
+      await settled(page);
+      same((await layout(page)).image, minimized.image);
+      await page.locator('.ib-fcomp-pill').tap();
+      await atRest(page);
+      same((await layout(page)).image, beforeMinimize.image);
+      same((await layout(page)).card!, beforeMinimize.card!);
+      // A swipe while it is minimized steps to the next option, and the card is there with the box.
+      await page.locator('.ib-fcomp-min').tap();
+      await atRest(page);
+      const hiddenAt = await layout(page);
+      await touch.down(hiddenAt.stage.right - 60, middle(hiddenAt).y, -hiddenAt.stage.width * 0.5, 0);
+      await touch.up();
+      await settled(page, 600);
+      await page.locator('.ib-fcomp-pill').tap();
+      await atRest(page);
+      await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
 
       // A tall picture reads from the top, reaches its end, and zooms below its Fit: the whole of it, in the clear.
       await openChoice(page, url, thread, 'D');
@@ -397,6 +402,20 @@ for (const { name, width, height } of [
       const end = await panTo(page, touch, 'bottom');
       expect(Math.abs(end.image.bottom - floor(end)), 'a tall picture reaches its end').toBeLessThan(1);
       await shot(page, `${tag}-D-tall-end`);
+      // Back up a little: off its stop, so the new room cannot move it.
+      for (let i = 0; i < 3; i++) {
+        await touch.down(middle(end).x, middle(end).y - 45, 0, 90, 6);
+        await touch.up();
+        await settled(page, 120);
+      }
+      const held = await layout(page);
+      expect(held.image.top).toBeGreaterThan(end.image.top + 200);
+      // Where the person panned to holds when the room changes: Hide (and minimize) refit only a picture resting at Fit.
+      await hideTools(page);
+      expect(Math.abs((await layout(page)).image.top - held.image.top), 'Hide does not snap a panned picture back').toBeLessThan(1.5);
+      await tapTools(page, '[data-full-view-handle]', 'revealed');
+      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
+      expect(Math.abs((await layout(page)).image.top - held.image.top), 'showing the tools again does not either').toBeLessThan(1.5);
       await panTo(page, touch, 'top');
       for (let i = 0; i < 3; i++) {
         await spread(page, at, 300, 60);
@@ -429,7 +448,8 @@ for (const { name, width, height } of [
       await hideTools(page);
       const hidden = await layout(page);
       expect(hidden.card).toBeNull();
-      expect(hidden.image.height).toBeGreaterThan(tools.image.height + 30);
+      expect(hidden.image.height).toBeGreaterThanOrEqual(tools.image.height);
+      expect(hidden.image.bottom).toBeGreaterThan(tools.image.bottom - 1);
       expect(Math.abs(hidden.image.top - hidden.stage.top - (hidden.stage.bottom - hidden.image.bottom)), 'centred on the whole stage').toBeLessThan(1);
       expect(Math.min(hidden.image.top - hidden.stage.top, hidden.image.left - hidden.stage.left)).toBeLessThan(14);
       await shot(page, `${tag}-C-hidden`);
@@ -517,8 +537,9 @@ for (const [width, height] of [
   [402, 660],
   [390, 844],
   [360, 780],
+  [320, 640],
 ] as const)
-  test(`the card keeps one height at ${width} × ${height}: the "Last option" note fits beside its pill, for its time, and is said once`, async () => {
+  test(`the card is one row and one height at ${width} × ${height}: the letter and the name, no arrows, question, dots or end note; the last option is said in the live region`, async () => {
     const { root, url, agent, thread } = await world();
     const browser: Browser = await chromium.launch();
     try {
@@ -526,8 +547,13 @@ for (const [width, height] of [
       const page = await context.newPage();
       await openChoice(page, url, thread, 'B');
       const recommended = (await layout(page)).card!;
+      expect(recommended.height, 'one row').toBeLessThan(60);
+      await expect(caption(page).locator('.ib-optcap-main .ib-optcap-letter')).toHaveText('B');
+      await expect(caption(page).locator('[data-option-recommended]')).toHaveText('Recommended');
+      for (const gone of ['[data-option-step]', '.ib-optcap-q', '.ib-optcap-prompt', '.ib-optcap-dots', '[data-option-end]']) await expect(caption(page).locator(gone)).toHaveCount(0);
+      await shot(page, `${width}x${height}-B-lean`);
 
-      // A step onto the last option: the note in the question's line, whole, and said in the window's live region.
+      // A swipe onto the last option: the card is where it was, and the live region says where the other files are.
       await openChoice(page, url, thread, 'D');
       const touch = await finger(page, 'chromium');
       const tall = await layout(page);
@@ -535,62 +561,38 @@ for (const [width, height] of [
       await touch.up();
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'E');
       await expect(page.locator('[data-step-live]')).toHaveText('Option E of 5: A panorama. Last option. 2 other files under the 5/5 button');
-      const fits = async () => {
-        const note = await noteLine(page);
-        expect(note.text).toBe('Last option · 2 files under 5/5');
-        expect(note.wordsCut, `the words want ${note.wordsWant} px of ${note.wordsRoom}`).toBe(false);
-        // Fonts differ by platform (159 px on a CI runner, 156 on a Mac): a real margin, not a lucky fit.
-        expect(note.wordsRoom - note.wordsWant, 'spare room beside the words').toBeGreaterThanOrEqual(8);
-        expect(note.pillOverlapsWords).toBe(false);
-        expect(note.pillPastLine).toBe(false);
-        expect(note.pillOverlapsDots).toBe(false);
-      };
-      await fits();
-      expect((await layout(page)).card!.height).toBe(recommended.height);
-      expect((await layout(page)).card!.top).toBe(recommended.top);
-      await shot(page, `${width}x${height}-E-last-option-note`);
-      await page.waitForTimeout(NOTE_MS + 200);
-      await expect(caption(page).locator('[data-option-end]')).toHaveCount(0);
-      await expect(caption(page).locator('.ib-optcap-prompt')).toHaveText('Where should Back to draft sit on a waiting thread?');
-      expect((await layout(page)).card!.height).toBe(recommended.height);
+      const last = (await layout(page)).card!;
+      expect(last.height).toBe(recommended.height);
+      expect(last.top).toBe(recommended.top);
+      await shot(page, `${width}x${height}-E-lean`);
 
       // A swipe past the end (the panorama panned to its far end first) says it again, as the pane always has.
       const l = await panTo(page, touch, 'right');
       await touch.down(l.stage.right - 60, middle(l).y, -l.stage.width * 0.5, 0);
       await touch.up();
       await expect(page.locator('[data-step-live]')).toHaveText('Last option');
-      await fits();
       expect((await layout(page)).card!.height).toBe(recommended.height);
 
-      // The largest text size: the pill still stands whole, whatever the words have to give.
-      await openChoice(page, url, thread, 'E');
+      // The largest text size, and a very long name: the name gives way with an ellipsis, the letter and the card stay whole.
       await page.evaluate(() => document.documentElement.style.setProperty('--inbox-text-size', '15'));
-      const largeNote = await noteLine(page);
-      expect(largeNote.pillOverlapsWords).toBe(false);
-      expect(largeNote.pillPastLine).toBe(false);
-      expect(largeNote.pillOverlapsDots).toBe(false);
-      expect(await caption(page).evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
-
-      // The longest wording a real thread can give (a two-digit count, eight choices), at that size: the same.
+      // The name everywhere it is drawn (the visible row and the unseen row that sets the card's width).
       await caption(page).evaluate((card) => {
-        card.querySelector('.ib-optcap-note')!.textContent = 'Last option · 12 files under ';
-        const dots = card.querySelector('.ib-optcap-dots')!;
-        for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('i'));
+        for (const el of card.querySelectorAll('.ib-optcap-label')) el.textContent = 'A very long choice name that goes on and on about where the quiet link should sit on a waiting thread';
       });
-      const longest = await noteLine(page);
-      await shot(page, `${width}x${height}-longest-note`);
-      // Here the words can't fit at 360 px: they end in an ellipsis, and the pill they point to stands whole.
-      if (width === 360) expect(longest.wordsCut).toBe(true);
-      expect(longest.wordsEllipsis).toBe(true);
-      expect(longest.pillOverlapsWords).toBe(false);
-      expect(longest.pillPastLine).toBe(false);
-      expect(longest.pillOverlapsDots).toBe(false);
-
-      // The card grows to hold its words, and the picture stays above it.
       await settled(page);
+      const cut = await caption(page).evaluate((card) => {
+        const label = card.querySelector<HTMLElement>('.ib-optcap-label')!;
+        const letter = card.querySelector<HTMLElement>('.ib-optcap-letter')!.getBoundingClientRect();
+        const box = card.getBoundingClientRect();
+        return { cut: label.scrollWidth > label.clientWidth, ellipsis: getComputedStyle(label).textOverflow, letterIn: letter.left >= box.left && letter.right <= box.right, right: box.right, width: window.innerWidth };
+      });
+      expect(cut.cut).toBe(true);
+      expect(cut.ellipsis).toBe('ellipsis');
+      expect(cut.letterIn).toBe(true);
+      expect(cut.right).toBeLessThanOrEqual(cut.width - 20);
       const large = await layout(page);
-      expect(large.card!.height).toBeGreaterThan(recommended.height);
       inTheClear(large);
+      await shot(page, `${width}x${height}-long-name`);
 
       await context.close();
     } finally {
@@ -678,7 +680,8 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
       await hideTools(page);
       const hidden = await layout(page);
       expect(hidden.card).toBeNull();
-      expect(hidden.image.height).toBeGreaterThan(tools.image.height + 30);
+      expect(hidden.image.height).toBeGreaterThanOrEqual(tools.image.height);
+      expect(hidden.image.bottom).toBeGreaterThan(tools.image.bottom - 1);
       await shot(page, `${tag}-C-hidden`);
 
       await context.close();
@@ -690,11 +693,10 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
   }
 });
 
-test('a phone on its side and a desktop stay as they were: Fit has the whole stage and the card its note', async () => {
+test('a phone on its side stays as it was: the card still floats over the picture, and Hide clears it', async () => {
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
   try {
-    // On its side: the card still floats over the picture, and Hide clears it.
     const side = await browser.newContext(sized(pixel, 844, 390));
     const sidePage = await side.newPage();
     await openChoice(sidePage, url, thread, 'A');
@@ -704,42 +706,30 @@ test('a phone on its side and a desktop stay as they were: Fit has the whole sta
     await hideTools(sidePage);
     expect((await layout(sidePage)).card).toBeNull();
     await side.close();
+  } finally {
+    await browser.close().catch(() => {});
+    await agent.close().catch(() => {});
+    await removeInboxScratch(root);
+  }
+});
 
-    const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const page = await desktop.newPage();
-    await page.goto(`${url}#thread=${thread}`);
-    const zoom = page.getByRole('button', { name: 'Zoom: Option E' }).first();
-    await zoom.scrollIntoViewIfNeeded();
-    await zoom.click();
-    await expect(pane(page)).toHaveAttribute('data-full-view', '');
-    await expect(caption(page)).toHaveAttribute('data-option-caption', 'E');
-    await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
-    await settled(page);
-
-    // The note stays, in its own row, and keeps its words.
-    await page.waitForTimeout(NOTE_MS + 200);
-    await expect(caption(page).locator('.ib-optcap-end')).toHaveText("Last option · the thread's 2 other files are under 5/5");
-    // Only a phone's note is timed, so only a phone's step says it.
-    await expect(page.locator('[data-step-live]')).not.toContainText('other file');
-    await expect(caption(page).locator('.ib-optcap-prompt')).toHaveText('Where should Back to draft sit on a waiting thread?');
-
-    expect((await layout(page)).card!.height).toBeGreaterThan(80);
-
-    // Fit works on the whole stage, with its 28 px of padding: the card floats over the picture as it did.
-    await page.goto('about:blank');
-    await page.goto(`${url}#thread=${thread}`);
-    const portrait = page.getByRole('button', { name: 'Zoom: Option C' }).first();
-    await portrait.scrollIntoViewIfNeeded();
-    await portrait.click();
-    await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
-    await expect(pane(page).locator('[data-image-zoom]')).toBeVisible();
-    await settled(page);
-    expect(await page.locator('[data-image-clear]').evaluate((el) => el.parentElement!.clientHeight - (el as HTMLElement).offsetHeight)).toBe(0);
-    const l = await layout(page);
-    expect(Math.abs(l.image.top - l.stage.top - (l.stage.bottom - l.image.bottom))).toBeLessThan(1);
-    expect(Math.abs(l.image.height - (l.stage.height - 56))).toBeLessThan(1);
-    expect(l.image.bottom).toBeGreaterThan(l.card!.top);
-    await desktop.close();
+test('under reduced motion a phone\'s Hide and minimize take the card with no fade', async () => {
+  const { root, url, agent, thread } = await world();
+  const browser: Browser = await chromium.launch();
+  try {
+    const context = await browser.newContext({ ...sized(pixel, 390, 844), reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await openChoice(page, url, thread, 'B');
+    const fade = () => page.locator('.ib-optcap').evaluate((el) => getComputedStyle(el).transitionDuration);
+    expect(await fade()).toBe('0s');
+    await hideTools(page);
+    expect(await fade()).toBe('0s');
+    await tapTools(page, '[data-full-view-handle]', 'revealed');
+    await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
+    await page.locator('.ib-fcomp-min').tap();
+    await atRest(page);
+    expect(await fade()).toBe('0s');
+    await context.close();
   } finally {
     await browser.close().catch(() => {});
     await agent.close().catch(() => {});
