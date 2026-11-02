@@ -124,7 +124,7 @@ import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
-import { perfPhase, watchLoopStalls, withServerTiming } from "./inbox-perf";
+import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -3728,9 +3728,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  // Server-Timing on every API answer; with the debug log on, slow requests and a stalled loop are noted too (inbox-perf.ts).
+  // With the debug log on only (inbox-perf.ts): Server-Timing on every API answer, slow requests and a stalled loop
+  // noted. Off, the handler is not wrapped and perfPhase does nothing but a compare.
   // The store's load time and the loop watch start with the first request the log keeps, so the log stays empty until then.
   let stopLoopWatch: (() => void) | null = null;
+  const releasePerfPhases = debugLog ? retainPerfPhases() : null;
   const isLoggedApiPath = (req: Request): boolean => {
     try {
       const pathname = new URL(req.url, "http://127.0.0.1").pathname;
@@ -3751,7 +3753,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return handle(req, via);
       }, debugOwner)
     : handle;
-  const served = withServerTiming(logged, debugRoute, debugLog ? (slow) => debugLog.note("slow_req", { ...slow }) : null);
+  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handle;
 
   /**
    * The window's own port: everything here came from this computer. A
@@ -3919,6 +3921,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (stopped) return;
     stopped = true;
     stopLoopWatch?.();
+    releasePerfPhases?.();
     clearInterval(dataCheck);
     windows.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);

@@ -1604,7 +1604,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     return found?.getAttribute('data-message-article') ?? null;
   };
   const expandAll = () => {
-    perfInteraction('expand-all', { messages: thread.messages.length });
+    perfInteraction('expand-all', thread.messages.length);
     const id = topVisible();
     anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
     if (allOpen) {
@@ -3237,7 +3237,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // Read-only while a Send is on its way: the words it carries are the words in the box.
     if (sending) return;
     // A key typed (not a restore): pn:keystroke when the next frame comes 50 ms or more after the key.
-    if (!behind) perfKeystroke((typeof window !== 'undefined' && (window.event as Event | undefined)?.timeStamp) || performance.now());
+    if (!behind) perfKeystroke();
     // The words changed (or emptied): a Send waiting to be confirmed no longer matches them.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');

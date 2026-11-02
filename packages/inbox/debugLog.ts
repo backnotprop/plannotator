@@ -275,6 +275,11 @@ export function learnDebugLog(response: Response): void {
   }
 }
 
+/** Whether this window is recording (the Inbox's debug log is on): the performance marks (perfMarks.ts) run only then. */
+export function debugLogOn(): boolean {
+  return recorder !== null;
+}
+
 /** A page moment worth a line (Send pressed, Send cleared). A no-op while debug is off. */
 export function debugNote(ev: string, fields?: Record<string, unknown>): void {
   recorder?.note(ev, fields);

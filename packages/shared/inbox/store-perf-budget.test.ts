@@ -6,10 +6,11 @@
  * 10×, which a new quadratic scan (16×) crosses and timing noise does not. The one thread read is timed on
  * a thread of the same size in both stores, so it should not grow at all; its budget is 3×.
  *
- * Off by default (timing tests are noisy on a busy laptop): `PLANNOTATOR_PERF_BUDGET=1 bun test
- * packages/shared/inbox/store-perf-budget.test.ts`. A CI job runs it with the variable set.
+ * Off by default (timing tests are noisy on a busy laptop), and then nothing is seeded: the seeding runs in the
+ * describe's beforeAll, which a skipped describe never calls. Run it by hand: `PLANNOTATOR_PERF_BUDGET=1 bun test
+ * packages/shared/inbox/store-perf-budget.test.ts`. No CI job runs it.
  */
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,25 +66,35 @@ function median(run: () => unknown, times = 7): number {
   return xs.sort((a, b) => a - b)[Math.floor(times / 2)]!;
 }
 
+/** One thread read is well under a millisecond: timed over a batch, so the median sits above timer noise and a GC pause. */
+const THREAD_READS = 50;
+
 function measure(dir: string, big: string) {
   let store = InboxStore.open(dir);
   return {
     load: median(() => (store = InboxStore.open(dir)), 3),
     listRows: median(() => store.listRows()),
-    windowThread: median(() => store.windowThread(big)),
+    windowThread: median(() => {
+      for (let i = 0; i < THREAD_READS; i++) store.windowThread(big);
+    }),
     changesSince: median(() => store.changesSince(0)),
     pendingReplies: median(() => store.pendingReplies("ses_1")),
   };
 }
 
 describe.skipIf(!ON)("Inbox store: work grows no faster than the data", () => {
-  const small = seed(N);
-  const large = seed(4 * N);
-  const a = measure(small.dir, small.big);
-  const b = measure(large.dir, large.big);
-  const ratio = (k: keyof typeof a) => b[k] / Math.max(a[k], 0.05);
-  // The numbers, for the CI log.
-  console.log(JSON.stringify({ n: N, small: a, large: b }, null, 1));
+  type Times = ReturnType<typeof measure>;
+  let a: Times;
+  let b: Times;
+  beforeAll(() => {
+    const small = seed(N);
+    const large = seed(4 * N);
+    a = measure(small.dir, small.big);
+    b = measure(large.dir, large.big);
+    // The numbers, for the run's log.
+    console.log(JSON.stringify({ n: N, small: a, large: b }, null, 1));
+  });
+  const ratio = (k: keyof Times) => b[k] / Math.max(a[k], 0.05);
 
   test("loading the store: about linear in the log", () => expect(ratio("load")).toBeLessThan(10));
   test("the window's list (listRows): about linear in the messages", () => expect(ratio("listRows")).toBeLessThan(10));
