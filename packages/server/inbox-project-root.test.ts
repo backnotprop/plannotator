@@ -14,6 +14,7 @@ import {
   createInboxProjectRoots,
   INBOX_PROJECT_CONTAINER_SCAN_MAX,
   inboxGitRunner,
+  isHomeOrRootShape,
   inboxProjectRootGitEnv,
   nearestProjectHolding,
   resolveInboxProjectRoot,
@@ -236,10 +237,35 @@ function appnotesLayout(root: string) {
 describe("a plain folder that holds one repository's checkouts", () => {
   test("files into that repository's project, as its checkouts do; the folder is kept as the root an older Inbox used", async () => {
     const { folder, main, branch } = appnotesLayout(tempRoot());
-    expect(await resolveInboxProjectRoot(folder)).toEqual({ root: main, name: "main", folder, worktree: folder, settled: true });
+    // Named for the repository ("appnotes"), not the checkout's folder ("main"), as the names read.
+    expect(await resolveInboxProjectRoot(folder)).toEqual({ root: main, name: "appnotes", folder, worktree: folder, settled: true });
     expect(await resolveInboxProjectRoot(branch)).toMatchObject({ root: main, worktree: branch });
-    // A subfolder of notes is not read: it holds no checkouts of its own.
-    expect(await resolveInboxProjectRoot(join(folder, "scripts"))).toMatchObject({ root: join(folder, "scripts"), worktree: null });
+  });
+
+  test("a plain subfolder files where its checkouts folder's holder does, as far as three folders up", async () => {
+    const { folder, main } = appnotesLayout(tempRoot());
+    // `appnotes/scripts` and `appnotes/worktrees`: each is its own folder, filed as the one holding the checkouts.
+    for (const sub of [join(folder, "scripts"), join(folder, "worktrees")]) {
+      expect(await resolveInboxProjectRoot(sub)).toEqual({ root: main, name: "appnotes", folder: sub, worktree: sub, settled: true });
+    }
+    const near = join(folder, "art", "2026", "q4");
+    mkdirSync(near, { recursive: true });
+    expect(await resolveInboxProjectRoot(near)).toMatchObject({ root: main, worktree: near });
+    const far = join(folder, "art", "2026", "q4", "drafts");
+    mkdirSync(far, { recursive: true });
+    expect(await resolveInboxProjectRoot(far)).toMatchObject({ root: far, worktree: null });
+  });
+
+  test("a stray clone of another repository among many checkouts does not split the folder off; a close count does", async () => {
+    const root = tempRoot();
+    const { folder, main } = appnotesLayout(root);
+    for (const branch of ["billing", "docs"]) git(main, "worktree", "add", "-q", join(folder, "worktrees", branch), "-b", branch);
+    // Four of appnotes (main, agent-pr-plan-box, billing, docs) and one clone of another repository: appnotes speaks for the folder.
+    git(root, "init", "-q", join(folder, "worktrees", "stray-clone"));
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: main, worktree: folder, settled: true });
+    // A second stray: four of six is no clear majority (four in five are needed), so the folder is its own project.
+    git(root, "init", "-q", join(folder, "worktrees", "another-clone"));
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
   });
 
   test("checkouts in `.worktrees` count the same way; checkouts right in a folder do not", async () => {
@@ -288,13 +314,63 @@ describe("a plain folder that holds one repository's checkouts", () => {
     expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
   });
 
-  test("without git the folder is its own project; a git that does not answer for the checkout leaves an unsettled guess", async () => {
+  test("without git the folder is its own project; a git that does not answer for the checkout degrades to the main checkout read from disk", async () => {
     const { folder, main } = appnotesLayout(tempRoot());
     const none: InboxGitRunner = async () => ({ exitCode: 127, stdout: "" });
     expect(await resolveInboxProjectRoot(folder, { git: none })).toMatchObject({ root: folder, worktree: null, settled: true });
+    // The folder's own git answers at once; the checkout's runs past the time limit. A fresh session still has a project.
     const real = createRealRunnerFor();
     const halfway: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
-    expect(await resolveInboxProjectRoot(folder, { git: halfway })).toMatchObject({ root: folder, worktree: null, settled: false });
+    expect(await resolveInboxProjectRoot(folder, { git: halfway })).toMatchObject({ root: main, worktree: folder, settled: true });
+  });
+
+  test("~/work holding the repositories api and web beside worktrees/api-feat is a folder of repositories, not api's", async () => {
+    const root = tempRoot();
+    const work = join(root, "work");
+    mkdirSync(join(work, "worktrees"), { recursive: true });
+    const { main: api } = repoWithWorktree(work, "api");
+    rmSync(join(work, "api-wt"), { recursive: true, force: true });
+    git(api, "worktree", "prune");
+    git(work, "init", "-q", join(work, "web"));
+    git(api, "worktree", "add", "-q", join(work, "worktrees", "api-feat"), "-b", "api-feat");
+    expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: work, worktree: null, settled: true });
+    // The same when the repository lies anywhere else in the folder (`proj/main` beside `proj/worktrees/x`).
+    expect(await resolveInboxProjectRoot(join(work, "worktrees"))).toMatchObject({ root: join(work, "worktrees"), worktree: null });
+  });
+
+  test("a checkout git does not confirm as the repository (a separate git dir), or a main checkout moved out, leaves the folder its own", async () => {
+    const root = tempRoot();
+    const folder = join(root, "tool");
+    mkdirSync(join(folder, "worktrees"), { recursive: true });
+    // `worktrees/sep` names its own git dir elsewhere, with no `commondir`: git calls it a toplevel, not a linked worktree.
+    const sep = join(folder, "worktrees", "sep");
+    git(root, "init", "-q", "--separate-git-dir", join(root, "sep.git"), sep);
+    writeFileSync(join(sep, "a.txt"), "a\n");
+    git(sep, "add", ".");
+    git(sep, "commit", "-qm", "a");
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
+    // A linked worktree whose main checkout was moved out of the folder (and repaired): that repository lies elsewhere.
+    const other = join(root, "other");
+    mkdirSync(join(other, "worktrees"), { recursive: true });
+    const { main } = repoWithWorktree(join(other, "worktrees"), "main");
+    const moved = join(root, "moved-main");
+    renameSync(main, moved);
+    git(moved, "worktree", "repair");
+    expect(await resolveInboxProjectRoot(other)).toMatchObject({ root: other, worktree: null });
+  });
+
+  test("a symlinked worktrees folder is not followed", async () => {
+    const root = tempRoot();
+    const { folder } = appnotesLayout(root);
+    const linked = join(root, "linked");
+    mkdirSync(linked);
+    symlinkSync(join(folder, "worktrees"), join(linked, "worktrees"));
+    expect(await resolveInboxProjectRoot(linked)).toMatchObject({ root: linked, worktree: null });
+  });
+
+  test("a home folder or a filesystem root, by its shape, is never folded or walked up to", () => {
+    for (const folder of ["/Users/x", "/home/x", "C:\\Users\\x", "/root", "/", "C:\\", "\\\\server\\share"]) expect(isHomeOrRootShape(folder)).toBe(true);
+    for (const folder of ["/Users/x/work", "/home/x/appnotes", "C:\\Users\\x\\src", "/srv/appnotes", "\\\\server\\share\\appnotes"]) expect(isHomeOrRootShape(folder)).toBe(false);
   });
 });
 

@@ -20,6 +20,8 @@ export interface InboxDebugLog {
   wrap<Via extends string>(handle: (req: Request, via: Via) => Promise<Response>, owner: (req: Request, via: Via) => boolean): (req: Request, via: Via) => Promise<Response>;
   /** The window's records: a same-origin, owner-only POST, checked by the caller. */
   accept(req: Request): Promise<Response>;
+  /** One line the server writes about something it did on its own (`ev` names it), stamped now. */
+  note(ev: string, fields: Record<string, unknown>): void;
 }
 
 /** The body as text, read no further than `cap`; null past it. Counted as it comes: a chunked body has no Content-Length. */
@@ -65,6 +67,9 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
   let serial = 0;
   return {
     path,
+    note(ev, fields) {
+      append(line({ t: Date.now(), ev, side: "server", ...fields }));
+    },
     wrap(handle, owner) {
       const isOwner: typeof owner = (req, via) => {
         try {

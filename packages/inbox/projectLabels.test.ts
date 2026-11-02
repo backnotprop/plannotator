@@ -207,3 +207,8 @@ test("a renamed project keeps its name; the folder's checkout then reads alone",
   expect(names.get(FOLDER.id)).toBe('appnotes notes');
   expect(names.get(MAIN.id)).toBe('appnotes');
 });
+
+test("macOS's /Users/Shared is no one's home: its parents are spelled out", () => {
+  const names = shortProjectNames([{ id: 's', root: '/Users/Shared/api', name: 'api' }, { id: 'w', root: '/work/api', name: 'api' }]);
+  expect(names.get('s')).toBe('api · Shared');
+});

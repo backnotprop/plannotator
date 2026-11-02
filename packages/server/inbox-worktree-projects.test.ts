@@ -443,6 +443,9 @@ test("a session started in a plain folder holding one repository's checkouts fil
   const client = await agent(server);
   const fromBranch = await send(client, { project_path: branch, body: "From a checkout.", agent_session: "ses_branch" });
   expect(fromBranch.project.root).toBe(main);
+  // Agents read the repository's name, as the window shows it, not the checkout's folder ("main"); the old
+  // folder project still stands beside it until the next start folds it, so the checkout is named.
+  expect(fromBranch.project.name).toBe("appnotes · main");
   const fromFolder = await send(client, { project_path: folder, body: "![notes](shots/notes.png)", agent_session: "ses_folder_new" });
   // The same project as the checkouts', not the folder's; the folder stays the base its relative paths start at.
   expect(fromFolder.project.id).toBe(fromBranch.project.id);
@@ -458,4 +461,23 @@ test("a session started in a plain folder holding one repository's checkouts fil
   expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toContain(asked.id);
   const reply = await send(client, { project_path: folder, reply_to: asked.id, body: "Shipped.", agent_session: "ses_folder" });
   expect(reply.project.id).toBe(old.id);
+});
+
+test("a fresh session in a checkouts folder whose checkout's git runs past the time limit still sends: it files into the repository read from disk", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-slow-")));
+  scratch.push(root);
+  const folder = join(root, "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const real = inboxGitRunner();
+  // The folder's own git answers (not a work tree); the checkout's gives no answer.
+  const slow: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
+  const server = await start(join(root, "data"), slow);
+  const sent = await send(await agent(server), { project_path: folder, body: "From the folder, git slow.", agent_session: "ses_slow" });
+  expect(sent.project.root).toBe(main);
+  expect(sent.project.name).toBe("appnotes");
 });

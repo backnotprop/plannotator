@@ -7,6 +7,8 @@
  * holds the repository's checkouts (`worktrees/main` and linked worktrees); a session started in the folder
  * made a folder project beside the repository's, both "appnotes", and the window's name climbed to the root.
  *
+ * - An Inbox from before the fix left a folder project beside the repository's: the first start folds it into
+ *   the repository's project (Combine projects' write), so the list and the sidebar read one "appnotes".
  * - A session started in that folder files into the repository's project (no folder project is made).
  * - The line is ONE line at 1440 px (the list wide, and narrow beside a thread), on a 390 px phone and on a
  *   320 px one: the count and Show keep their size, a long project name is cut with "…", and on a desktop the
@@ -20,6 +22,7 @@ import { devices, expect, test, type Browser, type Page } from '@playwright/test
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { InboxStore } from '../../packages/shared/inbox/store';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -34,6 +37,9 @@ interface World {
   folder: string;
   main: string;
   long: string;
+  /** The folder project an earlier Inbox made, and the thread it holds. */
+  old: { id: string; thread: string };
+  repo: string;
 }
 
 let world: World;
@@ -75,6 +81,11 @@ test.beforeAll(async () => {
   git(main, 'commit', '-qm', 'init');
   git(main, 'worktree', 'add', '-q', join(folder, 'worktrees', 'agent-pr-plan-box'), '-b', 'agent-pr-plan-box');
   const long = scratchProject(join(root, 'src'), LONG);
+  // What an Inbox from before the fix left: the repository's project, and a folder project for `appnotes` beside it.
+  const before = InboxStore.open(dataDir);
+  const repoProject = before.ensureProject({ name: 'main', root: realpathSync(main) });
+  const oldProject = before.ensureProject({ name: 'appnotes', root: realpathSync(folder) });
+  const oldThread = before.sendMessage({ project_id: oldProject.id, author: { kind: 'agent', host: 'claude-code', session: 'ses_old_folder', name: 'Claude Code' }, subject: 'Design notes', body: 'DESIGN.md is updated.' } as never).message.thread_id;
 
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -84,7 +95,30 @@ test.beforeAll(async () => {
     await agent.send({ project_path: join(folder, 'worktrees', 'agent-pr-plan-box'), subject, body: `${subject}. Nothing to answer.`, agent_session: `ses_seed_${n}` } as Parameters<SimAgent['send']>[0]);
   }
   await agent.send({ project_path: long, subject: 'Interview notes', body: 'Interview notes are in.', agent_session: 'ses_seed_long' } as Parameters<SimAgent['send']>[0]);
-  world = { url: started.stdout.trim().replace(/\/$/, ''), agent, folder: realpathSync(folder), main: realpathSync(main), long };
+  world = { url: started.stdout.trim().replace(/\/$/, ''), agent, folder: realpathSync(folder), main: realpathSync(main), long, old: { id: oldProject.id, thread: oldThread }, repo: repoProject.id };
+});
+
+test('the folder project an earlier Inbox made is folded into the repository project on start: one "appnotes"', async ({ browser }: { browser: Browser }) => {
+  type Listed = { projects: { id: string; root: string; combined?: { id: string }[] }[] };
+  await expect
+    .poll(async () => ((await (await fetch(`${world.url}/api/inbox/projects`)).json()) as Listed).projects.find((p) => p.id === world.repo)?.combined?.map((c) => c.id) ?? [])
+    .toEqual([world.old.id]);
+  const list = (await (await fetch(`${world.url}/api/inbox/projects`)).json()) as Listed;
+  expect(list.projects.map((p) => p.root)).not.toContain(world.folder);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  try {
+    const page = await context.newPage();
+    await page.goto(world.url);
+    // The old thread is in the list under the one "appnotes"; the sidebar names it once.
+    await expect(page.locator(`.ib-listcol [data-thread-id="${world.old.thread}"]`)).toContainText('appnotes');
+    await expect(page.locator(`.ib-listcol [data-thread-id="${world.old.thread}"]`)).not.toContainText('appnotes ·');
+    await expect(page.locator('.ib-listcol .ib-lbody [data-thread-id]').filter({ hasText: 'appnotes ·' })).toHaveCount(0);
+    const sidebar = page.locator('.ib-projs[aria-labelledby]').last();
+    await expect(sidebar.getByText('appnotes', { exact: true })).toHaveCount(1);
+    await expect(sidebar.getByText(/^appnotes ·/)).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
 });
 
 test.afterAll(async () => {
