@@ -8,10 +8,12 @@
  *  - work split by start folder: a session started in a plain folder above a
  *    repository files under the folder, while the repository's own sessions
  *    file under the repository. The folder is offered into the repository
- *    only when it is the one project inside the folder and ALL of the
- *    folder's agent messages are its work (`sameWork`).
+ *    only when it is the one project inside the folder, no other repository
+ *    sits beside it on disk (`holdsOtherWork`), the person did not name the
+ *    folder, and ALL of the folder's agent messages are its work (`sameWork`).
  *
- * A pair whose combine was undone is not suggested again. Pure.
+ * A pair whose combine was undone is not suggested again. Pure, and linear in
+ * the projects (times their depth): Tidy runs it on every list read.
  */
 
 import type { InboxProject, InboxProjectRepo, InboxTidyCombine } from "@plannotator/core/inbox-types";
@@ -24,10 +26,8 @@ function segments(path: string): string[] {
   return path.split(/[\\/]+/).filter((part) => part.length > 0);
 }
 
-/** `inner` is a checkout folder directly in `outer`'s `worktrees`, or in a dot-folder's (`<outer>/.claude/worktrees/<name>`). */
-function isLeftoverWorktree(inner: string, outer: string): boolean {
-  const parts = segments(inner);
-  const base = segments(outer);
+/** `inner` (parts) is a checkout folder directly in `outer`'s `worktrees`, or in a dot-folder's (`<outer>/.claude/worktrees/<name>`). */
+function isLeftoverWorktree(parts: readonly string[], base: readonly string[]): boolean {
   if (parts.length < base.length + 2 || !base.every((part, index) => part === parts[index])) return false;
   const between = parts.slice(base.length, -1);
   return CHECKOUTS.has(between[between.length - 1]!.toLowerCase()) && between.slice(0, -1).every((part) => part.startsWith("."));
@@ -57,6 +57,8 @@ export const COMBINE_WHY_STARTED_ABOVE = "same work, started a folder above";
 export interface CombineSuggestionInput {
   /** The projects a person sees (`listProjects`): a combined one is not suggested again. */
   projects: readonly InboxProject[];
+  /** Every project folder, combined members included (`allProjects`): a member inside a folder counts as a project inside it. Absent: `projects`. */
+  everyProject?: readonly InboxProject[];
   repoOf: (root: string) => InboxProjectRepo | null;
   threads: (projectId: string) => number;
   /** Whether two ids read as one project (`InboxStore.sameProject`). Without it, only the same id. */
@@ -67,6 +69,13 @@ export interface CombineSuggestionInput {
    * folder is offered that way.
    */
   plainFolder?: (root: string) => boolean;
+  /**
+   * Whether the folder holds work on disk other than the project at `inner`
+   * (another repository beside it, which the Inbox may not know yet). Asked
+   * last, only for a pair that otherwise qualifies. Absent: no folder is
+   * offered that way.
+   */
+  holdsOtherWork?: (folder: string, inner: string) => boolean;
   /** The agent messages of a project's threads (its group's). Asked only for a plain folder with exactly one project inside it, and that project. */
   agentWork?: (projectId: string) => readonly InboxAgentWork[];
 }
@@ -83,7 +92,16 @@ function sameWork(outer: readonly InboxAgentWork[], inner: readonly InboxAgentWo
   return outer.every((work) => (work.folder !== null && isWithin(work.folder, innerRoot)) || (work.session !== null && sessions.has(work.session)));
 }
 
-export function combineSuggestions({ projects, repoOf, threads, sameProject = (a, b) => a === b, plainFolder, agentWork }: CombineSuggestionInput): InboxTidyCombine[] {
+export function combineSuggestions({
+  projects,
+  everyProject = projects,
+  repoOf,
+  threads,
+  sameProject = (a, b) => a === b,
+  plainFolder,
+  holdsOtherWork,
+  agentWork,
+}: CombineSuggestionInput): InboxTidyCombine[] {
   const out: InboxTidyCombine[] = [];
   const taken = new Set<string>();
   /** The person already said no: one left the other, or left a project that has since gone into it. */
@@ -111,22 +129,58 @@ export function combineSuggestions({ projects, repoOf, threads, sameProject = (a
     for (const from of rest) if (!separated(into!, from)) pair(into!, from);
   }
 
+  // Each root split once, and the projects by root, so every pass below walks a root's parents, never every pair.
+  const partsOf = new Map<string, string[]>();
+  const parts = (root: string) => {
+    let found = partsOf.get(root);
+    if (!found) partsOf.set(root, (found = segments(root)));
+    return found;
+  };
+  const keyOf = (part: readonly string[], length = part.length) => part.slice(0, length).join("\u0000");
+  const order = new Map(projects.map((project, index) => [project.id, index]));
+  const atRoot = new Map<string, InboxProject[]>();
+  for (const project of projects) {
+    const key = keyOf(parts(project.root));
+    atRoot.set(key, [...(atRoot.get(key) ?? []), project]);
+  }
+
   for (const from of projects) {
     if (taken.has(from.id)) continue;
-    const into = projects.find((project) => project.id !== from.id && !taken.has(project.id) && isLeftoverWorktree(from.root, project.root));
+    // The first project (in list order) whose root holds this one as a leftover checkout.
+    const own = parts(from.root);
+    let into: InboxProject | undefined;
+    for (let length = 0; length <= own.length - 2; length++) {
+      for (const candidate of atRoot.get(keyOf(own, length)) ?? []) {
+        if (candidate.id === from.id || taken.has(candidate.id) || !isLeftoverWorktree(own, parts(candidate.root))) continue;
+        if (!into || order.get(candidate.id)! < order.get(into.id)!) into = candidate;
+      }
+    }
     if (into && !separated(into, from)) pair(into, from);
   }
 
-  if (plainFolder && agentWork) {
+  if (plainFolder && agentWork && holdsOtherWork) {
+    // The projects strictly inside each root, by the root's key: a project counts in every folder above it.
+    const inside = new Map<string, Set<string>>();
+    for (const project of everyProject) {
+      const own = parts(project.root);
+      for (let length = 0; length < own.length; length++) {
+        const key = keyOf(own, length);
+        let set = inside.get(key);
+        if (!set) inside.set(key, (set = new Set()));
+        if (set.size < 2) set.add(project.id);
+      }
+    }
+    const listed = new Map(projects.map((project) => [project.id, project]));
     for (const from of projects) {
-      if (taken.has(from.id)) continue;
+      // A name the person gave the folder says they see it as its own place.
+      if (taken.has(from.id) || from.display_name) continue;
       // A folder holding several projects is a folder of projects: combining it into one would show later work on another there.
-      const inside = projects.filter((project) => project.id !== from.id && project.root !== from.root && isWithin(project.root, from.root));
-      if (inside.length !== 1) continue;
-      const into = inside[0]!;
-      // Only a plain folder, into a repository: two plain folders are two places, whatever their agents did.
-      if (taken.has(into.id) || separated(into, from) || !plainFolder(from.root) || plainFolder(into.root)) continue;
-      if (sameWork(agentWork(from.id), agentWork(into.id), into.root)) pair(into, from, COMBINE_WHY_STARTED_ABOVE);
+      const ids = inside.get(keyOf(parts(from.root)));
+      if (!ids || ids.size !== 1) continue;
+      const into = listed.get([...ids][0]!);
+      // Only a plain folder, into a repository the person sees: two plain folders are two places, whatever their agents did.
+      if (!into || taken.has(into.id) || separated(into, from) || !plainFolder(from.root) || plainFolder(into.root)) continue;
+      if (sameWork(agentWork(from.id), agentWork(into.id), into.root) && !holdsOtherWork(from.root, into.root)) pair(into, from, COMBINE_WHY_STARTED_ABOVE);
     }
   }
   return out;

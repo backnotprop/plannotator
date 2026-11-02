@@ -381,6 +381,34 @@ describe("Tidy's Combine projects", () => {
     expect(again.combine?.map((pair) => [pair.from.root, pair.into.root]).sort()).toEqual([[docs, site], [work, app]].sort());
   });
 
+  test("never offers a folder of repositories of which only one reached the Inbox yet (review of #2528, F1)", async () => {
+    const w = await world();
+    // ~/repos holds a, b and c; only a has Inbox traffic. b is a repository, c holds checkouts in worktrees/.
+    const code = join(w.root, "repos");
+    const a = repository(join(code, "a"), "https://github.com/acme/a.git");
+    repository(join(code, "b"));
+    mkdirSync(join(code, "c", "worktrees", "main"), { recursive: true });
+    mkdirSync(join(code, "notes"));
+    // The same shape as the offered pair: started in code/, every message the work of a.
+    const above = (await w.client.callTool({
+      name: "send_message",
+      arguments: { project_path: code, body: "Fixed a's importer.", agent_session: "ses_above" },
+      _meta: { [INBOX_WORKING_FOLDER_META_KEY]: a },
+    })) as ToolResult;
+    expect(above.isError).toBeFalsy();
+    await send(w.client, { project_path: a, body: "a's tests.", agent_session: "ses_above" });
+    const plan = await until(() => tidyPlan(w.server), (found) => found.combine_loading === undefined);
+    expect(plan.combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    // b alone beside a is enough; and c's checkouts alone too. With neither, only a plain notes folder: offered.
+    rmSync(join(code, "c"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    rmSync(join(code, "b"), { recursive: true });
+    mkdirSync(join(code, "c", ".worktrees"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    rmSync(join(code, "c"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.map((pair) => [pair.from.root, pair.into.root])).toContainEqual([code, a]);
+  });
+
   test("a combined pair stops being offered; a pair whose combine was undone is not offered again", async () => {
     const w = await combined();
     await until(() => tidyPlan(w.server), () => true);

@@ -439,6 +439,19 @@ describe('Inbox project of a Claude Code session that moves (spec/inbox-project.
       const nested = { PLANNOTATOR_SESSION_TAG: 'claude-code:nested-session', PLANNOTATOR_SESSION_PROJECT: inboxSessionProjectEnvValue('model-session', abs('top')) }
       const other = await shell(real, runInboxCallCommand, ['send_message', JSON.stringify({ body: 'From a nested agent.' })], nested)
       expect(messageOf(real, other).project.root).toBe(abs('top/repo'))
+      // The same id under another host is another session: its own folder.
+      const otherHost = { PLANNOTATOR_SESSION_TAG: 'claude-code:model-session', PLANNOTATOR_SESSION_PROJECT: `pi:model-session:${abs('top')}` }
+      const piValue = await shell(real, runInboxCallCommand, ['send_message', JSON.stringify({ body: 'Pi value, Claude Code tag.' })], otherHost)
+      expect(messageOf(real, piValue).project.root).toBe(abs('top/repo'))
+      // `--session <id>` (a Tidy's wake carries a bare id too) is this session: its project.
+      const bare = await shell(real, runInboxCallCommand, ['--session', 'model-session', 'send_message', JSON.stringify({ body: 'From the Tidy.' })], {
+        PLANNOTATOR_SESSION_PROJECT: inboxSessionProjectEnvValue('model-session', abs('top')),
+      })
+      expect(messageOf(real, bare).project.root).toBe(abs('top'))
+      // `card --project` names its project, whatever the session's is.
+      const card = await shell(real, runCardCommand as typeof runInboxCallCommand, ['create', 'For the repository', '--project', '.', '--json'])
+      const cardId = /"(crd_[0-9A-Z]{26})"/.exec(card)?.[1]
+      expect(real.server.store.project(real.server.store.card(cardId!)!.project_id)!.root).toBe(abs('top/repo'))
     } finally {
       done()
     }

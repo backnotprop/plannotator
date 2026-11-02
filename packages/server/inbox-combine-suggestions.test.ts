@@ -109,7 +109,7 @@ describe("combineSuggestions", () => {
 describe("combineSuggestions: work split by start folder", () => {
   const PLAIN = new Set(["/code", "/code/notes", "/home/me"]);
   const split = (work: Record<string, InboxAgentWork[]>, projects = [project("prj_code", "/code"), project("prj_a", "/code/a")], extra: Partial<Parameters<typeof combineSuggestions>[0]> = {}) =>
-    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: (root) => PLAIN.has(root), agentWork: (id) => work[id] ?? [], ...extra });
+    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: (root) => PLAIN.has(root), holdsOtherWork: () => false, agentWork: (id) => work[id] ?? [], ...extra });
   const at = (session: string | null, folder: string | null = null): InboxAgentWork => ({ session, folder });
 
   test("offered into the repository when the folder's messages were sent from inside it, or by sessions that also wrote there", () => {
@@ -149,7 +149,53 @@ describe("combineSuggestions: work split by start folder", () => {
   test("reads messages only for a folder with one project inside it", () => {
     const asked: string[] = [];
     const projects = [project("prj_x", "/x"), project("prj_y", "/y"), project("prj_code", "/code"), project("prj_a", "/code/a"), project("prj_b", "/code/b")];
-    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: () => true, agentWork: (id) => (asked.push(id), []) });
+    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: () => true, holdsOtherWork: () => false, agentWork: (id) => (asked.push(id), []) });
     expect(asked).toEqual([]);
+  });
+
+  // Review of #2528, F1: the Inbox knows only the repositories that had traffic; the disk says what else the folder holds.
+  test("never when the folder holds other work on disk, a combined member inside it, or a name the person gave it", () => {
+    const work = { prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")] };
+    const asked: [string, string][] = [];
+    expect(split(work, undefined, { holdsOtherWork: (folder, inner) => (asked.push([folder, inner]), true) })).toEqual([]);
+    expect(asked).toEqual([["/code", "/code/a"]]);
+    // Without the disk read, the signal is off.
+    expect(split(work, undefined, { holdsOtherWork: undefined })).toEqual([]);
+    // A project combined into another place still lives in the folder: two projects inside it.
+    const listed = [project("prj_code", "/code"), project("prj_a", "/code/a")];
+    expect(split(work, listed, { everyProject: [...listed, project("prj_b", "/code/b", { merged_into: "prj_x" })] })).toEqual([]);
+    // The one project inside is a member of a group headed elsewhere: not one the person sees, so not a target.
+    expect(split(work, [project("prj_code", "/code")], { everyProject: [project("prj_code", "/code"), project("prj_a", "/code/a", { merged_into: "prj_x" })] })).toEqual([]);
+    // Renamed: the person sees the folder as its own place.
+    expect(split(work, [project("prj_code", "/code", { display_name: "Code" }), project("prj_a", "/code/a")])).toEqual([]);
+    // The disk is asked only for a pair that otherwise qualifies.
+    asked.length = 0;
+    split({ prj_code: [at("claude-2")], prj_a: [at("claude-1")] }, undefined, { holdsOtherWork: (folder, inner) => (asked.push([folder, inner]), false) });
+    expect(asked).toEqual([]);
+  });
+
+  test("a deep tree of projects reads the same as pair by pair, and stays fast", () => {
+    // A folder of 2000 repositories, each with a leftover checkout, and folders above single repositories.
+    const projects: InboxProject[] = [];
+    const work: Record<string, InboxAgentWork[]> = {};
+    for (let index = 0; index < 1000; index++) {
+      projects.push(project(`prj_r${index}`, `/w/group${index % 50}/r${index}`));
+      projects.push(project(`prj_l${index}`, `/w/group${index % 50}/r${index}/.claude/worktrees/agent-${index}`));
+    }
+    for (let index = 0; index < 50; index++) {
+      projects.push(project(`prj_solo${index}`, `/s/${index}`));
+      projects.push(project(`prj_solo${index}_repo`, `/s/${index}/repo`));
+      work[`prj_solo${index}`] = [at(`ses_${index}`, `/s/${index}/repo/src`)];
+    }
+    const started = performance.now();
+    const rows = combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: (root) => root.startsWith("/s/") && !root.endsWith("/repo"), holdsOtherWork: () => false, agentWork: (id) => work[id] ?? [] });
+    const took = performance.now() - started;
+    const leftovers = rows.filter((row) => row.why === "same repository");
+    const above = rows.filter((row) => row.why === COMBINE_WHY_STARTED_ABOVE);
+    expect(leftovers.length).toBe(1000);
+    expect(leftovers.every((row) => row.from.root.startsWith(`${row.into.root}/.claude/worktrees/`))).toBe(true);
+    expect(above.map((row) => [row.from.id, row.into.id])).toEqual(Array.from({ length: 50 }, (_, index) => [`prj_solo${index}`, `prj_solo${index}_repo`]));
+    // The pair-by-pair version took about 0.9 s for 2100 projects; this one takes about 3 ms. A generous bound for a slow machine.
+    expect(took).toBeLessThan(500);
   });
 });

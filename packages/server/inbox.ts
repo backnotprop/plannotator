@@ -153,7 +153,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
-import { createInboxProjectRoots, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
+import { createInboxProjectRoots, folderHoldsOtherWork, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
@@ -2634,30 +2634,38 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
 
   /**
-   * Each project's agent messages (by its group's head) for Tidy's "started a
-   * folder above" suggestion: who sent each, and the folder it was sent from
-   * (`base_path`). Read only for a folder that may qualify, and once per
-   * store change (the event-log cursor), not on every list read.
+   * Each project folder's agent messages (by the folder's own project id) for
+   * Tidy's "started a folder above" suggestion: who sent each, and the folder
+   * it was sent from (`base_path`). Built on the first read, then kept up by
+   * the store's lines: only a NEW agent message adds to it (a mark-read or any
+   * other rewrite of a message line does not), and a re-read from disk (a
+   * deletion, `reloadCount`) builds it again. Read by group at lookup, so a
+   * combine or an undo needs no rebuild.
    */
-  let agentWorkIndex: { cursor: number; byProject: Map<string, InboxAgentWork[]> } | null = null;
+  let agentWorkIndex: { reloads: number; seen: Set<string>; byProject: Map<string, InboxAgentWork[]> } | null = null;
+  const addAgentWork = (index: NonNullable<typeof agentWorkIndex>, message: InboxMessage) => {
+    if (message.author.kind !== "agent" || index.seen.has(message.id)) return;
+    index.seen.add(message.id);
+    const work = index.byProject.get(message.project_id) ?? [];
+    work.push({ session: message.author.session, folder: message.base_path ?? null });
+    index.byProject.set(message.project_id, work);
+  };
+  const unsubscribeAgentWork = store.subscribe((line) => {
+    if (agentWorkIndex && line.kind === "message") addAgentWork(agentWorkIndex, line.record);
+  });
   const agentWorkOf = (projectId: string): InboxAgentWork[] => {
-    const cursor = store.cursor();
-    if (agentWorkIndex?.cursor !== cursor) {
-      const byProject = new Map<string, InboxAgentWork[]>();
+    if (agentWorkIndex?.reloads !== store.reloadCount()) {
+      const index = { reloads: store.reloadCount(), seen: new Set<string>(), byProject: new Map<string, InboxAgentWork[]>() };
       for (const threadId of store.threadIds()) {
-        const root = store.message(threadId);
-        if (!root) continue;
-        const head = store.canonicalProjectId(root.project_id);
-        const work = byProject.get(head) ?? [];
         for (const id of store.threadMessageIds(threadId)) {
           const message = store.message(id);
-          if (message?.author.kind === "agent") work.push({ session: message.author.session, folder: message.base_path ?? null });
+          if (message) addAgentWork(index, message);
         }
-        byProject.set(head, work);
       }
-      agentWorkIndex = { cursor, byProject };
+      agentWorkIndex = index;
     }
-    return agentWorkIndex.byProject.get(store.canonicalProjectId(projectId)) ?? [];
+    const index = agentWorkIndex;
+    return store.projectGroup(projectId).flatMap((id) => index.byProject.get(id) ?? []);
   };
 
   // Tidy (packages/server/inbox-tidy.ts): the list header's and the Board's ⋮ menu.
@@ -2683,11 +2691,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       };
       return combineSuggestions({
         projects: store.listProjects(),
+        everyProject: store.allProjects(),
         repoOf: (root) => repos.peek(root),
         threads: threadsOf,
         sameProject: (a, b) => store.sameProject(a, b),
         // A folder above a repository (read from disk, no git): not a repository, the home folder or `/`.
         plainFolder: (root) => !existsSync(join(root, ".git")) && !isHomeOrRootFolder(root, projectRoots.home),
+        holdsOtherWork: folderHoldsOtherWork,
         agentWork: agentWorkOf,
       });
     },
@@ -3884,6 +3894,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);
     unsubscribeWaits();
+    unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
     voice.stop();

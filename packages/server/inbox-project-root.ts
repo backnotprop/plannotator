@@ -56,9 +56,9 @@
  * is an answer: every folder is its own project, as before.
  */
 
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
@@ -193,6 +193,49 @@ function realHome(): string | null {
  */
 export function isHomeOrRootFolder(folder: string, home: string | null): boolean {
   return folder === parse(folder).root || (home !== null && folder === home);
+}
+
+/** At most this many entries in a folder are read for `folderHoldsOtherWork`; a bigger folder counts as holding other work. */
+export const INBOX_FOLDER_CHILDREN_MAX = 256;
+
+/**
+ * Whether a plain folder holds work on disk besides the project at `inner`
+ * (inside it): a direct child folder, other than the one on `inner`'s path,
+ * that is a repository (`.git`) or holds checkouts (`worktrees`, `.worktrees`),
+ * or is itself a checkouts folder. Tidy offers a folder into the one project
+ * inside it only when this is false: `~/code` holding the repositories `a`, `b`
+ * and `c`, of which only `a` reached the Inbox yet, is a folder of
+ * repositories, not `a`'s. One bounded read of the folder (no git, no walk):
+ * an unreadable folder, a folder with more than `INBOX_FOLDER_CHILDREN_MAX`
+ * entries, or an `inner` not inside it counts as holding other work.
+ */
+export function folderHoldsOtherWork(folder: string, inner: string): boolean {
+  const path = relative(folder, inner);
+  if (path === "" || path.startsWith("..") || isAbsolute(path)) return true;
+  const onPath = path.split(sep)[0];
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(folder, { withFileTypes: true });
+  } catch {
+    return true;
+  }
+  if (entries.length > INBOX_FOLDER_CHILDREN_MAX) return true;
+  for (const entry of entries) {
+    if (entry.name === onPath) continue;
+    const child = join(folder, entry.name);
+    let isFolder = entry.isDirectory();
+    if (!isFolder && entry.isSymbolicLink()) {
+      try {
+        isFolder = statSync(child).isDirectory();
+      } catch {
+        isFolder = false;
+      }
+    }
+    if (!isFolder) continue;
+    if (entry.name === "worktrees" || entry.name === ".worktrees") return true;
+    if (existsSync(join(child, ".git")) || existsSync(join(child, "worktrees")) || existsSync(join(child, ".worktrees"))) return true;
+  }
+  return false;
 }
 
 /**

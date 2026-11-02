@@ -141,11 +141,13 @@ export function inboxSessionProjectFromEnv(env: Record<string, string | undefine
 /**
  * The folder a call files under when the agent named no project: the
  * session's own project folder when the call is filed as that very session
- * (host and id) and the folder still exists, else `cwd`. A variable inherited
+ * (its id, and its host when the caller names one: `inbox call --session <id>`
+ * names none) and the folder still exists, else `cwd`. A variable inherited
  * from another session (a nested agent, a stale shell) never applies.
  */
 export function inboxProjectFolderFor(sessionProject: InboxSessionProject | null, caller: { host?: string | null; session: string } | null | undefined, cwd: string): string {
-  if (!sessionProject || !caller || caller.session !== sessionProject.session || (caller.host ?? null) !== sessionProject.host) return cwd;
+  if (!sessionProject || !caller || caller.session !== sessionProject.session) return cwd;
+  if (caller.host != null && caller.host !== sessionProject.host) return cwd;
   try {
     return statSync(sessionProject.folder).isDirectory() ? sessionProject.folder : cwd;
   } catch {

@@ -365,6 +365,13 @@ async function plainReminderAgain($: Engine): Promise<void> {
   await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
 }
 
+/**
+ * The longest a hook waits for PLANNOTATOR_SESSION_PROJECT to be exported
+ * (`exportSessionProject`: the session's root, a folder check, `$.env.set`).
+ * A hang never holds a Bash call or a turn; the export goes on behind it.
+ */
+const SESSION_PROJECT_EXPORT_MS = 250
+
 /** `work`'s answer, or null once `ms` passed first (the bounding sleep is aborted when `work` settles). */
 async function withinMs<T>($: Engine, ms: number, work: () => Promise<T>): Promise<T | null> {
   const controller = new AbortController()
@@ -509,7 +516,8 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
     instance.carryQueued(previous)
     mod = instance
     // Beside the tag, for the same session: the project its shell's `plannotator inbox call` / `card` file under.
-    await instance.exportSessionProject()
+    // Not awaited: every hook (ExitPlanMode included) waits on this switch, and the turn start and each Bash call export again.
+    void instance.exportSessionProject()
     await instance.restore().catch(() => undefined)
     return instance
   })()
@@ -766,7 +774,8 @@ export function register(on: On) {
     if (allowed && e.tool === SHELL_TOOL) {
       // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
       // (written only on a change).
-      if (mod && !mod.isDisposed) await mod.exportSessionProject()
+      const current = mod
+      if (current && !current.isDisposed) await withinMs($, SESSION_PROJECT_EXPORT_MS, () => current.exportSessionProject())
       const input = shellTakeOver(e.command, !!e.agentId)
       if (!input) return next(e)
       const instance = await currentMod($)
@@ -899,7 +908,7 @@ export function register(on: On) {
       // A subagent's start carries its id: the controller counts only the main loop's turns.
       if (instance) await instance.onTurnStart(e.turnId, typeof e.text === 'string' ? e.text : '', typeof e.agentId === 'string' ? e.agentId : undefined)
       // A /cd since the last turn moved the project: the shell's Inbox commands follow it.
-      if (instance && !e.agentId) await instance.exportSessionProject()
+      if (instance && !e.agentId) await withinMs($, SESSION_PROJECT_EXPORT_MS, () => instance.exportSessionProject())
     }
     return next(e)
   })
