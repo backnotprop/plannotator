@@ -180,3 +180,16 @@ test.skipIf(!hasDom)('the top bar always shows the thread name, its tooltip the 
   sized(bar()!, 900, 120);
   expect(await tooltipOf(bar()!)).toBe(SUBJECT);
 });
+
+// The bar's title is aria-hidden and the heading is the subject, so the name needs its own text for a screen reader.
+test.skipIf(!hasDom)('a screen reader hears "Thread name: X" right after the heading for a named thread, and nothing extra for an unnamed one', async () => {
+  await render(thread('session-refresh', 1));
+  const sr = host!.querySelector<HTMLElement>('.ib-pbody .ib-sr[data-thread-name-sr]');
+  expect(sr!.textContent).toBe('Thread name: session-refresh');
+  expect(sr!.closest('[aria-hidden="true"]')).toBeNull();
+  expect(heading()!.nextElementSibling).toBe(sr);
+  draw(thread(null, 1));
+  await settle();
+  expect(host!.querySelector('[data-thread-name-sr]')).toBeNull();
+  expect(host!.textContent).not.toContain('Thread name');
+});

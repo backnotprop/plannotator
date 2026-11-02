@@ -443,14 +443,13 @@ function ClipText({ className, text }: { className: string; text: string }) {
 /**
  * The thread's name as a soft pill, cut with "…" (its tooltip shows it whole), or nothing.
  * `name` is what `threadChipName` gave. The open thread (Thread.tsx) draws it first in its
- * meta line, with `lead` (for a screen reader only) saying what the word is. The list's
+ * meta line. The list's
  * rows no longer draw it: their title is the name (approval "list-rows-mail-icons").
  */
-export function ThreadChip({ name, lead }: { name: string | null; lead?: string }) {
+export function ThreadChip({ name }: { name: string | null }) {
   if (!name) return null;
   return (
     <span className="ib-key">
-      {lead && <span className="ib-sr">{lead}</span>}
       <ClipText className="ib-keyt" text={name} />
     </span>
   );
