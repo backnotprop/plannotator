@@ -148,6 +148,8 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   await row(page, threads.refund).click({ button: 'right' });
   const menu = page.locator(`[data-row-menu="${threads.refund}"]`);
   await expect(menu).toBeVisible();
+  // Measured once the opening transition is over.
+  await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
   const before = await menu.boundingBox();
   // Hover moves nothing: the same menu, the same place.
   await menu.locator('[data-row-action="snooze"]').hover();
@@ -158,7 +160,8 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   await expect(menu.locator('[data-snooze-view="times"]')).toBeVisible();
   await expect(menu.locator('[data-row-action="copy-link"]')).toHaveCount(0);
   await expect(menu.locator('[data-snooze-choice="tomorrow"] .ib-zw')).toHaveText(/^\w{3} 8:00 AM$/);
-  await expect(menu.locator('[data-snooze-choice="week"]')).toBeVisible();
+  // In 3 days is always there (Next week goes when it is the same moment as Tomorrow or In 3 days).
+  await expect(menu.locator('[data-snooze-choice="days"] .ib-zw')).toHaveText(/^\w{3} 8:00 AM$/);
   await expect(menu.locator('[data-snooze-pick-time]')).toBeVisible();
   await shot(page, 'row-menu-times-light.png');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -229,20 +232,24 @@ test("the ⋯ menu: Pick a time, two lists by mouse, wheel and keys; the thread 
   // Open, it says until when; the thread stays open and snoozed (opening never ends it).
   const line = page.locator('[data-snooze-line]');
   await expect(line).toContainText(/^Snoozed until \w{3} 4:00 PM|^Snoozed until \w{3} \d+, 4:00 PM/);
+  // With the thread open the list holds still: the row says until when in place, and goes to the band later.
+  await expect(row(page, threads.release).locator('[data-snoozed-until]')).toContainText('4:00 PM');
+  expect(await groupOf(page, threads.release)).toBe('waiting');
+  // A reload keeps it open and snoozed; the list read fresh draws it in the band.
+  await page.reload();
+  await expect(page.locator('[data-snooze-line]')).toBeVisible();
   await bandButton(page).click();
   await expect(bandButton(page)).toHaveAttribute('aria-expanded', 'true');
-  await expect(row(page, threads.release).locator('[data-snoozed-until]')).toContainText('4:00 PM');
+  expect(await groupOf(page, threads.release)).toBe('snoozed');
   await shot(page, 'thread-light.png');
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'thread-dark.png');
   await page.emulateMedia({ colorScheme: 'light' });
-  await page.reload();
-  await expect(page.locator('[data-snooze-line]')).toBeVisible();
   await page.locator('[data-unsnooze]').click();
   await expect(page.locator('[data-snooze-line]')).toHaveCount(0);
   await expect(toast(page)).toContainText('Unsnoozed');
-  await expect(band(page)).toHaveCount(0);
   await page.locator('section.ib-pane').getByRole('button', { name: 'Close the thread' }).click();
+  await expect(band(page)).toHaveCount(0);
   expect(await groupOf(page, threads.release)).toBe('waiting');
   expect(world.errors).toEqual([]);
 });
@@ -299,6 +306,9 @@ test('the return at its time: back in its own section (Quiet comes back as New),
   // A thread looked at sits in Quiet; its return brings it back as New.
   await row(page, threads.webhook).click();
   await page.locator('section.ib-pane').getByRole('button', { name: 'Close the thread' }).click();
+  // The list holds a seen row in New where it was read; read fresh, it is in Quiet.
+  await page.reload();
+  if ((await page.locator('[data-section-id="quiet"] .ib-band').getAttribute('aria-expanded')) !== 'true') await page.locator('[data-section-id="quiet"] .ib-band').click();
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('quiet');
   await snoozeFromPage(page, threads.webhook, new Date(Date.now() + 4000).toISOString());
   await expect(bandButton(page)).toContainText('Snoozed 1');
@@ -344,7 +354,7 @@ test('a second window follows a snooze made in the first', async () => {
     await row(page, threads.release).click({ button: 'right' });
     const menu = page.locator(`[data-row-menu="${threads.release}"]`);
     await menu.locator('[data-row-action="snooze"]').click();
-    await menu.locator('[data-snooze-choice="week"]').click();
+    await menu.locator('[data-snooze-choice="days"]').click();
     await expect(row(second, threads.release)).toHaveCount(0);
     await expect(bandButton(second)).toContainText('Snoozed 1');
     // Unsnooze from the first's row menu: the second follows again.
