@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -13,6 +13,7 @@
     "./components/inbox-thread/reask": "./components/inbox-thread/reask.ts",
     "./components/ImageAnnotator": "./components/ImageAnnotator/index.tsx",
     "./components/html-viewer": "./components/html-viewer/index.ts",
+    "./components/chat": "./components/chat/index.ts",
     "./components/diagram": "./components/diagram/index.ts",
     "./components/diagramLanguages": "./components/diagramLanguages.ts",
     "./components/diagram/*": "./components/diagram/*.tsx",

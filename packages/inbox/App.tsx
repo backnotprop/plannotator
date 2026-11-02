@@ -32,6 +32,7 @@ import {
   inboxApi,
   setPageSession,
   subscribeInboxEvents,
+  tailnetGuest,
   type AgentToolHost,
   type ListModel,
   type MachineView,
@@ -201,6 +202,8 @@ const EMPTY_SET: ReadonlySet<string> = new Set();
 const REFRESH_SPIN_MS = 600;
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
+/** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
+const RESTART_NOT_BACK_MS = 20_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -757,12 +760,12 @@ function Inbox() {
   const [settingsLate, setSettingsLate] = useState(false);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
   const [restarting, setRestarting] = useState(false);
-  // What this page may offer: nothing over the tailnet, where the update routes are local only.
+  // What this page may offer: nothing to a tailnet guest, whom the update routes refuse.
   const pageUpdate = updateForPage(update, settings);
   // What's new only reads release notes: this computer's pages and the owner's over the tailnet, never a guest's.
   const pageWhatsNew = pageOffersWhatsNew(settings);
   // Checking for updates has failed for hours (packages/server/inbox-updates.ts): the sidebar's quiet row,
-  // About's dot and the General row's line. Not on a page opened over the tailnet (About is local only there).
+  // About's dot and the General row's line. Not on a tailnet guest's page.
   const [checkFailing, setCheckFailing] = useState<UpdateCheckFailing | null>(null);
   const pageCheckFailing = pageOffersUpdates(settings) ? checkFailing : null;
   // The sidebar toggle's dot while the sidebar is closed: an update the Update button offers, or checking failing.
@@ -1886,10 +1889,10 @@ function Inbox() {
   // design): asks about each agent that can take a note and was never asked.
   // Decided once per load, once the agents are read (the run that opened the
   // window has finished connecting) and the list has loaded; after the sound
-  // dialog, and never on a load that showed it. Never through the tailnet
-  // (the agents are local only, so `agents` stays null there), never while an
-  // update dialog is open or a reply is being typed, and it waits while
-  // Settings is open (Settings → Agents asks the same thing).
+  // dialog, and never on a load that showed it. Never through the tailnet,
+  // even for the owner, who can read the agents there (like the other one-time
+  // dialogs; Settings → Agents asks the same thing), never while an update
+  // dialog is open or a reply is being typed, and it waits while Settings is open.
   const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && (settings.via ?? 'local') === 'local') || soundClaimed);
   const agentNoteReady =
     agentsSettled && latest !== null && soundSettled && soundDialog === 'none' && updateDialog === null && !restarting && route.page !== 'settings' && route.page !== 'tour';
@@ -1899,7 +1902,7 @@ function Inbox() {
     const decide = () => {
       if (cancelled || agentNoteDecided.current || replyInProgress()) return false;
       agentNoteDecided.current = true;
-      const model = agentsRef.current;
+      const model = settings?.via === 'tailnet' ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
       if (rows.length > 0 && model) setAgentNote({ rows, report: cardReport(model) });
       setAgentNoteSettled(true);
@@ -3006,10 +3009,15 @@ function Inbox() {
   const restart = async () => {
     setRestarting(true);
     const before = latest?.serverSession;
+    /** Over the tailnet nobody is at the computer to see why: the window says what it knows. */
+    const notBack = () => {
+      setRestarting(false);
+      if (settings?.via === 'tailnet') showToast({ icon: 'warn', lead: 'The Inbox hasn’t come back yet. If it stays away, start it on the computer.', wrap: true }, RESTART_NOT_BACK_MS);
+    };
     try {
       await inboxApi.restart();
     } catch {
-      setRestarting(false);
+      notBack();
       return;
     }
     // The new Inbox comes up on the same port: reload once it answers.
@@ -3027,7 +3035,7 @@ function Inbox() {
         // Not up yet.
       }
     }
-    setRestarting(false);
+    notBack();
   };
 
   /** Restart onto the binary on disk, after saying what an unsent reply would lose. */
@@ -3448,10 +3456,11 @@ function Inbox() {
   // once an agent is installed or turned on: it reads the agents again when the window comes back
   // into focus (the person ran the install command in a terminal) and every few seconds while shown.
   const { model: firstRunSessions } = useComposeSessions(firstRun);
-  // Over the tailnet the agents route is local only: nothing to read again.
   const overTailnet = settings?.via === 'tailnet';
+  // For a tailnet guest the agents route is local only: nothing to read again.
+  const guestPage = tailnetGuest(settings);
   useEffect(() => {
-    if (!firstRun || overTailnet) return;
+    if (!firstRun || guestPage) return;
     let last = Date.now();
     const again = () => {
       if (document.visibilityState !== 'visible' || Date.now() - last < FIRST_RUN_AGENTS_MIN_GAP_MS) return;
@@ -3466,7 +3475,7 @@ function Inbox() {
       window.removeEventListener('focus', again);
       document.removeEventListener('visibilitychange', again);
     };
-  }, [firstRun, overTailnet, refreshAgents]);
+  }, [firstRun, guestPage, refreshAgents]);
   // ── The onboarding tour (approval "inbox-onboarding-tour") ──────────────
   // A replay of a real thread from building Plannotator, drawn with the
   // window's own list, thread and question card over the tour's fixture
@@ -4096,7 +4105,7 @@ function Inbox() {
     <EmptyState
       context={context}
       agents={agents}
-      agentsUnavailable={overTailnet ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null}
+      agentsUnavailable={guestPage ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null}
       onRetry={() => void refreshAgents()}
       sessions={firstRunSessions}
       onAgents={setAgents}
@@ -4222,6 +4231,7 @@ function Inbox() {
             onToggle={(change) => void saveUpdateSwitches(change)}
             update={pageUpdate}
             updates={pageOffersUpdates(settings)}
+            whatsNewRunning={settings?.via === 'tailnet'}
             onUpdate={pressUpdate}
             onWhatsNew={pageWhatsNew ? openWhatsNew : undefined}
             where={
@@ -4264,7 +4274,7 @@ function Inbox() {
     );
   } else if (route.page === 'board' && boardEnabled === false) {
     // The Board is off: a #board link says so, with the one way to turn it on (nothing else of it shows).
-    main = <BoardOff via={settings?.via ?? 'local'} onTurnOn={() => void toggleBoard(true)} error={settingsError} />;
+    main = <BoardOff guest={guestPage} onTurnOn={() => void toggleBoard(true)} error={settingsError} />;
   } else if (route.page === 'board' && boardEnabled === null) {
     main = <section className="ib-bpage" aria-busy="true" data-board-page="" />;
   } else if (route.page === 'board') {
@@ -4319,8 +4329,8 @@ function Inbox() {
         tidy={boardTidy}
         onOpenThread={(card, threadId) => go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter })}
         onCreateThread={(card, session, opener) => openCompose({ session, card: { id: card.id, title: card.title } }, opener)}
-        // The lane marks run this computer's gh / glab: never asked from a page opened over the tailnet.
-        marks={settings !== null && settings.via !== 'tailnet'}
+        // The lane marks run this computer's gh / glab: never asked from a tailnet guest's page.
+        marks={settings !== null && !guestPage}
       />
     );
   } else if (route.page === 'drafts') {
@@ -4356,7 +4366,7 @@ function Inbox() {
   } else if (showTourEntry) {
     main = (
       <TourEntry
-        model={tourEntryModel(agents, overTailnet ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null, new Set(firstRunSessions?.projects.flatMap((g) => g.sessions.map((x) => x.host)) ?? []))}
+        model={tourEntryModel(agents, guestPage ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null, new Set(firstRunSessions?.projects.flatMap((g) => g.sessions.map((x) => x.host)) ?? []))}
         onStart={startTour}
         onConnect={() => {
           saveTour({ skipped: true });
@@ -4686,7 +4696,7 @@ function Inbox() {
             onProjectRename={renameProject}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             announce={say}
-            // Not on a page opened over the tailnet: the update routes answer 403 local_only there.
+            // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
             restarting={restarting}
             // The quiet "What's new in X" link: this computer's pages and the owner's over the tailnet, not a guest's.
@@ -4711,8 +4721,8 @@ function Inbox() {
             onSettings={() => leave({ page: 'settings', project: null, thread: null })}
             onUpdate={pressUpdate}
             onWhatsNew={(version) => (tourRealStep ? endTour('finish', { page: 'whats-new', project: null, thread: null, version }) : openWhatsNew(version))}
-            // Not on a page opened over the tailnet: Settings → Agents is local only there.
-            restartAgents={settings && settings.via !== 'tailnet' ? restartAgents : NO_RESTART_AGENTS}
+            // Not on a tailnet guest's page: Settings → Agents is closed to it.
+            restartAgents={settings && !guestPage ? restartAgents : NO_RESTART_AGENTS}
             checkFailing={pageCheckFailing}
             onCheckFailing={() => leave({ page: 'settings', project: null, thread: null, section: 'about' })}
             onRestartSessions={() => leave({ page: 'settings', project: null, thread: null, section: 'agents' })}

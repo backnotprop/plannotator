@@ -265,6 +265,7 @@ export function DiagramViewer({
               draft={commentsState.composer}
               anchorRect={anchorRect}
               hostWidth={handle.hostRef.current?.getBoundingClientRect().width ?? 0}
+              hostHeight={handle.hostRef.current?.getBoundingClientRect().height ?? 0}
               sourceDirty={sourceDirty}
               submitting={commentsState.submitting}
               error={commentsState.submitError}

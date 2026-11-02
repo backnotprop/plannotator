@@ -2015,38 +2015,53 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    standing up with its tools out, where it ends at the size bar and at the toolbar or the option card (`useClearRows` reads it).
    Fit and the pan's limits work inside it; the stage stays whole, so every row still takes the fingers. */
 .ib-imgclear { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
-.ib-view.ib-fullview.ib-phone { --ib-optcap-h: max(72px, calc(72px * var(--ib-type, 14) / 14)); --ib-clearfoot: max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom)); }
+.ib-view.ib-fullview.ib-phone { --ib-clearfoot: max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom)); }
 /* A comment row in the grid: the stage already ends above it. */
 .ib-view.ib-fullview.ib-phone:has(.ib-imgcompose) { --ib-clearfoot: 0px; }
 @media (orientation: portrait) {
   :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"] .ib-imgclear { top: 62px; bottom: calc(68px + var(--ib-clearfoot)); }
-  :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"]:has(.ib-optcap) .ib-imgclear { bottom: calc(80px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
+  :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"]:not(:has(.ib-fcomp-pillwrap)):has(.ib-optcap) .ib-imgclear { bottom: calc(80px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
 }
-/* A question's picture choices in full screen (the same approval, "Option caption"): the choice on screen, the
-   question, one dot per choice. It stays while the set is open, where the step chip shows (above a phone's toolbar).
-   On a phone it is always one height (the picture fits above it) and Hide takes it with the rest. */
-.ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; width: min(420px, calc(100% - 32px)); padding: 11px 14px 12px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; }
+/* A question's picture choices in full screen (approval "inbox-option-card-lean", over "Option caption"): one row, the
+   choice on screen (Previous, its letter, its name, "Recommended" in plain text, Next; a phone swipes, so no arrows).
+   It stays while the set is open, in place of the step chip, and is always one height (`--ib-optcap-h`), so the picture
+   fits clear above it. Hide takes it with the rest, and so does minimizing the comment box. */
+.ib-view.ib-fullview { --ib-optcap-h: max(42px, calc(42px * var(--ib-type, 14) / 14)); }
+.ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(640px, calc(100% - 32px)); height: var(--ib-optcap-h); padding: 0 6px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; transition: opacity 180ms ease 180ms; }
 :root.light .ib-optcap { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
-.ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); width: min(420px, calc(100% - 56px)); height: var(--ib-optcap-h); }
-.ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); width: min(420px, calc(100% - 352px)); }
-.ib-optcap-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); max-width: calc(100% - 56px); padding: 0 14px; }
+.ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
+/* Minimizing the comment box shrinks the foot first: a fade would show the card hopping down, so it goes at once. Coming back it waits (the base delay) for the picture to finish easing. */
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { transition: none; }
+.ib-view.ib-fullview:not(.ib-phone):not(:has(.ib-imgcompose)) { --ib-clearfoot: var(--ib-fvfoot, 0px); }
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-imgcompose) { --ib-clearfoot: 0px; }
+.ib-view.ib-fullview:not(.ib-phone)[data-tools="pinned"]:not(:has(.ib-fcomp-pillwrap)):has(.ib-optcap) .ib-imgclear { bottom: calc(22px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); max-width: calc(100% - 352px); }
+.ib-optcap-step { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; pointer-events: auto; }
+@media (pointer: coarse) { .ib-view.ib-fullview:not(.ib-phone) { --ib-optcap-h: max(52px, calc(52px * var(--ib-type, 14) / 14)); } .ib-optcap-step { width: 44px; height: 44px; } }
+.ib-optcap-step:hover:not([aria-disabled="true"]) { background: var(--muted); color: var(--foreground); }
+.ib-optcap-step:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -2px; }
+.ib-optcap-step[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .ib-optcap-letter { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-foreground); font: 700 var(--ib-fs-12-5, 12.5px)/1 var(--font-sans, system-ui); }
 .ib-optcap-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-15, 15px); font-weight: 600; }
-.ib-optcap-rec { flex: none; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); border-radius: 6px; padding: 2px 7px; }
-.ib-optcap-q { display: flex; align-items: center; gap: 10px; margin-top: 6px; min-width: 0; }
-.ib-optcap-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-/* A phone's end note, in the question's line: its words give way, never the pill they point to. */
-.ib-optcap-q:has(.ib-optcap-noteline) { gap: 8px; }
-.ib-optcap-noteline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-optcap-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ib-optcap-noteline .ib-optcap-pill { flex: none; }
-.ib-optcap-dots { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-.ib-optcap-dots i { display: block; width: 6px; height: 6px; border-radius: 3px; background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); transition: width 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms ease; }
-.ib-optcap-dots i.ib-on { width: 16px; background: var(--primary); }
-.ib-optcap-end { margin-top: 9px; padding-top: 9px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
-.ib-optcap-pill { display: inline-flex; align-items: center; gap: 2px; color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { .ib-optcap-dots i, .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { transition: none; } }
+/* The names of the set share one cell, so the card is as wide as the widest (up to its cap) on every step; only the visible row shows. */
+.ib-optcap-body { flex: 0 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); }
+.ib-optcap-main, .ib-optcap-size { grid-area: 1 / 1; display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.ib-optcap-size { visibility: hidden; height: 0; overflow: hidden; pointer-events: none; }
+/* A cut name's full text, for a mouse that rests on it (OptionCaption reads the pointer's place: the card lets every pointer through to the picture). */
+.ib-optcap-tip { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 6px 10px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25); font-size: var(--ib-fs-13, 13px); line-height: 1.35; font-weight: 500; pointer-events: none; }
+.ib-optcap-rec { flex: none; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); }
+@media (prefers-reduced-motion: reduce) {
+  .ib-optcap,
+  .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+  .ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { transition: none; }
+}
 /* the image's size bar moves out from under the toolbar */
 .ib-view.ib-fullview:not(.ib-phone) .ib-imgbar { right: auto; left: 14px; }
 /* and the "Your marked-up copy" chip sits under it */
@@ -2946,6 +2961,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-fl-tm > button.ib-mut { width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
   .pn-inbox .ib-mfold-b { height: 44px; }
   .ib-tmeta { margin-top: -6px; }
+  /* A diagram's comment composer, inline or in the popout (which portals to body): buttons a thumb can hit. */
+  body:has(.pn-inbox) [data-diagram-composer] button { min-height: 44px; }
   /* the question cards (ui's QuestionBlock): rows and buttons a thumb can hit */
   .ib-body [data-question-option]:not([data-question-tile] > *) { min-height: 44px; align-items: center; padding-top: 8px; padding-bottom: 8px; }
   /* A picture tile: its caption row is the 44 px target, the radio or checkbox drawn at 20 px. */
@@ -3916,7 +3933,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-draft-del { flex: none; width: 32px; height: 32px; border-radius: 7px; border: 0; background: none; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; }
 .pn-inbox .ib-draft-del:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 8%, transparent); }
 
-/* A phone (PHONE_QUERY): compose is a full-screen sheet with Cancel · title · Send (or Save draft); the picker a second sheet. */
+/* A phone (PHONE_QUERY): compose is a full-screen sheet with Cancel · title (Save draft at the right only when nothing can be sent) and Send on the foot's row (approval inbox-phone-compose-send); the picker a second sheet. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-lhead-compose { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex: none; border-radius: 8px; color: var(--foreground); background: none; border: 0; }
   .ib-lhead .ib-lhead-search + .ib-lhead-compose { margin-left: 0; }
@@ -3924,18 +3941,23 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-drafts .ib-dh .ib-lhead-compose { margin-left: auto; }
   .ib-sp-entryrow { margin-bottom: 8px; }
   .pn-inbox .ib-compose-btn { width: 44px; height: 44px; }
-  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, 100%); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .pn-inbox dialog.ib-cp[data-phone], dialog.ib-cp[data-phone] { inset: 0; top: 0; width: 100%; height: var(--ib-vvh, var(--ib-cp-vvh, 100%)); max-height: none; border-radius: 0; box-shadow: none; background: var(--card); animation: none; padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
   dialog.ib-cp[data-phone]::backdrop { animation: none; }
-  .ib-cp-bar { display: flex; align-items: center; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); flex: none; }
-  .ib-cp-bar h2 { flex: 1; text-align: center; margin: 0; font-size: var(--ib-fs-17, 17px); font-weight: 650; }
+  .ib-cp-head { flex: none; }
+  /* Two equal sides, so the title stays centred with Save draft at the right or nothing there. */
+  .ib-cp-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: start; height: 52px; padding: 0 6px; border-bottom: 1px solid var(--ib-line); }
+  .ib-cp-bar h2 { grid-column: 2; margin: 0; font-size: var(--ib-fs-17, 17px); font-weight: 650; }
+  .ib-cp-bar [data-compose-save] { grid-column: 3; justify-self: end; }
   .pn-inbox .ib-cp-barb { min-width: 44px; height: 44px; padding: 0 10px; border: 0; background: none; color: var(--primary); font-size: var(--ib-fs-16-in, 16px); }
   .pn-inbox .ib-cp-barb.ib-strong { font-weight: 650; }
-  .pn-inbox .ib-cp-barb.ib-dis { opacity: 0.5; }
   .ib-cp-to { min-height: 56px; padding-top: 6px; padding-bottom: 6px; --ib-cp-tdlh: 22px; }
   .pn-inbox .ib-cp-tobtn { height: 44px; padding-top: 11px; padding-bottom: 11px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-cp-none-to { padding-top: 11px; padding-bottom: 11px; }
-  .ib-cp-body { flex: 1; }
+  /* The message field takes the whole body, so what is under the words is still the field: no gap above the foot that a tap misses. */
+  .ib-cp-body { flex: 1; display: flex; flex-direction: column; }
+  .ib-cp-field, .ib-cp-field .ib-cfield, .ib-cp-field .ib-cfield > .relative { flex: 1 0 auto; display: flex; flex-direction: column; }
   .pn-inbox .ib-cp-field .ib-rtext, .pn-inbox .ib-cp-field .ib-rmirror { font-size: var(--ib-fs-16-in, 16px); min-height: 200px; max-height: none; }
+  .pn-inbox .ib-cp-field .ib-rtext { flex: 1 0 auto; }
   .ib-cp-files { grid-template-columns: 1fr; }
   /* A file's × keeps its look and takes a 44 px hit area (compose's tiles and the reply box's). */
   .pn-inbox .ib-cp-fx { position: relative; }
@@ -3949,8 +3971,58 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }
   .ib-key.ib-cp-tname::after { content: ''; position: absolute; inset: -5px -2px; }
   .pn-inbox .ib-cp-tname-in { font-size: var(--ib-fs-16-in, 16px); position: relative; z-index: 1; }
-  .ib-cp-foot { min-height: 52px; }
-  .pn-inbox .ib-cp-clip { width: 44px; height: 44px; }
+  /* The foot: one row of 44 px targets, attachments and mic at the left, the one action at the right. Whatever else is on
+     the row gives way first, so the action keeps at least 12 px from the buttons on its left. */
+  .ib-cp-foot { min-height: 0; padding: 4px 12px 4px 4px; gap: 0; }
+  .pn-inbox .ib-cp-clip { flex: none; width: 44px; height: 44px; }
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic { width: 44px; height: 44px; }
+  .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic::after { inset: 0; }
+  .ib-cp-foot .ib-dtfoot { flex: none; }
+  .ib-cp-foot > .ib-sp { flex: 1 1 12px; min-width: 12px; }
+  .pn-inbox .ib-cp-send { flex: none; padding: 0 14px; gap: 6px; }
+  .ib-cp-clipn { display: none; }
+  /* The saved state: the check, the word, the time on one line; what does not fit wraps out of sight whole. */
+  .ib-cp-foot > .ib-cp-savedline { display: flex; flex-wrap: wrap; column-gap: 5px; flex: 0 1 auto; min-width: 14px; height: 20px; margin-left: 6px; overflow: hidden; line-height: 20px; white-space: nowrap; }
+  .ib-cp-foot > .ib-cp-savedline > svg { margin-block: 3px; }
+  /* Dictating: the row is the status, as the reply row's is, and the clip and mic stay under the finger. Send is off
+     until the words land; on the narrowest phones it is the bare arrow, its name kept for a screen reader. */
+  .ib-cp-foot .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+  .ib-cp-foot .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ib-cp-foot:has(.ib-vline) > :is(.ib-cp-savedline, .ib-sp) { display: none; }
+  .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { margin-left: 8px; }
+  @media (max-width: 359px) {
+    .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { width: 44px; padding: 0; justify-content: center; }
+    .ib-cp-foot:has(.ib-vline) .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  }
+  /* The keyboard is up (phone.ts): the head folds to one line. To takes the top bar's line in the title's place, with
+     the room Cancel and Save draft leave. Thread, the notes and the tiles step aside until it closes (the row says how
+     many files), except a Thread row in use or saying something, and a tile that was refused. */
+  :root[data-ib-keyboard] .ib-cp-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border-bottom: 1px solid var(--ib-line); }
+  :root[data-ib-keyboard] .ib-cp-bar { grid-area: 1 / 1 / 2 / -1; grid-template-columns: subgrid; height: 48px; border-bottom: 0; }
+  :root[data-ib-keyboard] .ib-cp-bar [data-compose-cancel] { grid-column: 1; }
+  :root[data-ib-keyboard] .ib-cp-bar h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  :root[data-ib-keyboard] .ib-cp-to { grid-area: 1 / 2; min-height: 0; padding: 0; border: 0; align-items: center; justify-content: flex-end; }
+  :root[data-ib-keyboard] .ib-cp-to .ib-cp-tol { display: none; }
+  /* A session that ended has Save draft beside it: To stays in its box with its chevron, the name gives way, and "ended" replaces the detail, whole. */
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] s { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] .ib-cp-tod { flex: none; }
+  :root[data-ib-keyboard] .ib-cp-tobtn[data-compose-to="ended"] :is(.ib-cp-tdsep, .ib-cp-tdw) { display: none; }
+  /* The narrowest phones, Save draft beside it: a struck letter says nothing. The mark says who, the button's name the rest. */
+  @media (max-width: 359px) {
+    :root[data-ib-keyboard] .ib-cp-head:has([data-compose-save]) .ib-cp-tobtn[data-compose-to="ended"] s { display: none; }
+  }
+  /* One line whatever the room: the narrowest phone has Save draft beside it. */
+  :root[data-ib-keyboard] .ib-cp-none-to { display: block; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-thread:not(:focus-within, :has([data-compose-thread-name-error], [data-compose-thread-name-note])) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+  /* The home bar is under the keyboard, and the foot must stay on screen in the little room left: what is over it gives way and scrolls. */
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] { padding-bottom: 0; }
+  :root[data-ib-keyboard] .ib-cp-body { padding-top: 8px; padding-bottom: 6px; overscroll-behavior: contain; }
+  :root[data-ib-keyboard] .pn-inbox .ib-cp-field :is(.ib-rtext, .ib-rmirror) { min-height: 72px; }
+  :root[data-ib-keyboard] :is(.ib-cp-thread, .ib-cp-error) { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
   .ib-cp-ask { flex-wrap: wrap; border-radius: 0; }
   .ib-cp-ask > span:first-child { flex-basis: 100%; }
   .ib-cp-picker[data-phone] { position: fixed; inset: 0; top: 0; left: 0; width: 100%; max-height: none; height: var(--ib-vvh, 100%); border-radius: 0; border: 0; box-shadow: none; background: var(--card); padding-top: env(safe-area-inset-top); z-index: 60; }
@@ -5320,7 +5392,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The tour's answer to a click it cannot use: one short line on the card. */
 .ib-tour-coach .ib-tc-nudge { margin: 8px 0 0; padding: 6px 9px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--popover)); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; }
 /* A click on the card shows its target again. */
-.pn-inbox .ib-tour-again { outline: 3px solid var(--primary) !important; outline-offset: 3px; }
+.pn-inbox .ib-tour-mark { outline: 3px solid var(--primary) !important; outline-offset: 3px; }
 .ib-tc-do { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 600; display: inline-flex; gap: 5px; align-items: center; }
 .ib-tc-wait { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-tc-wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--primary) 30%, transparent); border-top-color: var(--primary); }
@@ -5331,7 +5403,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   @keyframes ib-tour-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
   .ib-tour-coach { animation: ib-pm-in 160ms ease-out; }
   .ib-tc-wait::before { animation: ib-spin 0.9s linear infinite; }
-  .pn-inbox .ib-tour-again { animation: ib-tour-pulse 0.8s ease-out 2; }
+  .pn-inbox .ib-tour-mark { animation: ib-tour-pulse 0.8s ease-out 2; }
 }
 
 /* The replay's marks: what is a replay of the real thread says so. */
@@ -5461,6 +5533,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-tour-chip { padding: 0 10px; }
   .ib-tour-coach { left: 10px; right: 10px; width: auto; max-width: none; bottom: calc(10px + env(safe-area-inset-bottom)); top: auto; }
   .ib-tour-coach[data-at="top"] { top: calc(var(--ib-tour-bar-h, 52px) + 8px); bottom: auto; }
+  /* "Press Send" with the keyboard up (a tap on the message): the room left is Send's; the card is back when it closes. */
+  :root[data-ib-keyboard] .ib-tour-coach[data-tour-coach="9-to"] { display: none; }
   .pn-inbox .ib-tc-next, .pn-inbox .ib-tc-back { height: 44px; min-width: 44px; }
   .ib-te-paths { grid-template-columns: minmax(0, 1fr); }
   .ib-te-pic { aspect-ratio: 16 / 6; }
@@ -6244,7 +6318,7 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-fcomp .ib-fcomp-drop { border-radius: 13px; }
 .ib-fcomp-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .ib-fcomp-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; }
-.pn-inbox .ib-fcomp-q { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px dashed color-mix(in oklch, var(--muted-foreground) 50%, transparent); background: none; color: var(--muted-foreground); font-size: inherit; cursor: pointer; }
+.pn-inbox .ib-fcomp-q { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px dashed color-mix(in oklch, var(--muted-foreground) 50%, transparent); background: none; color: var(--muted-foreground); font-size: inherit; cursor: pointer; }
 .pn-inbox .ib-fcomp-q:hover { color: var(--foreground); border-style: solid; }
 .ib-fcomp-sent { flex: 1; display: inline-flex; align-items: center; gap: 6px; color: var(--success, #3fae6a); font-weight: 600; }
 .ib-fcomp-note { flex: 1; }
@@ -6269,12 +6343,17 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-view.ib-fullview .ib-imgview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) { grid-template-rows: minmax(0, 1fr); }
 /* A film keeps its own controls clear: the stage ends above the card or the pill (not once Hide took them away). */
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 0; }
+.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-vidview:has(> :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone))) .ib-vidstage,
+.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 0; }
 
-/* Hide (») hides what floats with the toolbar: the size chip, the composer or its pill (inert as well: FullScreenComposer.tsx). */
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-imgbar, .ib-fcomp, .ib-fcomp-pillwrap) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 180ms; }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-fcomp, .ib-fcomp-pillwrap) { transform: translate(-50%, 16px); }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-fcomp.ib-phone, .ib-fcomp-pillwrap.ib-phone) { transform: translateY(16px); }
+/* Hide (») hides what floats with the toolbar: the size chip, the composer or its pill (inert as well: FullScreenComposer.tsx).
+   A phone's Show tools (revealed) brings the composer and its pill back with the toolbar; the size chip stays away. */
+.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-imgbar,
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
+.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 180ms; }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
+.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(-50%, 16px); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp.ib-phone, .ib-fcomp-pillwrap.ib-phone) { transform: translateY(16px); }
 @media (prefers-reduced-motion: reduce) {
   .ib-fcomp, .ib-fcomp-pillwrap, .ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-imgbar, .ib-fcomp, .ib-fcomp-pillwrap) { transition: none; }
 }

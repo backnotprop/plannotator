@@ -118,7 +118,7 @@ beforeEach(async () => {
     if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     const answer = await loopback(path, method, body);
     if (method === 'GET' && path.startsWith('/api/inbox/settings') && answer.status === 200 && tailnetPage) {
-      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet' });
+      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet', guest: true });
     }
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': answer.type } });
   }) as typeof fetch;
@@ -495,7 +495,9 @@ test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send
   await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('after the tour'), 'Mark read answers');
   // A click on the card's words shows its target again.
   await click($(el, '[data-tour-coach] h2'));
-  await until(() => document.querySelector('.ib-tour-again') !== null, 'the target pointed at again');
+  await until(() => document.querySelector('.ib-tour-mark') !== null, 'the target pointed at again');
+  // The highlight is its own class: it never lands on the first-run line, which keeps `ib-tour-again` for its text.
+  expect(document.querySelector('.ib-tour-again.ib-tour-mark')).toBeNull();
   expect(writes()).toEqual([]);
 }, 90_000);
 

@@ -16,7 +16,7 @@
  * header, which closes the file and brings the list back (focus on its row); a node
  * comment on a Mermaid diagram; the file edited on disk and the changed line,
  * with "Open the version it sent" showing the bytes sent; Send carrying the
- * picks and the annotations, read back by wait_for_reply; a path outside the
+ * picks and the annotations, read back by read_thread; a path outside the
  * project, a symlink retargeted to a directory, `.env` and a request by path
  * each refused; delete thread removing its blobs and the store size falling.
  *
@@ -676,7 +676,7 @@ test('leaving full screen keeps the file beside the thread with ‹ Inbox leadin
   await expect(thread.locator('.ib-phead > *').first()).toHaveAttribute('data-file-back', '');
   // Archive, then ⋯ More (the copy menu, design record "inbox-copy-message"), end the header.
   await expect(thread.locator('.ib-phead > *').last()).toHaveAttribute('data-thread-more', '');
-  await expect(thread.locator('.ib-phead > *').nth(-2)).toHaveAttribute('data-archive', '');
+  await expect(thread.locator('.ib-phead [data-archive]')).toHaveCount(0);
   await expect(thread.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(nav).toBeHidden();
   await expect(page.locator('.ib-listcol')).toHaveCount(0);
@@ -905,7 +905,7 @@ test('the header says the message has files: its count opens the same tiles unde
   }
 });
 
-test('Send carries the picks and then the annotations as feedback; wait_for_reply returns both', async () => {
+test('Send carries the picks and then the annotations as feedback; read_thread returns both', async () => {
   const page = world.page;
   await page.getByRole('radio', { name: /Retry with the same idempotency key/ }).click();
   await page.getByRole('radio', { name: /^Yes/ }).click();
@@ -932,12 +932,10 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   await page.locator(`[data-attachment-pane="${world.attachments.html}"]`).getByRole('button', { name: 'Write the reply' }).click();
   await expect(page.locator(`[data-attachment-pane="${world.attachments.html}"]`)).not.toHaveClass(/ib-full/);
 
-  const waiting = world.claude.waitForReply(world.threads.billing, 40);
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the files below.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threads.billing, 40);
+  const body = reply.body as string;
   // The picks first ...
   expect(body).toContain('Answered 2 questions.');
   expect(body).toContain('Two notes on the files below.');
@@ -950,9 +948,6 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   expect(body).toContain('## proto/admin-view.html');
   expect(body).toContain('Retry all should ask first. Forty charges at once is a lot to undo.');
   expect(body).toContain('button');
-  // read_thread returns the same reply.
-  const thread = await world.claude.readThread(world.threads.billing);
-  expect(thread.messages.at(-1).body).toBe(body);
   // Sent annotations leave the chip and the tiles.
   await expect(page.locator('.ib-delivered')).toBeVisible();
   const after = (await (await inboxFetch(`/api/inbox/threads/${world.threads.billing}/attachments`)).json()) as { annotations: unknown[] };

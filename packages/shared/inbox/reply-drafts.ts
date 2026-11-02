@@ -6,7 +6,7 @@
  *
  * Files, not the store's JSONL, for the reasons compose drafts are
  * (drafts.ts): a draft changes on every pause in typing, and it must never
- * enter the event log, which the window's stream, wait_for_reply's cursor,
+ * enter the event log, which the window's stream, read_thread's cursor,
  * the phone relay and search read. So agents and the MCP never see it.
  *
  * A save is a compare-and-set on `updated_at`: `base` is the `updated_at` the

@@ -7,18 +7,19 @@
  * no label picker); Comment opens the composer, Save stores the comment
  * (`POST /api/inbox/messages/:id/annotations`), the passage keeps its
  * highlight, and the reply box's chip counts and lists it; Send carries it,
- * and the agent's own `wait_for_reply` (through the Inbox's MCP) returns the
+ * and the agent's own `read_thread` (through the Inbox's MCP) returns the
  * quote and the comment under "Feedback on your message from <time>". A
  * reload draws the saved highlight again; removing it from the chip takes the
  * highlight away. The person's own message and a question card's words open
- * no toolbar.
+ * no toolbar. A click on a diagram part in the message does the same through
+ * the diagram's own composer, and the agent reads which part.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -26,6 +27,8 @@ import type { InboxAnnotationRecord, InboxMessageWire } from '@plannotator/core/
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
+const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -95,10 +98,45 @@ async function agentWrites(body = BODY, replyTo?: string): Promise<{ id: string;
   return { id: sent, session };
 }
 
-const TESTS = 5;
+/** The fence opens on line 3, so `D` is declared on line 5. */
+const DIAGRAM_BODY = ['The review flow as it runs today.', '', '```mermaid', 'flowchart LR', '  U([Reviewer]) --> D{Approve?}', '  D -->|Yes| M[(Merge)]', '  D -->|No| R[Revise]', '```', ''].join('\n');
+const DIAGRAM_D_LINE = 5;
+
+const TESTS = 7;
+
+// The diagram is Chromium's own render of DIAGRAM_BODY's fence, through the host runtime slot (DiagramBlock.askAI.test.tsx's fixture).
+const FIXTURES = join(import.meta.dir, '..', 'ui', 'test-setup', 'fixtures', 'diagrams');
+const CAPTURE_ID = 'diagram-fixture';
+const SVG = readFileSync(join(FIXTURES, '06-flowchart-review-decision.svg'), 'utf8');
+const GEOMETRY = JSON.parse(readFileSync(join(FIXTURES, '06-flowchart-review-decision.geometry.json'), 'utf8')) as {
+  elements: Record<string, { bbox: { x: number; y: number; width: number; height: number }; ctm: DOMMatrix }>;
+};
+const CAPTURED = Object.entries(GEOMETRY.elements).map(([id, entry]) => [id.slice(CAPTURE_ID.length), entry] as const);
+const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
+const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
+const savedProto = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };
+let restoreParser: (() => void) | null = null;
+const noop = (): void => {};
 
 beforeAll(async () => {
   if (!hasDom) return;
+  restoreParser = diagramSvg!.installInertDiagramSvgParser();
+  mermaid!.setMermaidRuntime(
+    { initialize: noop, render: (id: string) => Promise.resolve({ svg: SVG.replaceAll(CAPTURE_ID, id) }) } as unknown as Parameters<typeof import('@plannotator/ui/utils/mermaid').setMermaidRuntime>[0],
+    'host',
+  );
+  elementProto['setPointerCapture'] ??= noop;
+  elementProto['releasePointerCapture'] ??= noop;
+  elementProto['hasPointerCapture'] ??= () => false;
+  svgProto['getBBox'] = function (this: Element) {
+    if (this.tagName.toLowerCase() === 'svg') return { x: 0, y: 0, width: 452, height: 182 };
+    const found = CAPTURED.find(([suffix]) => this.id.endsWith(suffix));
+    return found ? { ...found[1].bbox } : { x: 0, y: 0, width: 0, height: 0 };
+  };
+  svgProto['getScreenCTM'] = function (this: Element) {
+    if (this.tagName.toLowerCase() === 'svg') return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+    return CAPTURED.find(([suffix]) => this.id.endsWith(suffix))?.[1].ctm ?? null;
+  };
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-message-comments-dom-')));
   // Never the real tailscale, never the real data dir.
   mkdirSync(join(dir, 'bin'));
@@ -118,6 +156,10 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (!hasDom) return;
+  svgProto['getBBox'] = savedProto.getBBox;
+  svgProto['getScreenCTM'] = savedProto.getScreenCTM;
+  mermaid!.__setMermaidRuntimeLoaderForTests(undefined);
+  restoreParser?.();
   reader?.releaseLock();
   child?.kill();
   await child?.exited;
@@ -299,9 +341,8 @@ test.skipIf(!hasDom)("words selected in an agent's message: the comment-only too
   await until(async () => (await pending(message.id)).length === 0, 'the comment sent');
 
   // The agent that wrote the message reads it through the Inbox's MCP.
-  const { waited } = await command<{ waited: { status: string; reply: { body: string } } }>({ wait: { thread: message.id, session: message.session } });
-  expect(waited.status).toBe('replied');
-  const body = waited.reply.body;
+  const { read } = await command<{ read: { thread: { messages: { body: string; author: { kind: string } }[] } } }>({ read: { thread: message.id, session: message.session } });
+  const body = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.body;
   expect(body).toContain('# Feedback on your messages');
   expect(body).toMatch(new RegExp(`## Feedback on your message from .+ \\(${message.id}\\)`));
   expect(body).toContain('Feedback on: "two, four and eight seconds"');
@@ -355,6 +396,97 @@ test.skipIf(!hasDom)("the person's own message and a question card's words open 
   expect(mine.hasAttribute('data-text-comments')).toBe(false);
   await select(mine, 'Holding this one');
   expect(toolbarButtons()).toEqual([]);
+}, 30_000);
+
+/** Press and release on the diagram's node D, the way the canvas hears a click. */
+async function clickNodeD(scope: ParentNode) {
+  await until(() => scope.querySelector('[id$="-flowchart-D-1"]') !== null, 'the rendered diagram');
+  const node = scope.querySelector('[id$="-flowchart-D-1"]')!;
+  const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+  const fire = (kind: string) =>
+    node.dispatchEvent(new Ctor(kind, { bubbles: true, cancelable: true, clientX: 10, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId: 1 } : {}) } as MouseEventInit));
+  await act(async () => {
+    fire('pointerdown');
+    fire('pointerup');
+  });
+}
+
+const composerBox = (scope: ParentNode) => scope.querySelector<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+
+test.skipIf(!hasDom)('a click on a diagram part in a message: the composer, the badge, the chip names the part, a reload restores it, and the agent reads which part', async () => {
+  const message = await agentWrites(DIAGRAM_BODY);
+  await renderApp(`#thread=${message.id}`);
+  await clickNodeD(messageBody(message.id)!);
+  await until(() => composerBox(messageBody(message.id)!) !== null, 'the composer');
+  expect(messageBody(message.id)!.querySelector('[data-diagram-composer]')!.textContent).toContain('Approve?');
+
+  // Escape closes the composer, never the thread.
+  await act(async () => composerBox(messageBody(message.id)!)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await until(() => composerBox(messageBody(message.id)!) === null, 'the composer closed');
+  expect(messageBody(message.id)).not.toBeNull();
+  expect(window.location.hash).toContain(message.id);
+
+  await clickNodeD(messageBody(message.id)!);
+  await until(() => composerBox(messageBody(message.id)!) !== null, 'the composer');
+  const area = composerBox(messageBody(message.id)!)!;
+  await type(area, 'Who approves on a holiday?');
+  await act(async () => area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await until(async () => (await pending(message.id)).length === 1, 'the comment saved');
+  const [record] = await pending(message.id);
+  expect(record!.annotation).toMatchObject({
+    type: 'COMMENT',
+    text: 'Who approves on a holiday?',
+    originalText: 'Approve?',
+    diagramAnchor: { v: 1, family: 'flowchart', kind: 'node', id: 'D', label: 'Approve?', sourceLine: [DIAGRAM_D_LINE, DIAGRAM_D_LINE] },
+  });
+  await until(() => messageBody(message.id)!.querySelector(`[data-diagram-badge="${record!.id}"]`) !== null, 'the badge');
+
+  // Reload: the draft comes back on its part, and the reply box's list names it.
+  act(() => root?.unmount());
+  host?.remove();
+  const el = await renderApp(`#thread=${message.id}`);
+  await until(() => messageBody(message.id)?.querySelector(`[data-diagram-badge="${record!.id}"]`) != null, 'the badge after a reload');
+  openReply(el);
+  await until(() => el.querySelector('[data-annotations-chip]')?.textContent === '1 annotation', 'the chip');
+  act(() => (el.querySelector('[data-annotations-chip]') as HTMLButtonElement).click());
+  const row = el.querySelector(`[data-annotation-row="${record!.id}"]`) as HTMLElement;
+  expect(row.textContent).toContain('node D');
+  expect(row.textContent).toContain('Who approves on a holiday?');
+  act(() => (el.querySelector('.ib-annpop [aria-label="Close the list"]') as HTMLButtonElement).click());
+
+  act(() => button(el, 'Send').click());
+  await until(async () => (await pending(message.id)).length === 0, 'the comment sent');
+  const { read } = await command<{ read: { thread: { messages: { body: string; author: { kind: string } }[] } } }>({ read: { thread: message.id, session: message.session } });
+  const body = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.body;
+  expect(body).toContain('# Feedback on your messages');
+  expect(body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
+}, 30_000);
+
+test.skipIf(!hasDom)('a diagram in the person\'s own message and in an archived message opens no composer', async () => {
+  const message = await agentWrites(DIAGRAM_BODY);
+  const el = await renderApp(`#thread=${message.id}`);
+  await until(() => messageBody(message.id)?.querySelector('[id$="-flowchart-D-1"]') != null, 'the rendered diagram');
+
+  openReply(el);
+  await settle();
+  await type(el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement, DIAGRAM_BODY);
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('article[data-author="person"] [id$="-flowchart-D-1"]') !== null, 'my diagram drawn');
+  await clickNodeD(el.querySelector('article[data-author="person"]')!);
+  await settle();
+  expect(composerBox(el)).toBeNull();
+
+  await loopback(`/api/inbox/messages/${message.id}/resolve`, 'POST', JSON.stringify({ resolved: true }));
+  act(() => root?.unmount());
+  host?.remove();
+  const archived = await renderApp(`#thread=${message.id}`);
+  await until(() => archived.querySelector(`[data-message-article="${message.id}"]`) !== null, 'the message');
+  const head = archived.querySelector<HTMLElement>(`[data-message-article="${message.id}"] [data-fold-head]`);
+  if (head && !messageBody(message.id)) act(() => head.click());
+  await clickNodeD(messageBody(message.id)!);
+  await settle();
+  expect(messageBody(message.id)!.hasAttribute('data-text-comments')).toBe(false);
+  expect(composerBox(archived)).toBeNull();
 }, 30_000);
 
 test.skipIf(!hasDom)('a refused save takes its highlight away and says why', async () => {

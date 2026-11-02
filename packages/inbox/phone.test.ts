@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PHONE_QUERY, isIOSWebKit, keyboardLayout, trackKeyboard } from './phone';
+import { PHONE_QUERY, isIOSWebKit, keyboardLayout, stripHeight, trackKeyboard } from './phone';
 
 describe('the keyboard on a phone', () => {
   test('the keyboard up, unzoomed: the window takes the height above it and undoes the pan', () => {
@@ -25,6 +25,19 @@ describe('the keyboard on a phone', () => {
   test('nothing on a desktop window, or with nothing covering the bottom', () => {
     expect(keyboardLayout({ height: 400, offsetTop: 0, scale: 1 }, 659, 0, false)).toEqual({ height: null, resetScroll: false });
     expect(keyboardLayout({ height: 640, offsetTop: 0, scale: 1 }, 659, 0, true)).toEqual({ height: null, resetScroll: false });
+  });
+
+  test('a phone window too short for the sheet folds though nothing covers it; one with room does not', () => {
+    expect(keyboardLayout({ height: 200, offsetTop: 0, scale: 1 }, 200, 0, true)).toEqual({ height: 200, resetScroll: false });
+    expect(keyboardLayout({ height: 300, offsetTop: 0, scale: 1 }, 300, 0, true)).toEqual({ height: null, resetScroll: false });
+    expect(keyboardLayout({ height: 200, offsetTop: 0, scale: 1 }, 200, 0, false)).toEqual({ height: null, resetScroll: false });
+  });
+
+  test('a strip too small to fold for: New message ends above it; a pinch and a desktop window change nothing', () => {
+    expect(stripHeight({ height: 581.6, scale: 1 }, 660, true)).toBe(582);
+    expect(stripHeight({ height: 660, scale: 1 }, 660, true)).toBeNull();
+    expect(stripHeight({ height: 330, scale: 2 }, 660, true)).toBeNull();
+    expect(stripHeight({ height: 582, scale: 1 }, 660, false)).toBeNull();
   });
 });
 
