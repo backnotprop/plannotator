@@ -10,9 +10,12 @@
  * id: `claude-code` is inbox-launch-claude.ts. A record whose agent has no
  * host here (a downgrade) gets no line, no sweep and `404 launch_not_found`.
  *
- * We start nothing that lives on its own: the agent's own background host
- * keeps the session (`claude --bg`). Messages move over the links the Inbox
- * already has (Claude Code: the mod's bridge poll). Behind
+ * Where the agent has a background host of its own, it keeps the session
+ * (`claude --bg`). Where it has none (OpenCode 1), its host runs one
+ * `opencode serve` per launch, proved its own before any signal, and stops it
+ * after 30 minutes with no turn and no prompt (a reply continues the session).
+ * Messages move over the links the Inbox already has (Claude Code: the mod's
+ * bridge poll; OpenCode: the host's own wake on that bridge). Behind
  * `inboxLaunch.enabled` (config only, default off): off, every route here
  * answers 404 and nothing else changes.
  *
@@ -72,6 +75,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
@@ -349,6 +353,7 @@ export function createInboxLaunch(options: {
   /** The agents the Inbox can start, one per line. */
   const ownHosts: LaunchHost[] = [
     claude,
+    createOpenCodeLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -637,6 +642,8 @@ export function createInboxLaunch(options: {
       // A host whose resume throws is a failed restart, never an unhandled rejection (it would end the Inbox).
       .catch((error: unknown) => ({ exitCode: 1, text: `error: ${error instanceof Error ? error.message : String(error)}`, failure: { code: "failed" as const, text: "It did not start again." } }))
       .then(async (result) => {
+        // Deleted meanwhile: nothing is written for it (its folder is gone, and stays gone).
+        if (store.message(root.id)?.launch?.deleted_at) return;
         startLog(launch.id, `respawn ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
         if (!result.failure) return;
         attempt.failed = result.failure.text;
