@@ -20,6 +20,7 @@ import type { InboxThread } from "../../packages/core/inbox-types";
 import { inboxLeaseFileOf } from "../../packages/shared/inbox/agent-link";
 import {
   DSH_INBOX_HOST,
+  DSH_ROOT_SESSION_ENV,
   setupDshInbox,
   type DshInbox,
   type DshInboxAgent,
@@ -27,6 +28,7 @@ import {
   type DshToolDefinition,
 } from "./inbox";
 import type { DshUserMessage } from "./plan-review";
+import { applyPlannotator, DSH_INBOX_SERVICES } from "./plugin";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -48,15 +50,46 @@ class FakeAgent implements DshInboxAgent {
   readonly followups: DshUserMessage[] = [];
   readonly steers: DshUserMessage[] = [];
   readonly session: { header: { cwd: string; parentSession?: string; origin?: string; delegationDepth?: number } };
+  /** Leave what goes in queued (a long tool call holds a steer; the turn has not started): the test claims or discards it. */
+  hold = false;
+  /** A DSH that emits no `agent/inbox/claimed`: the turn takes the message silently. */
+  silentClaims = false;
   /** Set to drop a method, as an older or trimmed DSH would. */
   followup?: (message: DshUserMessage) => void = (message) => {
     this.followups.push(message);
-    this.host.emit("agent/inbox/inserted", { agent: this, message });
+    this.put("nextTurn", message);
   };
   steer?: (message: DshUserMessage) => void = (message) => {
     this.steers.push(message);
-    this.host.emit("agent/inbox/inserted", { agent: this, message });
+    this.put("nextStep", message);
   };
+
+  /** As DSH's ReactLoopInbox: queued, `agent/inbox/inserted`, then a turn claims it (at once here, unless held). */
+  private put(list: "nextTurn" | "nextStep", message: DshUserMessage): void {
+    this.inbox[list].push(message);
+    this.host.emit("agent/inbox/inserted", { agent: this, message });
+    if (!this.hold) queueMicrotask(() => this.claim(message.id));
+  }
+
+  /** A turn takes the message: out of the queue, `agent/inbox/claimed`. */
+  claim(id: string): void {
+    const message = this.take(id);
+    if (message && !this.silentClaims) this.host.emit("agent/inbox/claimed", { agent: this, message, turn: 1 });
+  }
+
+  /** The person takes it out of the queue (or cancels the turn and its queue): `agent/inbox/discarded`. */
+  discard(id: string): void {
+    const message = this.take(id);
+    if (message) this.host.emit("agent/inbox/discarded", { agent: this, message });
+  }
+
+  private take(id: string): unknown {
+    for (const list of [this.inbox.nextTurn, this.inbox.nextStep]) {
+      const at = list.findIndex((item) => (item as { id?: unknown }).id === id);
+      if (at >= 0) return list.splice(at, 1)[0];
+    }
+    return undefined;
+  }
 
   constructor(
     readonly id: string,
@@ -88,6 +121,12 @@ class FakeDsh {
     };
   }
 
+  /** Services not active yet (Cordis `ctx.get` answers undefined for them until `provide`). */
+  readonly late = new Set<string>();
+  /** The disposers `ctx.effect` collected: run on unload. */
+  readonly effects: (() => void)[] = [];
+  private readonly injects: { deps: string[]; run: () => void; ran: boolean; effects: (() => void)[] }[] = [];
+
   readonly ctx: DshInboxContext = {
     on: (event, listener) => {
       const list = this.listeners.get(event) ?? [];
@@ -95,9 +134,51 @@ class FakeDsh {
       this.listeners.set(event, list);
       return () => true;
     },
-    get: (name) => this.services[name],
+    get: (name) => (this.late.has(name) ? undefined : this.services[name]),
     logger: { warn: (format: string, ...args: unknown[]) => void this.warnings.push([format, ...args].join(" ")), info: () => {} },
   };
+
+  /** The same context with Cordis' `effect` and `inject`, as a real DSH hands a plugin. */
+  readonly cordis: DshInboxContext = {
+    ...this.ctx,
+    effect: (execute: () => () => void) => void this.effects.push(execute()),
+    inject: (deps, callback) => {
+      // A child context: its effects are its own, disposed when a service it needs goes away (Cordis' fiber).
+      const entry = { deps, ran: false, effects: [] as (() => void)[], run: () => void callback({ ...this.cordis, effect: (execute: () => () => void) => void entry.effects.push(execute()) }) };
+      this.injects.push(entry);
+      this.runReady();
+    },
+  };
+
+  /** A late service becomes active: the injected children waiting on it run. */
+  provide(name: string): void {
+    this.late.delete(name);
+    this.runReady();
+  }
+
+  /** A service goes away (replaced, or its plugin unloaded): the children that needed it are disposed and wait again. */
+  withdraw(name: string): void {
+    this.late.add(name);
+    for (const entry of this.injects) {
+      if (!entry.ran || !entry.deps.includes(name)) continue;
+      entry.ran = false;
+      for (const dispose of entry.effects.splice(0)) dispose();
+    }
+  }
+
+  /** The plugin unloads: every effect's disposer runs, its children's too. */
+  unload(): void {
+    for (const entry of this.injects) for (const dispose of entry.effects.splice(0)) dispose();
+    for (const dispose of this.effects.splice(0)) dispose();
+  }
+
+  private runReady(): void {
+    for (const entry of this.injects) {
+      if (entry.ran || entry.deps.some((dep) => this.late.has(dep) || this.services[dep] === undefined)) continue;
+      entry.ran = true;
+      entry.run();
+    }
+  }
 
   emit(event: string, payload: unknown): void {
     for (const listener of this.listeners.get(event) ?? []) listener(payload);
@@ -488,5 +569,215 @@ describe("DeepSeek Harness: the Inbox key stays out of DSH's reach", () => {
     const reachable = stringsIn({ inbox, tools: w.dsh.tools, warnings: w.dsh.warnings, followups: agent.followups, steers: agent.steers, read, sent });
     expect(reachable.length).toBeGreaterThan(0);
     expect(reachable.filter((text) => text.includes(token))).toEqual([]);
+  });
+});
+
+/** The reply's delivery as the thread holds it now (no waiting). */
+async function deliveryNow(server: InboxServer, threadId: string, id: string) {
+  return (await thread(server, threadId)).messages.find((m) => m.id === id)?.delivery ?? null;
+}
+
+// Pi marks a reply delivered when its message starts; DSH says when a turn takes a queued message.
+describe("DeepSeek Harness: delivered means a turn took it", () => {
+  const CHECK = 60;
+
+  test("a reply still queued in the session is not delivered yet; the turn taking it is", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-held", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Held?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Take it.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    await Bun.sleep(CHECK * 4);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    agent.claim(agent.followups[0]!.id);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-held" });
+    expect(agent.followups).toHaveLength(1);
+  });
+
+  test("the turn taking it marks it delivered at once, not at the next look", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-claimed", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: 60_000 });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Now?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Now.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.claim(agent.followups[0]!.id);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-claimed" });
+  });
+
+  test("Send now steered in, then taken out of the queue before a step read it: the reply waits for idle and goes in once as a turn", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-parked", w.project);
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Deploy?" })).text);
+    agent.status = "running";
+    agent.hold = true;
+    const answer = await reply(w.server, sent.message_id, "Deploy.");
+    await Bun.sleep(TICK * 6);
+    expect(await sendNow(w.server, answer.id)).toBe(200);
+    expect(await until(() => agent.steers.length === 1)).toBe(true);
+    agent.discard(agent.steers[0]!.id);
+    await Bun.sleep(CHECK * 3);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    expect(agent.followups).toEqual([]);
+    agent.hold = false;
+    agent.status = "idle";
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-parked" });
+    expect(agent.steers).toHaveLength(1);
+  });
+
+  test("a turn's reply taken out of the queue is never marked delivered, and is not put back", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-dropped", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Drop?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Dropped.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.discard(agent.followups[0]!.id);
+    expect(await until(() => w.dsh.warnings.some((line) => line.includes("could not be delivered")))).toBe(true);
+    expect(w.dsh.warnings.find((line) => line.includes("could not be delivered"))).toContain("taken out of the session's queue");
+    await Bun.sleep(CHECK * 4);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    expect(agent.followups).toHaveLength(1);
+  });
+
+  test("the session closes with the reply queued: DSH keeps it for the resume, so it is delivered", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-closing", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: 60_000 });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Closing?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Fine.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    w.dsh.dispose(agent);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-closing" });
+  });
+
+  test("a DSH that never says claimed: gone from the queue at the next look counts as taken", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-quiet", w.project);
+    agent.silentClaims = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Quiet?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Yes.");
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-quiet" });
+  });
+});
+
+describe("DeepSeek Harness: a subagent's shell sends as the session it works for", () => {
+  test("Plannotator adds DSH_PLANNOTATOR_SESSION_ID to each model shell: the parent's id for a subagent, the session's own otherwise", async () => {
+    const w = await world();
+    const contributors: { name: string; variables: Record<string, { description: string }>; resolve(execution: { agent?: DshInboxAgent }): Record<string, string> }[] = [];
+    w.dsh.services.shellEnv = { register: (contributor: (typeof contributors)[number]) => void contributors.push(contributor) };
+    const parent = w.dsh.create("session-top", w.project);
+    const child = w.dsh.create("session-sub", w.project, { parentSession: "session-top", origin: "subagent", delegationDepth: 1 });
+    await start(w);
+    expect(contributors).toHaveLength(1);
+    expect(Object.keys(contributors[0]!.variables)).toEqual([DSH_ROOT_SESSION_ENV]);
+    expect(contributors[0]!.resolve({ agent: child })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top" });
+    expect(contributors[0]!.resolve({ agent: parent })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top" });
+    expect(contributors[0]!.resolve({})).toEqual({});
+  });
+
+  test("a shellEnv that becomes active later still gets the variable", async () => {
+    const w = await world();
+    const contributors: unknown[] = [];
+    w.dsh.services.shellEnv = { register: (contributor: unknown) => void contributors.push(contributor) };
+    w.dsh.late.add("shellEnv");
+    w.dsh.create("session-late-env", w.project);
+    expect(await setupDshInbox(w.dsh.cordis, { env: ON, dataDir: w.dataDir, tickMs: TICK, version: null }).then((inbox) => (inbox && inboxes.push(inbox), inbox))).not.toBeNull();
+    expect(contributors).toEqual([]);
+    w.dsh.provide("shellEnv");
+    expect(contributors).toHaveLength(1);
+  });
+});
+
+// index.ts's `apply` is plugin.ts's applyPlannotator without test hooks.
+describe("DeepSeek Harness: the plugin's load and unload", () => {
+  const deps = (w: Awaited<ReturnType<typeof world>>) => ({ env: ON, dataDir: w.dataDir, tickMs: TICK, version: null });
+
+  test("agents and tools active after the plugin applies: the Inbox connection starts then, not 'no agents service'", async () => {
+    const w = await world();
+    for (const name of DSH_INBOX_SERVICES) w.dsh.late.add(name);
+    const agent = w.dsh.create("session-late", w.project);
+    const started: (DshInbox | null)[] = [];
+    await applyPlannotator(w.dsh.cordis as never, { planReview: false }, deps(w), (inbox) => void started.push(inbox));
+    expect(started).toEqual([]);
+    expect(w.dsh.tools).toEqual([]);
+    w.dsh.provide("agents");
+    // Agents alone is not enough: the tool needs `tools`.
+    await Bun.sleep(300);
+    expect(started).toEqual([]);
+    expect(w.dsh.warnings).toEqual([]);
+    w.dsh.provide("tools");
+    expect(await until(() => started.length === 1)).toBe(true);
+    const inbox = started[0]!;
+    inboxes.push(inbox!);
+    expect(w.dsh.warnings.filter((line) => line.includes("no agents service"))).toEqual([]);
+    expect(w.dsh.tools.map((t) => t.name)).toEqual(["plannotator_inbox"]);
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Late?" })).text);
+    await reply(w.server, sent.message_id, "On time.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+  });
+
+  test("a service it needs goes away (replaced): the old wakes stop, and the connection starts again when it is back", async () => {
+    const w = await world();
+    w.dsh.create("session-swap", w.project);
+    const started: (DshInbox | null)[] = [];
+    await applyPlannotator(w.dsh.cordis as never, { planReview: false }, deps(w), (inbox) => void started.push(inbox));
+    expect(await until(() => started.length === 1)).toBe(true);
+    const first = started[0]!.wakes.get("session-swap")!;
+    w.dsh.withdraw("agents");
+    expect(first.isDisposed).toBe(true);
+    w.dsh.provide("agents");
+    expect(await until(() => started.length === 2)).toBe(true);
+    inboxes.push(started[1]!);
+    expect(started[1]!.wakes.get("session-swap")!.isDisposed).toBe(false);
+  });
+
+  test("unloading the plugin stops every wake it started", async () => {
+    const w = await world();
+    w.dsh.create("session-reload", w.project);
+    const started: (DshInbox | null)[] = [];
+    await applyPlannotator(w.dsh.cordis as never, { planReview: false }, deps(w), (inbox) => void started.push(inbox));
+    expect(await until(() => started.length === 1)).toBe(true);
+    const wake = started[0]!.wakes.get("session-reload")!;
+    expect(wake.isDisposed).toBe(false);
+    w.dsh.unload();
+    expect(wake.isDisposed).toBe(true);
+  });
+
+  test("unloaded while the Inbox's tools are still being read: what started is stopped, nothing is kept", async () => {
+    const w = await world();
+    w.dsh.create("session-early", w.project);
+    let release: (tools: null) => void = () => {};
+    const gate = new Promise<null>((resolve) => (release = resolve));
+    const real = (await import("../../packages/shared/inbox/agent-link")).discoverInboxTools;
+    const started: (DshInbox | null)[] = [];
+    const applied = applyPlannotator(w.dsh.cordis as never, { planReview: false }, { ...deps(w), discover: async (dir) => (await gate, real(dir)) }, (inbox) => void started.push(inbox));
+    w.dsh.unload();
+    release(null);
+    await applied;
+    expect(await until(() => started.length === 1)).toBe(true);
+    expect(started).toEqual([null]);
+    expect(w.dsh.tools).toEqual([]);
+  });
+
+  test("a setup that throws is logged, and apply never rejects", async () => {
+    const w = await world();
+    const broken: DshInboxContext = {
+      ...w.dsh.ctx,
+      on: (event) => {
+        if (event.startsWith("agent/")) throw new Error("bus is closed");
+        return undefined;
+      },
+    };
+    await expect(applyPlannotator(broken as never, { planReview: false }, deps(w))).resolves.toBeUndefined();
+    expect(w.dsh.warnings.some((line) => line.includes("did not start") && line.includes("bus is closed"))).toBe(true);
   });
 });

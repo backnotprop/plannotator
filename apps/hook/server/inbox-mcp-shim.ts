@@ -82,8 +82,9 @@ export interface InboxHostSession {
  * the Claude Code mod in every process its session starts) comes first; then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
  * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs; Qwen's;
- * last `DSH_SESSION_ID`, DeepSeek Harness's (its MCP client strips every
- * `DSH_*` variable, so this is a DSH shell's `plannotator inbox call`). Anything
+ * last `DSH_SESSION_ID`, DeepSeek Harness's, only beside `DSH_SHELL=1` (its
+ * MCP client strips every `DSH_*` variable, so this is a DSH model shell's
+ * `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
  * session is a thread id, a UUID).
  */
@@ -103,14 +104,22 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   if (isCodexThreadId(codex)) return { host: INBOX_CODEX_HOST, session: codex, name: INBOX_CODEX_NAME };
   const qwen = env[INBOX_QWEN_SESSION_ENV];
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
-  // DeepSeek Harness sets DSH_SESSION_ID (with DSH_SHELL) in every model shell. Last, and only when no other
-  // agent's marker is there: every process started from a DSH shell inherits it, another agent included.
-  const dsh = env.DSH_SESSION_ID;
-  if (isInboxSessionId(dsh) && !INBOX_NON_DSH_MARKERS.some((key) => !!env[key])) return { host: INBOX_DSH_HOST, session: dsh, name: INBOX_SESSION_HOST_NAMES[INBOX_DSH_HOST]! };
+  // DeepSeek Harness sets DSH_SESSION_ID with DSH_SHELL=1 in every model shell. Only there: the person's own
+  // terminal in DSH Web gets DSH_SESSION_ID without DSH_SHELL, and whatever runs in it is not that session.
+  // Last, and only when no other agent's marker is there: every process started from a DSH shell inherits
+  // both, another agent included. Plannotator's DSH plugin adds the top-level session the shell works for
+  // (a subagent's parent, as the plugin's tool signs), which wins over the subagent's own.
+  if (env.DSH_SHELL === "1" && !INBOX_NON_DSH_MARKERS.some((key) => !!env[key])) {
+    const dsh = isInboxSessionId(env[INBOX_DSH_ROOT_SESSION_ENV]) ? env[INBOX_DSH_ROOT_SESSION_ENV] : env.DSH_SESSION_ID;
+    if (isInboxSessionId(dsh)) return { host: INBOX_DSH_HOST, session: dsh, name: INBOX_SESSION_HOST_NAMES[INBOX_DSH_HOST]! };
+  }
   return null;
 }
 
 export const INBOX_DSH_HOST = "dsh";
+
+/** Set by Plannotator's DSH plugin in each model shell (DSH's `shellEnv`): the top-level session the shell works for. */
+export const INBOX_DSH_ROOT_SESSION_ENV = "DSH_PLANNOTATOR_SESSION_ID";
 
 /**
  * The markers other agents set in the shells and MCP servers they start. Any

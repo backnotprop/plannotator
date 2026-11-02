@@ -41,7 +41,7 @@ import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxS
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
-import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -91,7 +91,9 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
   const named: InboxHostSession[] = [];
   const variables: string[] = [];
   for (const variable of SESSION_VARIABLES) {
-    const found = inboxHostSessionFromEnv({ [variable]: env[variable] });
+    // DSH_SESSION_ID names a session only in a DSH model shell (DSH_SHELL=1), where the plugin may name its parent.
+    const slice = variable === "DSH_SESSION_ID" ? { DSH_SESSION_ID: env.DSH_SESSION_ID, DSH_SHELL: env.DSH_SHELL, [INBOX_DSH_ROOT_SESSION_ENV]: env[INBOX_DSH_ROOT_SESSION_ENV] } : { [variable]: env[variable] };
+    const found = inboxHostSessionFromEnv(slice);
     if (!found) continue;
     variables.push(variable);
     if (!named.some((other) => other.host === found.host && other.session === found.session)) named.push(found);

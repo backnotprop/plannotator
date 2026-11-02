@@ -270,6 +270,18 @@ test("DeepSeek Harness: the tool switch turns its plugin's tool on, and it has n
   expect(fake.calls().filter((call) => call.name === "dsh")).toEqual([]);
 });
 
+// An older or newer Plannotator may share this config.json: saving one switch keeps a host this version does not know.
+test("saving a tool switch (Agents, or Settings' inbox_tool) keeps every other host's key, unknown hosts included", async () => {
+  mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+  writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: true, "next-host": false } }));
+  const s = await start();
+  await post(s, "/api/inbox/agents", { agent: "pi", reach: true });
+  expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: true, "next-host": false, pi: true });
+  expect((await post(s, "/api/inbox/settings", { inbox_tool: { opencode: true } })).status).toBe(200);
+  expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: true, "next-host": false, pi: true, opencode: true });
+});
+
 test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => {
   const s = await start({ PLANNOTATOR_INBOX_TOOL: "0" });
   const model = (await (await post(s, "/api/inbox/agents", { agent: "claude-code", reminder: true })).json()) as Model;

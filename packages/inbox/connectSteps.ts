@@ -295,7 +295,7 @@ export function mcpFoldHint(label: string): string {
 /** What the "Already connected" line says after the name. */
 export function doneNote(row: ConnectRow, opts: { live: boolean; turnedOn: boolean }): string {
   if (row.state === 'ready') {
-    if (opts.turnedOn) return 'next session';
+    if (opts.turnedOn) return row.id === 'dsh' ? 'when DeepSeek Harness next starts' : 'next session';
     const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
     return opts.live ? `${word} · running now` : word;
   }

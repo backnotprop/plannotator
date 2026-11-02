@@ -369,12 +369,21 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(fake.calls()).toEqual([]);
   });
 
-  test("turning on another agent's tool keeps the person's DeepSeek Harness switch", async () => {
+  test("turning on another agent's tool keeps the DeepSeek Harness switch and any host this version does not know", async () => {
     mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
     writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: false } }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: false, "next-host": true } }));
     expect((await connect()).added).toEqual(["pi"]);
-    expect(loadConfig().inboxTool).toEqual({ dsh: false, pi: true });
+    // A host this version does not know (a newer Plannotator's) is kept too.
+    expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: false, "next-host": true, pi: true });
+  });
+
+  test("a `dsh` on PATH alone (Debian's distributed shell) is not DeepSeek Harness, and is never run", async () => {
+    fake.install("dsh");
+    const report = await connect();
+    expect(report.manual).not.toContain("dsh");
+    expect(report.added).not.toContain("dsh");
+    expect(fake.calls()).toEqual([]);
   });
 
   test("DeepSeek Harness: DSH_HOME is where the profiles are", async () => {

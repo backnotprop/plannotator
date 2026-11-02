@@ -506,7 +506,27 @@ describe("plannotator inbox mcp inside an agent session", () => {
     for (const marker of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR_AGENT", "OPENCODE", "GEMINI_CLI", "COPILOT_CLI", "OMPCODE", "QWEN_CODE"]) {
       expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: dsh, [marker]: "1" })).toBeNull();
     }
-    for (const bad of ["", "a b", "../x", "-x", "a".repeat(129)]) expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: bad })).toBeNull();
+    for (const bad of ["", "a b", "../x", "-x", "a".repeat(129)]) expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: bad })).toBeNull();
+  });
+
+  // DSH Web's terminal for the person sets DSH_SESSION_ID without DSH_SHELL: what runs there is not that session.
+  test("DSH_SESSION_ID without DSH_SHELL (the person's own DSH terminal) names no session, and never shadows another", () => {
+    const dsh = "session-0b9c8e4e-63f1-4f8e-9a51-6a1d7d4c2f10";
+    // An agent with no marker of its own (Amp, Goose, Crush...) run there sends as nobody, so no reply goes into the DSH session.
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, AMP_HOME: "/x" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, DSH_SHELL: "true" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PI_SESSION_ID: "pi-1" })?.host).toBe("pi");
+  });
+
+  test("in a DSH subagent's shell, the session Plannotator's plugin names (the parent) is the caller", () => {
+    const parent = "session-parent-1";
+    const child = "session-child-1";
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent })).toEqual({ host: "dsh", session: parent, name: "DeepSeek Harness" });
+    // Malformed: the shell's own session.
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: "a b" })?.session).toBe(child);
+    // Never outside a model shell.
+    expect(inboxHostSessionFromEnv({ DSH_PLANNOTATOR_SESSION_ID: parent })).toBeNull();
   });
 
   test("a call from Codex is its thread's: the thread id from _meta, host codex, whatever the environment says", () => {

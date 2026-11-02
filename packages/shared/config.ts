@@ -1419,6 +1419,25 @@ export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean
   return undefined;
 }
 
+/**
+ * `inboxTool` with `changes` applied, for saving. Every per-host entry already
+ * there is kept, a host this version does not know included (a newer
+ * Plannotator's), so saving one switch never drops another's. One boolean for
+ * every host becomes that value for each host this version knows.
+ */
+export function inboxToolWith(
+  current: PlannotatorConfig["inboxTool"],
+  changes: Partial<Record<InboxToolHost, boolean>>,
+): Partial<Record<InboxToolHost, boolean>> {
+  const next: Record<string, boolean> = {};
+  if (typeof current === "boolean") {
+    for (const host of INBOX_TOOL_HOSTS) next[host] = current;
+  } else if (current && typeof current === "object") {
+    for (const [host, value] of Object.entries(current)) if (typeof value === "boolean") next[host] = value;
+  }
+  return { ...next, ...changes } as Partial<Record<InboxToolHost, boolean>>;
+}
+
 /** config.inboxTool for one host: the shared boolean, the host's own entry, or undefined. */
 export function configuredInboxTool(config: PlannotatorConfig, host: InboxToolHost): boolean | undefined {
   const value = config.inboxTool;

@@ -570,7 +570,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
           </div>
         )}
       </section>

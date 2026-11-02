@@ -347,6 +347,13 @@ describe("who is calling", () => {
     expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual({ host: "dsh", session: "session-s", name: "DeepSeek Harness" });
     expect(caller(null, { DSH_SHELL: "1" })).toBeNull();
     expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s", GEMINI_CLI: "1" })).toBe("session_ambiguous");
+    // The person's own terminal in DSH Web (DSH_SESSION_ID, no DSH_SHELL): no DSH session, so whoever runs there is themselves.
+    expect(caller(null, { DSH_SESSION_ID: "session-s" })).toBeNull();
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PI_SESSION_ID: "ses-pi" })).toEqual({ host: "pi", session: "ses-pi", name: "Pi" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
+    // A subagent's model shell: the session Plannotator's plugin names (its parent).
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent" })).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

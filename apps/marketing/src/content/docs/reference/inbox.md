@@ -224,15 +224,17 @@ Restart OpenCode. On OpenCode 2 a reply is queued into the session as its own tu
 
 ### DeepSeek Harness
 
-Add [Plannotator's DeepSeek Harness plugin](https://www.npmjs.com/package/@plannotator/dsh) to a profile (`dsh plugin --profile <profile> add @plannotator/dsh`), then run `plannotator inbox`: it turns the inbox tool on for DeepSeek Harness when it finds the plugin. The tool is off by default, for the same reason as Pi: DSH sends every tool's definition with each request. To turn it on yourself, use **Settings → Agents** or:
+Add [Plannotator's DeepSeek Harness plugin](https://www.npmjs.com/package/@plannotator/dsh) to a profile (`dsh plugin --profile <profile> add @plannotator/dsh`), then run `plannotator inbox`: it turns the inbox tool on for DeepSeek Harness when it finds the plugin. The tool is off by default, for the same reason as Pi: DSH sends every tool's definition with each request. To turn it on yourself, use **Settings → Agents**, or add this to `~/.plannotator/config.json` (keep its other keys):
 
-```bash
-export PLANNOTATOR_INBOX_TOOL=1
+```json
+{ "inboxTool": { "dsh": true } }
 ```
 
-Restart DSH. When the session is idle, a reply arrives as a new turn. DSH never interrupts a turn for it. **Send now** steers the reply into the running turn instead. The thread shows "Delivered to DeepSeek Harness". When a subagent writes, the reply goes to the session that started it. The `headless`, `sdk`, `sdk-minimal` and `acp` profiles get no tool and no wake. DeepSeek Harness has no reminder at session start yet.
+It applies when DeepSeek Harness next starts, so restart DSH. When the session is idle, a reply arrives as a new turn. DSH never interrupts a turn for it. **Send now** steers the reply into the running turn instead. The thread shows "Delivered to DeepSeek Harness". When a subagent writes, the reply goes to the session that started it. The `headless`, `sdk`, `sdk-minimal` and `acp` profiles get no tool and no wake. DeepSeek Harness has no reminder at session start yet.
 
 DSH runs its plugins in its own process, so DSH and its other plugins can read what Plannotator's plugin holds. The plugin keeps no copy of the Inbox's key: it reads the key from `~/.plannotator/inbox/inbox.json` for each request, and never writes it to the plugin's config, a log, a tool result or a message. A reply you send becomes part of the DSH session, like anything you type there.
+
+By default, DeepSeek Harness sends its session to DeepSeek, including the Inbox messages and replies the agent reads. The Inbox key is never in the session.
 
 ### The same session in two windows
 

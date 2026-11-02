@@ -83,6 +83,9 @@ const SERVER = 'plannotator-inbox';
 /** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
 const DSH_PLUGIN = '@plannotator/dsh';
 
+/** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
+export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
+
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
   return /^[A-Za-z0-9_\-./:=@%+,~]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
@@ -251,7 +254,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       // so over MCP the Inbox cannot tell which DSH session wrote, and a reply can never wake it.
       return {
         artefacts: [{ kind: 'code', text: `dsh plugin --profile <profile> add ${DSH_PLUGIN}` }],
-        note: "Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents, then start a new DSH session. Your replies come back into that session by themselves.",
+        note: `Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents. ${DSH_APPLIES} Your replies then come back into each DeepSeek Harness session by themselves.`,
         another: {
           summary: 'for DSH Desktop: open it once, quit it, then run',
           body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },

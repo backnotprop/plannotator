@@ -71,6 +71,21 @@ export interface DshInboxAgent {
   steer?(message: DshUserMessage): void;
 }
 
+/** `ctx.shellEnv` (ShellEnvRegistry): `DSH_*` variables a plugin adds to each model shell call. */
+export interface DshShellEnvService {
+  register(contributor: {
+    name: string;
+    variables: Record<string, { description: string }>;
+    resolve(execution: { agent?: DshInboxAgent }): Record<string, string>;
+  }): unknown;
+}
+
+/** The variable Plannotator's contributor sets: the top-level session a shell works for (the shim reads it). */
+export const DSH_ROOT_SESSION_ENV = "DSH_PLANNOTATOR_SESSION_ID";
+
+/** How long a reply put into a session waits to be taken by a turn before it is looked at again (Pi's watchdog). */
+export const DSH_DELIVERY_CHECK_MS = 15_000;
+
 /** `ctx.agents` (AgentsService): the live agents of this process. */
 export interface DshAgentsService {
   get(id: string): DshInboxAgent | undefined;
@@ -93,6 +108,8 @@ export interface DshToolDefinition {
 /** The Cordis context as the Inbox connection uses it: listeners for the agent events, and services by name. */
 export interface DshInboxContext extends Pick<DshContext, "get" | "effect" | "logger"> {
   on(event: string, listener: (payload: any) => unknown): unknown;
+  /** Cordis: run `callback` in a child context once every named service is active, again when one is replaced. */
+  inject?(deps: string[], callback: (ctx: DshInboxContext) => unknown): unknown;
 }
 
 export interface DshInboxDeps {
@@ -107,6 +124,8 @@ export interface DshInboxDeps {
   version?: string | null;
   /** Aborted when the plugin unloads: a setup still discovering then starts nothing. */
   unloadSignal?: AbortSignal;
+  /** How often a reply not yet taken by a turn is looked at again (default DSH_DELIVERY_CHECK_MS; tests). */
+  deliveryCheckMs?: number;
 }
 
 /** What `setupDshInbox` started, for the plugin's unload and the tests. */
@@ -178,6 +197,15 @@ function readPluginVersion(): string | null {
   return null;
 }
 
+/** Whether message `id` still waits in the agent's queue (`inbox.nextTurn` or `inbox.nextStep`). */
+function queued(agent: DshInboxAgent, id: string): boolean {
+  try {
+    return [...(agent.inbox?.nextTurn ?? []), ...(agent.inbox?.nextStep ?? [])].some((item) => (item as { id?: unknown } | null)?.id === id);
+  } catch {
+    return false;
+  }
+}
+
 /** The session title DSH keeps (`ctx.sessionTitle`): a generated or renamed one; "" for the built-in fallback; null when it cannot tell. */
 function titleOf(ctx: DshInboxContext, agent: DshInboxAgent | undefined): string | null {
   if (!agent) return null;
@@ -229,20 +257,57 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
     }
   };
 
-  const send = (sessionId: string, text: string, how: "followup" | "steer"): Promise<void> => {
-    const agent = agentOf(sessionId);
-    const put = agent?.[how];
-    if (!agent || typeof put !== "function") return Promise.reject(new Error(agent ? `this DSH has no agent.${how}` : "the session is not live in this DSH"));
-    const message = createUserMessage(text);
-    ours.add(message.id);
-    try {
-      put.call(agent, message);
-    } catch (error) {
-      ours.delete(message.id);
-      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-    }
-    return Promise.resolve();
-  };
+  /** Replies put into a session and not yet taken by a turn, by DSH message id. */
+  const waiting = new Map<string, { sessionId: string; end: (error?: Error) => void }>();
+  const checkMs = deps.deliveryCheckMs ?? DSH_DELIVERY_CHECK_MS;
+
+  /**
+   * Put the wake text into the session, and settle once a turn takes it, as
+   * Pi waits for its `message_start`: `agent/inbox/claimed` delivers it,
+   * `agent/inbox/discarded` (the person took it out of the queue, or cancelled
+   * the turn and its queue) fails it. Looked at again every `checkMs`: still
+   * in the session's queue (a long tool call holds a steer), it waits on; gone
+   * from it with no word (a DSH without the claimed event) it was taken. The
+   * session closing with it queued keeps it in the session's saved queue, which
+   * DSH takes when the session resumes: delivered.
+   */
+  const send = (sessionId: string, text: string, how: "followup" | "steer"): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const agent = agentOf(sessionId);
+      const put = agent?.[how];
+      if (!agent || typeof put !== "function") {
+        reject(new Error(agent ? `this DSH has no agent.${how}` : "the session is not live in this DSH"));
+        return;
+      }
+      const message = createUserMessage(text);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const end = (error?: Error) => {
+        if (!waiting.delete(message.id)) return;
+        clearTimeout(timer);
+        if (error) reject(error);
+        else resolve();
+      };
+      const look = () => {
+        if (!waiting.has(message.id)) return;
+        const live = agentOf(sessionId);
+        if (live && queued(live, message.id)) {
+          timer = setTimeout(look, checkMs);
+          (timer as { unref?: () => void }).unref?.();
+          return;
+        }
+        end();
+      };
+      waiting.set(message.id, { sessionId, end });
+      ours.add(message.id);
+      timer = setTimeout(look, checkMs);
+      (timer as { unref?: () => void }).unref?.();
+      try {
+        put.call(agent, message);
+      } catch (error) {
+        ours.delete(message.id);
+        end(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
 
   const target = (sessionId: string): InboxWakeTarget => ({
     // Busy: a turn runs, something waits in its inbox, or the session is not live here (it cannot take a turn now).
@@ -282,7 +347,20 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
     watch(payload?.agent);
     return undefined;
   });
-  ctx.on("agent/disposed", (payload: { agent?: DshInboxAgent }) => forget(payload?.agent));
+  ctx.on("agent/disposed", (payload: { agent?: DshInboxAgent }) => {
+    forget(payload?.agent);
+    // DSH keeps a closing session's queue (`keepInbox`) and takes it on resume: what waits there is in the session.
+    for (const entry of [...waiting.values()]) if (entry.sessionId === payload?.agent?.id) entry.end();
+  });
+  // A turn took the reply: delivered. Taken out of the queue first: not delivered.
+  ctx.on("agent/inbox/claimed", (payload: { message?: { id?: unknown } }) => {
+    const id = payload?.message?.id;
+    if (typeof id === "string") waiting.get(id)?.end();
+  });
+  ctx.on("agent/inbox/discarded", (payload: { message?: { id?: unknown } }) => {
+    const id = payload?.message?.id;
+    if (typeof id === "string") waiting.get(id)?.end(new Error("it was taken out of the session's queue in DeepSeek Harness before a turn read it"));
+  });
   // Someone else's prompt entering a session: its turn goes first, and the person's typing moves the lease here.
   ctx.on("agent/inbox/inserted", (payload: { agent?: DshInboxAgent; message?: { id?: unknown; source?: { kind?: unknown } } }) => {
     const id = payload?.message?.id;
@@ -328,6 +406,37 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
     warn("plannotator: this DSH has no tools service; plannotator_inbox is not registered");
   }
 
+  // A subagent's shell names its own session in DSH_SESSION_ID; the tool signs as the session it works for.
+  // So `plannotator inbox call` in that shell does too, through this variable (the shim prefers it).
+  let unregisterShellEnv: (() => void) | null = null;
+  const registerShellEnv = (shellEnv: DshShellEnvService | undefined) => {
+    if (disposed || typeof shellEnv?.register !== "function") return;
+    try {
+      const undo = shellEnv.register({
+        name: "plannotator-inbox",
+        variables: { [DSH_ROOT_SESSION_ENV]: { description: "The top-level session this shell works for (a subagent's parent); Plannotator's inbox commands send as it." } },
+        resolve: (execution): Record<string, string> => {
+          const agent = execution?.agent;
+          const root = agent ? rootAgentOf(agents, agent) : undefined;
+          return root && typeof root.id === "string" ? { [DSH_ROOT_SESSION_ENV]: root.id } : {};
+        },
+      });
+      if (typeof undo === "function") unregisterShellEnv = undo as () => void;
+    } catch (error) {
+      warn("plannotator: could not add %s to DSH's shells (%s)", DSH_ROOT_SESSION_ENV, error instanceof Error ? error.message : String(error));
+    }
+  };
+  const shellEnv = service<DshShellEnvService>(ctx, "shellEnv");
+  if (shellEnv) registerShellEnv(shellEnv);
+  else if (typeof ctx.inject === "function") {
+    // Not active yet: register once it is (Cordis disposes that registration with this context).
+    try {
+      ctx.inject(["shellEnv"], (child) => registerShellEnv(service<DshShellEnvService>(child, "shellEnv")));
+    } catch {
+      // No shellEnv: a subagent's shell sends as the subagent.
+    }
+  }
+
   return {
     connection,
     wakes,
@@ -336,6 +445,13 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
       disposed = true;
       for (const wake of wakes.values()) wake.dispose();
       wakes.clear();
+      // Still queued in a session: it stays in the session's saved queue.
+      for (const entry of [...waiting.values()]) entry.end();
+      try {
+        unregisterShellEnv?.();
+      } catch {
+        // Cordis disposes it with the plugin anyway.
+      }
     },
   };
 }

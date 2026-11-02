@@ -100,6 +100,7 @@ import {
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
+  inboxToolWith,
   configuredInboxReminder,
   resolveInboxReminder,
   type InboxToolHost,
@@ -1911,12 +1912,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
     }
-    const config = loadConfig();
-    const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of INBOX_TOOL_HOSTS) {
-      const current = configuredInboxTool(config, host);
-      if (current !== undefined) next[host] = current;
-    }
+    const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
         throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh).`, { field: `inbox_tool.${host}` });
@@ -1924,12 +1920,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
       }
-      next[host as InboxToolHost] = value;
+      changes[host as InboxToolHost] = value;
     }
     if (validateOnly) return inboxToolState();
-    saveConfig({ inboxTool: next });
+    // Every other entry is kept, a host this version does not know included.
+    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, changes) });
     const saved = loadConfig();
-    for (const [host, value] of Object.entries(next)) {
+    for (const [host, value] of Object.entries(changes)) {
       if (configuredInboxTool(saved, host as InboxToolHost) !== value) {
         throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       }
