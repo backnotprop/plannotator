@@ -28,6 +28,9 @@
  *    `cswap` adds cannot reach the window.
  *  - Its output and error text are never logged, stored or passed on. A
  *    failure is a fixed reason code.
+ *
+ * A linked machine's read is this same read on that machine, asked for through
+ * its door (`accountsOf` in inbox-machines.ts) and picked by name again here.
  */
 
 import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxUsageWindow } from "@plannotator/core/inbox-types";
@@ -93,7 +96,26 @@ function account(row: unknown): InboxAccount | null {
   };
 }
 
+const FAILURES: readonly string[] = ["timed_out", "run_failed", "bad_output", "unknown_schema"] satisfies InboxAccountsFailure[];
 const failed = (reason: InboxAccountsFailure): InboxAccountsRead => ({ state: "failed", reason });
+
+function accountList(rows: unknown[]): InboxAccount[] | null {
+  const accounts = rows.map(account);
+  return accounts.some((row) => row === null) ? null : (accounts as InboxAccount[]);
+}
+
+/**
+ * What a linked machine's door answered, picked by name here too: its Inbox
+ * may be older, newer or hostile, so nothing it adds reaches this window, and
+ * its failure stays a fixed code. Null: not an answer this build can read.
+ */
+export function parsePeerAccounts(value: unknown): InboxAccountsRead | null {
+  if (!isRecord(value)) return null;
+  if (value.state === "not_installed") return { state: "not_installed" };
+  if (value.state === "failed") return failed(typeof value.reason === "string" && FAILURES.includes(value.reason) ? (value.reason as InboxAccountsFailure) : "run_failed");
+  const accounts = value.state === "accounts" && Array.isArray(value.accounts) ? accountList(value.accounts) : null;
+  return accounts && { state: "accounts", accounts };
+}
 
 /** What the window may know of `cswap list --json`'s output. */
 export function parseCswapList(stdout: string): InboxAccountsRead {
@@ -106,9 +128,8 @@ export function parseCswapList(stdout: string): InboxAccountsRead {
   if (!isRecord(output) || typeof output.schemaVersion !== "number") return failed("bad_output");
   if (output.schemaVersion !== CSWAP_SCHEMA_VERSION) return failed("unknown_schema");
   if (!Array.isArray(output.accounts)) return failed("bad_output");
-  const accounts = output.accounts.map(account);
-  if (accounts.some((row) => row === null)) return failed("bad_output");
-  return { state: "accounts", accounts: accounts as InboxAccount[] };
+  const accounts = accountList(output.accounts);
+  return accounts ? { state: "accounts", accounts } : failed("bad_output");
 }
 
 export interface InboxAccountsOptions {

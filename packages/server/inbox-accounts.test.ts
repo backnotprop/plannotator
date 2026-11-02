@@ -8,12 +8,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { InboxAccountsRead } from "@plannotator/core/inbox-types";
+import type { InboxAccountsRead, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { doorRouteNames } from "./inbox-devices";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
 import { fakeCswapCalls, fakeCswapFinished, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer } from "../../tests/helpers/fake-cswap";
+import { waitFor } from "../../tests/helpers/inbox-world";
 
 const FIXTURES = resolve(import.meta.dir, "../../tests/fixtures/cswap");
 const LIST = readFileSync(join(FIXTURES, "list.json"), "utf8");
@@ -23,13 +23,16 @@ const WINDOWS = JSON.parse(readFileSync(join(FIXTURES, "usage-windows.json"), "u
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
 const GUEST = "guest@example.com";
+const FAR = "ibx_01K00000000000000000000002";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
+const doors: ReturnType<typeof Bun.serve>[] = [];
 const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
 
 afterEach(() => {
   for (const server of servers.splice(0)) server.stop();
+  for (const door of doors.splice(0)) door.stop(true);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
@@ -42,9 +45,14 @@ interface WorldOptions {
   /** 0 unless a test is about the kept answer: the others change the fake between reads. */
   cacheMs?: number;
   tailnet?: boolean;
+  phones?: boolean;
+  /** How long a read of a linked machine waits. */
+  requestMs?: number;
+  /** A stand-in for another Inbox's door, linked here. */
+  linkedTo?: string;
 }
 
-async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, linkedTo }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -56,6 +64,11 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   if (tailnet) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
   if (cswap) writeFakeCswap(bin, cswap);
+  if (linkedTo) {
+    const link = { id: FAR, name: "Mini", token: "tok_x", transport: { kind: "tailnet", url: linkedTo }, device_id: null, linked_at: "2026-11-01T00:00:00Z" };
+    mkdirSync(join(dataDir, "inbox"));
+    writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000001" }, links: [link] }), { mode: 0o600 });
+  }
   const serve = new Map<number, string>();
   const run: TailscaleRunner = (args) => {
     const done = (stdout = "") => ({ status: 0, stdout, stderr: "" });
@@ -72,12 +85,15 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
   const server = await startInboxServer({
     dataDir,
     binaryPath: null,
-    phones: false,
+    phones,
     version: "dev",
     // The fake's folder and nothing else.
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: bin } }),
     accounts: { timeoutMs, hardLimitMs, cacheMs },
-    ...(tailnet ? { tailscale: run, publishTailnet: true } : {}),
+    ...(requestMs ? { machineLinkTimings: { requestMs } } : {}),
+    // Linked or not, nothing here may run the real `tailscale`.
+    tailscale: run,
+    ...(tailnet ? { publishTailnet: true } : {}),
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -92,7 +108,50 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
       headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` },
     });
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as { cswap: boolean };
-  return { root, bin, dataDir, read, accounts, through, settings };
+  /** A linked machine's read, as the window asks for it. */
+  const readOf = async (machine: string, query = "") => {
+    const answer = await fetch(`${base}/api/inbox/accounts/${machine}${query}`);
+    expect(answer.status).toBe(200);
+    return (await answer.json()) as InboxMachineAccountsRead;
+  };
+  return { root, bin, dataDir, base, read, readOf, accounts, through, settings };
+}
+
+/** `from` links one way to `to` over its door, as `plannotator inbox link --one-way` does. Answers `to`'s id. */
+async function link(from: { base: string }, to: { base: string }): Promise<string> {
+  const offered = (await (await fetch(`${to.base}/api/inbox/machines/offer`, { method: "POST", body: "{}" })).json()) as { link: string; machine: { id: string } };
+  const linked = await fetch(`${from.base}/api/inbox/machines/link`, { method: "POST", body: JSON.stringify({ link: offered.link, address: to.base, one_way: true }) });
+  expect(linked.status).toBe(201);
+  return offered.machine.id;
+}
+
+/** The token `from` holds for the machine it linked to. */
+const machineToken = (from: { dataDir: string }) => (JSON.parse(readFileSync(join(from.dataDir, "inbox", "machines.json"), "utf8")) as { links: { token: string }[] }).links[0]!.token;
+
+/** Another Inbox's door, played: `accounts` is the test's, and the line stays up. */
+function standInDoor(accounts: (request: Request) => Response | Promise<Response>, machineLinks = 1) {
+  const door = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    idleTimeout: 0,
+    fetch(req) {
+      const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+      if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: machineLinks, version: "0.28.40" });
+      if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+      if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [] });
+      if (route === "accounts") return accounts(req);
+      return Response.json({ code: "device_route_not_found" }, { status: 404 });
+    },
+  });
+  doors.push(door);
+  return `http://127.0.0.1:${door.port}`;
+}
+
+async function onlineMachine(w: { base: string }) {
+  await waitFor("the line to the other machine", async () => {
+    const { machines } = (await (await fetch(`${w.base}/api/inbox/machines`)).json()) as { machines: { self: boolean; state: string }[] };
+    return machines.find((machine) => !machine.self)?.state === "online";
+  });
 }
 
 function listed(read: InboxAccountsRead) {
@@ -420,8 +479,173 @@ describe.skipIf(process.platform === "win32")("who may read", () => {
     expect(fakeCswapCalls(w.bin)).toEqual([]);
   });
 
-  test("it is not on the device door", () => {
-    expect(doorRouteNames().filter((route) => /accounts/.test(route))).toEqual([]);
+  test("a phone's token and the relay's commands don't reach it: on the door it is a machine's read alone", async () => {
+    const w = await world({ phones: true });
+    const made = (await (await fetch(`${w.base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as { offer: { code: string } };
+    const paired = await fetch(`${w.base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+    const { token } = (await paired.json()) as { token: string };
+    const refused = await fetch(`${w.base}/api/inbox/device/accounts`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(refused.status).toBe(404);
+    expect(((await refused.json()) as { code: string }).code).toBe("device_route_not_found");
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("a linked machine's accounts, through its door", () => {
+  test("its read, its one run and its kept answer; Refresh skips that; what `cswap` adds never crosses", async () => {
+    const list = JSON.parse(LIST) as { accounts: Record<string, unknown>[] };
+    list.accounts[0]!.accessToken = "sk-ant-oat01-never-shown-4f2a";
+    const far = await world({ cswap: { stdout: JSON.stringify(list) }, cacheMs: 60_000 });
+    const near = await world({ cswap: null });
+    const machine = await link(near, far);
+    const read = await near.readOf(machine);
+    expect(listed(read as InboxAccountsRead).map((account) => account.email)).toEqual(["a@fake.test", "b@fake.test", null]);
+    expect(JSON.stringify(read)).not.toContain("sk-ant");
+    expect(fakeCswapCalls(far.bin)).toEqual(["list --json"]);
+    await near.readOf(machine);
+    expect(fakeCswapCalls(far.bin)).toHaveLength(1);
+    await near.readOf(machine, "?fresh=1");
+    expect(fakeCswapCalls(far.bin)).toHaveLength(2);
+  });
+
+  test("no address reaches either machine's disk, and nothing is polled", async () => {
+    const far = await world();
+    const near = await world({ cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    expect(fakeCswapCalls(far.bin)).toEqual([]);
+    expect(JSON.stringify(await near.readOf(machine))).toContain("a@fake.test");
+    for (const file of [...filesUnder(near.dataDir), ...filesUnder(far.dataDir)]) expect(readFileSync(file, "utf8")).not.toContain("@fake.test");
+    await Bun.sleep(300);
+    expect(fakeCswapCalls(far.bin)).toHaveLength(1);
+  });
+
+  test("a machine without cswap says so, as this one would", async () => {
+    const far = await world({ cswap: null });
+    const near = await world();
+    expect(await near.readOf(await link(near, far))).toEqual({ state: "not_installed" });
+  });
+
+  test("a machine that is gone is offline, at once, and this machine's read goes on", async () => {
+    const far = await world();
+    const near = await world();
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    servers.find((server) => server.port === Number(new URL(far.base).port))!.stop();
+    await waitFor("the line to drop", async () => {
+      const { machines } = (await (await fetch(`${near.base}/api/inbox/machines`)).json()) as { machines: { self: boolean; state: string }[] };
+      return machines.find((m) => !m.self)?.state === "offline";
+    });
+    const started = Date.now();
+    expect(await near.readOf(machine)).toEqual({ state: "offline" });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(listed(await near.read())).toHaveLength(3);
+  });
+
+  test("a slow machine holds up only itself, whether it stalls before its answer or inside it, and reads as offline", async () => {
+    const stalled = [
+      () => new Promise<Response>(() => {}),
+      () => new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode('{"state":')) }), { headers: { "Content-Type": "application/json" } }),
+    ];
+    for (const answer of stalled) {
+      const near = await world({ linkedTo: standInDoor(answer), requestMs: 300 });
+      await onlineMachine(near);
+      const reading = near.readOf(FAR);
+      expect(listed(await near.read())).toHaveLength(3);
+      expect(await reading).toEqual({ state: "offline" });
+    }
+  });
+
+  test("a far side that does not know the route, an older Plannotator, reads as needing an update; so does one too old to link", async () => {
+    const older = await world({ linkedTo: standInDoor(() => Response.json({ error: "Not a phone route.", code: "device_route_not_found" }, { status: 404 })) });
+    await onlineMachine(older);
+    expect(await older.readOf(FAR)).toEqual({ state: "needs_update" });
+
+    const tooOld = await world({ linkedTo: standInDoor(() => Response.json({ state: "not_installed" }), 0) });
+    await waitFor("the line to read its version", async () => {
+      const { machines } = (await (await fetch(`${tooOld.base}/api/inbox/machines`)).json()) as { machines: { self: boolean; state: string }[] };
+      return machines.find((m) => !m.self)?.state === "needs_update";
+    });
+    expect(await tooOld.readOf(FAR)).toEqual({ state: "needs_update" });
+  });
+
+  test("whatever a far door sends: named fields only, a fixed failure, and anything else is offline", async () => {
+    let sends: () => Response = () => new Response();
+    const near = await world({ linkedTo: standInDoor(() => sends()) });
+    await onlineMachine(near);
+
+    sends = () =>
+      Response.json({
+        state: "accounts",
+        raw: "kept out",
+        accounts: [{ number: 1, email: "a@fake.test", active: true, usageStatus: "ok", accessToken: "sk-ant-x", usage: { accessToken: "sk-ant-x", fiveHour: { pct: 92, accessToken: "sk-ant-x" } } }],
+      });
+    const read = await near.readOf(FAR);
+    expect(listed(read as InboxAccountsRead)[0]!.usage!.fiveHour!.pct).toBe(92);
+    expect(JSON.stringify(read)).not.toMatch(/sk-ant|kept out/);
+
+    sends = () => Response.json({ state: "failed", reason: "a sentence from the other side" });
+    expect(await near.readOf(FAR)).toEqual({ state: "failed", reason: "run_failed" });
+
+    for (const answer of [() => new Response("<html>"), () => Response.json({ state: "accounts", accounts: [{ number: "one" }] }), () => Response.json({ state: "shrug" }), () => new Response("bad gateway", { status: 502 }), () => new Response("not found", { status: 404 })]) {
+      sends = answer;
+      expect(await near.readOf(FAR)).toEqual({ state: "offline" });
+    }
+  });
+
+  test("a machine that is not linked is 404", async () => {
+    const w = await world();
+    expect((await fetch(`${w.base}/api/inbox/accounts/${FAR}`)).status).toBe(404);
+  });
+
+  test("a tailnet guest gets nothing on any path, and starts nothing on the far machine; the owner reads it from a phone's browser", async () => {
+    const far = await world();
+    const near = await world({ tailnet: true, cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    const direct = await near.through(GUEST, `/api/inbox/accounts/${machine}`);
+    expect(direct.status).toBe(403);
+    expect(((await direct.json()) as { code: string }).code).toBe("owner_only");
+    expect((await near.through(GUEST, `/api/inbox/accounts/${machine}?fresh=1`)).status).toBe(403);
+    // The forward passes whatever the far door allows: that way there is no route at all, for anyone.
+    for (const route of ["accounts", "accounts?fresh=1", "acc%6Funts", "%61ccounts"]) {
+      for (const login of [GUEST, OWNER]) {
+        const forwarded = await near.through(login, `/api/inbox/m/${machine}/${route}`);
+        expect(forwarded.status).toBe(404);
+        expect(await forwarded.text()).not.toContain("@fake.test");
+      }
+    }
+    expect(fakeCswapCalls(far.bin)).toEqual([]);
+
+    const owner = await near.through(OWNER, `/api/inbox/accounts/${machine}`);
+    expect(owner.status).toBe(200);
+    expect(listed((await owner.json()) as InboxAccountsRead)).toHaveLength(3);
+  });
+
+  test("another site gets nothing of a linked machine, and only GET", async () => {
+    const far = await world();
+    const near = await world({ cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    const refused = await fetch(`${near.base}/api/inbox/accounts/${machine}`, { headers: { "Sec-Fetch-Site": "cross-site" } });
+    expect(refused.status).toBe(403);
+    expect((await fetch(`${near.base}/api/inbox/accounts/${machine}`, { method: "POST", body: "{}" })).status).toBe(405);
+    expect(fakeCswapCalls(far.bin)).toEqual([]);
+  });
+
+  test("a machine's token reads that machine's own accounts only, never a third's", async () => {
+    const third = await world();
+    const middle = await world();
+    const near = await world({ cswap: null });
+    const thirdId = await link(middle, third);
+    await link(near, middle);
+    const headers = { Authorization: `Bearer ${machineToken(near)}` };
+    const own = await fetch(`${middle.base}/api/inbox/device/accounts?machine=${thirdId}`, { headers });
+    expect(own.status).toBe(200);
+    expect(fakeCswapCalls(middle.bin)).toHaveLength(1);
+    expect((await fetch(`${middle.base}/api/inbox/device/accounts/${thirdId}`, { headers })).status).toBe(404);
+    expect((await fetch(`${middle.base}/api/inbox/device/m/${thirdId}/accounts`, { headers })).status).toBe(404);
+    expect(fakeCswapCalls(third.bin)).toEqual([]);
   });
 });
 

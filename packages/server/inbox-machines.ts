@@ -24,13 +24,14 @@
  *    (`link-back`, `unlink`).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -570,7 +571,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(route) === "accounts") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -647,9 +649,37 @@ export function createInboxMachines(context: InboxMachinesContext) {
     return new Response(JSON.stringify({ outbox: outboxView(entry), machine }), { status: 202, headers });
   };
 
+  // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
+
+  /**
+   * Its door's read, asked for only when a window asks (nothing polls), kept
+   * nowhere, and picked by name again. Each machine is its own request, so a
+   * slow one holds up only itself. Whatever does not answer is offline, never
+   * an error. A door that does not know the route is an older Plannotator.
+   */
+  const accountsOf = async (machine: string, fresh: boolean, signal: AbortSignal): Promise<InboxMachineAccountsRead> => {
+    const peer = peers.get(machine);
+    if (!peer) throw new InboxError("machine_not_linked", "That machine is not linked.");
+    if (peer.state === "needs_update") return { state: "needs_update" };
+    if (peer.state === "offline" || peer.state === "revoked") {
+      peer.poke();
+      return { state: "offline" };
+    }
+    try {
+      // The peer's limit stops at the answer's headers: this one covers its body too.
+      const limit = AbortSignal.timeout(context.timings?.requestMs ?? PEER_LINK_TIMINGS.requestMs);
+      const response = await peer.request("accounts", fresh ? "?fresh=1" : "", { method: "GET", headers: {}, signal: AbortSignal.any([signal, limit]) });
+      const body: unknown = await response.json().catch(() => null);
+      if (response.status === 404 && (body as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
+      return (response.ok ? parsePeerAccounts(body) : null) ?? { state: "offline" };
+    } catch {
+      return { state: "offline" };
+    }
+  };
+
   // ── The window's routes and the CLI's ──
 
-  const staleTab = (body: Record<string, unknown>) =>
+  const staleTab =(body: Record<string, unknown>) =>
     checkServerSession(body, context.serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null;
 
   /** The routes the window calls. `via`: linking and unlinking answer only on this computer (PLAN section 4, rule 5). */
@@ -752,6 +782,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     },
     route,
     control,
+    accountsOf,
     linkBack,
     unlinkedBy,
     start,

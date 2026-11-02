@@ -46,6 +46,7 @@ import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearc
 import type {
   InboxAgentId,
   InboxAccountsRead,
+  InboxMachineAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
   InboxCardColumn,
@@ -1328,6 +1329,8 @@ export const inboxApi = {
   /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
   /** `fresh`: skip the answer the Inbox keeps 30 s (Refresh). */
   accounts: (fresh = false) => get<InboxAccountsRead>(inboxUrl('/accounts', fresh ? 'fresh=1' : undefined)),
+  /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
+  machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
   agents: () => get<InboxAgentsModel>(inboxUrl('/agents')),
   saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>

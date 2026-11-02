@@ -2509,8 +2509,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.voice,
   });
 
+  // The test sandbox's agent PATH is empty and a loopback link needs the sandbox, so a spec of linked machines on the
+  // compiled binary names its fake `cswap`'s folder. Without the sandbox this is never read.
+  const fakeCswap = process.env.PLANNOTATOR_TEST_SANDBOX ? process.env.PLANNOTATOR_TEST_CSWAP_DIR : undefined;
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
-  const accounts = createInboxAccounts({ environment: agentEnvironment, ...options.accounts });
+  const accounts = createInboxAccounts({
+    environment: fakeCswap ? createAgentEnvironmentFor({ platform: process.platform, homeDir: agentEnvironment.homeDir, env: { HOME: agentEnvironment.homeDir, PATH: fakeCswap } }) : agentEnvironment,
+    ...options.accounts,
+  });
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
@@ -2940,14 +2946,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,
-      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. Never on the device door.
-      if (path === "/api/inbox/accounts") {
+      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. One check for this
+      // computer's read and a linked machine's, which is not forwarded any other way. On the door for a machine only.
+      const machineAccounts = /^\/api\/inbox\/accounts\/(ibx_[0-9A-HJKMNP-TV-Z]{26})$/.exec(path);
+      if (path === "/api/inbox/accounts" || machineAccounts) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (tailnetGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
-        return json(await accounts.read({ fresh: url.searchParams.get("fresh") === "1" }));
+        const fresh = url.searchParams.get("fresh") === "1";
+        return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.

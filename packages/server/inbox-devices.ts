@@ -220,11 +220,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
 const MACHINE_DOOR_WRITES = ["link-back", "unlink"] as const;
+/** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
+const MACHINE_DOOR_ACCOUNTS = "accounts";
 
 /** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
 export function doorRouteNames(): string[] {
   const words = (route: RegExp) => route.source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
-  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`)];
+  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), `GET ${MACHINE_DOOR_ACCOUNTS}`, ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`)];
 }
 
 /** For rule 8's test: the door's POST routes, and which take a raw body (a file). */
@@ -832,6 +834,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
       const [linkBack, unlink] = MACHINE_DOOR_WRITES;
       if (machines && req.method === "POST" && route === linkBack) return machines.linkBack(device.id, await context.readBody(req));
       if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
+      // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
+      if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
     }
     for (const entry of ALLOWLIST) {
       if (entry.method !== req.method) continue;

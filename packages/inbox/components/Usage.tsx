@@ -2,7 +2,7 @@ import { useEffect, useMemo, type CSSProperties } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import type { InboxAccount } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
-import { accountsFailure, useAccounts, type AccountsView } from '../useAccounts';
+import { accountsFailure, useAccounts, type AccountsView, type MachineAccounts } from '../useAccounts';
 import { FAILURE_TEXT, accountMeters, isHigh, isStale, rowName, shownPct, type Meter } from './Accounts';
 
 /** Usage shows where `cswap` is: the read says so once it answers, and `installed` (the settings' look at PATH) until then. */
@@ -14,17 +14,26 @@ function hasUsage(view: AccountsView | null, installed: boolean): boolean {
 const loginExpired = (account: InboxAccount) => account.usageStatus === 'relogin_required';
 
 /** The highest limit at 90% or more, if this reading can still be trusted. */
-function nearLimit(account: InboxAccount | undefined): number | null {
+function nearLimit(account: InboxAccount | undefined): Meter | null {
   if (!account || isStale(account) || loginExpired(account)) return null;
   const high = accountMeters(account).filter((meter) => isHigh(meter.window));
-  return high.length > 0 ? Math.max(...high.map((meter) => shownPct(meter.window))) : null;
+  return high.reduce<Meter | null>((top, meter) => (top && shownPct(top.window) >= shownPct(meter.window) ? top : meter), null);
+}
+
+/** Other machines stay out of the peek until the account one is using nears a limit. One that does not answer has nothing to say. */
+function nearMachines(machines: MachineAccounts[]) {
+  return machines.flatMap(({ id, name, read }) => {
+    const meter = read?.state === 'accounts' ? nearLimit(read.accounts.find((account) => account.active)) : null;
+    return meter ? [{ id, name, meter }] : [];
+  });
 }
 
 /** The sidebar's row: plain, until the account in use nears a limit. No `cswap`, no row. */
 export function UsageRow({ installed, open, onOpen }: { installed: boolean; open: boolean; onOpen: (row: HTMLElement) => void }) {
   const { view } = useAccounts();
   if (!hasUsage(view, installed)) return null;
-  const figure = view?.state === 'accounts' ? nearLimit(view.accounts.find((account) => account.active)) : null;
+  const near = view?.state === 'accounts' ? nearLimit(view.accounts.find((account) => account.active)) : null;
+  const figure = near && shownPct(near.window);
   return (
     <button
       type="button"
@@ -92,7 +101,24 @@ function UsageBlock({ name, note, meters, muted, onOpen }: { name: string; note?
   );
 }
 
-function UsageBody({ onOpen }: { onOpen: () => void }) {
+/** Another machine at 90% or more: its name and that limit. It opens the same place. */
+function NearMachine({ name, meter, onOpen }: { name: string; meter: Meter; onOpen: () => void }) {
+  const figure = `${meter.label} ${shownPct(meter.window)}`;
+  return (
+    <button type="button" className="ib-usage-row" aria-label={`${name}, ${figure} percent. Open Accounts in Settings.`} data-usage-machine="" onClick={onOpen}>
+      <span className="ib-usage-who">
+        <HostMark host="claude-code" />
+        <span className="ib-usage-nm">{name}</span>
+        <span className="ib-usage-note" data-high="">
+          {figure}%
+        </span>
+        <Icon name="chevR" size={12} className="ib-usage-go" />
+      </span>
+    </button>
+  );
+}
+
+function ThisMachine({ onOpen }: { onOpen: () => void }) {
   const { view } = useAccounts();
   const failure = view && accountsFailure(view);
   if (failure) return <UsageBlock name={FAILURE_TEXT[failure]} onOpen={onOpen} />;
@@ -115,11 +141,12 @@ function UsageBody({ onOpen }: { onOpen: () => void }) {
 
 /**
  * The Usage row's peek (approval "accounts-page"): read-only, the account in
- * use and its limits. On a phone the same content is the Inbox's bottom sheet.
- * `anchor` is the row; null is closed.
+ * use and its limits, then any other machine at 90% or more. On a phone the
+ * same content is the Inbox's bottom sheet. `anchor` is the row; null is closed.
  */
 export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTMLElement | null; phone: boolean; onClose: () => void; onSettings: () => void }) {
-  const { view } = useAccounts();
+  const { view, machines } = useAccounts();
+  const near = nearMachines(machines);
   const row = useMemo(() => ({ current: anchor }), [anchor]);
   const open = anchor !== null && hasUsage(view, true);
   // The read took `cswap` away while it was open, and the row with it.
@@ -128,8 +155,8 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
   }, [anchor, open, onClose]);
   return (
     <Popover.Root
-      // Placed at its size: it stays put once open, so a desktop peek opened on "Reading…" is placed again for what it grew to.
-      key={!phone && view === null ? 'reading' : 'read'}
+      // Placed at its size: it stays put once open, so a desktop peek that grew (a first read, a machine's answer) is placed again.
+      key={phone ? 'sheet' : `${view === null ? 'reading' : 'read'} ${near.length}`}
       open={open}
       modal={phone}
       onOpenChange={(next, details) => {
@@ -142,8 +169,24 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
         {phone && <Popover.Backdrop className="ib-pm-scrim" />}
         {/* Stays put when the row goes: the hover sidebar slides away, and a phone's closes. */}
         <Popover.Positioner className="ib-tidy-pos" anchor={row} side="right" align="end" sideOffset={14} disableAnchorTracking data-phone={phone ? '' : undefined}>
-          <Popover.Popup className="ib-tidy ib-usage" aria-label="Usage" finalFocus={phone ? false : row} data-usage-peek="">
-            <UsageBody onOpen={onSettings} />
+          <Popover.Popup
+            className="ib-tidy ib-usage"
+            aria-label="Usage"
+            finalFocus={phone ? false : row}
+            data-usage-peek=""
+            onKeyDown={(event) => {
+              // Tab past either end closes it, back on the row: left alone, focus lands on a guard behind the open peek.
+              if (phone || event.key !== 'Tab') return;
+              const blocks = event.currentTarget.querySelectorAll('button');
+              if (event.target !== blocks[event.shiftKey ? 0 : blocks.length - 1]) return;
+              event.preventDefault();
+              onClose();
+            }}
+          >
+            <ThisMachine onOpen={onSettings} />
+            {near.map(({ id, name, meter }) => (
+              <NearMachine key={id} name={name} meter={meter} onOpen={onSettings} />
+            ))}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

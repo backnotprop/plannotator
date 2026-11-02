@@ -1596,6 +1596,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-acct-h + p { margin-top: 2px; }
 .ib-acct { border-bottom: 1px solid var(--ib-sep-s, var(--ib-hair)); }
 .ib-acct:last-child { border-bottom: 0; }
+.ib-acct-row.ib-acct-machine { border-bottom: 1px solid var(--ib-sep-s, var(--ib-hair)); }
+.ib-acct-row.ib-acct-machine:last-child { border-bottom: 0; }
 /* Room for the chevron stays on the right of every row, so a row with nothing to open keeps the columns. */
 .ib-acct-row { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 8px 34px 8px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: left; }
 button.ib-acct-row { cursor: pointer; border-radius: inherit; }
@@ -1644,6 +1646,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-usage-who { display: flex; align-items: center; gap: 6px; min-height: 18px; min-width: 0; font-weight: 550; }
 .ib-usage-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-usage-note { margin-left: auto; flex: none; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; color: var(--muted-foreground); }
+.ib-usage-note[data-high] { font-weight: 550; color: color-mix(in oklab, var(--warning) 70%, var(--foreground)); }
 .pn-inbox .ib-usage-go { margin-left: auto; flex: none; width: 12px; height: 12px; color: var(--muted-foreground); opacity: 0.6; }
 .pn-inbox .ib-usage-note + .ib-usage-go { margin-left: 0; }
 .ib-usage-row:hover .ib-usage-go { opacity: 1; }

@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
-import type { InboxAccount, InboxUsageWindow } from '@plannotator/core/inbox-types';
+import type { InboxAccount, InboxMachineAccountsRead, InboxUsageWindow } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
-import { accountsFailure, useAccounts, type AccountsFailure } from '../useAccounts';
+import { accountsFailure, useAccounts, type AccountsFailure, type AccountsView, type MachineAccounts } from '../useAccounts';
 import { CodeBox } from './ConnectPicker';
 
 /** The first way claude-swap's README gives. */
@@ -79,8 +79,47 @@ export function accountMeters(account: InboxAccount): Meter[] {
   ];
 }
 
+/** One row of the list: a login, and the machines it is saved on (none named while no machine is linked). */
+export interface ListedAccount {
+  key: string;
+  account: InboxAccount;
+  machines: string[];
+}
+
+/** The newer reading of one login on two machines, and an alias if only one of them gave it. */
+function newerReading(held: InboxAccount, other: InboxAccount): InboxAccount {
+  const newer = other.usage && (!held.usage || (other.usageAgeSeconds ?? 0) < (held.usageAgeSeconds ?? 0)) ? other : held;
+  return { ...newer, alias: held.alias ?? other.alias };
+}
+
+/**
+ * Every machine's accounts as one list, this machine's first: one login saved
+ * on two machines is one row, by its address and organization. An API key has
+ * no address to tell it by, so it stays its machine's own row, and rows one
+ * machine keeps apart stay apart.
+ */
+export function listedAccounts(self: { name: string; accounts: InboxAccount[] }, linked: MachineAccounts[]): ListedAccount[] {
+  const listed = new Map<string, ListedAccount>();
+  const name = (machine: string) => (linked.length > 0 ? [machine] : []);
+  const add = (id: string, machine: string, accounts: InboxAccount[]) => {
+    const seen = new Map<string, number>();
+    for (const account of accounts) {
+      const login = account.email ? `${account.email.toLowerCase()}\n${account.organizationName ?? ''}` : `${id}\n${account.number}`;
+      const nth = seen.get(login) ?? 0;
+      seen.set(login, nth + 1);
+      const key = `${login}\n${nth}`;
+      const held = listed.get(key);
+      if (held) listed.set(key, { key, account: newerReading(held.account, account), machines: [...held.machines, ...name(machine)] });
+      else listed.set(key, { key, account, machines: name(machine) });
+    }
+  };
+  add('self', self.name, self.accounts);
+  for (const { id, name: machine, read } of linked) if (read?.state === 'accounts') add(id, machine, read.accounts);
+  return [...listed.values()];
+}
+
 /** What an open row adds. An organization a row already shows is not said twice. */
-function accountMore(account: InboxAccount, meters: Meter[], name: RowName): string[] {
+function accountMore(account: InboxAccount, meters: Meter[], name: RowName, machines: string[]): string[] {
   const resets = meters.flatMap(({ label, window }) => {
     const when = window.clock ?? (window.countdown && `in ${window.countdown}`);
     return when ? [`${label} ${when}`] : [];
@@ -91,6 +130,7 @@ function accountMore(account: InboxAccount, meters: Meter[], name: RowName): str
   if (organization && !name.organization) lines.push(organization);
   if (resets.length > 0) lines.push(`Resets ${resets.join(' · ')}`);
   if (meters.length > 0 && isStale(account)) lines.push(`Last read ${ageText(account.usageAgeSeconds!)} ago`);
+  if (machines.length > 0) lines.push(machines.join(', '));
   return lines;
 }
 
@@ -163,10 +203,10 @@ function AccountUsage({ account, meters }: { account: InboxAccount; meters: Mete
   );
 }
 
-function AccountRow({ account, name }: { account: InboxAccount; name: RowName }) {
+function AccountRow({ account, name, machines }: { account: InboxAccount; name: RowName; machines: string[] }) {
   const [open, setOpen] = useState(false);
   const meters = accountMeters(account);
-  const more = accountMore(account, meters, name);
+  const more = accountMore(account, meters, name, machines);
   const head = (
     <>
       <span className="ib-acct-who">
@@ -206,8 +246,8 @@ function AccountRow({ account, name }: { account: InboxAccount; name: RowName })
   );
 }
 
-function AccountList({ accounts, reading }: { accounts: InboxAccount[]; reading: boolean }) {
-  if (accounts.length === 0) {
+function AccountList({ rows, reading }: { rows: ListedAccount[]; reading: boolean }) {
+  if (rows.length === 0) {
     return (
       <div className="ib-card ib-acct-install" data-accounts-none="">
         <span>Sign in to Claude Code, then save the account</span>
@@ -215,21 +255,62 @@ function AccountList({ accounts, reading }: { accounts: InboxAccount[]; reading:
       </div>
     );
   }
+  const accounts = rows.map((row) => row.account);
   return (
     <ul className="ib-card ib-acct-list" aria-label="Claude Code accounts" aria-busy={reading}>
-      {accounts.map((account) => (
-        <AccountRow key={account.number} account={account} name={rowName(accounts, account)} />
+      {rows.map(({ key, account, machines }) => (
+        <AccountRow key={key} account={account} name={rowName(accounts, account)} machines={machines} />
       ))}
     </ul>
   );
 }
 
-/** This machine and the account it is using. Its Switch comes here in a later step. */
-function MachineGroup({ machine, active, accounts }: { machine: string; active: InboxAccount; accounts: InboxAccount[] }) {
-  const { label, organization, number } = rowName(accounts, active);
-  const name = number === null ? label : `${label} #${number}`;
+/** A machine's row says the account it is using, or these few words. A machine without `cswap` says nothing here: Settings → Machines has the rest. */
+const NO_ACCOUNT: Record<string, string> = {
+  reading: 'Reading accounts…',
+  offline: 'Asleep',
+  needs_update: 'Update Plannotator',
+};
+
+/** What a machine's row says on its right, in one line, so an answer never moves the rows under it. */
+function MachineUse({ read }: { read: AccountsView | InboxMachineAccountsRead | null }) {
+  if (read?.state === 'accounts') {
+    const active = read.accounts.find((account) => account.active);
+    if (active) {
+      const { label, organization, number } = rowName(read.accounts, active);
+      const name = number === null ? label : `${label} #${number}`;
+      return (
+        <span className="ib-acct-ro" data-machine-use="account">
+          <HostMark host="claude-code" />
+          <span>{organization ? `${name} · ${organization}` : name}</span>
+        </span>
+      );
+    }
+  }
+  const failure = read && (read.state === 'failed' || read.state === 'unreachable') ? accountsFailure(read) : null;
+  const words = read?.state === 'accounts' ? (read.accounts.length > 0 ? 'No account in use' : 'No accounts yet') : failure ? FAILURE_TEXT[failure] : NO_ACCOUNT[read?.state ?? 'reading'];
   return (
-    <section className="ib-sgroup ib-sgroup-first" data-accounts-machine="" aria-labelledby="ib-g-machines">
+    <span className="ib-acct-ro" data-machine-use={read?.state ?? 'reading'}>
+      {words && <span>{words}</span>}
+    </span>
+  );
+}
+
+function MachineRow({ name, read }: { name: string; read: AccountsView | InboxMachineAccountsRead | null }) {
+  return (
+    <div className="ib-acct-row ib-acct-machine" data-accounts-machine={name}>
+      <span className="ib-acct-who">
+        <span className="ib-acct-name">{name}</span>
+      </span>
+      <MachineUse read={read} />
+    </div>
+  );
+}
+
+/** Every machine and the account it is using, this one first. Switch comes here in a later step. */
+function MachineGroup({ self, view, linked }: { self: string; view: AccountsView | null; linked: MachineAccounts[] }) {
+  return (
+    <section className="ib-sgroup ib-sgroup-first" data-accounts-machines="" aria-labelledby="ib-g-machines">
       <div className="ib-acct-h">
         <h2 id="ib-g-machines">
           <Icon name="system" size={15} />
@@ -237,38 +318,38 @@ function MachineGroup({ machine, active, accounts }: { machine: string; active: 
         </h2>
       </div>
       <div className="ib-card">
-        <div className="ib-acct-row">
-          <span className="ib-acct-who">
-            <span className="ib-acct-name">{machine}</span>
-          </span>
-          <span className="ib-acct-ro">
-            <HostMark host="claude-code" />
-            <span>{organization ? `${name} · ${organization}` : name}</span>
-          </span>
-        </div>
+        <MachineRow name={self} read={view} />
+        {linked.map((machine) => (
+          <MachineRow key={machine.id} name={machine.name} read={machine.read} />
+        ))}
       </div>
     </section>
   );
 }
 
 /**
- * Settings → Accounts (approval "accounts-page", step 1): this computer's
- * Claude accounts and their usage, read-only. A read goes through `cswap` to
- * the Keychain and to Anthropic, so it takes seconds. This page reads when it
- * opens and on Refresh, through the window's one read (useAccounts).
+ * Settings → Accounts (approval "accounts-page"): the Claude accounts and
+ * their usage on this computer and on every linked machine, read-only. A read
+ * goes through `cswap` to the Keychain and to Anthropic, so it takes seconds.
+ * This page reads when it opens and on Refresh, through the window's one read
+ * (useAccounts).
  */
 export function AccountsSection({ machine }: { /** This machine's name, when this Inbox knows it. */ machine?: string }) {
-  const { view, refreshFailed, reading, read } = useAccounts();
+  const { view, refreshFailed, reading, machines, read } = useAccounts();
   useEffect(() => {
     void read();
   }, [read]);
 
-  const active = view?.state === 'accounts' ? view.accounts.find((account) => account.active) : undefined;
+  const self = machine ?? 'This machine';
+  const own = view?.state === 'accounts' ? view.accounts : [];
+  const linked = view?.state === 'owner_only' ? [] : machines;
+  const rows = listedAccounts({ name: self, accounts: own }, linked);
+  const hasMachines = linked.length > 0 || own.some((account) => account.active);
   const failure = refreshFailed ?? (view ? accountsFailure(view) : null);
   return (
     <>
-      {active && view?.state === 'accounts' && <MachineGroup machine={machine ?? 'This machine'} active={active} accounts={view.accounts} />}
-      <section className={active ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} data-settings-accounts={view?.state ?? 'reading'} aria-labelledby="ib-g-claude">
+      {hasMachines && <MachineGroup self={self} view={view} linked={linked} />}
+      <section className={hasMachines ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} data-settings-accounts={view?.state ?? 'reading'} aria-labelledby="ib-g-claude">
         <div className="ib-acct-h">
           <h2 id="ib-g-claude">
             <HostMark host="claude-code" />
@@ -293,7 +374,7 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
             {FAILURE_TEXT[failure]}
           </p>
         )}
-        {view?.state === 'accounts' && <AccountList accounts={view.accounts} reading={reading} />}
+        {(view?.state === 'accounts' || rows.length > 0) && <AccountList rows={rows} reading={reading} />}
         {view?.state === 'not_installed' && (
           <div className="ib-card ib-acct-install">
             <span>

@@ -1873,6 +1873,9 @@ export type InboxAccountsRead =
   | { state: "failed"; reason: InboxAccountsFailure }
   | { state: "accounts"; accounts: InboxAccount[] };
 
+/** `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is none: unreachable, or too old to answer. Neither is an error. */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
