@@ -215,6 +215,9 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   // One rhythm: the same gap between the heading, the step, the line saying which agents a reply wakes, Try it, the fold and the tour's quiet line
   // (the tour was decided before this Inbox started: "Take the 2-minute tour" ends the screen).
   await expect(empty.locator('[data-tour-again]')).toBeVisible();
+  // The line carries no highlight of its own: the tour's highlight class and outline are for its targets only.
+  await expect(empty.locator('[data-tour-again]')).not.toHaveClass(/ib-tour-mark/);
+  await expect(empty.locator('[data-tour-again]')).toHaveCSS('outline-style', 'none');
   const boxes = await empty.evaluate((el) =>
     [...el.children].filter((child) => !child.classList.contains('ib-sr')).map((child) => child.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom })),
   );

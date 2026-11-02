@@ -519,6 +519,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const remember = (id: string, patch: FileMemory) => memory.current.set(id, { ...memory.current.get(id), ...patch });
   /** How the last step was asked for, so focus lands in the right place once the next file is in. */
   const pendingStep = useRef<StepSource | null>(null);
+  /** Which of the option card's arrows asked for the step in flight, so focus can go back to it. */
+  const cardArrow = useRef<1 | -1 | null>(null);
 
   const rememberPlace = () => {
     const scroller = scrollerOf(sectionRef.current);
@@ -544,7 +546,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     announce(text);
     if (endTimer.current) clearTimeout(endTimer.current);
     endTimer.current = setTimeout(() => setEndNote(null), 1800);
-    // In a set of picture choices the caption says it (it stays on screen); else the chip.
+    // In a set of picture choices nothing on screen says it (the card is the choice, the live region says the end); else the chip.
     if (fullRef.current && !optionSetRef.current) showChip(text);
   };
 
@@ -684,11 +686,20 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!source) return;
     const at = stepIndexOf(stepsRef.current, attachment.id);
     const set = optionSetRef.current;
-    if (at >= 0) announce(set ? optionAnnouncement(set, at, phone ? outsideSet : undefined) : stepAnnouncement(stepsRef.current, at));
+    if (at >= 0) announce(set ? optionAnnouncement(set, at, outsideSet) : stepAnnouncement(stepsRef.current, at));
     // Full screen keeps on through a step; with no bar under the file, a chip names the file for a moment (a set's caption names the choice).
     if (fullRef.current && !set) showChipRef.current(null);
     // A key pressed in the document (or the HTML page) leaves focus on the pane; a bar button keeps it.
     if (source === 'key') sectionRef.current?.focus({ preventScroll: true });
+    // The card's arrow keeps it too, unless the step waited on the unsaved-comment question (its buttons took focus, then went): back on the arrow.
+    const arrow = cardArrow.current;
+    cardArrow.current = null;
+    if (source === 'button' && arrow !== null) {
+      requestAnimationFrame(() => {
+        if (document.activeElement && document.activeElement !== document.body) return;
+        sectionRef.current?.querySelector<HTMLElement>(`[data-option-step="${arrow < 0 ? 'prev' : 'next'}"]`)?.focus({ preventScroll: true });
+      });
+    }
     // The sheet's Previous / Next closed the sheet with the step: focus back on what opened it.
     if (steppedFromSheet.current) {
       steppedFromSheet.current = false;
@@ -1027,7 +1038,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (target && !inField && (isEditableTarget(target) || inOverlay(target))) return null;
     return escapeRung({
       full: true,
-      popoverOpen: menuOpen || moreOpen,
+      popoverOpen: menuOpen || moreOpen || !!props.composer?.reply.comments.list,
       composerOpen: !props.readOnly && openComposer() !== null,
       inField,
       panelOpen: panelOpen,
@@ -1046,6 +1057,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       case 'popover': {
         setMenuOpen(false);
         setMoreOpen(false);
+        // Reached only from inside the page: the list takes a key from this window itself, and focus stays in the page.
+        props.composer?.reply.comments.onList(null);
         // The peek hands focus back to N/M itself; a menu whose item held focus leaves it on ⋯.
         requestAnimationFrame(() => {
           const active = document.activeElement;
@@ -1433,6 +1446,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const id = requestAnimationFrame(() => viewerRef.current?.applySharedAnnotations(annotations.filter(annotationOwnsHighlight)));
     return () => cancelAnimationFrame(id);
   }, [view, attachment.kind, attachment.id, annotations]);
+
+  // A comment that left the records another way than this pane's Remove (a Send took it, the comments list's Remove,
+  // another window) leaves the page too.
+  const listedIds = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(annotations.map((annotation) => annotation.id));
+    for (const id of listedIds.current) if (!ids.has(id)) viewerRef.current?.removeHighlight(id);
+    listedIds.current = ids;
+  }, [annotations]);
 
   const save = useCallback(
     (annotation: Annotation): Promise<boolean> => {
@@ -1838,6 +1860,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
             <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
             <HtmlViewer
+              ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
               rawHtml={view.html}
               title={attachment.name}
@@ -2320,7 +2343,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       )}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
-        <OptionCaption set={optionSet} index={index} otherFiles={outsideSet} note={endNote} phone={phone} />
+        <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => {
+          cardArrow.current = dir;
+          step(dir, 'button');
+        }}
+        />
       )}
       {full && !optionSet && (
         // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
