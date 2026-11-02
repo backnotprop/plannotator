@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import type { AttachmentStep } from './stepping';
-import { choiceLetters, choiceName, labelHasLetter, optionAnnouncement, optionEndLine, optionOf, optionSetId, optionSetOf, parseOptionSetId, FIRST_OPTION_NOTE, LAST_OPTION_NOTE } from './optionSets';
+import { choiceLetters, choiceName, labelHasLetter, optionAnnouncement, optionOf, optionSetId, optionSetOf, parseOptionSetId } from './optionSets';
 
 const M1 = 'msg_01K7M1MMMMMMMMMMMMMMMMMMMM';
 const M2 = 'msg_01K7M2MMMMMMMMMMMMMMMMMMMM';
@@ -59,7 +59,6 @@ describe('option sets', () => {
       ['D', 'Header menu only'],
     ]);
     expect(set.choices[0]!.recommended).toBe(true);
-    expect(set.prompt).toBe('Which copy-message design should ship?');
     // The other question's pictures are a set of their own.
     expect(optionSetOf([EARLIER, MESSAGE], STEPS, optionSetId(M2, 'q-dots'))!.steps.map((s) => s.attachment.id)).toEqual(['att_q1', 'att_q2']);
   });
@@ -133,17 +132,13 @@ describe('option sets', () => {
     expect(choiceName('B · Total pinned', 1, ['Plain', 'B · Total pinned'])).toBe('B · Total pinned');
   });
 
-  test('the caption\'s end line: at the last option, where the thread\'s other files are; at the first only after a swipe past it', () => {
+  test('a step says the option, its letter and whether it is recommended', () => {
     const set = optionSetOf([MESSAGE], STEPS, optionSetId(M2, 'q-design'))!;
-    expect(optionEndLine(set, 2, 4, null)).toEqual({ note: LAST_OPTION_NOTE, others: 4 });
-    expect(optionEndLine(set, 1, 4, null)).toBeNull();
-    expect(optionEndLine(set, 0, 4, null)).toBeNull();
-    expect(optionEndLine(set, 0, 4, FIRST_OPTION_NOTE)).toEqual({ note: FIRST_OPTION_NOTE, others: 0 });
     expect(optionAnnouncement(set, 0)).toBe('Option A of 3: Gmail-style ⋯, recommended');
     expect(optionAnnouncement(set, 2)).toBe('Option D of 3: Header menu only');
   });
 
-  test('on a phone the step onto the last option says the end note, which the caption shows only for a moment', () => {
+  test('the step onto the last option says the end note and where the other files are, which the card does not show', () => {
     const set = optionSetOf([MESSAGE], STEPS, optionSetId(M2, 'q-design'))!;
     expect(optionAnnouncement(set, 2, 2)).toBe('Option D of 3: Header menu only. Last option. 2 other files under the 3/3 button');
     expect(optionAnnouncement(set, 2, 1)).toBe('Option D of 3: Header menu only. Last option. 1 other file under the 3/3 button');

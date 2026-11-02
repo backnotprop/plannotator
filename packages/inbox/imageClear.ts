@@ -14,11 +14,11 @@ export function readClearRows(probe: HTMLElement): ZoomClear | undefined {
 }
 
 /**
- * The rows a picture keeps clear on a phone (approval
- * "inbox-option-card-phone"). The stylesheet knows what floats over a phone's
- * picture (the size bar, the toolbar, the option card, the comment box, and
- * whether Hide took them), so it says so on `.ib-imgclear`, a hidden box that
- * fills the stage everywhere else: give the box `probe`, and `clear` follows it.
+ * The rows a picture keeps clear (approvals "inbox-option-card-phone" and
+ * "inbox-option-card-lean"). The stylesheet knows what floats over the picture
+ * (a phone's size bar, toolbar and option card, a desktop's option card, the
+ * comment box, and whether Hide or a minimized comment box took them), so it
+ * says so on `.ib-imgclear`, a hidden box that fills the stage everywhere else: give the box `probe`, and `clear` follows it.
  * The stage itself stays whole, so every row still takes the fingers.
  */
 export function useClearRows(): { probe: (el: HTMLElement | null) => void; clear: ZoomClear | undefined } {

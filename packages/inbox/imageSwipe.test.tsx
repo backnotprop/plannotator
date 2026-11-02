@@ -22,11 +22,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
 import { SWIPE_HANDOFF_MAX_MS, SWIPE_SLIDE_MS } from './fileSwipe';
-import { LAST_OPTION_NOTE, optionSetId, optionSetOf, type OptionSet } from './optionSets';
+import { optionSetId, optionSetOf, type OptionSet } from './optionSets';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
-const { OptionCaption, OPTION_NOTE_MS } = (hasDom ? await import('./components/OptionCaption') : {}) as typeof import('./components/OptionCaption');
+const { OptionCaption } = (hasDom ? await import('./components/OptionCaption') : {}) as typeof import('./components/OptionCaption');
 const { peekFit } = (hasDom ? await import('./components/ImageSwipePeek') : {}) as typeof import('./components/ImageSwipePeek');
 
 let root: Root | null = null;
@@ -231,9 +231,8 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   const { opened } = await render(optB);
   expect(caption()!.getAttribute('data-option-caption')).toBe('B');
   expect(caption()!.querySelector('.ib-optcap-label')!.textContent).toBe('Option B: Quiet hover menu');
-  expect(caption()!.querySelector('.ib-optcap-prompt')!.textContent).toBe('Which copy-message design should ship?');
-  expect(caption()!.querySelector('[data-option-dots]')!.getAttribute('data-option-dots')).toBe('2/4');
-  expect(caption()!.querySelectorAll('.ib-optcap-dots i')).toHaveLength(4);
+  // One row: no question, dots, end note or arrows (a phone swipes).
+  for (const gone of ['.ib-optcap-prompt', '[data-option-dots]', '[data-option-end]', '[data-option-step]']) expect(caption()!.querySelector(gone)).toBeNull();
   expect(caption()!.querySelector('[data-option-recommended]')).toBeNull();
   expect(caption()!.querySelector('[data-option-end]')).toBeNull();
   expect(pill().textContent).toContain('2/4');
@@ -251,9 +250,7 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
-  // The last choice: the caption says where the thread's other files are.
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('Last option · 2 files under 4/4');
-  // Stepping onto it says so too, once: the caption shows it only for a moment.
+  // The last choice: the live region says where the thread's other files are (the card does not).
   expect(live()).toBe('Option D of 4: Header menu only. Last option. 2 other files under the 4/4 button');
   await drag(-200);
   await settle(40);
@@ -270,76 +267,46 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await drag(200);
   await settle(40);
   expect(opened).toHaveLength(5);
-  expect(caption()!.querySelector('[data-option-end]')!.textContent).toBe('First option');
+  expect(live()).toBe('First option');
 });
 
-/** The caption on its own, with its note's timer in the test's hands. */
+/** The card on its own: `steps` collects what its arrows ask for. */
 async function captionAlone(at: number, phone: boolean) {
-  const realTimeout = globalThis.setTimeout;
-  const noteEnds: (() => void)[] = [];
-  globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-    if (ms === OPTION_NOTE_MS) {
-      noteEnds.push(fn);
-      return 0;
-    }
-    return realTimeout(fn, ms);
-  }) as typeof globalThis.setTimeout;
+  const steps: number[] = [];
   host = document.createElement('div');
   document.body.appendChild(host);
-  const draw = (index: number, note: string | null = null) => <OptionCaption set={SET} index={index} otherFiles={2} note={note} phone={phone} />;
   await act(async () => {
     root = createRoot(host!);
-    root.render(draw(at));
+    root.render(<OptionCaption set={SET} index={at} phone={phone} onStep={(dir) => steps.push(dir)} />);
   });
-  return {
-    show: (index: number, note: string | null = null) => act(async () => root!.render(draw(index, note))),
-    noteTimeUp: () => act(async () => noteEnds.splice(0).forEach((fn) => fn())),
-    done: () => {
-      globalThis.setTimeout = realTimeout;
-    },
-  };
+  return steps;
 }
 
-test.skipIf(!hasDom)('on a phone the end note takes the question\'s line for its time, so the card keeps one height, and comes back with a step or a swipe past the end', async () => {
-  const card = await captionAlone(3, true);
-  try {
-    const line = () => caption()!.querySelector('.ib-optcap-q > :first-child')!;
-    expect(line().textContent).toBe('Last option · 2 files under 4/4');
-    expect(line().hasAttribute('data-option-end')).toBe(true);
-    // The pill stands beside the words, so they can give way and it cannot.
-    expect(line().querySelector('.ib-optcap-note .ib-optcap-pill')).toBeNull();
-    expect(line().querySelector(':scope > .ib-optcap-pill')).not.toBeNull();
-    expect(caption()!.querySelector('.ib-optcap-end')).toBeNull();
-
-    await card.noteTimeUp();
-    expect(line().textContent).toBe(QUESTION.prompt);
-    expect(caption()!.querySelector('[data-option-end]')).toBeNull();
-
-    // A swipe past the last choice says it again, for as long as the pane's note shows.
-    await card.show(3, LAST_OPTION_NOTE);
-    expect(line().textContent).toBe('Last option · 2 files under 4/4');
-    await card.show(3, null);
-    expect(line().textContent).toBe(QUESTION.prompt);
-
-    // A step away and back says it again, even before the step away had its own time.
-    await card.show(2);
-    expect(line().textContent).toBe(QUESTION.prompt);
-    await card.show(3);
-    expect(line().textContent).toBe('Last option · 2 files under 4/4');
-  } finally {
-    card.done();
+test.skipIf(!hasDom)('off a phone the card has ‹ Previous and Next › that step like [ and ], marked disabled at the ends', async () => {
+  for (const [at, prevOff, nextOff] of [[0, true, false], [1, false, false], [3, false, true]] as const) {
+    const steps = await captionAlone(at, false);
+    const prev = caption()!.querySelector<HTMLButtonElement>('[data-option-step="prev"]')!;
+    const next = caption()!.querySelector<HTMLButtonElement>('[data-option-step="next"]')!;
+    expect(prev.getAttribute('aria-disabled') === 'true').toBe(prevOff);
+    expect(next.getAttribute('aria-disabled') === 'true').toBe(nextOff);
+    expect(prev.getAttribute('aria-label')).toMatch(prevOff ? /this is the first$/ : /^Previous option: \S/);
+    expect(next.getAttribute('aria-label')).toMatch(nextOff ? /this is the last$/ : /^Next option: \S/);
+    await act(async () => {
+      prev.click();
+      next.click();
+    });
+    expect(steps).toEqual([...(prevOff ? [] : [-1]), ...(nextOff ? [] : [1])]);
+    await act(async () => root!.unmount());
+    host!.remove();
+    host = null;
+    root = null;
   }
 });
 
-test.skipIf(!hasDom)('off a phone the end note stays in its own row, under the question', async () => {
-  const card = await captionAlone(3, false);
-  try {
-    await card.noteTimeUp();
-    expect(caption()!.querySelector('.ib-optcap-prompt')!.textContent).toBe(QUESTION.prompt);
-    expect(caption()!.querySelector('.ib-optcap-end')!.textContent).toBe("Last option · the thread's 2 other files are under 4/4");
-  } finally {
-    card.done();
-  }
+test.skipIf(!hasDom)('one row on a phone too: the letter, the name, no arrows, no question, dots or end note', async () => {
+  await captionAlone(3, true);
+  expect(caption()!.querySelector('.ib-optcap-label')).not.toBeNull();
+  for (const gone of ['[data-option-step]', '.ib-optcap-q', '.ib-optcap-dots', '[data-option-end]']) expect(caption()!.querySelector(gone)).toBeNull();
 });
 
 test.skipIf(!hasDom)('a neighbour is drawn at the Fit its image will have, between the rows the image keeps clear', () => {
@@ -515,4 +482,30 @@ test.skipIf(!hasDom)('under reduced motion nothing follows the finger: the step 
   await release();
   await settle(20);
   expect(closes.count).toBe(1);
+});
+
+test.skipIf(!hasDom)('the card holds every name of the set (unseen) so it is one width on every step, and a wheel over an arrow goes to the picture', async () => {
+  await captionAlone(1, false);
+  const sizers = [...caption()!.querySelectorAll('.ib-optcap-size')].map((el) => el.textContent);
+  expect(sizers).toHaveLength(4);
+  expect(sizers.join('|')).toContain(SET.choices[3]!.label);
+  for (const el of caption()!.querySelectorAll('.ib-optcap-size')) expect(el.getAttribute('aria-hidden')).toBe('true');
+  // The name read aloud is the visible row's only (not four names).
+  expect(caption()!.querySelector('.ib-optcap-main .ib-optcap-label')!.textContent).toContain(SET.choices[1]!.label);
+  expect(caption()!.querySelectorAll('.ib-optcap-main .sr-only')).toHaveLength(1);
+
+  // A pinch (Ctrl + wheel) over an arrow: held off the page and handed to the picture's stage.
+  host!.className = 'ib-view';
+  const stage = document.createElement('div');
+  stage.setAttribute('data-image-zoom-stage', 'fit');
+  host!.appendChild(stage);
+  const received: WheelEvent[] = [];
+  stage.addEventListener('wheel', (e) => received.push(e as WheelEvent));
+  const wheel = new WheelEvent('wheel', { deltaY: -120, ctrlKey: true, clientX: 10, clientY: 20, bubbles: true, cancelable: true });
+  await act(async () => {
+    caption()!.querySelector('[data-option-step="next"]')!.dispatchEvent(wheel);
+  });
+  expect(wheel.defaultPrevented).toBe(true);
+  expect(received).toHaveLength(1);
+  expect(received[0]!.deltaY).toBe(-120);
 });
