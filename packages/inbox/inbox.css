@@ -6562,6 +6562,45 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .pn-inbox .ib-vkey { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line); border-radius: 7px; background: var(--background); color: var(--foreground); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-vkey:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
+/*
+ * Snooze (approval "inbox-snooze"): the row's return time where its words go, the small clock of a thread back
+ * from a snooze, the folded band's triangle, and the menus' times (packages/ui/components/inbox-thread/SnoozeMenu.tsx),
+ * which swap in place in the row menu and the thread's ⋯ (the project menu's look, `.ib-pm`).
+ */
+.ib-zwhen { display: inline-flex; align-items: center; gap: 5px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-zwhen svg.ib-ic { width: 13px; height: 13px; flex: none; }
+.ib-row .ib-cw:has(.ib-zwhen) { overflow: visible; }
+.ib-nrow .ib-l3 .ib-zwhen, .ib-mrow .ib-m3 .ib-zwhen { flex: none; }
+.ib-zback { display: inline-flex; vertical-align: -2px; margin-right: 5px; color: var(--muted-foreground); }
+.pn-inbox .ib-zback svg.ib-ic { width: 13px; height: 13px; }
+.ib-zband-tri { display: inline-flex; color: var(--ib-badge-hold-fg-soft); }
+.ib-zband-tri[data-stopped] { color: var(--ib-badge-stop-fg-soft); }
+.pn-inbox .ib-band .ib-zband-tri .ib-ic { margin-left: 0; color: inherit; }
+.ib-zsub { margin-left: auto; display: inline-flex; padding-left: 16px; }
+.ib-zi { justify-content: space-between; gap: 24px; }
+.ib-zw { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-zb { color: var(--muted-foreground); }
+.ib-zp { display: flex; flex-direction: column; gap: 8px; width: 256px; padding: 2px 4px 4px; }
+.ib-zlists { display: grid; grid-template-columns: 1.15fr 1fr; }
+/* Real lists: the wheel, a touch and a drag scroll them; the scrollbar is the platform's thin one. */
+.ib-zcol { position: relative; display: flex; flex-direction: column; height: 182px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 2px; outline: none; border-radius: var(--ib-rl-xs-s, 5px); -webkit-overflow-scrolling: touch; }
+.ib-zcol:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.ib-zcol + .ib-zcol { border-left: 1px solid var(--border); border-radius: 0; }
+.ib-zli { flex: none; display: flex; align-items: center; height: 30px; padding: 0 8px; border-radius: var(--ib-rl-xs-s, 5px); color: var(--foreground); white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; user-select: none; }
+.ib-zli:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 80%, transparent)); }
+.ib-zli[data-on], .ib-zli[data-on]:hover { background: color-mix(in oklch, var(--primary) 26%, transparent); font-weight: 550; }
+.ib-zfoot { display: flex; justify-content: flex-end; }
+.pn-inbox .ib-zgo { flex: none; height: 30px; padding: 0 12px; border-radius: var(--ib-rl-xs-s, 5px); background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-13, 13px); font-weight: 550; }
+.pn-inbox .ib-zgo:disabled { opacity: 0.5; }
+.pn-inbox .ib-zgo:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-pm-pos[data-phone] .ib-zp { width: auto; gap: 12px; padding: 4px 6px 6px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-pm-pos[data-phone] .ib-zcol { height: 264px; }
+  .ib-pm-pos[data-phone] .ib-zli { height: 44px; padding: 0 12px; }
+  .ib-pm-pos[data-phone] .ib-zfoot { display: block; }
+  .pn-inbox .ib-pm-pos[data-phone] .ib-zgo { width: 100%; height: 48px; border-radius: 8px; font-size: var(--ib-fs-16-in, 16px); }
+}
+
 /* The count opens the list of comments (AnnotationsChip.tsx). In the closed foot, a quiet link; its bigger press area
    is an overlay, so the foot's row keeps its size and nothing moves. */
 .pn-inbox button.ib-comments-link { position: relative; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); }

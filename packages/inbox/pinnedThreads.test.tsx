@@ -301,9 +301,9 @@ test.skipIf(!hasDom)("the header ⋯ menu's Pin thread pins and Unpin thread unp
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // First in the menu, in its own group, as the row menu leads with it.
+  // In the first group, after Snooze (approval "inbox-snooze"), with a separator after it.
   const first = await openThreadMenu();
-  expect(threadMenu()!.querySelector('[role="menuitem"]')).toBe(first);
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 2).map((el) => el.textContent?.trim())).toEqual(['Snooze', 'Pin thread']);
   expect(first.nextElementSibling?.getAttribute('role')).toBe('separator');
   await act(async () => first.click());
   await until(() => !threadMenu(), 'the menu to close');

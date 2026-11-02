@@ -43,7 +43,8 @@ import {
 } from './api';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { hasMovingDelivery } from './rowDelivery';
 import {
   captureSettle,
@@ -553,8 +554,9 @@ function listIntroHeldBack(): boolean {
   return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
 }
 
+/** Rows the person reads in place: the folded Snoozed band alone holds nothing still, so a read is adopted whole. */
 function hasRows(sections: readonly InboxListSection[] | null): boolean {
-  return !!sections && sections.some((s) => s.threads.length > 0);
+  return !!sections && sections.some((s) => s.id !== 'snoozed' && s.threads.length > 0);
 }
 
 function Inbox() {
@@ -1021,7 +1023,8 @@ function Inbox() {
       const next = latestRef.current;
       if (!next) return;
       if (slide) armSlide();
-      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? next.sections : settleOwn(current, next.sections, openedHere.current, closed)));
+      const groups = listGroups(next);
+      setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
     },
     [armSlide, cancelSettle],
   );
@@ -1062,14 +1065,15 @@ function Inbox() {
       setRestartAgents(restartAgentsOf(next.restart_agents, next.restart_claude_code));
       setCheckFailing(next.update_check_failing ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
+      const groups = listGroups(next);
       setShown((current) =>
         current === null || !hasRows(current)
-          ? next.sections
+          ? groups
           : adopt
             ? keep
-              ? adoptKeepingOpen(current, next.sections, keep)
-              : next.sections
-            : refreshHeldRows(current, next.sections, heldOpen()),
+              ? adoptKeepingOpen(current, groups, keep)
+              : groups
+            : refreshHeldRows(current, groups, heldOpen()),
       );
       setLoadError(null);
       return next;
@@ -1078,6 +1082,13 @@ function Inbox() {
       return null;
     }
   }, [armSlide]);
+  /** The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this window's clock). */
+  const refreshSnoozes = useCallback(async () => {
+    const next = await refreshList(false);
+    if (next) flushNotifications(next);
+    void refreshDecisions();
+    if (!routeRef.current.thread) settleList('own', true);
+  }, [refreshList, flushNotifications, refreshDecisions, settleList]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -1423,6 +1434,7 @@ function Inbox() {
     let deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
     let draftsTimer: ReturnType<typeof setTimeout> | null = null;
     let pinsTimer: ReturnType<typeof setTimeout> | null = null;
+    let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1488,6 +1500,13 @@ function Inbox() {
         onPins: () => {
           if (pinsTimer) clearTimeout(pinsTimer);
           pinsTimer = setTimeout(() => void refreshList(false), 60);
+        },
+        // A snooze changed (another window, a phone, a linked machine) or ran out: read the list. It is the person's
+        // own act, so with no thread open the row goes to its place, as it does in the window they did it in; a return
+        // waits behind "N new" (held.ts). A return may ask something: notifications read this list too.
+        onSnoozes: () => {
+          if (snoozesTimer) clearTimeout(snoozesTimer);
+          snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
@@ -1590,10 +1609,11 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (pinsTimer) clearTimeout(pinsTimer);
+      if (snoozesTimer) clearTimeout(snoozesTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
+  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -1702,7 +1722,7 @@ function Inbox() {
       closing.current = null;
       return;
     }
-    closing.current = { threadId: closed, asOf: latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed) ?? null };
+    closing.current = { threadId: closed, asOf: (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === closed) ?? null };
     // A thread opened from search or a link may have no row on screen (Quiet folded, another project): the
     // Quiet band, else the first row, so focus is never left on the page. Checked now and once the thread's pane
     // has gone (what had focus in it may outlive this commit by a frame).
@@ -1724,12 +1744,13 @@ function Inbox() {
       // was open): it takes the section its state gives it (held.ts
       // settlesOnBack, settleThread).
       closing.current = null;
-      const next = latestRef.current?.sections.flatMap((section) => section.threads).find((row) => row.thread_id === closed);
+      const groups = latestRef.current ? listGroups(latestRef.current) : [];
+      const next = groups.flatMap((section) => section.threads).find((row) => row.thread_id === closed);
       if (next && shownRef.current && settlesOnBack(shownRef.current, next)) {
         // Back put focus on the row; the settle redraws it in another group, so focus goes with it ([shown] layout effect):
         // after a key, and after a stacked window's Back by mouse (#1866 hands that focus to the row too); never after a phone's tap.
         if (lastInput() === 'keyboard' || !isPhone()) refocusRow.current = closed;
-        setShown((current) => (current ? settleThread(current, latestRef.current!.sections, closed) : current));
+        setShown((current) => (current ? settleThread(current, groups, closed) : current));
       }
       return;
     }
@@ -2050,7 +2071,8 @@ function Inbox() {
       if (stayed) setSentLight({ thread: sent.threadId });
       if (adopt) return;
       armSlide();
-      setShown((current) => (current === null ? next.sections : addOwnThreads(current, next.sections, [sent.threadId])));
+      const groups = listGroups(next);
+      setShown((current) => (current === null ? groups : addOwnThreads(current, groups, [sent.threadId])));
     });
     if (sent.draftId) void refreshDrafts();
     showToast(
@@ -2214,7 +2236,7 @@ function Inbox() {
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
-    (latestRef.current?.sections ?? []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
+    (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
   const say = (text: string) => {
     setSaid('');
@@ -2402,9 +2424,11 @@ function Inbox() {
       ...copy,
       icon: warn ? 'warn' : 'check',
       onUndo: () => {
-        if (!stood) return void markRead(threadId, false);
+        // Mark read ended the snooze: its Undo puts that back too.
+        const restoring = restoreSnooze(threadId, before.snoozed);
+        if (!stood) return void restoring.then(() => markRead(threadId, false));
         dismissToast();
-        void markUnread(threadId);
+        void restoring.then(() => markUnread(threadId));
       },
       ...(warn
         ? {
@@ -2428,7 +2452,7 @@ function Inbox() {
    */
   const moveSeenToQuiet = (threadId: string, row: InboxListRow) => {
     const before = shownRef.current;
-    const sections = latestRef.current?.sections;
+    const sections = latestRef.current ? listGroups(latestRef.current) : null;
     if (!before || !sections) return;
     armSlide();
     setShown((current) => (current ? settleThread(current, sections, threadId) : current));
@@ -2575,11 +2599,95 @@ function Inbox() {
       // The thread's foot says the next message starts a new thread.
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
       const detail = threadId !== open && before ? `“${before.subject ?? '(no subject)'}”` : undefined;
-      showToast({ icon: 'archive', lead: 'Archived', ...(detail ? { detail } : {}), onUndo: () => void archive(threadId, rootId, false) });
+      const snoozed = before?.snoozed;
+      showToast({
+        icon: 'archive',
+        lead: 'Archived',
+        ...(detail ? { detail } : {}),
+        // Archive ended the snooze: Undo unarchives first, since an archived thread takes none.
+        onUndo: () => void archive(threadId, rootId, false).then(() => restoreSnooze(threadId, snoozed)),
+      });
     } else {
       dismissToast();
       say('Unarchived.');
     }
+  };
+
+  /**
+   * Put a snooze back as it was, its own time included, when its time is still
+   * ahead: the Undo of Mark read and Archive, which ended it. Past its time
+   * there is nothing to put back. Asks nothing of the list: the caller reads it.
+   */
+  const restoreSnooze = async (threadId: string, snooze: InboxRowSnooze | null | undefined) => {
+    if (!snooze || !inboxSnoozeRunning(snooze.until)) return;
+    try {
+      await inboxApi.snooze(threadId, snooze.until, snooze.at);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+  };
+
+  /**
+   * Snooze a thread, from its row's menu or its ⋯ (approval "inbox-snooze"). The
+   * row leaves its section as Mark read's does: at once with no thread open,
+   * when the list settles with one. The toast says when it comes back; its Undo
+   * puts back exactly what was there, an earlier snooze included.
+   */
+  const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
+    const threadId = row.thread_id;
+    const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
+    try {
+      await inboxApi.snooze(threadId, until);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    const when = inboxSnoozeWhen(until);
+    showToast({
+      icon: 'clock',
+      lead: 'Snoozed',
+      detail: when,
+      speech: `Snoozed “${row.subject ?? '(no subject)'}” until ${when}.`,
+      onUndo: () => void putSnooze(threadId, earlier),
+    });
+  };
+  /** Snooze's Undo: the snooze it replaced, or none. */
+  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null) => {
+    try {
+      await inboxApi.snooze(threadId, earlier && inboxSnoozeRunning(earlier.until) ? earlier.until : null, earlier?.at);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    dismissToast();
+    say(earlier ? 'Snooze moved back.' : 'Unsnoozed.');
+  };
+  /** Unsnooze: the thread is back in its section now. Undo snoozes it again, to the same time. */
+  const unsnooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>) => {
+    const threadId = row.thread_id;
+    const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
+    try {
+      await inboxApi.snooze(threadId, null);
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite();
+    showToast({
+      icon: 'clock',
+      lead: 'Unsnoozed',
+      speech: `Unsnoozed “${row.subject ?? '(no subject)'}”.`,
+      onUndo: earlier
+        ? () => {
+            dismissToast();
+            void restoreSnooze(threadId, earlier);
+          }
+        : undefined,
+    });
   };
 
   /**
@@ -2688,6 +2796,7 @@ function Inbox() {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
     if (action === 'mark-unread') return void markUnread(row.thread_id);
+    if (action === 'unsnooze') return void unsnooze(row);
     if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
@@ -3255,7 +3364,9 @@ function Inbox() {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
   const latestSections = latest?.sections ?? [];
-  const latestRows = useMemo(() => new Map((latest?.sections ?? []).flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const)), [latest]);
+  // Every row the list knows, the Snoozed band's too: only counts read `latestSections`, which has none of those.
+  const latestGroups = useMemo(() => (latest ? listGroups(latest) : []), [latest]);
+  const latestRows = useMemo(() => new Map(latestGroups.flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const)), [latestGroups]);
   // Decision mode is on only while settings say so; with it off, nothing of it renders and nothing is read.
   const decisionModeOn = settings?.experimental?.decision_mode.on === true;
   decisionModeOnRef.current = decisionModeOn;
@@ -3298,9 +3409,19 @@ function Inbox() {
   const pinnedIds = useMemo(() => new Set((pinRows ?? []).map((pin) => pin.thread_id)), [pinRows]);
   // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
   const openThreadRow = thread
-    ? (latestSections.flatMap((section) => section.threads).find((row) => row.thread_id === thread.thread_id) ??
-      (threadRow?.thread_id === thread.thread_id ? threadRow : null))
+    ? (latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null))
     : null;
+  // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
+  // a snooze lives on the thread's home machine and goes there through the forward and the outbox.
+  const snoozeOn = latest?.snoozed !== undefined;
+  // The list reads again at the nearest return, by this window's clock (api.ts runs the rule on what it reads): a
+  // linked machine asleep past a thread's time sends no event, and the row still comes back.
+  useEffect(() => {
+    const delay = inboxSnoozeDelay((latest?.snoozed ?? []).flatMap((row) => (row.snoozed ? [row.snoozed.until] : [])));
+    if (delay === null) return;
+    const timer = setTimeout(() => void refreshSnoozes(), delay);
+    return () => clearTimeout(timer);
+  }, [latest?.snoozed, refreshSnoozes]);
   /** The projects where Mark all as read has something to do. */
   const projectsReadable = useMemo(() => projectsWithReadable(latestSections), [latestSections]);
   const projectCounts = useMemo(() => {
@@ -3334,7 +3455,7 @@ function Inbox() {
   );
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
-  const notice = shown && latest ? heldNotice(filterList(shown), filterList(latest.sections), openedHere.current, heldOpen(), projectNames).text : null;
+  const notice = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames).text : null;
   const firstRun = latest !== null && projects.length === 0;
 
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
@@ -3446,7 +3567,7 @@ function Inbox() {
     voiceIntro.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
-      ? filterList(shown).filter((section) => section.threads.length > 0).map((section) => ({ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }))
+      ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
       : [];
   // Tidy (2026-10-28): the list header's and the Board's ⋮ menu, each reading who it would ask in its scope.
   const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', shown, route.page === 'inbox' && !firstRun);
@@ -4279,7 +4400,7 @@ function Inbox() {
   } else if (route.page === 'board') {
     // The opened card's threads and a sent card's ticks read the list's rows (pins included).
     const rowById = new Map<string, InboxListRow>();
-    for (const section of latestSections) for (const row of section.threads) rowById.set(row.thread_id, row);
+    for (const section of latestGroups) for (const row of section.threads) rowById.set(row.thread_id, row);
     for (const row of latest?.pins ?? []) if (!rowById.has(row.thread_id)) rowById.set(row.thread_id, row);
     // The cards' own answer names threads the list leaves out (archived): the opened card still names them.
     for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rowById.has(id)) rowById.set(id, row);
@@ -4436,6 +4557,7 @@ function Inbox() {
           onMarkUnread={(row) => void markUnread(row.thread_id)}
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
+          onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           pinned={pinsOn ? pinnedIds : undefined}
           tidy={{
             ...listTidy,
@@ -4511,6 +4633,8 @@ function Inbox() {
             pinned={pinnedIds.has(thread.thread_id)}
             // Pins are this Inbox's own: another machine's thread is pinned on that machine (PLAN Phase 2).
             onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
+            onSnooze={snoozeOn ? (until) => void snooze(thread, until) : undefined}
+            onUnsnooze={snoozeOn ? () => void unsnooze(thread) : undefined}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}

@@ -6,7 +6,24 @@
  * closes (`settleOwn`; when that happens and how it moves: settle.ts). Pure.
  */
 
-import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
+import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_SNOOZED_BAND } from '@plannotator/core/inbox-snooze';
+
+/**
+ * What the list draws from a read: the sections, then the Snoozed band under
+ * Quiet. Only the list goes through here: the band is in no section, so what
+ * counts sections (the sidebar, the tab, notifications) never counts it. The
+ * held rules below treat it as one more group, so a snoozed row settles,
+ * holds and comes back as any other row does.
+ */
+export function listGroups(model: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[] }): InboxListSection[] {
+  return [...model.sections, { ...INBOX_SNOOZED_BAND, threads: [...(model.snoozed ?? [])] }];
+}
+
+/** The group a row's state puts it in. */
+function groupOf(row: InboxListRow): InboxListGroupId {
+  return row.snoozed ? INBOX_SNOOZED_BAND.id : row.section;
+}
 
 export interface HeldNotice {
   count: number;
@@ -44,9 +61,14 @@ function lastAgentAt(row: InboxListRow): string | null {
  * notification, Settings' Unarchive) and whose agent messages they have all
  * seen (`unseen` 0) came in by their own hand (it was archived, say, and they
  * unarchived it). A thread read somewhere else (a phone, another tab) is not
- * exempt: this tab has not shown it, so it stays news here.
+ * exempt: this tab has not shown it, so it stays news here. A snoozed thread
+ * is never news, whatever an agent wrote there (approval "inbox-snooze"), and
+ * its return is: a row that comes to the top by the clock waits behind "N new"
+ * as an agent's message does, so the list never moves under the reader.
  */
 function hasNewAgentActivity(old: InboxListRow | undefined, row: InboxListRow, openedHere?: ReadonlySet<string>): boolean {
+  if (row.snoozed) return false;
+  if (row.snooze_back && row.snooze_back !== old?.snooze_back) return true;
   const at = lastAgentAt(row);
   // The person's own reply came after the agent's last message (`sent` reads
   // past the notes): whatever the agent wrote before it, they answered, on
@@ -176,7 +198,9 @@ export function settleOwn(
   open?: OpenThread | null,
 ): InboxListSection[] {
   const before = rowsById(shown);
-  const known = new Set(latest.map((section) => section.id));
+  const known = new Set<string>(latest.map((section) => section.id));
+  // A row held in the band stays there: its own `section` says where it was, not where it is drawn.
+  const inBand = new Set(shown.find((section) => section.id === INBOX_SNOOZED_BAND.id)?.threads.map((row) => row.thread_id));
   const buckets = new Map<string, InboxListRow[]>();
   const put = (sectionId: string, row: InboxListRow) => {
     const bucket = buckets.get(sectionId);
@@ -196,10 +220,15 @@ export function settleOwn(
       // "N new", like any agent activity.
       else if (old && (old.resolved_at ?? null) !== null && old.back_from_archive !== true) continue;
       // Held: the state on screen, in the section that state sits in.
-      else if (old) put(known.has(old.section) ? old.section : section.id, old);
+      else if (old) put(inBand.has(old.thread_id) && known.has(INBOX_SNOOZED_BAND.id) ? INBOX_SNOOZED_BAND.id : known.has(old.section) ? old.section : section.id, old);
     }
   }
-  return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(newestFirst) }));
+  return latest.map((section) => ({ ...section, threads: (buckets.get(section.id) ?? []).sort(section.id === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst) }));
+}
+
+/** The band's own order (core inbox-snooze.ts): a row a settle leaves there keeps its place by its time. */
+function soonestBack(left: InboxListRow, right: InboxListRow): number {
+  return (left.snoozed?.until ?? '').localeCompare(right.snoozed?.until ?? '') || left.thread_id.localeCompare(right.thread_id);
 }
 
 /**
@@ -214,10 +243,11 @@ export function settleOwn(
 export function settleThread(shown: readonly InboxListSection[], latest: readonly InboxListSection[], threadId: string): InboxListSection[] {
   const next = rowsById(latest).get(threadId);
   if (!next) return shown.map((section) => ({ ...section }));
+  const place = groupOf(next);
   return shown.map((section) => {
     const threads = section.threads.filter((row) => row.thread_id !== threadId);
-    if (section.id !== next.section) return { ...section, threads };
-    const at = threads.findIndex((row) => newestFirst(next, row) < 0);
+    if (section.id !== place) return { ...section, threads };
+    const at = threads.findIndex((row) => (place === INBOX_SNOOZED_BAND.id ? soonestBack : newestFirst)(next, row) < 0);
     threads.splice(at < 0 ? threads.length : at, 0, next);
     return { ...section, threads };
   });
@@ -229,12 +259,16 @@ export function settleThread(shown: readonly InboxListSection[], latest: readonl
  * there is still unseen (it comes back unread), and when the thread now waits
  * on the person (Stopped, Holding, Waiting: an agent asked while it was open,
  * seen or not) and is drawn in another group, so it is never left folded in
- * Quiet with questions open. A thread only read stays where it was left.
+ * Quiet with questions open. A thread only read stays where it was left. A
+ * thread snoozed or unsnoozed while it was open goes to its place: that is what
+ * the person just asked for.
  */
 export function settlesOnBack(shown: readonly InboxListSection[], row: InboxListRow): boolean {
+  const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
+  if (drawn && (drawn.id === INBOX_SNOOZED_BAND.id) !== !!row.snoozed) return true;
+  if (row.snoozed) return false;
   if (row.unseen > 0) return true;
   if (row.section !== 'stopped' && row.section !== 'holding' && row.section !== 'waiting') return false;
-  const drawn = shown.find((section) => section.threads.some((other) => other.thread_id === row.thread_id));
   return drawn?.id !== row.section;
 }
 
@@ -304,7 +338,7 @@ export function adoptKeepingOpen(shown: readonly InboxListSection[], latest: rea
  * has none for it. While the list holds still this can differ from the row's
  * own `section`, which says where it will settle.
  */
-export function drawnSection(shown: readonly InboxListSection[] | null, threadId: string): InboxSectionId | null {
+export function drawnSection(shown: readonly InboxListSection[] | null, threadId: string): InboxListGroupId | null {
   return shown?.find((section) => section.threads.some((row) => row.thread_id === threadId))?.id ?? null;
 }
 

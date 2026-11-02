@@ -137,11 +137,22 @@ The model also predicts every event's outcome (written, nothing to do, a replaye
 
 The project menu's batches (design record "inbox-project-menu", approved 2026-10-14; `packages/shared/inbox/project-batch.ts`) add no rule: each is a loop over the single actions above, run synchronously. `store.test.ts` ("the project menu's batches") has the model decide on its own which threads a batch takes, apply the single rules thread by thread, and check every invariant after every batch and every Undo between generated steps; a batch undone back to back gives the project's rows back exactly (invariants 4 and 5, per project). After Mark all as read nothing in the project waits on the person; after Archive all nothing of it is listed, which is what hides the project in the window's sidebar (derived from the folders' `listed`, never stored).
 
+## Snooze
+
+Snooze (approval "inbox-snooze", 2026-11-02) adds no section rule and no store line. A snooze is `{ thread_id, until, at }` in `inbox/snoozes.json`, outside the log, and `inboxSectionOf` does not read it: an agent, `read_thread`, the cursors and the twin model see the same thread with or without one. The server's list model applies it on top of the sections, by the clock when the list is read:
+
+- **Before `until`**: the window's view (`snoozed=exclude`) takes the row out of its section into the Snoozed band; the default view keeps it in its section with `snoozed`. Its question stays open (invariant 3 holds on the store's own rows).
+- **After `until`**, until the person reads it: the row is back in its own section, except that Quiet comes back as New; it is bold (`unread`), its `last_at` is the later of its own and `until`, and it carries `snooze_back`.
+- **What ends it** (the entry is deleted): the person's reply, re-ask or new message in the thread, Archive, Mark read, Unsnooze, and a look after `until`. No agent write ends it. The project batches skip snoozed threads.
+
+`store-snoozes.test.ts` runs the twin property: generated histories on a store that snoozes and on a twin that never does give the same section, unread, unseen, questions, read and resolved for every thread (the snooze is never part of the log).
+
 ## Counts
 
 - **Inbox and folder counts in the sidebar**: rows in Stopped, Holding and Waiting (`waitingCount` in `packages/inbox/held.ts`). New is bold but not counted there.
 - **`projects[].unread`** in the list response: rows in Stopped, Holding, Waiting or New (`unread`, bold).
 - Questions are never counted one by one in the badge.
+- A snoozed row counts nowhere (sidebar, `projects[].unread`, the tab count, the decision queue) until its snooze ends.
 
 ## What is window-only and never stored
 

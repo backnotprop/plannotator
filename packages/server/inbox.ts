@@ -180,6 +180,8 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxSnoozes } from "./inbox-snooze";
+import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -535,6 +537,9 @@ const ERROR_STATUS: Record<string, number> = {
   config_not_saved: 500,
   // pins.json from a newer Plannotator: kept as it is (packages/shared/inbox/pins.ts).
   pins_newer: 409,
+  // Snoozes (packages/shared/inbox/snoozes.ts): a time gone by, and a file from a newer Plannotator.
+  snooze_past: 409,
+  snoozes_newer: 409,
   // Attachments and annotations (step 2).
   attachment_not_found: 404,
   attachment_missing: 404,
@@ -835,6 +840,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
+  /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
+  const snoozeListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -972,19 +979,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machine_links: 1,
   });
 
+  const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
+  /**
+   * A row as the window and the phone read it (approval "inbox-snooze"): its
+   * `snoozed`, and a return drawn by the clock now (core inbox-snooze.ts). Only
+   * here, never in `store.listRow`, which agents read through.
+   */
+  const withSnooze = (row: InboxListRow, byThread = snoozesById(), now = new Date()): InboxListRow => {
+    const snooze = byThread.get(row.thread_id);
+    return snooze ? inboxRowAsOf({ ...row, snoozed: { until: snooze.until, at: snooze.at } }, now) : row;
+  };
+
   /**
    * The sidebar's folders: every project, with its thread and unread counts,
    * and (additive) `listed`, the threads the window's list holds, and
    * `archived`, the rest. The window leaves out a project with nothing listed
    * (the project menu's automatic hiding); an older window ignores both.
    */
-  const projectFolders = (rows: readonly InboxListRow[] = store.listRows()) => {
+  const projectFolders = (rows?: readonly InboxListRow[]) => {
+    const byThread = snoozesById();
+    const counted = rows ?? store.listRows().map((row) => withSnooze(row, byThread));
     return store.listProjects().map((project) => {
-      const mine = rows.filter((row) => row.project.id === project.id);
+      const mine = counted.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
       // The projects combined into this one: a link to one opens this project. Additive, and only when there are any.
       const combined = store.combinedInto(project.id).map(({ id, name, root }) => ({ id, name, root }));
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
+      // A snoozed thread is listed (its project stays, for the band) and not unread (nothing shows until it is back).
+      const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -1027,17 +1049,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * machine): every linked machine's rows join this Inbox's, each row with
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
-  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false) => {
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
     // One pass over the store feeds both the folders' counts and the sections.
-    // `pinned_at` (additive) on the window's and the phone's rows only: never on anything an agent reads.
+    // `pinned_at` and `snoozed` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
-    const own = store.listRows().map((row) => (pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
+    // Snoozes, by this reader's clock now (core inbox-snooze.ts): a row past its time stands as a return, in every mode.
+    const now = new Date();
+    const byThread = snoozesById();
+    const own = store.listRows().map((row) => withSnooze(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row, byThread, now));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
-    const rows: InboxListRow[] = merged ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id))] : own;
+    // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
+    const rows: InboxListRow[] = merged
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(row, now))]
+      : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
     const scoped = shownProject ? rows.filter((row) => row.project.id === shownProject) : rows;
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
+    const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
+    const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     return {
       serverSession,
       version,
@@ -1057,7 +1087,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // `?archived=exclude` (the window): archived threads leave every section,
       // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
       // Without it they stay in Quiet, as an older window and the phone expect.
-      sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
+      // `?snoozed=exclude` (the window): snoozed threads leave every section for `snoozed`, soonest back first.
+      // Without it they stay in their sections, each with its `snoozed` field, as an older window and the phone expect.
+      sections: inboxListSections(listed ? listed.rows : unarchived),
+      ...(listed ? { snoozed: listed.snoozed } : {}),
       /**
        * The sidebar's pinned threads (approval "inbox-pinned-threads"), in pin
        * order: every pinned thread whatever the project filter or `archived`
@@ -1149,6 +1182,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (value === null || value === "" || value === "include") return "include";
     if (value === "exclude") return "exclude";
     throw new InboxError("validation_error", "archived: include or exclude.", { field: "archived" });
+  };
+
+  /** `?snoozed=include|exclude` on the list: where snoozed threads go. Default `include` (in their sections). */
+  const snoozedModeOf = (url: URL): "include" | "exclude" => {
+    const value = url.searchParams.get("snoozed");
+    if (value === null || value === "" || value === "include") return "include";
+    if (value === "exclude") return "exclude";
+    throw new InboxError("validation_error", "snoozed: include or exclude.", { field: "snoozed" });
   };
 
   /** A whole number from a query parameter, within bounds; absent or empty is the default. */
@@ -1980,6 +2021,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId) pinListeners.add(onPins);
+        // A snooze changed or ran out: the list is read again. Windows, and a linked machine that asks (`snoozes=1`:
+        // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
+        const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
+        if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
         const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
@@ -2007,6 +2052,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
+          snoozeListeners.delete(onSnoozes);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();
@@ -2495,6 +2541,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
+  const snoozes = createInboxSnoozes({
+    store,
+    serverSession,
+    readBody: (req) => readBody(req),
+    json,
+    tell: () => {
+      for (const listener of snoozeListeners) listener();
+    },
+  });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts).
@@ -2746,7 +2802,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -2763,7 +2819,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         // Each decision's project carries its repo (as a thread does), so refs on its card link there.
-        const decisions = store.openDecisions({ projectId: projectFilterOf(url) }).map((decision) => {
+        // A snoozed thread's decisions wait with it (approval "inbox-snooze"): they come back with the thread.
+        const snoozedNow = store.snoozedThreads();
+        const open = store.openDecisions({ projectId: projectFilterOf(url) }).filter((decision) => !snoozedNow.has(decision.thread.id));
+        const decisions = open.map((decision) => {
           // The thread's own folder: `thread.project` is the head of a combined project.
           const root = store.thread(decision.thread.id)?.project.root;
           return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
@@ -3054,6 +3113,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
+      // Snooze and Unsnooze (approval "inbox-snooze").
+      const snoozed = await snoozes.route(req, url);
+      if (snoozed) return snoozed;
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url);
       if (embedded) return embedded;
@@ -3197,7 +3259,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: store.listRow(thread.thread_id) });
+        const row = store.listRow(thread.thread_id);
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row && withSnooze(row) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -3740,6 +3803,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     imageCapture.stop();
     clearInterval(uploadSweep);
     stopPinEvents();
+    snoozes.stop();
     clearInterval(restartWatch);
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);

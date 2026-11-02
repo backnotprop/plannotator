@@ -624,7 +624,7 @@ import { GuideCard } from "@plannotator/ui/components/inbox-thread/GuideCard";
 @import "@plannotator/ui/inbox-thread.css";
 ```
 
-- **In the folder so far.** `icons` (`Icon`, `HostMark`, `AuthorMark`, `TabGlyph`, `TailscaleMark`), `Tip` (`Tip`, `isTextCut`), `FileName`, `GuideCard`, `SkillsLine`, `ReaskNote`, and `reask` (the pure Re-ask rules).
+- **In the folder so far.** `icons` (`Icon`, `HostMark`, `AuthorMark`, `TabGlyph`, `TailscaleMark`), `Tip` (`Tip`, `isTextCut`), `FileName`, `GuideCard`, `SkillsLine`, `ReaskNote`, `reask` (the pure Re-ask rules), and `SnoozeMenu` (ui 0.57.0: `SnoozeTimes`, the Snooze times and Pick a time views a host renders inside its own Base UI `Menu.Popup`, and `SnoozePicker`, the day and half-hour lists; the times come from `@plannotator/core/inbox-snooze`, core 0.25.15, and the part only calls `onPick(untilIso)`).
 - **Host-neutral.** A part takes what it shows as props, over core's `InboxMessageWire`, `InboxAttachmentState` and related types. It makes no request and reads no route, hash, cookie or storage. `tests/inbox-thread-parts-host-neutral.test.ts` fails if one does.
 - **Tooltips.** `Tip` portals into the nearest `[data-pn-tooltip-root]`, so put that attribute on your `.pn-inbox` root, the same element: the sheet styles nothing outside that root. Without a `TooltipProvider`, each `Tip` keeps its own 150 ms delay.
 - **Styles.** The parts draw with the Inbox's `ib-` classes, and those rules stay in `packages/inbox/inbox.css`, their only source. `@plannotator/ui/inbox-thread.css` is generated from that file at `prepack` (the pattern of `bridge-script.asset.js`; gitignored, in `files`). It is the whole sheet, about 560 KB raw and 79 KB gzipped, not a subset. What a host has to do is under "Consuming it".
