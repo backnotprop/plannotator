@@ -51,6 +51,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { useReplyDraft } from '../replyDraft';
+import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
@@ -81,7 +82,7 @@ import { ReaskNote } from './ReaskNote';
 import { TidyNote } from './Tidy';
 import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } from '../reask';
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
-import { InboxComposerField } from './ComposerField';
+import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
@@ -1147,6 +1148,11 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
 const REPLY_BOX_CONTROLS =
   'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
 
+/** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
+function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
+  return <InboxComposerField {...props} value={useReplyText(replyText)} />;
+}
+
 /**
  * A press anywhere else in the reply box puts the caret in its text, as a
  * press anywhere in an input does. The box is drawn as one field with a focus
@@ -1382,14 +1388,32 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const threadRef = useRef(thread);
   threadRef.current = thread;
 
-  const [box, setBox] = useState<{ open: boolean; text: string }>({ open: false, text: '' });
+  /**
+   * The reply box: open or not here, its words in `replyText` (replyText.ts), so a key typed re-renders the
+   * field alone, never this pane and its messages. Read the words with `replyText.get()` (or `boxRef`) where
+   * they are acted on; a render reads only whether there are any (`boxHasWords`).
+   */
+  const [boxOpen, setBoxOpen] = useState(false);
+  const replyText = useReplyTextStore();
+  const box = { open: boxOpen };
+  const setBox = useCallback(
+    (next: { open: boolean; text: string }) => {
+      replyText.set(next.text);
+      setBoxOpen(next.open);
+    },
+    [replyText],
+  );
+  const boxHasWords = useReplyHasWords(replyText);
   /**
    * The reply box's words, kept per thread as a server draft (approval
    * "inbox-reply-drafts"): saved while typing, back when the thread opens.
    */
   const replyDraft = useReplyDraft(thread.thread_id);
-  /** The words a Send carries: the box's, or (the box closed) those kept as its draft. */
-  const boxWords = box.open ? box.text.trim() : ((replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '');
+  const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
+  /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
+  const hasWords = box.open ? boxHasWords : keptWords !== '';
+  /** The words a Send carries, as they are now: the box's, or (the box closed) those kept as its draft. */
+  const boxWords = () => (box.open ? replyText.get().trim() : keptWords);
   /** The box closed: the long pastes its draft keeps (approval "inbox-paste-attachment"), which a Send carries too. */
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
@@ -1411,7 +1435,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     onPasted: (names) => announce(attachedAnnouncement(names)),
     onPutBack: () => announce('The pasted text is back in your reply.'),
     machine: machine?.id ?? null,
-    text: { value: box.text, set: (text) => changeReply(text, true) },
+    text: {
+      get value() {
+        return replyText.get();
+      },
+      set: (text) => changeReply(text, true),
+    },
   });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   /**
@@ -1836,7 +1865,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const keepOpen = skipIds.size === 0;
   const toggleKeepOpen = () => setSkipArmed(keepOpen ? new Set(unanswered.map((u) => u.id)) : null);
   const skipping = !keepOpen;
-  const asking = askingSessionOf(thread, { skip: skipIds, carries: boxWords !== '' || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
+  const asking = askingSessionOf(thread, { skip: skipIds, carries: hasWords || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
   const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
@@ -2790,8 +2819,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // its copy here follows. A box with no edits since its last save or read takes the new words (or
   // closes when the draft is gone); a box with edits keeps them, and the conflict shows (replyDraft.ts).
   const reloadDraft = replyDraft.reload;
-  const boxRef = useRef(box);
-  boxRef.current = box;
+  // The box as it is now: open as of this render (or as a change in this event made it), its words as they are now.
+  const liveBox = (open: boolean): { open: boolean; readonly text: string } => ({
+    open,
+    get text() {
+      return replyText.get();
+    },
+  });
+  const boxRef = useRef(liveBox(box.open));
+  boxRef.current = liveBox(box.open);
   const hasFilesRef = useRef(false);
   hasFilesRef.current = replyFiles.files.length > 0;
   useEffect(() => {
@@ -2900,7 +2936,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setError(null);
   });
   // The box open with words or files in it, wherever focus is: the list options dialog waits for it (App).
-  const unsentWriting = box.open && (boxWords !== '' || replyFiles.files.length > 0);
+  const unsentWriting = box.open && (boxHasWords || replyFiles.files.length > 0);
   useEffect(() => {
     reportUnsentReply({ subject: unsentSubject, files: unsentFiles, writing: unsentWriting });
     return () => reportUnsentReply(null);
@@ -3246,7 +3282,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (behind && !boxRef.current.open) restoringRef.current = true;
     setBox({ open: true, text });
     // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
-    boxRef.current = { open: true, text };
+    boxRef.current = liveBox(true);
+    // A long paste's tile keeps its place in the words, edit by edit (this pane does not render for a key).
+    replyFiles.follow();
     // The long pastes beside the words go in the draft too, each placed in these words (approval "inbox-paste-attachment").
     const pastes = replyFiles.pastedDraft(text);
     pastedSaved.current = pastedSignature(pastes);
@@ -3345,7 +3383,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const earlier = unconfirmed.get(thread.thread_id);
     if (!earlier) return;
     if (!thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === earlier.key)) return;
-    if (box.open && box.text.trim() === earlier.words) {
+    if (box.open && replyText.get().trim() === earlier.words) {
       finishLanded(earlier);
       void reloadFiles();
     } else {
@@ -3353,7 +3391,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       unconfirmed.delete(thread.thread_id);
       replyDraft.expectOwnClear(earlier.words);
       const leftover = leftoverText(earlier);
-      const line = box.open && box.text.trim() ? 'Your earlier reply went; Send sends your edited words as another reply.' : (leftover ?? 'Your reply went.');
+      const line = box.open && replyText.get().trim() ? 'Your earlier reply went; Send sends your edited words as another reply.' : (leftover ?? 'Your reply went.');
       setError(line);
       announce(line);
       if (!box.open) void replyDraft.reload();
@@ -3415,7 +3453,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
     if (askerEnded && anyOtherLive && asking && !options.routed) {
-      const empty = picksCount === 0 && records.length === 0 && boxWords === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
+      const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
         return;
@@ -3484,7 +3522,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // first. There, that Send is finished and nothing goes again; not there, this is an ordinary new Send.
       const earlier = unconfirmed.get(current.thread_id);
       unconfirmed.delete(current.thread_id);
-      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords) {
+      if (earlier && Date.now() - earlier.at < UNCONFIRMED_MS && box.open && earlier.words === boxWords()) {
         const landed = await replyLanded(current.thread_id, earlier.key);
         if (landed === 'unknown') {
           unconfirmed.set(current.thread_id, earlier);
@@ -3503,7 +3541,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           return;
         }
       }
-      let words = boxWords;
+      let words = boxWords();
       let draftSavedAs: string | null = null;
       /** The long pastes a closed box's draft keeps (approval "inbox-paste-attachment"): they go with its words. */
       let draftUploads: string[] = [];
@@ -4131,18 +4169,21 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * sends it. The card has no words of its own: it shows the box's (or, the box closed, the kept draft's) and
    * writes through `changeReply`, so typing in either is the one draft; Send is this thread's Send.
    */
+  const composerShown = !!file && shownFull && !resolved;
+  // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
+  const composerText = useReplyTextWhile(replyText, composerShown);
   const composer: FullScreenComposerValue | null =
-    file && shownFull && !resolved
+    composerShown
       ? {
           threadId: thread.thread_id,
           phone,
           reply: {
             to: replyName ?? asker,
-            value: box.open ? box.text : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
             onSend: () => void send({ stayFull: true }),
             sending,
-            canSend: boxWords !== '' || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
+            canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
             picks: picksCount,
             annotations: records.length,
             comments: {
@@ -5330,7 +5371,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             ref={guardRef}
             questions={staleQuestions}
             thread={thread}
-            words={boxWords}
+            words={boxWords()}
             otherPicks={picksCount}
             annotations={records.length}
             onAnswerNew={(target) => {
@@ -5368,7 +5409,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ? `Reply to ${replyName}`
                     : `Reply to ${asker} in ${thread.project.name}`
               }
-              savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
+              savedAt={boxHasWords ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
               conflict={
                 replyDraft.conflict !== null
@@ -5376,7 +5417,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                       id: conflictId,
                       text: conflictText(conflictSentElsewhere),
                       onKeepMine: () => {
-                        replyDraft.keepMine(box.text, replyFiles.pastedDraft(box.text));
+                        const mine = replyText.get();
+                        replyDraft.keepMine(mine, replyFiles.pastedDraft(mine));
                         announce('Your words are saved.');
                         requestAnimationFrame(() => textRef.current?.focus());
                       },
@@ -5408,7 +5450,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 if (replyFiles.paste(event)) setError(null);
               }}
             >
-              <InboxComposerField
+              <ReplyTextField
+                replyText={replyText}
                 textareaRef={textRef}
                 voice={voice}
                 ariaLabel={`Reply to ${replyName ?? asker}`}
@@ -5416,7 +5459,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 placeholder="Write a reply"
                 destination="your reply"
                 tags={composerTags}
-                value={box.text}
                 onChange={(text) => changeReply(text)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
