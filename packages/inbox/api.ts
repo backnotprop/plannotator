@@ -736,6 +736,11 @@ export function setPageSession(value: string): void {
   if (pageSession === null) pageSession = value;
 }
 
+/** For a DOM test file that runs after another one in the same process (without `--isolate`) against its own server: the first file's session would otherwise stay. */
+export function resetPageSessionForTests(): void {
+  pageSession = null;
+}
+
 /** The page's serverSession (null before the first list read), for a keepalive request built by hand. */
 export function pageServerSession(): string | null {
   return pageSession;
