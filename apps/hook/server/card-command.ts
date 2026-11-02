@@ -58,7 +58,8 @@ const POSITIONAL: Record<Op, { names: readonly string[]; required: number }> = {
 };
 
 export function parseCardCommand(argv: readonly string[]): ParsedCardCommand {
-  const op = argv[0] as Op | undefined;
+  // `card done <crd_id>` is `card ship` (its column is Done).
+  const op = (argv[0] === "done" ? "ship" : argv[0]) as Op | undefined;
   if (!op || !Object.hasOwn(POSITIONAL, op)) return { ok: false, error: op ? `Unknown card command: ${op}` : "A card command: create, move, say, link, ship, drop or list." };
   const args: Record<string, unknown> = { op };
   const positional: string[] = [];

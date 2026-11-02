@@ -82,7 +82,7 @@ export interface BoardPageProps {
   onMove: (card: InboxCardWire, move: BoardMove) => Promise<InboxCardWire | null>;
   /** A card was made or edited here: read the cards again (the event stream does too). */
   onChanged: (card?: InboxCardWire) => void;
-  /** The person looked at these agents' drops ("Got it", or the Icebox page while it is in front): only those are marked seen. */
+  /** The person looked at these agents' drops ("Got it", or the Cancelled page while it is in front): only those are marked seen. */
   onSeeDrops: (ids: readonly string[]) => void;
   /** A thread of the opened card opens in the Inbox view, with a way back to the card. */
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
@@ -94,7 +94,7 @@ export interface BoardPageProps {
   tidy?: TidyController;
   /**
    * The project the Board shows (`#board&project=prj_…`, the list's own key), or null for every card.
-   * Lanes, counts, Shipped, Icebox and the agents' drops all follow it.
+   * Lanes, counts, Done, Cancelled and the agents' drops all follow it.
    */
   project?: string | null;
   onProject?: (project: string | null) => void;
@@ -107,11 +107,11 @@ export interface BoardPageProps {
 
 /**
  * The Board (approval "inbox-board", step 2): the five live columns as lanes
- * (Soft + Lanes), cards in variant C "Lean", Shipped and Icebox as links to
+ * (Soft + Lanes), cards in variant C "Lean", Done and Cancelled as links to
  * their own lists, the agents' unseen drops above the lanes. A card opens in
  * a panel beside the Board (the lanes narrow and scroll, so the card's lane
- * stays in view); on a phone the lanes are one stacked list (Shipped and
- * Icebox folded at the end) and an opened card is a full screen. Every move
+ * stays in view); on a phone the lanes are one stacked list (Done and
+ * Cancelled folded at the end) and an opened card is a full screen. Every move
  * is on the opened card's column menu (the keyboard's way), and on a desktop
  * a card can be dragged to another lane.
  */
@@ -141,7 +141,8 @@ export function BoardPage(props: BoardPageProps) {
       .catch(() => {});
   }, [props.claimIntro]);
   const promptCopy = useCopyBoardPrompt(props.mcpCommand);
-  const liveCount = counts.inFlight;
+  // Cards on the lanes (Backlog too): none is the empty Board's line. "In flight" in the header leaves Backlog out.
+  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column)).length;
   const [sendingCard, setSendingCard] = useState<InboxCardWire | null>(null);
   const [said, setSaid] = useState('');
   const [failed, setFailed] = useState<string | null>(null);
@@ -218,7 +219,7 @@ export function BoardPage(props: BoardPageProps) {
   // A New card dialog makes one card, whatever its retries. Each try that makes it has its own key and
   // its own content; when a try's answer is lost, the next try first replays that try exactly (its key,
   // its words), which answers the card it made (or makes it now), and then brings the card to what the
-  // dialog says now (title, notes, added links, Backlog or Icebox). So editing the title after a lost
+  // dialog says now (title, notes, added links, Backlog). So editing the title after a lost
   // answer never reuses a key with other words (`idempotency_key_reused`) and never makes a second card.
   const dialogKey = useRef('');
   /** The card a New card dialog already made (a retry reconciles and sends that one, never a second). */
@@ -260,7 +261,7 @@ export function BoardPage(props: BoardPageProps) {
   /** One try at making the dialog's card, with its own key and these words; replayable as it is. */
   const makeTry = (input: NewCardInput): { key: string; run: () => Promise<InboxCardWire> } => {
     const key = newUuid();
-    const column: 'backlog' | 'icebox' = input.mode === 'icebox' ? 'icebox' : 'backlog';
+    const column = 'backlog' as const;
     if (input.mode === 'send' && input.to && !input.to.project.id) {
       // A folder the Inbox has not seen has no project yet: the thread makes it, and the card is
       // made and sent in one step with it (checked by the server before anything is written).
@@ -323,16 +324,16 @@ export function BoardPage(props: BoardPageProps) {
       card = (await inboxApi.editCard(card.id, { op: 'edit', title: input.title, notes: input.notes })).card;
     }
     for (const ref of input.refs) if (!was || !was.refs.includes(ref)) card = (await inboxApi.editCard(card.id, { op: 'link', ref })).card;
-    const column = input.mode === 'icebox' ? 'icebox' : 'backlog';
-    if (card.column !== column) card = (await inboxApi.moveCard(card.id, column === 'icebox' ? { op: 'icebox' } : { op: 'move', column: 'backlog' })).card;
+    // A card the dialog made but has not sent yet stays in Backlog (a send moves it to Todo).
+    if (!card.sent && card.column !== 'backlog') card = (await inboxApi.moveCard(card.id, { op: 'move', column: 'backlog' })).card;
     dialogCard.current = card;
     madeFrom.current = { input, target };
     return card;
   };
 
   /**
-   * Make a card from New card: Backlog or Icebox in a project, or sent to an
-   * agent. Sending makes the card first (Backlog, in the session's project)
+   * Make a card from New card: Backlog in a project, or sent to an agent
+   * (Todo). Sending makes the card first (Backlog, in the session's project)
    * and names it in the message, so the agent never gets "it is yours now"
    * for a card that does not exist; a retry reuses the card and the key.
    */
@@ -349,7 +350,7 @@ export function BoardPage(props: BoardPageProps) {
         setSaid(`Sent “${input.title}” to ${hostLabel(input.to.host)}${elsewhere}.`);
       } else {
         props.onChanged(card);
-        setSaid(`Added “${input.title}” to ${input.mode === 'icebox' ? 'Icebox' : 'Backlog'}${elsewhere}.`);
+        setSaid(`Added “${input.title}” to Backlog${elsewhere}.`);
       }
       setCreating(null);
       resetDialog();
@@ -360,7 +361,7 @@ export function BoardPage(props: BoardPageProps) {
     }
   };
 
-  /** Send a Backlog card nobody was asked about: a new thread to the agent (its notes the message), then the card is sent. */
+  /** Send a card nobody was asked about: a new thread to the agent (its notes the message), then the card is sent. */
   const sendExisting = async (card: InboxCardWire, input: NewCardInput): Promise<string | null> => {
     if (!input.to) return 'Choose an agent to send it to.';
     const key = dialogKey.current || newUuid();
@@ -448,17 +449,17 @@ export function BoardPage(props: BoardPageProps) {
       </div>
     );
   else if (phone) body = <PhoneBoard cards={cards} counts={counts} {...common} onRestore={(card) => move(card, { op: 'restore' })} />;
-  else if (view === 'shipped')
+  else if (view === 'done')
     body = (
       <CardList
-        title="Shipped"
-        empty={project ? <>Nothing shipped in {inProject} yet.</> : 'Nothing shipped yet. A card goes here when its work is merged or live.'}
-        cards={cards.filter((c) => c.column === 'shipped')}
+        title="Done"
+        empty={project ? <>Nothing done in {inProject} yet.</> : 'Nothing done yet. A card goes here when its work is merged, live or finished.'}
+        cards={cards.filter((c) => c.column === 'done')}
         {...common}
       />
     );
-  else if (view === 'icebox')
-    body = <IceboxPage cards={cards} inProject={project ? inProject : null} {...common} onRestore={(card) => move(card, { op: 'restore' })} onSeeDrops={props.onSeeDrops} unseen={drops} />;
+  else if (view === 'cancelled')
+    body = <CancelledPage cards={cards} inProject={project ? inProject : null} onRestore={(card) => move(card, { op: 'restore' })} onSeeDrops={props.onSeeDrops} unseen={drops} />;
   else body = <Lanes cards={cards} {...common} openColumn={open?.column ?? null} onMove={(card, column) => void move(card, { op: 'move', column })} />;
 
   const titleId = useId();
@@ -504,7 +505,7 @@ export function BoardPage(props: BoardPageProps) {
               Board
             </button>
             <h1 id={titleId} tabIndex={-1}>
-              {view === 'shipped' ? 'Shipped' : 'Icebox'}
+              {view === 'done' ? 'Done' : 'Cancelled'}
             </h1>
             {!narrowHead && filter}
           </>
@@ -513,22 +514,11 @@ export function BoardPage(props: BoardPageProps) {
             <h1 id={titleId} tabIndex={-1}>
               Board
             </h1>
-            {model && (
-              <span className="ib-bsum" data-board-summary="">
-                {counts.inFlight === 0 ? (
-                  'Nothing in flight'
-                ) : (
-                  <>
-                    {phone ? formatCount(counts.inFlight) : `${formatCount(counts.inFlight)} in flight`} · <b>{formatCount(counts.onYou)} on you</b>
-                  </>
-                )}
-              </span>
-            )}
             {!phone && !narrowHead && filter}
           </>
         )}
         <span className="ib-bsp" />
-        {/* The "?" sits left of Shipped and Icebox (the intro mock). */}
+        {/* The "?" sits left of Done and Cancelled (the intro mock). */}
         {(view === 'lanes' || phone) && (
           <Tip content="About the Board">
             <button type="button" className="ib-iconbtn ib-babout" aria-label="About the Board" aria-haspopup="dialog" onClick={() => setIntro(true)} data-board-about="">
@@ -538,12 +528,12 @@ export function BoardPage(props: BoardPageProps) {
         )}
         {!phone && view === 'lanes' && model && (
           <nav className="ib-blinks" aria-label="Cards out of the lanes">
-            <a href="#board=shipped" data-board-link="shipped" onClick={(event) => (event.preventDefault(), props.onView('shipped'))}>
-              Shipped {formatCount(counts.shipped)}
+            <a href="#board=done" data-board-link="done" onClick={(event) => (event.preventDefault(), props.onView('done'))}>
+              Done {formatCount(counts.done)}
             </a>
             <span aria-hidden="true">·</span>
-            <a href="#board=icebox" data-board-link="icebox" onClick={(event) => (event.preventDefault(), props.onView('icebox'))}>
-              Icebox {formatCount(counts.icebox)}
+            <a href="#board=cancelled" data-board-link="cancelled" onClick={(event) => (event.preventDefault(), props.onView('cancelled'))}>
+              Cancelled {formatCount(counts.dropped)}
             </a>
           </nav>
         )}
@@ -553,8 +543,8 @@ export function BoardPage(props: BoardPageProps) {
         )}
       </div>
       {(phone || narrowHead) && filter && <div className="ib-bfbar">{filter}</div>}
-      {model && drops.length > 0 && view !== 'icebox' && (
-        <DroppedNotice drops={drops} onRestore={(card) => move(card, { op: 'restore' })} onSeen={() => props.onSeeDrops(drops.map((card) => card.id))} onOpenIcebox={phone ? null : () => props.onView('icebox')} />
+      {model && drops.length > 0 && view !== 'cancelled' && (
+        <DroppedNotice drops={drops} onRestore={(card) => move(card, { op: 'restore' })} onSeen={() => props.onSeeDrops(drops.map((card) => card.id))} onOpenCancelled={phone ? null : () => props.onView('cancelled')} />
       )}
       {failed && (
         <div className="ib-error ib-bfail" role="alert">
@@ -566,7 +556,7 @@ export function BoardPage(props: BoardPageProps) {
         cardOf={(id) => allCards.find((c) => c.id === id) ?? null}
         rowOf={props.rowOf}
         onTarget={setMenuId}
-        onColumn={(card, column) => void move(card, column === 'icebox' ? { op: 'icebox' } : { op: 'move', column }, true)}
+        onColumn={(card, column) => void move(card, { op: 'move', column }, true)}
         onRestore={(card) => void move(card, { op: 'restore' })}
         onDrop={(card) => {
           setDropAsk((ask) => ({ id: card.id, n: (ask?.n ?? 0) + 1 }));
@@ -781,11 +771,10 @@ function Lanes({
 }
 
 const LANE_EMPTY: Partial<Record<InboxCardColumn, string>> = {
-  backlog: 'Nothing waiting. A card here is not sent to any agent.',
-  designing: 'No agent is designing anything.',
-  your_look: 'Nothing waits on your look.',
-  building: 'No agent is building anything.',
-  your_review: 'Nothing waits on your review.',
+  backlog: 'No ideas here. A card here is not sent to any agent.',
+  todo: 'Nothing asked and waiting to start.',
+  in_progress: 'No agent is working on anything.',
+  in_review: 'Nothing waits on your review.',
 };
 
 /** A lane card's title is cut (clamped at three lines, or a word cut at the edge): its button overflows. */
@@ -909,17 +898,17 @@ function BoardCard({
   );
 }
 
-/** "2 dropped by an agent", with each title and reason, until the person has looked. */
+/** "2 cancelled by an agent", with each title and reason, until the person has looked. */
 function DroppedNotice({
   drops,
   onRestore,
   onSeen,
-  onOpenIcebox,
+  onOpenCancelled,
 }: {
   drops: readonly InboxCardWire[];
   onRestore: (card: InboxCardWire) => unknown;
   onSeen: () => void;
-  onOpenIcebox: (() => void) | null;
+  onOpenCancelled: (() => void) | null;
 }) {
   const headingId = useId();
   return (
@@ -927,12 +916,12 @@ function DroppedNotice({
       <div className="ib-bdrops-h">
         <Icon name="warn" size={16} />
         <h2 id={headingId}>
-          {formatCount(drops.length)} dropped by {drops.length === 1 ? 'an agent' : 'agents'}
+          {formatCount(drops.length)} cancelled by {drops.length === 1 ? 'an agent' : 'agents'}
         </h2>
         <span className="ib-bsp" />
-        {onOpenIcebox && (
-          <button type="button" className="ib-lnk" onClick={onOpenIcebox}>
-            See Dropped
+        {onOpenCancelled && (
+          <button type="button" className="ib-lnk" onClick={onOpenCancelled}>
+            See Cancelled
           </button>
         )}
         <button type="button" className="ib-btn ib-sm" data-dropped-seen="" onClick={onSeen}>
@@ -958,7 +947,7 @@ function DroppedNotice({
   );
 }
 
-/** A list of cards (Shipped, Icebox), newest move first. */
+/** A list of cards (Done), newest move first. */
 function CardList({ title, empty, cards, ...common }: CardCommon & { title: string; empty: ReactNode; cards: readonly InboxCardWire[] }) {
   const id = useId();
   return (
@@ -980,18 +969,17 @@ function CardList({ title, empty, cards, ...common }: CardCommon & { title: stri
 }
 
 /**
- * The Icebox page: cards the person put aside (nothing happens to them: no
- * agent is told, nothing moves them), then Dropped with the date, who dropped
- * it, the reason and Restore. Opening it is the person looking at Dropped.
+ * The Cancelled page (the Dropped column; approval "inbox-board-columns-v2"):
+ * each card with the date, who cancelled it, the reason and Restore. Opening
+ * it is the person looking at the agents' cancels.
  */
-function IceboxPage({
+function CancelledPage({
   cards,
   inProject,
   onRestore,
   onSeeDrops,
   unseen,
-  ...common
-}: CardCommon & {
+}: {
   cards: readonly InboxCardWire[];
   /** Filtered to a project: its name, for the empty lines. */
   inProject: ReactNode;
@@ -1022,16 +1010,9 @@ function IceboxPage({
     window.addEventListener('focus', retry);
     return stop;
   }, [unseenKey, onSeeDrops]);
-  const iced = cards.filter((c) => c.column === 'icebox');
   const dropped = cards.filter((c) => c.column === 'dropped').sort((a, b) => (b.dropped?.at ?? b.moved_at).localeCompare(a.dropped?.at ?? a.moved_at));
   return (
     <div className="ib-blists">
-      <CardList
-        title="Icebox"
-        empty={inProject ? <>Nothing on ice in {inProject}.</> : 'Nothing on ice. Put a card here to set it aside: no agent is told and nothing moves it.'}
-        cards={iced}
-        {...common}
-      />
       <DroppedList cards={dropped} onRestore={onRestore} inProject={inProject} />
     </div>
   );
@@ -1042,7 +1023,7 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
   return (
     <section className="ib-blist" aria-labelledby={id} data-dropped-list="">
       <h2 id={id} className="ib-blist-h" tabIndex={-1}>
-        Dropped <span className="ib-lane-n">{formatCount(cards.length)}</span>
+        Cancelled <span className="ib-lane-n">{formatCount(cards.length)}</span>
       </h2>
       {cards.length > 0 ? (
         <ul className="ib-drops">
@@ -1055,7 +1036,7 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
                     {card.title}
                   </span>
                   <span className="ib-drop-meta" dir="auto">
-                    {card.dropped ? `Dropped ${whenTime(card.dropped.at)} by ${by}` : 'Dropped'}
+                    {card.dropped ? `Cancelled ${whenTime(card.dropped.at)} by ${by}` : 'Cancelled'}
                     {card.dropped?.reason ? `: ${card.dropped.reason}` : ''}
                   </span>
                 </span>
@@ -1067,7 +1048,7 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
           })}
         </ul>
       ) : (
-        <p className="ib-lane-empty">{inProject ? <>Nothing dropped in {inProject}.</> : 'Nothing dropped. A dropped card is kept here and can be restored.'}</p>
+        <p className="ib-lane-empty">{inProject ? <>Nothing cancelled in {inProject}.</> : 'Nothing cancelled. A cancelled card is kept here and can be restored.'}</p>
       )}
     </section>
   );
@@ -1075,7 +1056,7 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
 
 /**
  * A phone: the lanes as one stacked list in column order, each foldable,
- * with Shipped and Icebox (Dropped inside it) folded at the end. No drag: a
+ * with Done and Cancelled folded at the end. No drag: a
  * card opens full screen, where its column menu moves it.
  */
 function PhoneBoard({
@@ -1084,7 +1065,7 @@ function PhoneBoard({
   onRestore,
   ...common
 }: CardCommon & { cards: readonly InboxCardWire[]; counts: ReturnType<typeof boardCounts>; onRestore: (card: InboxCardWire) => unknown }) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(['shipped', 'icebox']));
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(['done', 'dropped']));
   const toggle = (key: string) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -1109,17 +1090,12 @@ function PhoneBoard({
     body: list(lane.cards, LANE_EMPTY[lane.column] ?? ''),
   }));
   const dropped = cards.filter((c) => c.column === 'dropped');
-  groups.push({ key: 'shipped', label: 'Shipped', count: counts.shipped, body: list(cards.filter((c) => c.column === 'shipped'), 'Nothing shipped yet.') });
+  groups.push({ key: 'done', label: 'Done', count: counts.done, body: list(cards.filter((c) => c.column === 'done'), 'Nothing done yet.') });
   groups.push({
-    key: 'icebox',
-    label: 'Icebox',
-    count: counts.icebox,
-    body: (
-      <>
-        {list(cards.filter((c) => c.column === 'icebox'), 'Nothing on ice.')}
-        {dropped.length > 0 && <DroppedList cards={dropped} onRestore={onRestore} />}
-      </>
-    ),
+    key: 'dropped',
+    label: 'Cancelled',
+    count: counts.dropped,
+    body: dropped.length > 0 ? <DroppedList cards={dropped} onRestore={onRestore} /> : <p className="ib-lane-empty">Nothing cancelled.</p>,
   });
   return (
     <div className="ib-bstack">
@@ -1271,9 +1247,8 @@ function OpenedCard({
       phone={phone}
       now={now}
       onClose={onClose}
-      onColumn={(column) => onMove(column === 'icebox' ? { op: 'icebox' } : { op: 'move', column })}
-      onShip={() => onMove({ op: 'move', column: 'shipped' })}
-      onIcebox={() => onMove({ op: 'icebox' })}
+      onColumn={(column) => onMove({ op: 'move', column })}
+      onShip={() => onMove({ op: 'move', column: 'done' })}
       onRestore={() => onMove({ op: 'restore' })}
       onDrop={(reason, fromMenu) => onMove({ op: 'drop', reason }, fromMenu)}
       dropAsk={dropAsk}
