@@ -144,7 +144,7 @@ let current: ListLook | null = null;
  */
 let serverRev = -1;
 let serverLook: ListLook | null = null;
-/** The last count `event: rows` brought: the stream sends every save once, in order, so the next is always above it. */
+/** The last count `event: rows` brought: one stream sends every save once, in order, so the next is above it. */
 let eventRev = -1;
 /** One save on its way at a time; a change meanwhile waits as `queued` (only the latest one), sent when it answers. */
 let inFlight = false;
@@ -248,8 +248,8 @@ export function listLookReadMark(): number {
  * save to make, it is kept and shown once every save answered. A name no build knows is dropped.
  *
  * The count only goes up, unless config.json is reset, restored or hand-edited. A read answers a count at least the
- * one this page had heard when it was sent (`sentAt`, from `listLookReadMark`), and the stream's events count up one
- * by one; one below that means the count went back, so the page takes it and counts again from there.
+ * one this page had heard when it was sent (`sentAt`, from `listLookReadMark`); one below it means the count went
+ * back, so the page takes it and counts again from there. An event cannot tell (`hearRowsEvent`): it asks for a read.
  */
 export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): void {
   if (rows === undefined) return;
@@ -257,11 +257,19 @@ export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): v
   adopt(rows, rev);
 }
 
-/** Another save, here or in another window (`event: rows`): see `adoptSavedRows`. */
-export function hearRowsEvent(rows: unknown, rev?: unknown): void {
+/**
+ * Another save, here or in another window (`event: rows`): see `adoptSavedRows`. One at or below the last event's
+ * count is never taken: it is the count gone back, or a late copy of an old one (during a leader steal two tabs
+ * relay frames, and a rows frame has no seq to tell copies apart, sharedEvents.ts). Only a settings read can tell
+ * which, so `onDoubt` asks for one.
+ */
+export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void): void {
   if (rows === undefined) return;
   if (typeof rev === 'number') {
-    if (rev <= eventRev) serverRev = -1;
+    if (rev <= eventRev) {
+      onDoubt?.();
+      return;
+    }
     eventRev = rev;
   }
   adopt(rows, rev);

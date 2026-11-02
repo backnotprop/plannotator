@@ -1598,7 +1598,8 @@ function Inbox() {
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
-        onRows: hearRowsEvent,
+        // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
+        onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);

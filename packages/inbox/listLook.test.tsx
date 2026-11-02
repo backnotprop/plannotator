@@ -409,10 +409,45 @@ describe('the saved look', () => {
     const mark = listLookReadMark();
     adoptSavedRows(['roomy'], 2, mark);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
-    // An event below the last event: the stream counts up one by one, so the count went back.
+    // An event at or below the last event's count is not taken (gone back, or a late copy?): it asks for a read, and
+    // the read, below what the page had heard when it was sent, is taken.
+    let doubts = 0;
     hearRowsEvent(['highlight'], 7);
-    hearRowsEvent(['titleFirst'], 1);
+    const sent = listLookReadMark();
+    hearRowsEvent(['titleFirst'], 1, () => (doubts += 1));
+    expect(doubts).toBe(1);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true });
+    adoptSavedRows(['titleFirst'], 1, sent);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true });
+  });
+
+  // Delta review of #2516: in a leader steal two tabs relay the same frames, and a rows frame has no seq.
+  test("a late copy of an old event never undoes this page's newer save: it asks for a read instead", async () => {
+    let doubts = 0;
+    serverRev = 4;
+    hearRowsEvent(['highlight'], 4);
+    void writeListLookOption('compact', true);
+    await answer();
+    hearRowsEvent(['highlight', 'compact'], 5);
+    hearRowsEvent(['highlight'], 4, () => (doubts += 1));
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+    expect(doubts).toBe(1);
+    // The read it asks for answers the server's count, 5: at the mark, so nothing changes.
+    adoptSavedRows(['highlight', 'compact'], 5, listLookReadMark());
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+  });
+
+  // The count went back to exactly the one heard before the save, while a newer one was heard during it.
+  test("a save's answer equal to the count heard before it is the count gone back: this page's look is taken", async () => {
+    hearRowsEvent(['highlight'], 2);
+    held = [];
+    serverRev = 1;
+    void writeListLookOption('compact', true);
+    // Before it lands: another window's save (3), then config.json reset and that window's next save (1).
+    hearRowsEvent(['roomy'], 3);
+    hearRowsEvent(['titleFirst'], 1, () => {});
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
   });
 
   test('a read is old, not gone back, when it answers at least the count heard when it was sent', () => {
