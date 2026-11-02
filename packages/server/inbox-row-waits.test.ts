@@ -9,7 +9,7 @@
  *    `Stopped:` line and `Holds up:` entries; a question with neither, a
  *    question picked, and a row with no badge carry nothing;
  *  - capped (at most 8 questions, the words cut);
- *  - never in what agents read (read_thread's list, wait_for_reply);
+ *  - never in what agents read (read_thread's list);
  *  - the phone door forwards it unchanged.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -135,7 +135,7 @@ describe("the list row's waits", () => {
     }
   });
 
-  test("agents never read it: read_thread's list and wait_for_reply", async () => {
+  test("agents never read it: read_thread's list", async () => {
     const w = await world();
     const sent = await w.send(block("Ship it behind a flag?", ["Holds up: the retry worker"]), { thread: "flag" });
     expect((await w.rows())[0]!.waits).toHaveLength(1);
@@ -143,8 +143,6 @@ describe("the list row's waits", () => {
     const text = JSON.stringify(listed);
     expect(text).not.toContain('"waits"');
     expect(text).toContain(sent.thread_id);
-    const waited = await w.client.callTool({ name: "wait_for_reply", arguments: { project_path: w.project, agent_session: "ses_rows", thread_id: sent.thread_id, timeout_seconds: 1 } });
-    expect(JSON.stringify(waited)).not.toContain('"waits"');
   });
 
   test("the phone door forwards it unchanged", async () => {

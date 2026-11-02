@@ -5,15 +5,15 @@
  * the store's clock set back (`storeNow`) while a test writes, so it reads as
  * hours or days old.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxQuestion, InboxThread, InboxTidyPlan, InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxTidyRun } from "@plannotator/shared/inbox/tidy";
-import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
+import { inboxTidyBody, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
+import { INBOX_TIDY_HOW, INBOX_TIDY_INSTRUCTION, parseInboxSessionRef } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -334,6 +334,58 @@ describe("Tidy: asking", () => {
     const first = await read();
     expect(first).toContain(INBOX_TIDY_INSTRUCTION);
     expect(await read()).not.toContain(INBOX_TIDY_INSTRUCTION);
+  });
+
+  test("a read from the shell of a session its connection wakes leaves the wake to the connection", async () => {
+    const { server, client, billing, clock } = await setup();
+    clock.behind = 3 * HOUR;
+    await poll(server, "ses-a", billing);
+    const asked = await send(client, billing, "ses-a", { subject: "Ledger", thread: "Ledger", body: block("Ledger first?") });
+    clock.behind = 0;
+    await poll(server, "ses-a", billing, { busy: true });
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t1" })).status).toBe(200);
+    // read_thread carries no agent_host: a script's read names only the session.
+    const read = await call(client, "read_thread", { thread_id: asked.thread_id, agent_session: "ses-a", project_path: billing });
+    expect(read.content.map((c) => c.text).join("\n")).not.toContain(INBOX_TIDY_INSTRUCTION);
+    expect(read.structuredContent.tidy).toBeUndefined();
+    const commands = await deliver(server, "ses-a", billing);
+    expect(commands.map((c) => inboxWakeText(c).split("\n")[1])).toEqual([INBOX_TIDY_INSTRUCTION]);
+  });
+
+  test("a bridge that stopped polling cannot keep a Tidy: the session's next read carries it", async () => {
+    const { server, client, billing, clock } = await setup();
+    clock.behind = 3 * HOUR;
+    await poll(server, "ses-a", billing);
+    const asked = await send(client, billing, "ses-a", { subject: "Ledger", thread: "Ledger", body: block("Ledger first?") });
+    clock.behind = 0;
+    await poll(server, "ses-a", billing, { busy: true });
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t1" })).status).toBe(200);
+    setSystemTime(new Date(Date.now() + 31_000));
+    try {
+      const read = await call(client, "read_thread", { thread_id: asked.thread_id, agent_session: "ses-a", project_path: billing });
+      expect(read.content.map((c) => c.text).join("\n")).toContain(INBOX_TIDY_INSTRUCTION);
+      expect(await stateOf(server, "ses-a")).toBe("delivered");
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("the wake gives each session the value that makes its script that session, for every host and none", () => {
+    const body = (host: string | null, session: string) => inboxTidyBody({ session, host, name: "An agent", reach: "wakes", items: [] });
+    for (const [host, session, value] of [
+      ["claude-code", "ses-a", "claude-code:ses-a"],
+      ["opencode", "ses_0abcDEF", "opencode:ses_0abcDEF"],
+      ["cursor", "ses_01abc", "cursor:ses_01abc"],
+      [null, "ses_01abc", "ses_01abc"],
+    ] as const) {
+      expect(/`--session ([^`]+)`/.exec(body(host, session))?.[1]).toBe(value);
+      expect(parseInboxSessionRef(value)).toEqual({ host: host, session });
+    }
+    // An id an agent chose that a command line should not carry: no value, and the rest of the wake stands.
+    const odd = body("cursor", "my session; rm -rf /");
+    expect(odd).not.toContain("--session");
+    expect(odd).not.toContain("rm -rf");
+    expect(odd).toContain(INBOX_TIDY_HOW);
   });
 
   test("guards: another site's read and write, a stale tab", async () => {

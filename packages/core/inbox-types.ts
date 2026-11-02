@@ -411,8 +411,8 @@ export interface InboxMessage {
    * On the note that carries a 👍 Looks good to the agent (amended
    * 2026-10-16): the agent message the person marked. Written once the
    * ack's Undo window passed (its body is `inboxAckLine`), as a reply to
-   * that message, and delivered like any reply (the wake, wait_for_reply's
-   * `acknowledged`) while the ack still names it (`InboxAck.note_id`). The
+   * that message, and delivered like any reply (the wake)
+   * while the ack still names it (`InboxAck.note_id`). The
    * window and read_thread do not list it: the ack on the message says it.
    * Absent on every other message.
    */
@@ -435,7 +435,7 @@ export interface InboxMessage {
   tidy?: InboxTidyMark;
   /**
    * On a root: the seq up to which the asking agent has read the person's
-   * replies (wait_for_reply returned one, or read_thread read the thread),
+   * replies (a wake delivered one, or read_thread read the thread),
    * and when. A Sent row moves to Quiet once its reply is checked.
    */
   agent_checked_seq?: number | null;
@@ -564,8 +564,8 @@ export interface InboxMessage {
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the
-   * agent receives for this message (the delivered turn, wait_for_reply,
-   * read_thread) carries `inboxBoardRequestBlock` after it. Absent on every
+   * agent receives for this message (the delivered turn, read_thread)
+   * carries `inboxBoardRequestBlock` after it. Absent on every
    * other message.
    */
   board_request?: true;
@@ -607,8 +607,8 @@ export interface InboxMessage {
    * message, handed to its owner and to every tagged session; each records
    * its own delivery in its entry, so each gets its own line and Send now.
    * A message with tags is settled for each recipient only by that
-   * recipient's own delivery or its own wait_for_reply, never by another
-   * agent's read. Absent on every other message and on older records.
+   * recipient's own delivery, or for one not woken its own read, never by
+   * another agent's read. Absent on every other message and on older records.
    */
   tags?: InboxTag[];
   /**
@@ -658,10 +658,10 @@ export interface InboxTag {
    * Its connection wakes it (the Claude Code mod, Pi, OpenCode 2, with the
    * tag capability): the reply arrives as a turn. False: an agent that reads
    * the Inbox only (MCP, OpenCode 1); it sees the tag the next time it reads
-   * the thread or waits for a reply.
+   * the thread.
    */
   wakes: boolean;
-  /** It reached the session (its connection delivered it, or its own wait_for_reply returned it). */
+  /** It reached the session (its connection delivered it). */
   delivery?: InboxDelivery | null;
   /** The person pressed Send now for this session (or the Inbox did, after the wait: `deliver_now_by`). */
   deliver_now_at?: string | null;
@@ -752,8 +752,8 @@ export type InboxThreadNaming =
 
 /**
  * The one line an agent is handed while a thread the person started still
- * has no name an agent gave and that agent may name it: in `wait_for_reply`
- * and `read_thread` beside `name_this_thread: true`. The wake of the thread
+ * has no name an agent gave and that agent may name it: in `read_thread`
+ * beside `name_this_thread: true`. The wake of the thread
  * (INBOX_NAME_THREAD_LINE in shared/inbox/connection.ts) carries the same ask.
  */
 export const INBOX_NAME_THIS_THREAD_HINT =
@@ -776,8 +776,7 @@ export interface InboxAck {
   made_read?: boolean;
   /**
    * Set once the Undo window passed with the ack standing (the seq of that
-   * line, and when): agents see it from then on (read_thread, and
-   * wait_for_reply's `acknowledged`). Null before.
+   * line, and when): agents see it from then on (read_thread). Null before.
    */
   settled_seq?: number | null;
   settled_at?: string | null;
@@ -795,7 +794,7 @@ export interface InboxAck {
    * it; the window says it was not sent. Absent on every other ack.
    */
   not_sent?: "replied" | "wrote_again" | null;
-  /** When an agent read it (read_thread, or wait_for_reply returned it). Null until then. */
+  /** When an agent read it (read_thread, or the wake delivered its note). Null until then. */
   seen_at?: string | null;
   /**
    * The window's thread only (`GET /api/inbox/threads/:id`): when the 👍
@@ -1873,6 +1872,14 @@ export type InboxAccountsRead =
   | { state: "failed"; reason: InboxAccountsFailure }
   | { state: "accounts"; accounts: InboxAccount[] };
 
+/**
+ * `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is
+ * none: `offline`, no answer at all; `needs_update`, a version apart;
+ * `unreachable`, it answered something else (a 500, a refused token). None is
+ * an error.
+ */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
@@ -2102,10 +2109,13 @@ export type InboxToolCostHost = "pi" | "opencode";
  * block, so it gets a copy button; `Run:` left out of the short list):
  * measured on Pi, 10,303 bytes (both changes; tokens estimated at about
  * 4 bytes each). With the Board on 11,722 (11,490 + 232, estimated).
+ * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
+ * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
+ * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10303, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11722, tokens: 3150 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -2373,7 +2383,7 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
     editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */

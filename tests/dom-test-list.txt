@@ -31,6 +31,10 @@ packages/ui/components/ai/SessionAskNotice.dom.test.tsx
 packages/ui/hooks/useAIChat.sessionAsk.test.tsx
 packages/ui/hooks/useAIChat.newChat.test.tsx
 packages/ui/components/ai/NewChatButton.dom.test.tsx
+packages/ui/components/chat/ChatFrame.dom.test.tsx
+packages/ui/components/chat/ChatComposer.dom.test.tsx
+packages/ui/components/chat/ChatTranscript.dom.test.tsx
+packages/ui/components/chat/chatSanitizer.dom.test.ts
 packages/review-editor/hooks/useAIChat.newChat.test.tsx
 packages/ui/hooks/useAgentSettings.dom.test.tsx
 packages/ui/utils/codeHighlight.test.ts
@@ -53,6 +57,7 @@ packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
 packages/ui/components/ImageLightbox.test.tsx
 packages/ui/components/ImageZoomStage.wheelHint.test.tsx
+packages/ui/components/ImageZoomStage.clear.test.tsx
 packages/ui/components/Viewer.imageRegions.test.tsx
 packages/ui/components/HostTitle.dom.test.tsx
 packages/ui/components/RefHoverCard.dom.test.tsx
@@ -71,6 +76,7 @@ packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
 packages/inbox/whatsNewLink.test.tsx
 packages/inbox/whatsNewHeader.test.tsx
+packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
 packages/inbox/reask.test.tsx
@@ -130,6 +136,7 @@ packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
 packages/inbox/tour.test.tsx
+packages/inbox/tailnetOwner.test.tsx
 packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx
@@ -449,3 +456,5 @@ packages/review-editor/components/GoToFile.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
+packages/inbox/voiceComposeRenders.test.tsx
+packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx

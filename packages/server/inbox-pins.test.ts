@@ -140,9 +140,8 @@ describe("pinned threads", () => {
     // Nothing an agent reads names a pin.
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } });
     const listed = await client.callTool({ name: "read_thread", arguments: { agent_session: "ses_a", asked_by: "anyone" } });
-    const waited = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: a.thread_id, agent_session: "ses_a", timeout_seconds: 1 } });
     const searched = await client.callTool({ name: "search", arguments: { query: "search index", agent_session: "ses_a" } });
-    for (const answer of [read, listed, waited, searched]) expect(JSON.stringify(answer)).not.toMatch(/pinned_at|\\"pins\\"|Pinned/);
+    for (const answer of [read, listed, searched]) expect(JSON.stringify(answer)).not.toMatch(/pinned_at|\\"pins\\"|Pinned/);
     expect(server.store.listRow(a.thread_id)!.pinned_at).toBeUndefined();
   });
 

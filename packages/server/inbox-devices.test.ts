@@ -8,7 +8,7 @@
  *    and data dir. Every contract exchange of sections 1 and 2 (7.1 to 7.25,
  *    7.36, 7.37) is replayed with real fetch and the answers compared to the
  *    contract's shapes. A "phone" (this script) pairs, reads threads, picks
- *    and sends, and the agent's wait_for_reply, through `plannotator inbox
+ *    and sends, and the agent's read_thread, through `plannotator inbox
  *    mcp` and the MCP SDK's stdio client, gets the answer.
  *  - "In process": what a process cannot show without waiting ten minutes
  *    or a real tailnet: the offer's expiry (the server's clock option), and
@@ -311,6 +311,13 @@ describe("the device door, on the binary", () => {
       // A reply draft is read only on the door (7.62): the phone writes none.
       ["POST", "threads/msg_x/draft"],
       ["POST", "threads/msg_x/draft/delete"],
+      // Ask AI answers only the person's own window: never a phone's door.
+      ["GET", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask/seen"],
+      ["POST", "threads/msg_x/ask/end"],
+      ["POST", "ask/session-a/api/ai/bridge/poll"],
+      ["POST", "ask/session-a/api/ai/bridge/event"],
       // Shared drafts stay the window's (never seen by phones) until that is ruled otherwise.
       ["GET", "drafts"],
       ["POST", "drafts/drf_x"],
@@ -389,7 +396,7 @@ describe("the device door, on the binary", () => {
     expect(text).toMatch(new RegExp(`id: ${thread.cursor}\\nevent: record\\ndata: \\{"seq":${thread.cursor},`));
   });
 
-  test("7.10 and 7.11: a pick (replayed by its key, a stale revision refused), then Send, and the agent's wait_for_reply gets the answer", async () => {
+  test("7.10 and 7.11: a pick (replayed by its key, a stale revision refused), then Send, and the agent's read_thread gets the answer", async () => {
     const thread = (await (await door(`threads/${threadId}`)).json()) as Json;
     const q = thread.thread.messages[0].questions[0];
     const pickKey = keys();
@@ -415,7 +422,6 @@ describe("the device door, on the binary", () => {
     expect(reused.status).toBe(409);
     expect(((await reused.json()) as Json).code).toBe("idempotency_key_reused");
 
-    const waiting = agent.waitForReply(threadId, 50);
     const sendKey = keys();
     const send = await door(`messages/${threadId}/reply`, { body: { idempotency_key: sendKey, words: "Go ahead.", questions: [{ key: q.key, revision: 1 }] } });
     expect(send.status).toBe(200);
@@ -423,7 +429,7 @@ describe("the device door, on the binary", () => {
     expect(Object.keys(sent).sort()).toEqual(["message_id", "questions", "replayed", "reply"]);
     expect(sent).toMatchObject({ message_id: threadId, replayed: false, reply: { author: { kind: "person" }, idempotency_key: sendKey } });
     expect(sent.questions[0]).toMatchObject({ key: q.key, state: "sent", sent_revision: 1 });
-    const reply = await waiting;
+    const reply = await agent.nextReply(threadId);
     expect(JSON.stringify(reply)).toContain("Go ahead.");
     expect(JSON.stringify(reply)).toContain("Yes");
     // A retry of the same Send over another path writes nothing.
@@ -1126,6 +1132,34 @@ describe("the device door, in process", () => {
     const after = await phones.asDevice(paired.device.id, { method: "GET", path });
     expect(after.status).toBe(401);
     expect(asked.length).toBe(1);
+  });
+
+  test("through the relay (asDevice), a phone's command never reaches a machine's accounts, while the same phone's other commands run", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-relay-accounts-"));
+    roots.push(dataDir);
+    const asked: string[] = [];
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async (req) => {
+        asked.push(new URL(req.url).pathname);
+        return new Response(ONE_PIXEL_PNG, { headers: { "Content-Type": "image/png" } });
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    expect((await phones.asDevice(paired.device.id, { method: "GET", path: "/api/inbox/device/messages/msg_x/image?path=a.png" })).status).toBe(200);
+    expect(asked).toHaveLength(1);
+    for (const path of ["/api/inbox/device/accounts", "/api/inbox/device/accounts?fresh=1"]) {
+      const refused = await phones.asDevice(paired.device.id, { method: "GET", path });
+      expect(refused.status).toBe(404);
+      expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
+    }
+    expect(asked).toHaveLength(1);
   });
 });
 

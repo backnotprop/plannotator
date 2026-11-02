@@ -238,6 +238,7 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runInboxCallCommand } from "./inbox-call-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
@@ -326,6 +327,22 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
+// Here, like the card command: it takes its own flags, and JSON is not ours to scan.
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "call") {
+    const callDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCallCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(callDataDir),
       }),
     );
   }

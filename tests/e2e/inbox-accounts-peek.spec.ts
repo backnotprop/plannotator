@@ -59,6 +59,10 @@ test.beforeAll(async () => {
     PATH: bin,
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
+    // Each window here reads another answer, seconds apart: the 30 s between two runs would stand in the way.
+    PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_TEST_CSWAP_DIR: bin,
+    PLANNOTATOR_TEST_ACCOUNTS_CACHE_MS: '0',
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -89,11 +93,11 @@ async function shot(page: Page, name: string) {
   }
 }
 
-/** The Inbox keeps a good answer 30 s: this read replaces the last one, so the next window gets `stdout`. */
+/** The next window gets `stdout`. */
 async function replaceAnswer(page: Page, stdout: string | null) {
   if (stdout === null) removeFakeCswap(bin);
   else writeFakeCswap(bin, { stdout });
-  const answer = await page.request.get(new URL('api/inbox/accounts?fresh=1', url).href);
+  const answer = await page.request.get(new URL('api/inbox/accounts', url).href);
   expect((await answer.json()).state).toBe(stdout === null ? 'not_installed' : 'accounts');
 }
 

@@ -13,7 +13,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { describeTailscaleFailure, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 
 type Json = Record<string, any>;
@@ -259,16 +261,6 @@ describe("Inbox over your tailnet", () => {
     expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
 
-    // The agents on this computer (their files, their switches, the card): this computer only, read or write.
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/agents"))).toEqual([403, "local_only"]);
-    for (const [path, body] of [
-      ["/api/inbox/agents", { agent: "codex", reach: true }],
-      ["/api/inbox/agents/notes", { add: ["codex"] }],
-      ["/api/inbox/agents/seen", {}],
-    ] as const) {
-      const response = await throughServe(inbox, path, { method: "POST", headers: own, body: JSON.stringify({ ...body, serverSession: inbox.serverSession }) });
-      expect([path, ...(await codeOf(response))]).toEqual([path, 403, "local_only"]);
-    }
   });
 
   test("a message's image (#1813) reads through the tailnet for the owner like the other read routes; a wrong login, no login and another site are refused", async () => {
@@ -716,59 +708,85 @@ describe("Inbox over your tailnet", () => {
   });
 });
 
-describe("the update control never answers through the tailnet", () => {
-  test("Update now, snooze, Check now, the facts, What's new and the update switches are local only; nothing is launched or written", async () => {
-    const dataDir = world({ inboxTailscale: true });
-    writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
-    const ts = fakeTailscale();
-    const launches: unknown[] = [];
-    const inbox = await start(dataDir, ts.run, {
-      version: "0.28.10",
-      updates: {
-        fetchRelease: async () => ({ ok: true, release: { tag: "v0.28.12" } }),
-        isManaged: () => true,
-        listSessions: () => [],
-        launchInstaller: (launch) => void launches.push(launch),
+// Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
+describe("what the owner reads through the tailnet, and what a page there never claims", () => {
+  test("What's new and its images answer the owner over the tailnet, read only; another allowed login is refused, there and at the update control", async () => {
+    const GUEST = "guest@example.com";
+    const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+    let githubRequests = 0;
+    const github = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch() {
+        githubRequests++;
+        const png = new Uint8Array(33);
+        png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+        new DataView(png.buffer).setUint32(16, 4);
+        new DataView(png.buffer).setUint32(20, 5);
+        png.set([8, 6, 0, 0, 0], 24);
+        return new Response(png);
       },
     });
-    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
-    const calls: [string, string, Json | undefined][] = [
-      ["POST", "/api/inbox/update", { serverSession: inbox.serverSession }],
-      ["POST", "/api/inbox/update/snooze", { serverSession: inbox.serverSession }],
-      ["POST", "/api/inbox/update/check", { serverSession: inbox.serverSession }],
-      ["GET", "/api/inbox/update", undefined],
-      ["GET", "/api/inbox/whats-new?version=0.28.12", undefined],
-      ["GET", "/api/inbox/whats-new/image?version=0.28.12&src=https%3A%2F%2Fgithub.com%2Fuser-attachments%2Fassets%2Fa", undefined],
-      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, auto_update: true }],
-      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, update_check: false }],
-      // The address this computer's browser opens (#2184).
-      ["POST", "/api/inbox/settings", { serverSession: inbox.serverSession, cookie_host: true }],
-    ];
-    for (const [method, path, body] of calls) {
-      const response = await throughServe(inbox, path, { method, headers: own, ...(body ? { body: JSON.stringify(body) } : {}) });
-      expect([method, path, ...(await codeOf(response))]).toEqual([method, path, 403, "local_only"]);
+    try {
+      setEnv("PLANNOTATOR_UPDATE_API_URL", `http://127.0.0.1:${github.port}/repos/backnotprop/plannotator/releases/latest`);
+      const src = `http://127.0.0.1:${github.port}/user-attachments/assets/a`;
+      writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
+      writeReleaseNotes({ version: "0.28.12", notes: `Notes.\n\n![a](${src})`, highlights: [] }, dataDir);
+      await fetchReleaseImagesFor({ version: "0.28.12", dataDir, enabled: () => true });
+      const ts = fakeTailscale();
+      const launches: unknown[] = [];
+      const inbox = await start(dataDir, ts.run, {
+        version: "0.28.10",
+        updates: { fetchRelease: async () => ({ ok: false, error: "offline" }), isManaged: () => true, listSessions: () => [], launchInstaller: (l) => void launches.push(l) },
+      });
+      const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
+      const page = "/api/inbox/whats-new?version=0.28.12";
+      const image = `/api/inbox/whats-new/image?version=0.28.12&src=${encodeURIComponent(src)}`;
+      const before = githubRequests;
+      const stateBefore = readFileSync(join(dataDir, "update-state.json"), "utf8");
+
+      // This computer: as before.
+      const local = await fetch(`http://127.0.0.1:${inbox.port}${page}`);
+      expect(local.status).toBe(200);
+      expect(((await local.json()) as Json).images).toEqual([src]);
+      expect((await fetch(`http://127.0.0.1:${inbox.port}${image}`)).status).toBe(200);
+
+      // The owner over the tailnet: the notes, and the image with the route's own headers.
+      const owner = await throughServe(inbox, page, { headers: own });
+      expect(owner.status).toBe(200);
+      expect(await owner.json()).toMatchObject({ version: "0.28.12", current: "0.28.10", images: [src] });
+      const picture = await throughServe(inbox, image, { headers: own });
+      expect(picture.status).toBe(200);
+      expect(picture.headers.get("content-type")).toBe("image/png");
+      expect(picture.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+      // The route's guards still hold there.
+      expect(await codeOf(await throughServe(inbox, image, { headers: { ...own, "Sec-Fetch-Site": "cross-site" } }))).toEqual([403, "cross_site"]);
+      expect(await codeOf(await throughServe(inbox, `${image}x`, { headers: own }))).toEqual([404, "image_not_referenced"]);
+      // Read only: nothing else gets in.
+      expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
+      expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
+
+      // Another allowed login is refused, for both routes.
+      expect(await codeOf(await throughServe(inbox, page, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      expect(await codeOf(await throughServe(inbox, image, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+
+      // The window is told who is a guest.
+      const settings = async (login: string | null) =>
+        (await (login === null ? fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`) : throughServe(inbox, "/api/inbox/settings", { login, headers: own }))).json() as Promise<Json>;
+      expect(await settings(OWNER)).toMatchObject({ via: "tailnet", guest: false, version: "0.28.10" });
+      expect(await settings(GUEST)).toMatchObject({ via: "tailnet", guest: true });
+      expect(await settings(null)).toMatchObject({ via: "local", guest: false });
+
+      // The update control stays closed to a guest (what it does for the owner is inbox-tailnet-owner.test.ts).
+      expect(await codeOf(await throughServe(inbox, "/api/inbox/update", { method: "POST", login: GUEST, headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) }))).toEqual([403, "local_only"]);
+      expect(await codeOf(await throughServe(inbox, "/api/inbox/update", { login: GUEST, headers: own }))).toEqual([403, "local_only"]);
+      expect(launches).toEqual([]);
+      // Nothing was fetched or written by reading it.
+      expect(githubRequests).toBe(before);
+      expect(readFileSync(join(dataDir, "update-state.json"), "utf8")).toBe(stateBefore);
+    } finally {
+      github.stop(true);
     }
-    expect(launches).toEqual([]);
-    const config = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
-    expect(config.autoUpdate).toBeUndefined();
-    expect(config.updateCheck).toBeUndefined();
-    expect(config.urlHost).toBeUndefined();
-    // A page through the tailnet is not shown the cookie switch at all.
-    const shown = await throughServe(inbox, "/api/inbox/settings", { method: "GET", headers: own });
-    expect(shown.status).toBe(200);
-    expect((await shown.json()).cookie_host).toBeUndefined();
-    // Nor in the answer to a save it may make.
-    const saved = await throughServe(inbox, "/api/inbox/settings", {
-      method: "POST",
-      headers: own,
-      body: JSON.stringify({ serverSession: inbox.serverSession, text_size: 14 }),
-    });
-    expect(saved.status).toBe(200);
-    expect((await saved.json()).cookie_host).toBeUndefined();
-    // The same Update now works on this computer.
-    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/update`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    expect(local.status).toBe(200);
-    expect(launches).toHaveLength(1);
   });
 
   test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
@@ -790,26 +808,5 @@ describe("the update control never answers through the tailnet", () => {
       body: JSON.stringify({ serverSession: inbox.serverSession }),
     });
     expect(((await local.json()) as Json).show).toBe(true);
-  });
-
-  // The Inbox reminder goes into every agent session on this computer: the
-  // owner's page over the tailnet reads Settings → Prompts but cannot change it.
-  test("Settings → Prompts is read-only through the tailnet", async () => {
-    const dataDir = world({ inboxTailscale: true });
-    const ts = fakeTailscale();
-    const inbox = await start(dataDir, ts.run);
-    const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
-    const read = await throughServe(inbox, "/api/inbox/settings", { headers: own });
-    expect(read.status).toBe(200);
-    expect((((await read.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(false);
-    const write = await throughServe(inbox, "/api/inbox/settings", {
-      method: "POST",
-      headers: own,
-      body: JSON.stringify({ serverSession: inbox.serverSession, prompts: { inbox: { reminder: "Mine." } } }),
-    });
-    expect(await codeOf(write)).toEqual([403, "local_only"]);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).prompts).toBeUndefined();
-    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`);
-    expect((((await local.json()) as Json).prompts as { reminder: { editable: boolean } }).reminder.editable).toBe(true);
   });
 });

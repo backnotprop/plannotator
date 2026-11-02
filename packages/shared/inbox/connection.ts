@@ -44,7 +44,6 @@ export const INBOX_TOOL_ACTIONS = [
   'send_message',
   'read_thread',
   'search',
-  'wait_for_reply',
   'resolve_message',
   'submit_guide',
   'get_guide_brief',
@@ -52,6 +51,16 @@ export const INBOX_TOOL_ACTIONS = [
 ] as const
 
 export type InboxToolAction = (typeof INBOX_TOOL_ACTIONS)[number]
+
+/**
+ * The action the Inbox no longer has, and what a call to it answers: an older
+ * plugin, skill or note may still name it. `/mcp` answers it as a tool result
+ * and `inboxToolCall` as a refusal, in the Inbox's `<snake_code>: <message>`.
+ */
+export const INBOX_REMOVED_ACTION = 'wait_for_reply'
+
+export const INBOX_REMOVED_ACTION_TEXT =
+  'action_removed: The Plannotator Inbox no longer has wait_for_reply. Go on with your work or end your turn. If the reply does not arrive in this session by itself, call read_thread with the thread_id later.'
 
 /**
  * Arguments the connection fills itself, on the Inbox tools that take them:
@@ -88,10 +97,9 @@ export function inboxProjectPathShapeRefusal(value: unknown): string | null {
 /**
  * The `_meta` key a connection sets to `true` on its `tools/call` when the
  * person's reply reaches this session as a turn by itself (the session's wake
- * runs). The send tools then say to end the turn instead of waiting with
- * wait_for_reply. Without it (the stdio shim, a raw MCP client, OpenCode 1,
- * an older connection) they keep the wait_for_reply advice. An older Inbox
- * ignores it.
+ * runs). The send tools then say the reply arrives by itself. Without it (the
+ * stdio shim, a raw MCP client, OpenCode 1, an older connection) they say to
+ * read the thread later. An older Inbox ignores it.
  */
 export const INBOX_WAKES_META_KEY = 'ai.plannotator/inbox-wakes'
 
@@ -360,7 +368,7 @@ export const INBOX_TOOL_LEAD =
  * OpenCode 2 as a user message, and all three carry the wake's first line.
  */
 export const INBOX_TOOL_WAKE_NOTE =
-  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <subject> (<reply id>)`: end your turn or keep working; do not call wait_for_reply. To answer it, send_message with reply_to set to that reply id, never one from memory."
+  "A reply arrives in this session by itself once it is idle, headed `Plannotator Inbox: <title> (<reply id>)`: end your turn or keep working. To answer it, send_message with reply_to set to that reply id, never one from memory."
 
 /**
  * Fixed text, the description's last line: where everything the tool's short
@@ -386,7 +394,6 @@ export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlast
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   send_message: "Message the person (markdown), in your session's open thread (see `thread`).",
-  wait_for_reply: 'Wait for a reply (thread_id or message_id; neither: any open thread you asked).',
   resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
   // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
@@ -461,10 +468,10 @@ export const INBOX_REMINDER_TEXT =
 
 /**
  * The same line for a host without the wake (OpenCode 1): the reply does not
- * come back by itself there, so it names wait_for_reply instead.
+ * come back by itself there, so it says to read the thread.
  */
 export const INBOX_REMINDER_TEXT_NO_WAKE =
-  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message (each decision as a \`:::question\` block) and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Call wait_for_reply when you need their answer. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
+  `Plannotator Inbox is on: when you finish long work, or need a decision only the person can make, send it with plannotator_inbox send_message (each decision as a \`:::question\` block) and keep going. ${INBOX_FOLLOW_THROUGH_RULE} ${INBOX_THREAD_RULE} Their reply does not come back here by itself: read the thread later with read_thread. A decision in the Inbox stays there: when the person writes here, say what waits and link its thread, but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar). Run \`plannotator inbox --help\` for how it works.`
 
 /**
  * The reminder naming the tool as the host registered it. Claude Code defers
@@ -507,7 +514,7 @@ export const INBOX_COMMAND_BRIEFING = [
   `- ${INBOX_USE_RULE}`,
   `- ${INBOX_THREAD_RULE}`,
   '- Send with a `plannotator_inbox` tool when you have one (it can be listed with a prefix and may need loading through tool search first): `action` `send_message`, with a markdown `body`. Otherwise call `send_message` on the Inbox\'s MCP server, `plannotator inbox mcp`.',
-  "- send_message's result says whether the person's reply arrives in this session by itself. When it does, do not wait or poll for it: end your turn or go on with other work. When it does not, call wait_for_reply when you need the answer.",
+  "- send_message's result says whether the person's reply arrives in this session by itself. When it does, do not wait or poll for it: end your turn or go on with other work. When it does not, go on with your work and read the thread later with read_thread.",
   `- ${INBOX_CHANNEL_RULE}`,
   `- ${INBOX_FOLLOW_THROUGH_RULE}`,
   `- ${INBOX_BRIEFING_NEVER_RUN}`,
@@ -625,6 +632,7 @@ export function inboxToolCall(
 ): { name: string; arguments: Record<string, unknown>; projectPath?: string } | { error: string } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'Invalid plannotator_inbox call: expected an object with an action.' }
   const { action, ...rest } = input as Record<string, unknown>
+  if (action === INBOX_REMOVED_ACTION) return { error: INBOX_REMOVED_ACTION_TEXT }
   const tool = tools.find((candidate) => candidate.name === action)
   if (!tool) {
     return {
@@ -654,8 +662,8 @@ export function inboxToolCall(
 
 /**
  * The `_meta` key an Inbox sets to `true` on a tool result whose text already
- * says everything its structured content holds (read_thread, search,
- * wait_for_reply): a compact transcript the model reads instead of JSON. A
+ * says everything its structured content holds (read_thread, search): a
+ * compact transcript the model reads instead of JSON. A
  * connection then hands the model the text alone. An older connection does
  * not know the key and appends the structured content as before, which the
  * Inbox keeps to the same trimmed shape.
@@ -773,7 +781,12 @@ export interface InboxReplyCommand {
   thread_id: string
   /** The agent message a reply answers; null for a message. */
   reply_to: string | null
-  /** The thread's subject. */
+  /**
+   * The title a wake shows, as the Inbox decided it (`InboxStore.agentTitle`):
+   * on a plain reply the thread's short name, or null when it has none, which
+   * every connection words `a reply`; on everything else the thread's
+   * subject. An older Inbox always sends the subject here.
+   */
   subject: string | null
   /** The reply or message, markdown, verbatim. */
   body: string
@@ -982,6 +995,36 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * The poll field (`true`) by which a connection says it can answer Ask AI
+ * live. An older connection never sends it, so a question never waits for it.
+ */
+export const INBOX_ASK_POLL_FIELD = 'ask'
+
+/**
+ * Set (`true`) on every poll answer while a question waits for this session
+ * and its Ask AI client has not connected, and a held poll ends at once. The
+ * connection then runs the client against `inboxAskBridgeBase(session)`, with
+ * the Inbox's token, until the Inbox says `closing`. It is a state, not an
+ * event: a poll answer that does not read it loses nothing.
+ */
+export const INBOX_ASK_WAITS_FIELD = 'ask_waits'
+
+export const INBOX_ASK_BRIDGE_PREFIX = '/api/inbox/ask/'
+
+/** Where a session's Ask AI client talks to the Inbox: the pull bridge's two paths go after it. */
+export function inboxAskBridgeBase(session: string): string {
+  return `${INBOX_ASK_BRIDGE_PREFIX}${encodeURIComponent(session)}`
+}
+
+export function parseInboxAskWaits(text: string): boolean {
+  try {
+    return (JSON.parse(text) as Record<string, unknown>)[INBOX_ASK_WAITS_FIELD] === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * The turn a connection submits when a reply it put into a running turn
  * arrived as that turn ended, so the model never read it: the reply is in
  * the conversation already, so this only points at it.
@@ -1140,8 +1183,9 @@ export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX
 }
 
 /**
- * The turn a reply or a message becomes: `Plannotator Inbox: <subject> (<id>)`,
- * the fixed instruction line for its type (a reply, a New message, or a
+ * The turn a reply or a message becomes: `Plannotator Inbox: <title> (<id>)`
+ * (the title is the command's `subject`, or `a reply` / `a message` without
+ * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
  * saying so under it), then the words verbatim, then the closing line
  * (`inboxWakeClosingLine`, naming `toolName`, the tool as the host

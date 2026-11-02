@@ -215,6 +215,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
+  // The draft question or a phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind
+  // it. Choosing an agent is part of writing, so To ends a take and keeps what was said; a take already on its way isn't
+  // a recording, and its words still land.
+  const footCovered = question || (picker && phone);
+  useEffect(() => {
+    if (!footCovered) return;
+    if (!question) voice.session.stop();
+    if (voice.session.view().phase !== 'sending') voice.session.covered();
+  }, [footCovered, question, voice.session]);
+
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(crypto.randomUUID());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
@@ -371,6 +381,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const keepDraft = async () => {
+    // As Send: the words of a running take are not in yet, and leaving would lose them.
+    if (voice.busy) return;
     const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
     if (result) props.onSaved(result);
     else setQuestion(false);
@@ -430,14 +442,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const sendable = !!target;
+  const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
   const loading = !model;
-  // Save draft only for something written: an empty compose offers none (a phone shows the disabled Send instead).
+  // Save draft only for something written: an empty compose offers none.
   const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
   const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
+
+  // Back from the picker: to the message. In the tour on a phone, to To: a focused message raises the keyboard, and in
+  // the room it leaves "Press Send" would have no card to read.
+  const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
   const toRow = (
     <div className="ib-cp-to">
@@ -523,34 +540,30 @@ export function ComposeDialog(props: ComposeDialogProps) {
       }}
     >
       {phone ? (
-        <div className="ib-cp-bar">
-          <button type="button" className="ib-cp-barb" onClick={requestClose} data-compose-cancel="">
-            Cancel
-          </button>
-          <h2 id={titleId}>{title}</h2>
-          {saveOffered ? (
-            <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
-              Save draft
+        // One box, so To can take the top bar's line while the keyboard is up (inbox.css).
+        <div className="ib-cp-head">
+          <div className="ib-cp-bar">
+            <button type="button" className="ib-cp-barb" onClick={requestClose} data-compose-cancel="">
+              Cancel
             </button>
-          ) : (
-            <button
-              type="button"
-              className={`ib-cp-barb ib-strong${sendable ? '' : ' ib-dis'}`}
-              aria-disabled={!sendable || undefined}
-              onClick={() => void send()}
-              disabled={busy !== null || voice.busy}
-              data-compose-send=""
-            >
-              Send
-            </button>
-          )}
+            <h2 id={titleId}>{title}</h2>
+            {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
+            {saveOffered && (!draft || dirty) && (
+              <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+                Save draft
+              </button>
+            )}
+          </div>
+          {toRow}
         </div>
       ) : (
-        <h2 id={titleId} className="ib-sr">
-          {title}
-        </h2>
+        <>
+          <h2 id={titleId} className="ib-sr">
+            {title}
+          </h2>
+          {toRow}
+        </>
       )}
-      {toRow}
       {card && (
         <p className="ib-cp-card" data-compose-card={card.id}>
           <span>
@@ -568,12 +581,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             setChosen(picked.session);
             setPicker(false);
             setError(null);
-            textRef.current?.focus();
+            afterPicker();
           }}
           onClose={() => {
             setPicker(false);
             // Still nobody in To: back on To, where the choice is made.
-            (target ? textRef.current : (toRef.current ?? textRef.current))?.focus();
+            if (target) afterPicker();
+            else (toRef.current ?? textRef.current)?.focus();
           }}
         />
       )}
@@ -703,7 +717,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <button type="button" className="ib-btn" onClick={props.onClose} data-compose-discard="">
             Discard
           </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-keep="" autoFocus>
+          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-keep="" autoFocus>
             Keep draft
           </button>
         </div>
@@ -719,45 +733,55 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </span>
             </Tip>
           )}
-          <VoiceFoot voice={voice} phone={phone} lead />
-          {/* On a desktop the To line already says "Draft · saved". */}
-          {draft && !dirty && phone && (
-            <span className="ib-cp-savedline" data-compose-saved="">
-              <Icon name="check" size={14} />
-              Saved as a draft {whenTime(draft.updated_at)}
+          {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
+          {phone && attached > 0 && (
+            <span className="ib-cp-clipn" data-compose-file-count="">
+              {attached}
+              <span className="ib-sr"> attached</span>
             </span>
           )}
-          {draft && (
+          {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
+          {draft && !dirty && phone && (
+            <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
+              <Icon name="check" size={14} />
+              <span>Saved</span>
+              <span>{whenTime(draft.updated_at)}</span>
+            </span>
+          )}
+          {/* A phone deletes a draft from its row on the Drafts page. */}
+          {draft && !phone && (
             <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
               Delete draft
             </button>
           )}
           <span className="ib-sp" />
+          {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
           {status && (
-            <span className="ib-cp-status" id={statusId} data-compose-status="">
+            <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
               {status}
             </span>
           )}
-          {saveOffered && !phone && (
-            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
-              Save draft
-            </button>
-          )}
-          {!phone && (
-            <button
-              type="button"
-              className={`ib-btn ib-pri${sendable ? '' : ' ib-dis'}`}
-              aria-disabled={!sendable || undefined}
-              aria-keyshortcuts={sendKeys}
-              onClick={() => void send()}
-              disabled={busy !== null || voice.busy}
-              data-compose-send=""
-            >
-              <Icon name="send" size={15} />
-              Send
-              <ShortcutHint scope={inboxThreadShortcuts} action="send" />
-            </button>
-          )}
+          {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
+          <VoiceFoot voice={voice} phone={phone}>
+            {saveOffered && !phone && (
+              <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+                Save draft
+              </button>
+            )}
+          </VoiceFoot>
+          <button
+            type="button"
+            className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+            aria-disabled={!sendable || undefined}
+            aria-keyshortcuts={sendKeys}
+            onClick={() => void send()}
+            disabled={busy !== null || voice.busy}
+            data-compose-send=""
+          >
+            <Icon name="send" size={15} />
+            {phone ? <span className="ib-cp-sendl">Send</span> : 'Send'}
+            <ShortcutHint scope={inboxThreadShortcuts} action="send" />
+          </button>
         </div>
       )}
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">

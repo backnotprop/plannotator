@@ -10,7 +10,9 @@
  * config.json `inboxTailscale`; inbox-tailscale.ts) publishes the window
  * through `tailscale serve` to a second loopback listener that lets in only
  * the Tailscale login that owns this machine, and hands it no connection
- * route, no `/mcp` and no device door (`via: "tailnet"` below). A
+ * route, no `/mcp` and no device door (`via: "tailnet"` below). The rules
+ * that are about this computer ask `ownerOrLocal`: the owner over the tailnet
+ * has what the computer has, another allowed login does not. A
  * paired phone reaches it through the device door only, over a path the
  * person switched on ("Reach from my tailnet": a door-only listener that
  * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
@@ -92,6 +94,7 @@ import {
   parseUpdateCheckEnv,
   resolveAutoUpdate,
   resolveUpdateCheck,
+  resolveInboxAskAi,
   resolveInboxPhones,
   resolveInboxTool,
   saveConfig,
@@ -112,18 +115,23 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
+import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
+  INBOX_ASK_BRIDGE_PREFIX,
+  INBOX_ASK_WAITS_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_MAX_MS,
   INBOX_BRIDGE_POLL_PATH,
   inboxHandedAwayLine,
   inboxReaskItemsOf,
   INBOX_MAX_REQUEST_BYTES,
+  INBOX_REMOVED_ACTION,
+  INBOX_REMOVED_ACTION_TEXT,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   type InboxReplyCommand,
@@ -149,7 +157,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
-import { createInboxAccounts } from "./inbox-accounts";
+import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -170,6 +178,8 @@ import {
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
+import { createInboxAsk } from "./inbox-ask";
+import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
@@ -177,10 +187,10 @@ import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
+import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
-import { createInboxMachines, type InboxMachines, type MachineFrame } from "./inbox-machines";
+import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
-import type { PeerLinkTimings } from "./inbox-peer-link";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -321,6 +331,8 @@ export interface InboxServerOptions {
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
    */
   feedbackUrl?: string;
+  /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
+  debug?: boolean;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -350,8 +362,15 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
+  /**
+   * Ask AI (inbox-ask.ts). Default: `resolveInboxAskAi` (PLANNOTATOR_INBOX_ASK_AI,
+   * else off). Off, its routes answer the unknown-route 404.
+   */
+  askAi?: boolean;
+  /** Tests: Ask AI's waits (inbox-ask-live.ts). */
+  askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
-  machineLinkTimings?: Partial<PeerLinkTimings>;
+  machineLinkTimings?: MachineLinkTimings;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
   windowHeartbeatMs?: number;
   /** The Board, decided here instead of config.json `inboxBoard` (tests). Absent: config.json decides on every request. */
@@ -461,6 +480,19 @@ const ERROR_STATUS: Record<string, number> = {
   validation_error: 422,
   project_unresolved: 503,
   owner_only: 403,
+  // Ask AI: only the person's own window asks or reads (inbox-ask.ts).
+  window_only: 403,
+  // Ask AI: no agent owns the thread, so nobody can answer.
+  ask_no_owner: 409,
+  // Ask AI: the conversation's file. Refused so nothing replaces it (shared/inbox/ask.ts).
+  ask_unreadable: 503,
+  ask_damaged: 409,
+  ask_full: 409,
+  // Ask AI: the slot is taken, or this session's connection can't answer live (nothing new is saved).
+  ask_busy: 409,
+  ask_no_live_path: 409,
+  // Ask AI: a client polling for a session no question asked for (it stops).
+  ask_no_bridge: 404,
   message_not_found: 404,
   thread_not_found: 404,
   project_not_found: 404,
@@ -791,6 +823,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
+  // Read once per start: Ask AI stays hidden until the owner has used it.
+  const askOn = options.askAi ?? resolveInboxAskAi();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   let port = 0;
@@ -799,6 +833,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const statusListeners = new Set<() => void>();
   /** A reply draft was saved or deleted (inbox-reply-drafts.ts): the windows' streams say `event: drafts`. */
   const draftListeners = new Set<(threadId: string) => void>();
+  /** An Ask AI conversation changed (inbox-ask.ts): the owner's windows' streams say `event: ask`. */
+  const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -902,19 +938,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         projectRootOf: (path) => projectRoots.resolve(path),
         recordAttachments: (paths, project, base) =>
           recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
-        // An open wait_for_reply keeps its session present (never "ended").
-        presence: {
-          seen: (session) => live.seenOverMcp(session),
-          hold: (session, threadId) => {
-            const release = live.holdOverMcp(session, threadId);
-            return () => {
-              release();
-              // A Codex thread's wait ended: what it left (a wait cut short) is queued as a turn now.
-              if (codexWake.status(session) !== null) void codexWake.sweep();
-              if (qwenWake.status(session) !== null) void qwenWake.sweep();
-            };
-          },
-        },
         // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
         searchIndex: search.index,
         findProjects,
@@ -926,6 +949,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
           (await codexWake.wakes(host, session, meta)) ||
           qwenWake.wakes(host, session, meta),
+        bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
@@ -1762,10 +1786,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Settings → Prompts: the Inbox reminder (config.json `prompts.inbox`) and
    * the plan, review and annotate prompts. `on` per agent is what Settings →
    * Agents shows: the reminder switch, with the Inbox tool (and, for Claude
-   * Code, its mod). Changing it is for this computer only: the text goes to
-   * every agent session here.
+   * Code, its mod). Changing it is for the owner only (`editable`): the text
+   * goes to every agent session here.
    */
-  const promptsState = (via: RequestVia) => {
+  const promptsState = (editable: boolean) => {
     const config = loadConfig();
     const env = agentEnvironment.env as NodeJS.ProcessEnv;
     const modOff = !claudeCodeModOn(agentEnvironment);
@@ -1774,19 +1798,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ) as Record<InboxToolHost, boolean>;
     // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
     const wakes = { "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" };
-    return inboxPromptsModel(config, on, via === "local", wakes);
+    return inboxPromptsModel(config, on, editable, wakes);
   };
 
-  /** What Settings and the connect snippets read. */
-  /** A login let in over the tailnet that isn't the owner's. Voice spends the owner's ChatGPT login or key: a guest's page gets no use of them, as with Feedback. */
-  const tailnetGuest = (req: Request, via: RequestVia) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
+  /**
+   * The person at this computer, or the login that owns it over the tailnet: what the rules about this
+   * computer ask. A login config.json `inboxTailscaleAllow` added is neither, and an owner Tailscale never
+   * named is no one. Only `via` lets the login header count: the window's port refuses a request carrying it.
+   */
+  const ownerOrLocal = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
+  /** What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. */
   const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
     via,
+    /** A tailnet login other than the owner's: what is about this computer stays closed to this page. */
+    guest,
     version,
     port,
     url: baseUrl,
@@ -1807,8 +1837,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
-    /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); only for a page on this computer. */
-    ...(via === "local" ? { cookie_host: cookieHostWire() } : {}),
+    /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); not for a tailnet guest's page. */
+    ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
@@ -1821,8 +1851,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: { on: boardOn() },
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
-    /** Settings → Prompts: the Inbox reminder (editable on this computer) and the plan, review and annotate prompts. */
-    prompts: promptsState(via),
+    /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
+    prompts: promptsState(!guest),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -1948,6 +1978,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
         const onDraft = (threadId: string) => send(`event: drafts\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId) draftListeners.add(onDraft);
+        // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
+        const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
+        if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
         // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId) pinListeners.add(onPins);
@@ -1976,6 +2009,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           statusListeners.delete(onStatus);
           stopReach();
           draftListeners.delete(onDraft);
+          askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
@@ -2089,6 +2123,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const replyCommand = (reply: InboxMessage, sendNow = false, session: string | null = null): InboxReplyCommand => {
     const tag = session && !store.isOwner(reply, session) ? (reply.tags?.find((t) => t.session === session) ?? null) : null;
+    // Every wake's title, decided once: null on a plain reply in a thread with no name (an older connection says `a reply` too).
+    const subject = store.agentTitle(reply, session);
     // The former owner of a handed-off thread: the notice alone (its body, so an older connection still says it).
     if (tag?.handed_away) {
       const to = hostAgentName(reply.to?.host);
@@ -2097,7 +2133,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         id: reply.id,
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
-        subject: store.threadSubject(reply.thread_id),
+        subject,
         body: inboxHandedAwayLine(to),
         url: threadPageUrl(baseUrl, reply.thread_id),
         handed_away: { to },
@@ -2109,7 +2145,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         id: reply.id,
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
-        subject: store.threadSubject(reply.thread_id),
+        subject,
         body: inboxBodyForAgent(reply),
         url: threadPageUrl(baseUrl, reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
@@ -2121,37 +2157,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const alsoTagged = (reply.tags ?? []).filter((t) => !t.handed_away).map((t) => hostAgentName(t.host));
     // Handed this thread ("Hand off instead"): the wake says it is this session's now.
     const handedFrom = reply.handoff && !reply.handoff.undone_at && reply.to ? { handoff: { from: hostAgentName(reply.handoff.from?.host) } } : {};
-    return { ...ownerCommand(reply, sendNow), ...handedFrom, ...(alsoTagged.length > 0 ? { also_tagged: alsoTagged } : {}) };
+    return { ...ownerCommand(reply, sendNow, subject), ...handedFrom, ...(alsoTagged.length > 0 ? { also_tagged: alsoTagged } : {}) };
   };
-  const ownerCommand = (reply: InboxMessage, sendNow: boolean): InboxReplyCommand => {
+  const ownerCommand = (reply: InboxMessage, sendNow: boolean, subject: string | null): InboxReplyCommand => {
     // Tidy: the note's body is the whole wake (inboxWakeText words it); never a reply to anything.
     if (reply.tidy) {
       return { type: "message", id: reply.id, thread_id: reply.thread_id, reply_to: null, subject: "Tidy", body: reply.body, url: threadPageUrl(baseUrl, reply.thread_id), tidy: true };
     }
     // A reply the person sent to another session because the one that asked
     // had ended: the wake says so, naming the agent that asked.
-    const asked = reply.to && reply.reply_to ? store.message(reply.reply_to) : null;
+    const asked = store.redirectedFrom(reply);
     // Named from the host (`Claude Code`), never from the name the agent gave
     // itself: this line goes into another session's prompt.
-    const redirected =
-      asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? hostAgentName(asked.author.host, "agent") : null;
+    const redirected = asked ? hostAgentName(asked.host, "agent") : null;
     // More words in a thread the person started, handed to a session that has
     // seen nothing of it (the person moved them there): read the thread first.
-    const root = store.message(reply.thread_id);
-    const continues =
-      !!reply.to &&
-      reply.thread_id !== reply.id &&
-      !!root?.started_by_person &&
-      root.delivery?.session !== reply.to.session &&
-      // The root goes to this session too (not taken yet, maybe in the same poll): it opens the thread.
-      root.to?.session !== reply.to.session &&
-      !store.thread(reply.thread_id)?.messages.some((m) => m.author.kind === "agent" && m.author.session === reply.to!.session);
+    const continues = store.continuesThread(reply);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
-      subject: store.threadSubject(reply.thread_id),
+      subject,
       body: inboxBodyForAgent(reply),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
@@ -2194,10 +2221,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     const commands = () => store.pendingReplies(session, { tags }).map((reply) => replyCommand(reply, sendNow, session));
+    // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
+    const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     const now = commands();
-    if (now.length > 0 || waitMs === 0) {
+    if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
-      return json({ commands: now });
+      return json({ commands: now, ...askWaits() });
     }
     return new Promise<Response>((resolve) => {
       let done = false;
@@ -2206,13 +2235,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         done = true;
         clearTimeout(timer);
         unsubscribe();
+        stopAskWaits();
         req.signal.removeEventListener("abort", finish);
         answered();
-        resolve(json({ commands: commands() }));
+        resolve(json({ commands: commands(), ...askWaits() }));
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
         if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session, { tags }).length > 0) finish();
+      });
+      const stopAskWaits = ask.onWaits((waiting) => {
+        if (waiting === session) finish();
       });
       req.signal.addEventListener("abort", finish);
     });
@@ -2253,30 +2286,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return json({ ok: true, delivery: reply.delivery });
   };
 
-  /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
   /**
-   * A `card` call while the Board is off (a session listed the tool while it
-   * was on; its tool list is fixed for the session): answered here with the
-   * tool result `board_off`, before the MCP server (which no longer has the
-   * tool) would say "unknown tool". Anything else, or a body that does not
-   * read, goes on to the MCP server unchanged.
+   * A tool call answered here as a tool result, before the MCP server (which
+   * has no such tool) would say "unknown tool", with nothing written:
+   * `wait_for_reply`, gone from the Inbox while an older plugin, skill or
+   * client may still call it, and `card` while the Board is off (a session
+   * listed the tool while it was on; its tool list is fixed for the session).
+   * Anything else, or a body that does not read, goes on to the MCP server
+   * unchanged.
    */
-  const boardOffCardCall = async (req: Request): Promise<Response | null> => {
-    let body: unknown;
-    try {
-      body = await req.json();
-    } catch {
-      return null;
-    }
+  const refusedToolCall = (body: unknown): Response | null => {
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const call = body as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: { name?: unknown } };
-    if (call.method !== "tools/call" || call.params?.name !== "card" || call.id === undefined) return null;
-    return json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text: INBOX_BOARD_OFF_TEXT }], isError: true } });
+    if (call.method !== "tools/call" || call.id === undefined) return null;
+    const text = call.params?.name === INBOX_REMOVED_ACTION ? INBOX_REMOVED_ACTION_TEXT : call.params?.name === "card" && !boardOn() ? INBOX_BOARD_OFF_TEXT : null;
+    return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };
 
-  const noteMcpPresence = async (req: Request): Promise<void> => {
+  /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
+  const noteMcpPresence = async (body: unknown): Promise<void> => {
     try {
-      const body = (await req.json()) as unknown;
       for (const call of Array.isArray(body) ? body : [body]) {
         if ((call as { method?: unknown } | null)?.method !== "tools/call") continue;
         const params = (call as { params?: { arguments?: Record<string, unknown>; _meta?: unknown } }).params;
@@ -2287,7 +2316,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A Codex thread (inbox-codex-wake.ts). Codex names its thread on every call (`_meta.threadId`), so a
         // tool without a session (search, get_guide_brief) counts too: it is there, and it read what was queued
         // before this turn started. While this Inbox can wake it (not a `codex exec` run), it is live for New
-        // message, compose and tags. A command its shell runs (host codex, CODEX_THREAD_ID) is presence only.
+        // message, compose and tags. A command its shell runs (host codex, CODEX_THREAD_ID) names no turn, so
+        // it is presence, and marks a queued Tidy wake delivered, but it delivers no reply and is not made live.
         const meta = params?._meta;
         const thread = codexThreadOfCall(meta);
         if (thread && (!session || session === thread)) {
@@ -2307,7 +2337,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
       }
     } catch {
-      // Not JSON: the MCP handler answers it.
+      // A shape it does not know: the MCP handler answers it.
     }
   };
 
@@ -2351,8 +2381,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
-    // A thread blocked in wait_for_reply gets the reply from that call, not as another turn as well.
-    waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -2365,7 +2393,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     environment: agentEnvironment,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
-    waitingOverMcp: (session, threadId) => live.waitingOverMcp(session, threadId),
     ...options.qwenWake,
   });
 
@@ -2455,6 +2482,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of draftListeners) listener(threadId);
     },
   });
+  // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
+  const ask = createInboxAsk({
+    on: askOn,
+    store,
+    serverSession,
+    readBody: (req) => readBody(req),
+    json,
+    isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+    onChange: (threadId) => {
+      for (const listener of askListeners) listener(threadId);
+    },
+    token,
+    hostOf: (session) => live.askHostOf(session),
+    ...(options.askTimes ? { times: options.askTimes } : {}),
+  });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
@@ -2505,12 +2547,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     otherDialogDue: () => soundState().dialog_due || listIntroState().due,
     json,
     readBody,
-    localOnly,
     ...options.voice,
   });
 
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
-  const accounts = createInboxAccounts({ environment: agentEnvironment, ...options.accounts });
+  const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
@@ -2547,6 +2588,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });
+
+  /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
+  const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
+  const debugOwner = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
@@ -2591,19 +2636,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (origin !== null) {
         return json({ error: "Browser requests are not accepted on /mcp.", code: "origin_not_allowed" }, 403);
       }
-      // A tool call naming an agent_session is presence: that session is
-      // not "ended" while it talks to the Inbox, connection or not.
-      if (req.method === "POST") void noteMcpPresence(req.clone());
-      // The Board off: `card` is not listed, and a session that listed it while it was on gets
-      // board_off (a tool result, as any refusal) instead of "unknown tool". Nothing is written.
-      if (req.method === "POST" && !boardOn()) {
-        const refused = await boardOffCardCall(req.clone());
+      if (req.method === "POST") {
+        const body = (await req.clone().json().catch(() => undefined)) as unknown;
+        // A tool call naming an agent_session is presence: that session is
+        // not "ended" while it talks to the Inbox, connection or not.
+        void noteMcpPresence(body);
+        const refused = refusedToolCall(body);
         if (refused) return refused;
       }
       return mcp.fetch(req);
     }
 
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/")) {
+    // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
+    const askClient = askOn && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -2614,6 +2660,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const match = /^Bearer\s+(\S+)$/i.exec((req.headers.get("authorization") ?? "").trim());
       if (!match || !tokensEqual(match[1]!, token)) {
         return json({ error: "Missing or wrong Inbox token.", code: "unauthorized" }, 401);
+      }
+      if (askClient) {
+        try {
+          return await ask.hostRoute(req, url);
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       if (path === "/api/inbox/control/stop") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -2673,6 +2726,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
     }
+    // The window's debug records (inbox-debug-log.ts): off, this falls through to the unknown-route 404.
+    if (debugLog && path === INBOX_DEBUG_PATH) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (!debugOwner(req, via)) return json({ error: "Only this computer's owner can write the debug log.", code: "owner_only" }, 403);
+      return debugLog.accept(req);
+    }
+
     // The tailnet never widens the Inbox's exposure: pairing a phone and
     // Phones' tailnet and Wi-Fi switches answer only on this computer (the
     // window's own switch refuses `on` below).
@@ -2687,6 +2747,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (tourAnswer) return tourAnswer;
 
     try {
+      // Ask AI's session and query routes. Off, and on any other server path, they do not exist here.
+      if (path.startsWith("/api/ai/")) {
+        const answer = await ask.aiRoute(req, path, via);
+        if (answer) return answer;
+      }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
       if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
@@ -2776,32 +2841,35 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ ok: true, restarting: true });
       }
-      // The update control (packages/server/inbox-updates.ts). Updating changes
-      // this computer, so none of it answers a page that came through the tailnet;
-      // nor does the What's new page, nor its images (inbox-whats-new-images.ts).
-      if (
-        path === "/api/inbox/update" ||
-        path.startsWith("/api/inbox/update/") ||
-        path === "/api/inbox/whats-new" ||
-        path === INBOX_WHATS_NEW_IMAGE_PATH
-      ) {
-        if (via === "tailnet") return localOnly();
+      // What's new and its images (inbox-whats-new-images.ts) only read release
+      // notes, so they answer this computer and the owner over the tailnet; any
+      // other tailnet login is refused (`owner_only`, as voice and Feedback do).
+      // Fetching missing notes by a release's tag is limited to the versions
+      // this Inbox knows (inbox-updates.ts fetchableVersion) and stays inside
+      // the update-notes folder of the data directory.
+      if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_IMAGE_PATH) {
+        if (!ownerOrLocal(req, via)) {
+          throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
+        }
         // A stored image of a release's notes: read only, never fetched here.
         if (path === INBOX_WHATS_NEW_IMAGE_PATH) return whatsNewImageRoute(req, url, dataDir);
-        if (path === "/api/inbox/whats-new") {
-          if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-          // Notes this machine never saved (a version installed outside the
-          // Inbox) are fetched by the release's tag, waited for at most 3 s;
-          // past that the page is told to ask again (503 notes_loading).
-          const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
-          if (answer.kind === "notes") return json(answer.notes);
-          if (answer.kind === "loading") {
-            const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
-            res.headers.set("Retry-After", "1");
-            return res;
-          }
-          return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        // Notes this machine never saved (a version installed outside the
+        // Inbox) are fetched by the release's tag, waited for at most 3 s;
+        // past that the page is told to ask again (503 notes_loading).
+        const answer = await updates.whatsNew(url.searchParams.get("version") ?? "");
+        if (answer.kind === "notes") return json(answer.notes);
+        if (answer.kind === "loading") {
+          const res = json({ error: "Fetching the release notes…", code: "notes_loading", retry_after_ms: 1000 }, 503);
+          res.headers.set("Retry-After", "1");
+          return res;
         }
+        return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
+      }
+      // The update control (packages/server/inbox-updates.ts). Updating changes
+      // this computer, so it answers the owner only.
+      if (path === "/api/inbox/update" || path.startsWith("/api/inbox/update/")) {
+        if (!ownerOrLocal(req, via)) return localOnly();
         if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -2828,10 +2896,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ error: "Not found", code: "not_found" }, 404);
       }
-      // The agents on this computer: paths in the person's home, so only on this computer.
+      // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
-        // The person's own agent files: only on this computer.
-        if (via === "tailnet") return localOnly();
+        // The person's own agent files: only theirs, never a tailnet guest's.
+        if (!ownerOrLocal(req, via)) return localOnly();
         if (path === "/api/inbox/agents" && req.method === "GET") return json(await agentsModel());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -2846,7 +2914,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, tailnetGuest(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via)));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -2869,15 +2937,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         ) {
           throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
-        // The Board changes what agents on this computer are offered (the card tool): changed only here.
-        if (body.board !== undefined && via === "tailnet") return localOnly();
-        if (body.voice !== undefined && tailnetGuest(req, via)) throw voiceOwnerOnly();
-        // Updating changes this computer: never from a page that came through the tailnet.
-        if (updateSwitches && via === "tailnet") return localOnly();
-        // The reminder goes to every agent session on this computer: changed only here, like Settings → Agents.
-        if (body.prompts !== undefined && via === "tailnet") return localOnly();
-        // The address this computer's browser opens: never from a page that came through the tailnet.
-        if (body.cookie_host !== undefined && via === "tailnet") return localOnly();
+        const owner = ownerOrLocal(req, via);
+        // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
+        if (body.board !== undefined && !owner) return localOnly();
+        if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
+        // Updating changes this computer: the owner's to change.
+        if (updateSwitches && !owner) return localOnly();
+        // The reminder goes to every agent session on this computer: the owner's, like Settings → Agents.
+        if (body.prompts !== undefined && !owner) return localOnly();
+        // The address this computer's browser opens: the owner's to change.
+        if (body.cookie_host !== undefined && !owner) return localOnly();
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
@@ -2928,26 +2997,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, tailnetGuest(req, via)), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        if (tailnetGuest(req, via)) throw voiceOwnerOnly();
+        if (!ownerOrLocal(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
       }
       // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,
-      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. Never on the device door.
-      if (path === "/api/inbox/accounts") {
+      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. One check for this
+      // computer's read and a linked machine's, which is not forwarded any other way. On the door for a machine only.
+      const machineAccounts = /^\/api\/inbox\/accounts\/(ibx_[0-9A-HJKMNP-TV-Z]{26})$/.exec(path);
+      if (path === "/api/inbox/accounts" || machineAccounts) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        if (tailnetGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
-        return json(await accounts.read({ fresh: url.searchParams.get("fresh") === "1" }));
+        if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
+        const fresh = url.searchParams.get("fresh") === "1";
+        return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
@@ -2996,6 +3068,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;
+      // Ask AI: off, this answers nothing and the path is an unknown route.
+      const asked = await ask.route(req, url, via);
+      if (asked) return asked;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
@@ -3004,7 +3079,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (embedded) return embedded;
       // Feedback (the sidebar's Feedback dialog): sent on, never stored here. The owner's only: a
       // tailnet guest's words would go out as this computer's (its version, OS, IP and rate limit).
-      if (path === INBOX_FEEDBACK_PATH && via === "tailnet" && !tailscale.isOwnerRequest(req.headers)) {
+      if (path === INBOX_FEEDBACK_PATH && !ownerOrLocal(req, via)) {
         throw new InboxError("owner_only", "Only this computer's owner can send feedback from this Inbox.");
       }
       const fed = await feedback.route(req, path);
@@ -3073,11 +3148,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ cards: store.markCardDropsSeen(projectIds, new Set(ids as string[])).map((card) => store.cardWire(card)) });
       }
       // The lane cards' marks (inbox-card-marks.ts): the state of each card's one marked link, for the
-      // cards on screen. Only this computer's window, only while the Board is on; never on the device
+      // cards on screen. Only the owner's window, only while the Board is on; never on the device
       // door (not on its allowlist). Read only; it runs gh / glab, so another site is refused first.
       if (path === "/api/inbox/cards/marks") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        if (via === "tailnet") return localOnly();
+        if (!ownerOrLocal(req, via)) return localOnly();
         const refused = crossSiteCardRead(req);
         if (refused) return refused;
         const body = await readBody(req);
@@ -3514,6 +3589,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
+  const served = debugLog ? debugLog.wrap(handle, debugOwner) : handle;
+
   /**
    * The window's own port: everything here came from this computer. A
    * request carrying what `tailscale serve` always adds (and a local client
@@ -3537,7 +3614,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       tailscale.noteServedRequest();
       return Promise.resolve(localOnly());
     }
-    return handle(req, "local");
+    return served(req, "local");
   };
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
@@ -3566,7 +3643,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await handle(req, "tailnet")),
+    dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
     // Compress the page for the tailnet before the first phone asks (#2032).
     onListen: () => prewarmAppHtml(options.htmlContent ?? NOT_BUILT_PAGE, "br"),
     tailscale: options.tailscale,
@@ -3690,6 +3767,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     voice.stop();
+    // An answer in progress is saved. Open clients lose the connection (the force below cuts their
+    // `closing` short); one that polls the next Inbox gets a 404, and stops.
+    ask.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

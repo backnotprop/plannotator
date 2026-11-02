@@ -184,7 +184,7 @@ test.skipIf(!hasDom)('with a file open beside the thread, ‹ Inbox leads the he
   expect(buttons[1]).toBe(markRead!);
   // ⋯ More (the copy menu, design record "inbox-copy-message") ends it, right after Archive.
   expect(head.lastElementChild).toBe(head.querySelector('[data-thread-more]'));
-  expect(head.lastElementChild!.previousElementSibling).toBe(head.querySelector('[data-archive]'));
+  expect(head.querySelector('[data-archive]')).toBeNull();
   expect(back(el)!.getAttribute('aria-label')).toBe('Back to Inbox');
   expect(back(el)!.textContent?.trim()).toBe('Inbox');
   expect(await tooltipOf(back(el)!)).toBe('Close notes.md and show the list');

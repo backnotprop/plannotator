@@ -257,6 +257,7 @@ try {
     "HANDOFF.md",
     "styles.css",
     "contents-rail.css",
+    "inbox-thread.css",
     "types.ts",
   ];
   for (const entry of requiredEntries) {
@@ -314,6 +315,7 @@ try {
   writeFileSync(
     join(consumerDir, "consumer.tsx"),
     [
+      'import "@plannotator/ui/inbox-thread.css";',
       'import { AnnotationPanel } from "@plannotator/ui/components/AnnotationPanel";',
       'import { StickyHeaderLane, type StickyHeaderLaneProps } from "@plannotator/ui/components/StickyHeaderLane";',
       'import { DiffFileTree, type DiffFileTreeProps } from "@plannotator/ui/components/DiffFileTree";',
@@ -403,7 +405,7 @@ try {
   );
 
   console.log(
-    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/Viewer/StickyHeaderLane/DiffFileTree/parser, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
+    `Verified @plannotator/ui@${expectedUiVersion} packs, resolves AnnotationPanel/Viewer/StickyHeaderLane/DiffFileTree/parser/inbox-thread.css, and installs externally with @plannotator/core@${expectedCoreVersion}.`,
   );
 } finally {
   rmSync(workDir, { recursive: true, force: true });

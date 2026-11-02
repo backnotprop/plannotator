@@ -86,7 +86,7 @@ export interface SettingsPageProps {
   /**
    * Settings → General's first row: the version and the sidebar's update
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
-   * (a page opened over the tailnet).
+   * (a tailnet guest's page).
    */
   updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
@@ -127,14 +127,15 @@ export interface SettingsPageProps {
  * code review and annotate show in their Settings too: config.json
  * `urlHost: "plannotator.localhost"`. Locked (with the reason) while
  * PLANNOTATOR_URL_HOST is set or config.json holds another `urlHost`, which it
- * never replaces. The server leaves it out for a page that came through the tailnet.
+ * never replaces. The server leaves it out for a tailnet guest's page. From the owner's
+ * phone (`remote`) it is still the computer's browser that the switch changes, so the heading says so.
  */
-function CookieHostGroup({ cookieHost, onToggle }: { cookieHost: InboxCookieHost; onToggle: (next: boolean) => void }) {
+function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCookieHost; remote: boolean; onToggle: (next: boolean) => void }) {
   const locked = cookieHost.env !== null || cookieHost.url_host !== null;
   const state = cookieHost.env !== null ? 'locked-env' : cookieHost.url_host !== null ? 'locked-url-host' : cookieHost.on ? 'on' : 'off';
   return (
     <section className="ib-sgroup" data-settings-cookie-host={state} aria-labelledby="ib-g-browser">
-      <h2 id="ib-g-browser">This browser</h2>
+      <h2 id="ib-g-browser">{remote ? 'The computer’s browser' : 'This browser'}</h2>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-txt">
@@ -425,7 +426,7 @@ function GeneralSection({
           Notifications are allowed per address, so a browser on another device asks once there.
         </div>
       </section>
-      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} onToggle={onToggleCookieHost} />}
+      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} remote={settings.via === 'tailnet'} onToggle={onToggleCookieHost} />}
     </>
   );
 }

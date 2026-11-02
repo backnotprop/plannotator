@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -131,6 +131,8 @@ interface SeenSession {
   sendNow: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
+  /** Its poll said it can answer Ask AI live (`ask`). */
+  ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
   cwd: string | null;
   /**
@@ -222,26 +224,20 @@ export function createInboxLiveSessions(options: {
   const startedAt = now();
   const sessions = new Map<string, SeenSession>();
   /**
-   * MCP activity per agent session: when a tool call last named it, and the
-   * wait_for_reply calls it holds open now. Presence only (a session that
-   * asked is not "ended" while it talks to the Inbox); it never makes a
-   * session live for New message, which needs a connection that wakes it.
+   * MCP activity per agent session: when a tool call last named it. Presence
+   * only (a session that asked is not "ended" while it talks to the Inbox); it
+   * never makes a session live for New message, which needs a connection that
+   * wakes it.
    */
-  const mcpSeen = new Map<string, { lastSeen: number; holding: number; host?: string; name?: string; waits?: (string | null)[] }>();
+  const mcpSeen = new Map<string, { lastSeen: number; host?: string; name?: string }>();
   const mcpEntry = (session: string) => {
     let entry = mcpSeen.get(session);
     if (!entry) {
-      entry = { lastSeen: now(), holding: 0 };
+      entry = { lastSeen: now() };
       mcpSeen.set(session, entry);
     }
     return entry;
   };
-  /**
-   * The session holds a wait_for_reply open now that would return an item of
-   * `threadId`: a wait on that thread, or one on every thread it asked (null).
-   */
-  const waitingOverMcp = (session: string, threadId: string): boolean =>
-    (mcpSeen.get(session)?.waits ?? []).some((thread) => thread === null || thread === threadId);
   /** A tool call named this agent session (and, when the call said so, its host and name: the tag list's MCP rows). */
   const seenOverMcp = (session: string, who: { host?: unknown; name?: unknown } = {}) => {
     if (!session) return;
@@ -249,22 +245,6 @@ export function createInboxLiveSessions(options: {
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
     if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
-  };
-  /** A wait_for_reply for this session is open (on `threadId`, or null: every thread it asked): present until it answers. */
-  const holdOverMcp = (session: string, threadId: string | null = null): (() => void) => {
-    const entry = mcpEntry(session);
-    entry.holding += 1;
-    entry.lastSeen = now();
-    (entry.waits ??= []).push(threadId);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      entry.holding = Math.max(0, entry.holding - 1);
-      const at = entry.waits?.indexOf(threadId) ?? -1;
-      if (at >= 0) entry.waits!.splice(at, 1);
-      entry.lastSeen = now();
-    };
   };
   /**
    * project_path to its project's root. The Inbox passes its shared
@@ -388,6 +368,7 @@ export function createInboxLiveSessions(options: {
     entry.host = host;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
     entry.engine = parseEngine(body.engine);
@@ -476,7 +457,7 @@ export function createInboxLiveSessions(options: {
 
   /**
    * Whether the session that asked is still there, with the grace above: it
-   * holds a poll or an MCP wait_for_reply, or polled or called an MCP tool
+   * holds a poll, or polled or called an MCP tool
    * within `INBOX_ASKER_GRACE_MS`, or this Inbox started less than that long
    * ago (sessions are kept in memory only). The window asks only about a
    * session whose message came through a connection that wakes it
@@ -486,8 +467,8 @@ export function createInboxLiveSessions(options: {
     // A session the Inbox wakes itself (Codex) is there until its thread is known to be gone.
     const wakeOnly = options.wakeOnlyStatus?.(session) ?? null;
     if (wakeOnly !== null) return wakeOnly === "alive";
-    const recent = (entry: { holding: number; lastSeen: number } | undefined) =>
-      !!entry && (entry.holding > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
+    const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
+      !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
     return now() - startedAt <= INBOX_ASKER_GRACE_MS;
   };
@@ -701,6 +682,12 @@ export function createInboxLiveSessions(options: {
     return !!entry && isLive(entry) && entry.tags;
   };
 
+  /** The host of a live session whose connection can answer Ask AI (its poll said `ask`), else null. */
+  const askHostOf = (session: string): string | null => {
+    const entry = sessions.get(session);
+    return entry?.ask === true && isLive(entry) ? entry.host : null;
+  };
+
   /** How a session is connected now (live, no grace), or null when its connection does not poll. */
   const connectionOf = (session: string): InboxRecipientConnection | null => {
     const entry = sessions.get(session);
@@ -762,7 +749,7 @@ export function createInboxLiveSessions(options: {
       parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${clocked}`);
     }
     for (const [id, entry] of mcpSeen) {
-      if (entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
+      if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
     }
     return parts.join("|");
   };
@@ -977,14 +964,13 @@ export function createInboxLiveSessions(options: {
     askerLive,
     replyTarget,
     seenOverMcp,
-    holdOverMcp,
-    waitingOverMcp,
     route,
     allLive,
     isSessionLive,
     pollsNow,
     composeTarget,
     connectionOf,
+    askHostOf,
     deliveryConnectionOf,
     lastIdleOf,
     steerableSessions,

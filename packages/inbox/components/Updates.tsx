@@ -836,7 +836,7 @@ export function checksOffWords(details: UpdateDetails | null): ReactNode {
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
  * Check now; the failing-check line with the install command when checking
- * fails. The page never renders it when opened over the tailnet.
+ * fails. The page never renders it for a tailnet guest.
  */
 export function GeneralUpdateRow({
   version,
@@ -964,7 +964,20 @@ export function AboutBlock({
   onUpdate,
   onWhatsNew,
   where,
+  updates = true,
+  whatsNewRunning = false,
 }: {
+  /**
+   * False on a tailnet guest's page, where every /api/inbox/update* route
+   * answers 403 local_only: the block shows the version, and no What's new,
+   * Update, Check now or update switch.
+   */
+  updates?: boolean;
+  /**
+   * The owner's page over the tailnet: also a link to What's new in the
+   * release this Inbox runs (none for a development build).
+   */
+  whatsNewRunning?: boolean;
   version: string;
   details: UpdateDetails | null;
   switches: UpdateSwitches | undefined;
@@ -994,6 +1007,27 @@ export function AboutBlock({
   const available = update?.version ?? (latest && newerThan(latest.version, version) ? latest.version : null);
   const updateLabel = update?.state === 'ready' ? 'Restart to update' : update?.state === 'failed' ? 'Update failed…' : 'Update now';
   const locked = (checks?.env !== null && checks?.env !== undefined) || (auto?.env !== null && auto?.env !== undefined);
+  // The running release's notes; a development build has none to name.
+  const running = whatsNewRunning && onWhatsNew && STABLE.test(version) ? version : null;
+  if (!updates) {
+    return (
+      <>
+        <section className="ib-sgroup ib-sgroup-first" data-settings-about="tailnet" aria-label="Version">
+          <div className="ib-card">
+            <div className="ib-prow">
+              <span className="ib-tile">
+                <Icon name="inbox" />
+              </span>
+              <span className="ib-txt">
+                <span className="ib-l">Plannotator {version}</span>
+              </span>
+            </div>
+          </div>
+        </section>
+        {where && <AboutWhere where={where} />}
+      </>
+    );
+  }
   return (
     <>
       <section className="ib-sgroup ib-sgroup-first" data-settings-about="" aria-label="Version and updates">
@@ -1017,6 +1051,14 @@ export function AboutBlock({
                     {' · '}
                     <button type="button" className="ib-lnk" onClick={() => onWhatsNew(available)}>
                       What&apos;s new in {available}
+                    </button>
+                  </>
+                )}
+                {running && (
+                  <>
+                    {' · '}
+                    <button type="button" className="ib-lnk" data-about-whats-new={running} onClick={() => onWhatsNew!(running)}>
+                      What&apos;s new in {running}
                     </button>
                   </>
                 )}
@@ -1085,29 +1127,33 @@ export function AboutBlock({
         {failing && details && <CheckFailingCommand command={details.command} />}
         {error && <div className="ib-error">{error}</div>}
       </section>
-      {where && (
-        <section className="ib-sgroup" aria-labelledby="ib-g-where">
-          <h2 id="ib-g-where">Where things are</h2>
-          <div className="ib-card">
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l">Data</span>
-                <span className="ib-desc">
-                  <code>{where.data}</code>
-                </span>
-              </span>
-            </div>
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l">MCP for other agents</span>
-                <span className="ib-desc">
-                  <code>{where.mcpUrl}</code> · or the command <code>{where.mcpCommand}</code>
-                </span>
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
+      {where && <AboutWhere where={where} />}
     </>
+  );
+}
+
+function AboutWhere({ where }: { where: { data: string; mcpUrl: string; mcpCommand: string } }) {
+  return (
+    <section className="ib-sgroup" aria-labelledby="ib-g-where">
+      <h2 id="ib-g-where">Where things are</h2>
+      <div className="ib-card">
+        <div className="ib-prow">
+          <span className="ib-txt">
+            <span className="ib-l">Data</span>
+            <span className="ib-desc">
+              <code>{where.data}</code>
+            </span>
+          </span>
+        </div>
+        <div className="ib-prow">
+          <span className="ib-txt">
+            <span className="ib-l">MCP for other agents</span>
+            <span className="ib-desc">
+              <code>{where.mcpUrl}</code> · or the command <code>{where.mcpCommand}</code>
+            </span>
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }

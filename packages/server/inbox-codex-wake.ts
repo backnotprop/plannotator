@@ -8,9 +8,11 @@
  * <thread id>` (Codex names its thread on every tool call,
  * `params._meta.threadId`), and the message is marked `wakes` when the call
  * comes from a thread that keeps running (its turn metadata's `turn_trigger`
- * is not `exec`: a `codex exec` run exits after its turn, so its agent keeps
- * wait_for_reply) and this Inbox can run a Codex CLI that queues
- * (packages/server/inbox-mcp.ts). Then each item waiting for that session
+ * is not `exec`: a `codex exec` run exits after its turn, so its agent reads
+ * the thread) and this Inbox can run a Codex CLI that queues
+ * (packages/server/inbox-mcp.ts). A command the thread's shell runs carries no
+ * turn metadata, so it wakes only for a thread that already woke from a call
+ * of its own and that Codex has not disowned since. Then each item waiting for that session
  * (`InboxStore.pendingRepliesFor`) is handed to
  * `codex queue --thread=<id> --message=<the wake text>` exactly once:
  *
@@ -23,8 +25,8 @@
  *    before the call), and never queued twice, across restarts too;
  *  - exit 0 means queued, not delivered: the item is "Delivered" once the
  *    thread calls an Inbox tool from a turn that started after it was queued
- *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when the agent
- *    reads it (wait_for_reply, read_thread). A turn that starts while the
+ *    (`x-codex-turn-metadata.turn_started_at_unix_ms`), or when that thread
+ *    reads it itself (read_thread, `recordOwnRead`). A turn that starts while the
  *    call still runs counts, once the call exits 0. Until then the window says
  *    "Queued for Codex; it gets this as its next turn.";
  *  - a call that ran out of time (or that the Inbox's stop cut short) may or
@@ -46,14 +48,14 @@
  *
  * A sweep is one pass over the person's messages (bucketed by recipient), and
  * runs only when it can find something: a store line, a retry coming due, a
- * thread coming back, a wait_for_reply ending, and once at start. No Send now
+ * thread coming back, and once at start. No Send now
  * and no going in by itself after five minutes: Codex never takes a message
  * mid-turn.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
+import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -97,8 +99,11 @@ export interface InboxCodexWake {
   knownCli(): InboxCodexCli | null;
   /**
    * Whether a message from this host and session, sent by a tool call with
-   * this `_meta`, wakes it: a Codex thread id, the call from that thread and
-   * not from `codex exec`, and a Codex CLI that queues.
+   * this `_meta`, wakes it: a Codex thread id, a Codex CLI that queues, and
+   * the call from that thread and not from `codex exec`. A command its shell
+   * runs says neither: it wakes only for a thread with a waking message of its
+   * own (which a `codex exec` run never has, a Tidy or a tag only naming it),
+   * and not one Codex disowned that no queue or turn has proved since.
    */
   wakes(host: unknown, session: unknown, meta: unknown): Promise<boolean>;
   /**
@@ -121,7 +126,7 @@ export interface InboxCodexWake {
   uncertain(session: string, itemId: string): boolean;
   /** The items of `session` that are uncertain (see `uncertain`). */
   uncertainItems(session: string): string[];
-  /** Look for items to queue now (the Inbox runs it on every store line, a retry coming due, a wait ending). */
+  /** Look for items to queue now (the Inbox runs it on every store line and a retry coming due). */
   sweep(): Promise<void>;
   stop(): void;
 }
@@ -189,8 +194,6 @@ export function createInboxCodexWake(options: {
   environment: AgentEnvironment;
   /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
-  /** The session holds a wait_for_reply open now that returns items of this thread: those are not queued as well. */
-  waitingOverMcp?: (session: string, threadId: string) => boolean;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
   extraClis?: readonly string[];
   now?: () => number;
@@ -233,6 +236,10 @@ export function createInboxCodexWake(options: {
   // ── The sessions it wakes, and the ones Codex did not know ──
   let known: Set<string> | null = null;
   const knownSessions = (): Set<string> => (known ??= store.wakingSessionsOfHost(INBOX_CODEX_HOST));
+  let woke: Set<string> | null = null;
+  const wokeSessions = (): Set<string> => (woke ??= store.sessionsThatWoke(INBOX_CODEX_HOST));
+  /** Threads only a shell call took off `dead`: that call says nothing of Codex knowing them again, until a queue or a turn does. */
+  const unproven = new Set<string>();
   const dead = new Set<string>();
   try {
     for (const session of readdirSync(deadDir)) if (isCodexThreadId(session)) dead.add(session);
@@ -350,6 +357,7 @@ export function createInboxCodexWake(options: {
     }
     if (run.exitCode === 0) {
       retryAt.delete(key);
+      unproven.delete(session);
       if (!claimed.has(key)) return;
       if (flight.taken) {
         delivered(item.id, session);
@@ -396,8 +404,6 @@ export function createInboxCodexWake(options: {
         const key = `${item.id}.${session}`;
         pendingKeys.add(key);
         if (dead.has(session) || claimed.has(key)) continue;
-        // An open wait_for_reply returns it: it is not queued as a turn as well.
-        if (options.waitingOverMcp?.(session, item.thread_id)) continue;
         work.push({ item, session });
       }
     }
@@ -449,6 +455,7 @@ export function createInboxCodexWake(options: {
       // A Codex message that wakes: also a moment to look again (a reply that waited for a Codex CLI to appear).
       if (message.wakes !== true || message.author.host !== INBOX_CODEX_HOST || !message.author.session) return;
       knownSessions().add(message.author.session);
+      wokeSessions().add(message.author.session);
     } else {
       if (message.to?.host === INBOX_CODEX_HOST) knownSessions().add(message.to.session);
       for (const tag of message.tags ?? []) if (tag.host === INBOX_CODEX_HOST && tag.wakes) knownSessions().add(tag.session);
@@ -467,9 +474,15 @@ export function createInboxCodexWake(options: {
     if (!isCodexThreadId(session)) return;
     if (dead.delete(session)) {
       rmSync(join(deadDir, session), { force: true });
+      if (turnStartedAt === null) unproven.add(session);
       void sweep();
     }
-    if (turnStartedAt === null) return;
+    // A command its shell runs names no turn, so a reply stays queued; a Tidy wake counts, or a script's writes would never count as tidied.
+    if (turnStartedAt === null) {
+      for (const itemId of [...(queued.get(session)?.keys() ?? [])]) if (store.message(itemId)?.tidy) delivered(itemId, session);
+      return;
+    }
+    unproven.delete(session);
     for (const flight of inFlight.values()) if (flight.session === session && flight.at < turnStartedAt) flight.taken = true;
     const items = queued.get(session);
     if (!items) return;
@@ -479,7 +492,11 @@ export function createInboxCodexWake(options: {
   return {
     cli,
     knownCli: () => cliAnswer?.cli ?? null,
-    wakes: async (host, session, meta) => host === INBOX_CODEX_HOST && isCodexThreadId(session) && codexCallWakes(meta, session) && (await cli()) !== null,
+    wakes: async (host, session, meta) =>
+      host === INBOX_CODEX_HOST &&
+      isCodexThreadId(session) &&
+      (codexCallWakes(meta, session) || (codexThreadOfCall(meta) === null && wokeSessions().has(session) && !dead.has(session) && !unproven.has(session))) &&
+      (await cli()) !== null,
     status: (session) => (!knownSessions().has(session) ? null : dead.has(session) ? "dead" : "alive"),
     uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`),
     uncertainItems: (session) => [...uncertain].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
