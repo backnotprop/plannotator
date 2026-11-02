@@ -424,8 +424,9 @@ function isComment(text: string): boolean {
  * The rich mode's raw HTML. An image and a checkbox draw, each written fresh from
  * the attributes it may have, so nothing of the source reaches the parser and a
  * browser's reading of the tag cannot differ from this one. `marked`'s pattern
- * accepted the tag first. Any other `<input>` goes, and a comment draws nothing.
- * The rest stays the text it is, which is what keeps `MAX_HTML_CHARS` a limit on
+ * accepted the tag first. Any other `<input>` goes, and a token that is one
+ * comment draws nothing; a comment in a longer block stays text. The rest stays
+ * the text it is, which is what keeps `MAX_HTML_CHARS` a limit on
  * the nodes: void tags are one node each, and an unclosed `<b>` never gets here.
  * A block that is only images and checkboxes gets no `<p>`, so it takes no
  * paragraph's margin.
