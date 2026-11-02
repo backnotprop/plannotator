@@ -74,10 +74,16 @@ export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsMo
   return !live.asker.live;
 }
 
-/** Whether one session has ended, as `askerHasEnded` reads it (the sessions route's `asker`). A read that fails: not ended. */
+/** How long a read of one session's state may take: a Send waits on it, so a read that hangs must not hold it. */
+export const SESSION_ENDED_READ_MS = 5_000;
+
+/**
+ * Whether one session has ended, as `askerHasEnded` reads it (the sessions route's `asker`). A read that fails or
+ * takes over SESSION_ENDED_READ_MS: not ended.
+ */
 async function sessionEnded(threadId: string, session: string): Promise<boolean> {
   try {
-    const model = await inboxApi.sessions(threadId, session);
+    const model = await inboxApi.sessions(threadId, session, [], SESSION_ENDED_READ_MS);
     return model.asker?.session === session && model.asker.live === false;
   } catch {
     return false;

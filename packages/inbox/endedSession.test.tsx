@@ -111,8 +111,11 @@ let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
-/** A session whose `?asker=` read waits until `until` settles (a slow /sessions round trip); null: none waits. */
-let holdAsker: { session: string; until: Promise<void> } | null = null;
+/**
+ * A session whose `?asker=` reads wait (a slow /sessions round trip): each read waits on its own, in order, until
+ * `held[i]` is called; null: none waits.
+ */
+let holdAsker: { session: string; held: (() => void)[] } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -134,7 +137,10 @@ beforeEach(() => {
     if (path.includes('/sessions')) {
       // With `liveness`, `?asker=` is answered for whichever session the window asks about.
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
-      if (holdAsker && asked === holdAsker.session) await holdAsker.until;
+      if (holdAsker && asked === holdAsker.session) {
+        const held = holdAsker.held;
+        await new Promise<void>((resolve) => held.push(resolve));
+      }
       const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
       return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}) });
     }
@@ -551,8 +557,8 @@ test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send befor
   liveness = { ses_asker: false, ses_b: true };
   sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
   const el = await render(threadOf(asking(true), laterUpdate()));
-  let release!: () => void;
-  holdAsker = { session: 'ses_asker', until: new Promise<void>((resolve) => (release = resolve)) };
+  holdAsker = { session: 'ses_asker', held: [] };
+  const release = () => holdAsker!.held.splice(0).forEach((go) => go());
   act(() => button(el, 'Edit draft').click());
   await settle();
   const text = el.querySelector('textarea') as HTMLTextAreaElement;
@@ -572,6 +578,40 @@ test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send befor
   await settle();
   expect(replies()).toEqual([]);
   expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+});
+
+// The same Send pressed twice while the first waits for A's read: the second press must not send too, or the first,
+// when its read lands, posts every reply again with new keys.
+test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send pressed twice before A's read lands: the replies go once", async () => {
+  liveness = { ses_asker: true, ses_b: true };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  holdAsker = { session: 'ses_asker', held: [] };
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  // The effect's read of A waits; the first Send waits on its own read of A.
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(holdAsker.held.length).toBe(2);
+  // The effect's read lands (A is read now), and Send is pressed again while the first still waits.
+  await act(async () => {
+    holdAsker!.held.shift()!();
+  });
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  await act(async () => {
+    holdAsker!.held.splice(0).forEach((go) => go());
+  });
+  await settle();
+  await settle();
+  expect(replies().map((r) => (r.path.includes(M1) ? 'A' : 'B'))).toEqual(['A', 'B']);
 });
 
 test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {

@@ -1917,6 +1917,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
   /** A Send waits for the read of a session it reaches (useEndedSessions' `check`): a second press meanwhile does nothing. */
   const checkingEnded = useRef(false);
+  /** Counts the Sends that started posting: a Send that waited for the ended check goes only if none started meanwhile. */
+  const sendStarts = useRef(0);
   /** What the route choice is for: a reply, or a Re-ask (the same choice, its own words). */
   const [routeFor, setRouteFor] = useState<'reply' | 'reask'>('reply');
   const reaskRef = useRef<HTMLButtonElement>(null);
@@ -3415,7 +3417,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const byChord = sentByChord.current;
     sentByChord.current = false;
     // Dictation still running, in this box: the words are not in it yet (Mod+Enter reaches here with Send off).
-    if (sending || voice.busy) return;
+    // A Send waiting for the ended check (below) holds every other press: else both would post the replies.
+    if (sending || voice.busy || checkingEnded.current) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
       setGuard(true);
@@ -3432,14 +3435,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     let gateEnded = askerEnded;
     let gateAsking = asking;
     if (!options.routed && !askerEnded && !resolved && otherEnded.unchecked) {
-      if (checkingEnded.current) return;
       checkingEnded.current = true;
+      const starts = sendStarts.current;
       let ended: ReadonlySet<string>;
       try {
         ended = await otherEnded.check();
       } finally {
         checkingEnded.current = false;
       }
+      // Another Send went while this one waited: this one's replies went with it.
+      if (sendStarts.current !== starts) return;
       const other = otherSessions.filter((s) => ended.has(s.session)).at(-1) ?? null;
       if (other) {
         gateEnded = true;
@@ -3468,6 +3473,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         : null;
     const to = chosen ? { host: chosen.host, session: chosen.session } : undefined;
     sendingFromComposer.current = options.stayFull === true;
+    sendStarts.current += 1;
     setSending(true);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
