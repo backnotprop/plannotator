@@ -14,6 +14,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { QUESTION_OPENERS_WITH_TEXT_MAX } from "@plannotator/shared/inbox/question-openers";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -92,4 +93,46 @@ test("a correct block, or an example in a code fence: no warning", async () => {
   expect(structured.questions).toHaveLength(1);
   expect(structured.question_openers_with_text).toBeUndefined();
   expect(text).not.toContain("has text after it");
+});
+
+test("a warning with other hints in the same result: every warning stays a line of its own, the hints whole", async () => {
+  const { project, client } = await world();
+  // A broken opener, and a question that marks its recommendation in a label (its own hint).
+  const body = [
+    ":::question {#a}",
+    "Which bar?",
+    "- [ ] Top",
+    ":::",
+    "",
+    ":::question",
+    "Which colour?",
+    "- [ ] Blue (Recommended)",
+    "- [ ] Green",
+    ":::",
+    "",
+    ":::question-text more",
+    "Why?",
+    ":::",
+  ].join("\n");
+  const { text, structured } = await send(client, { project_path: project, body, thread: "Hints" });
+  expect(structured.recommended_in_label).toHaveLength(1);
+  const lines = text.split("\n");
+  expect(lines).toContain(warning(1, ":::question"));
+  expect(lines).toContain(warning(12, ":::question-text"));
+  // The other hint is whole, on a line with no warning in it.
+  const hint = lines.find((line) => line.includes("marks its recommendation inside a choice label"));
+  expect(hint).toBeDefined();
+  expect(hint).not.toContain("has text after it");
+});
+
+test("many such lines: the result names the first few and counts the rest", async () => {
+  const { project, client } = await world();
+  const blocks = Array.from({ length: QUESTION_OPENERS_WITH_TEXT_MAX + 3 }, (_, i) => `:::question {#q${i}}\nQuestion ${i}?\n:::`);
+  const { text, structured } = await send(client, { project_path: project, body: blocks.join("\n\n"), thread: "Many" });
+  expect(structured.question_openers_with_text).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX);
+  expect(structured.question_openers_with_text[0]).toEqual({ line: 1, directive: ":::question" });
+  expect(structured.question_openers_with_text_more).toBe(3);
+  const lines = text.split("\n");
+  expect(lines.filter((line) => line.includes("has text after it"))).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX);
+  expect(lines.at(-1)).toBe("And 3 more lines like these.");
 });

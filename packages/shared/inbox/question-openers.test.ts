@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { questionOpenersWithText, questionOpenersWithTextText } from "./question-openers";
+import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText } from "./question-openers";
 
 describe("questionOpenersWithText", () => {
   test("an opener with text after its name is named by its line and the directive as written, and opens no question", () => {
@@ -77,5 +77,42 @@ describe("questionOpenersWithText", () => {
   test("after a code fence closes, an opener with text is named again, by its line in the body", () => {
     const body = ["```", ":::question {#example}", "```", ":::question {#real}", "Which?", ":::"].join("\r\n");
     expect(questionOpenersWithText(body)).toEqual([{ line: 4, directive: ":::question" }]);
+  });
+
+  test("a stray ``` inside an HTML block or a directive's body hides nothing after it, as the parser reads it", () => {
+    const afterHtml = ["<div>", "```", "</div>", "", ":::question {#x}", "Which?", ":::"].join("\n");
+    expect(parseInboxQuestionBlocks(afterHtml)).toEqual([]);
+    expect(questionOpenersWithText(afterHtml)).toEqual([{ line: 5, directive: ":::question" }]);
+    const afterNote = [":::note", "```", ":::", ":::question {#x}", "Which?", ":::"].join("\n");
+    expect(parseInboxQuestionBlocks(afterNote)).toEqual([]);
+    expect(questionOpenersWithText(afterNote)).toEqual([{ line: 4, directive: ":::question" }]);
+  });
+
+  test("an opener with text inside another directive's body, an HTML block or display math is not named (alone on its line it would open nothing there either)", () => {
+    const body = [
+      ":::note",
+      ":::question {#in-note}",
+      ":::",
+      "",
+      "<div>",
+      ":::question-multi in html",
+      "</div>",
+      "",
+      "$$",
+      ":::question-text in math",
+      "$$",
+    ].join("\n");
+    expect(questionOpenersWithText(body)).toEqual([]);
+  });
+
+  test("past the cap, the first openers are named and the rest counted on a line of its own", () => {
+    const openers = Array.from({ length: QUESTION_OPENERS_WITH_TEXT_MAX + 2 }, (_, i) => ({ line: i * 4 + 1, directive: ":::question" }));
+    const text = questionOpenersWithTextText(openers);
+    const lines = text.split("\n").slice(1);
+    expect(lines).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX + 1);
+    expect(lines.filter((line) => line.endsWith("send the question again."))).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX);
+    expect(lines.at(-1)).toBe("And 2 more lines like these.");
+    // A list already cut to the cap, with the rest counted (what the CLI reads from the result).
+    expect(questionOpenersWithTextText(openers.slice(0, QUESTION_OPENERS_WITH_TEXT_MAX), 1).split("\n").at(-1)).toBe("And 1 more line like this.");
   });
 });

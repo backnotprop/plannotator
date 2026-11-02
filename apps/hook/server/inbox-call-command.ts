@@ -241,7 +241,14 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   if (tidy) err(`${inboxTidyMcpLine(tidy.id)}\n\n${tidy.text}\n`);
   // A question line that opened no block (`:::question {#x}`): the result text's warning, one line each, on stderr so stdout stays one JSON value.
   const openers = result?.structuredContent?.question_openers_with_text;
-  if (Array.isArray(openers) && openers.length > 0) err(`${questionOpenersWithTextText(openers as QuestionOpenerWithText[]).trim()}\n`);
+  const moreOpeners = result?.structuredContent?.question_openers_with_text_more;
+  if (Array.isArray(openers) && openers.length > 0) {
+    try {
+      err(`${questionOpenersWithTextText(openers as QuestionOpenerWithText[], typeof moreOpeners === "number" ? moreOpeners : 0).trim()}\n`);
+    } catch {
+      // A malformed list (never from this Inbox) prints no warning; the result below still does.
+    }
+  }
   // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
