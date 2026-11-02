@@ -138,6 +138,8 @@ export function createInboxAsk(options: {
       const owner = ownerOf(thread);
       return json({
         serverSession,
+        subject: thread.subject,
+        project: thread.project.name,
         conversation: readInboxAsk(store.dir, threadId),
         running: live.running(threadId),
         can_ask: !!owner && live.canAnswer(owner.session),

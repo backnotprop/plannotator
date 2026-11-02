@@ -350,6 +350,8 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /** Ask AI is on for this reader (PLANNOTATOR_INBOX_ASK_AI). Absent while it is off, for a tailnet guest, and from an older Inbox. */
+  ask_ai?: true;
   /**
    * Plannotator's appearance in config.json (`theme`), the value plan review
    * reads too: null when never chosen. Absent from an Inbox that predates it.
@@ -1343,8 +1345,70 @@ export const inboxApi = {
   answerNotes: (add: InboxNoteAgentId[], asked: InboxNoteAgentId[], seen: boolean) =>
     post<InboxAgentsModel & { results: InboxNoteResult[] }>(inboxUrl('/agents/notes'), { add, asked, seen }),
   agentsSeen: () => post<InboxAgentsModel>(inboxUrl('/agents/seen'), {}),
+  /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
+  askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
+  askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
+  askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
+  askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
+  askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
 };
+
+/** One question and what came of it (`packages/shared/inbox/ask.ts`). */
+export interface InboxAskTurnWire {
+  id: string;
+  at: string;
+  session: string;
+  host: string | null;
+  question: string;
+  passage?: string;
+  answer?: string;
+  answered_at?: string;
+  stopped?: boolean;
+  failure?: 'gone' | 'taken_over' | 'failed';
+}
+
+export interface InboxAskConversationWire {
+  v: 1;
+  thread_id: string;
+  seen_at: string | null;
+  turns: InboxAskTurnWire[];
+}
+
+/** `GET /api/inbox/threads/:id/ask`. */
+export interface InboxAskModel {
+  subject: string | null;
+  project: string;
+  conversation: InboxAskConversationWire | null;
+  /** The turn being answered, or null. */
+  running: string | null;
+  /** The icons show: an open thread whose owner's connection can answer now. */
+  can_ask: boolean;
+  agent: { host: string | null; name: string };
+}
+
+/** `POST /api/inbox/threads/:id/ask`. */
+export interface InboxAskPosted {
+  conversation: InboxAskConversationWire;
+  turn: InboxAskTurnWire;
+  /** What `/api/ai/session` must name for this turn; null when nothing can run now. */
+  provider_id: string | null;
+  reason?: 'no_connection' | 'no_live_path';
+  /** The turn is already being answered, in another window. */
+  running?: boolean;
+}
+
+/** One row of the chat list (`GET /api/inbox/ask`). */
+export interface InboxAskChat {
+  thread_id: string;
+  subject: string | null;
+  project: string;
+  host: string | null;
+  /** When anything last happened in the chat. */
+  at: string;
+  unread: boolean;
+  answering: boolean;
+}
 
 /** One note the dialog asked to add: written, or why not. */
 export type InboxNoteResult = { ok: true; agent: InboxNoteAgentId; action: string; path: string | null } | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
@@ -1417,6 +1481,8 @@ export interface InboxEventHandlers {
   onConnect?: () => void;
   /** A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"); never called by an older Inbox. */
   onDrafts?: (threadId: string) => void;
+  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
+  onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
   /**
@@ -1454,7 +1520,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1508,6 +1574,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { thread_id?: unknown };
         if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'ask':
+      try {
+        const data = JSON.parse(frame.data) as { thread_id?: unknown };
+        if (typeof data.thread_id === 'string') handlers.onAsk?.(data.thread_id);
       } catch {
         // A malformed frame changes nothing.
       }
