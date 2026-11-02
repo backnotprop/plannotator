@@ -3,6 +3,7 @@
  * answers, and which reply each waiting annotation rides.
  */
 import { inboxActionInDraft, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 
 /**
  * One reply of a Send: the message it answers, its picks and the questions it
@@ -132,7 +133,8 @@ export function wordsMessage(thread: InboxThread): InboxMessageWire {
     const after = thread.messages.slice(handedAt + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
     return after.at(-1) ?? handoff;
   }
-  return thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;
+  // A permission prompt's question (launch, `perm:…`) takes only its own answer: the words go to the agent itself.
+  return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)).at(-1) ?? thread.messages[0]!;
 }
 
 /** The reply a message's questions ride: its session's, or its own when it has none. */

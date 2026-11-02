@@ -62,7 +62,7 @@ export function ulid(now: number = Date.now()): string {
 }
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -81,6 +81,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   crd: /^crd_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One press of Tidy (packages/core/inbox-tidy.ts). */
   tdy: /^tdy_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** An agent the Inbox started (launch; packages/server/inbox-launch.ts). */
+  lch: /^lch_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** An Inbox: the stable id other machines' links key on (packages/server/inbox-links.ts). */
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
@@ -570,6 +572,11 @@ export interface InboxMessage {
    */
   board_request?: true;
   /**
+   * On the root of a thread the person started by launching an agent (To:
+   * "New Claude Code session"). Absent on every other message.
+   */
+  launch?: InboxLaunchRecord;
+  /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
    * it in compose; otherwise the first reply from a session that may name it
@@ -830,6 +837,84 @@ export interface InboxAddressee {
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   session: string;
+}
+
+/**
+ * Launch (start an agent from compose): the agents the Inbox can start a
+ * session of, one per line. PR 1: Claude Code only.
+ */
+export type InboxLaunchAgent =
+  | "claude-code";
+
+/** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
+export interface InboxLaunchError {
+  code: "untrusted" | "missing" | "failed";
+  /** One sentence for the run line (screen 14). */
+  text: string;
+  at: string;
+}
+
+/**
+ * On the root of a thread the person started by launching an agent: written
+ * with the root, then once more when the host answers (`session_ref`, or
+ * `error`). Live state is never stored; the server computes `InboxRun` on
+ * read. Per-launch files live in `<dataDir>/inbox/launch/<id>/`.
+ */
+export interface InboxLaunchRecord {
+  id: string;
+  agent: InboxLaunchAgent;
+  /** The host's own short id (`claude attach <ref>`); null until it started. */
+  session_ref: string | null;
+  /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
+  folder: string;
+  /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
+  scratch: boolean;
+  /**
+   * A scratch folder's identity when the Inbox made it (`<dev>:<ino>`): Delete purges and removes the folder
+   * only while the same folder is still there, never one made later at that path.
+   */
+  scratch_inode?: string;
+  started_at: string;
+  /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
+  full_permissions?: true;
+  /** Started in the person's own Claude `permissions.defaultMode` (no `--permission-mode`). Neither this nor full: auto mode. */
+  own_mode?: true;
+  /**
+   * The person recorded Claude Code's bypass consent when the launch was made: it starts with
+   * `--allow-dangerously-skip-permissions`, and its card offers Full permissions. Absent (an older launch
+   * too): no Full permissions.
+   */
+  bypass_available?: true;
+  error?: InboxLaunchError | null;
+  /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
+  deleted_at?: string;
+}
+
+/** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
+export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing";
+
+/** What a launched thread's run line shows (the thread route's `run`). */
+export interface InboxRun {
+  state: InboxRunState;
+  launch_id: string;
+  agent: InboxLaunchAgent;
+  /** The project's name (the line's "in <project>"). */
+  project: string;
+  folder: string;
+  /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
+  since: string | null;
+  /** `starting` after a reply's respawn ("Starting … again"). */
+  again: boolean;
+  /** `stopped`: the person pressed Stop (the line names the time). */
+  stopped_by_person: boolean;
+  /** `failed`: the cause in words; `stopped`: the host's note, when it has one (else null); `missing`: null. */
+  cause: string | null;
+  /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
+  untrusted: boolean;
+  /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
+  trust?: { warning: string | null };
+  /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
+  attach_command: string | null;
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -1350,6 +1435,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * on every other thread and from an older Inbox.
    */
   addressee?: InboxAddressee | null;
+  /**
+   * On a launched thread (the window's list only): the one muted word after
+   * the agent's mark ("Starting", "Working"). Absent otherwise and from an
+   * older Inbox.
+   */
+  run?: "starting" | "working" | null;
   /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
@@ -2223,6 +2314,43 @@ export interface InboxComposeSession {
 export interface InboxComposeProject {
   project: { id: string | null; name: string; root: string };
   sessions: InboxComposeSession[];
+}
+
+/** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
+export interface InboxLaunchTrust {
+  /** The folder the trust lands on. */
+  folder: string;
+  /** Its reading as the window had it: `[]` when none was read yet, so a folder with any fact answers `trust_warning_changed`. */
+  facts: string[];
+}
+
+/**
+ * A folder compose would Trust and start. Every entry has `folder`, the one the trust lands on (a repository's root, a
+ * scratch root), which can differ from the folder picked. Only the folder picked in To has `facts`, the short lines the
+ * details show (none: a clean folder, no circle), and `warns`: a fact beyond "the whole repository" (the warning colour).
+ */
+export interface InboxLaunchUntrusted {
+  folder: string;
+  facts?: string[];
+  warns?: boolean;
+}
+
+/**
+ * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
+ * `inboxLaunch.enabled`): the agents To offers to start (only those
+ * available: no grey rows), and the projects the folder menu lists, the most
+ * recently active first, each with whether its folder is still there.
+ */
+export interface InboxComposeLaunch {
+  /**
+   * `scratch_trusted: false`: the agent does not trust the scratch root yet. `untrusted`: only for the owner's window,
+   * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
+   * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
+   */
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
+  projects: { id: string; name: string; root: string; exists: boolean }[];
+  /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
+  scratch?: { root: string };
 }
 
 /**

@@ -99,9 +99,11 @@ export interface AgentEnvironment {
    * Run argv with no stdin, the environment's env, killed (with its process
    * group) after `timeoutMs`, when `signal` aborts, or when this process exits.
    * `cwd`: the folder it runs in (default: this process's). `env`: variables
-   * set on top of the environment's for this run.
+   * set on top of the environment's for this run. `killGroup: false`: on the
+   * limit or exit kill only the CLI itself, never its group (launch: a call
+   * may be the one that starts the person's shared Claude supervisor).
    */
-  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>> }): Promise<AgentRunResult>;
+  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; killGroup?: boolean }): Promise<AgentRunResult>;
 }
 
 /** The real boundary: this process's home, environment and PATH. */
@@ -121,7 +123,7 @@ export function createAgentEnvironmentFor(input: {
     homeDir: input.homeDir,
     env,
     which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd),
+    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd, options.killGroup ?? true),
   };
 }
 
@@ -149,7 +151,8 @@ export function liveAgentRunCount(): number {
  * stdout open cannot hold it. On the time limit, when `signal` aborts, or when
  * this process exits first, the whole group is killed (SIGKILL), so a CLI that
  * hangs never outlives its run. A CLI that exited by itself is left alone (its
- * group may hold a daemon it started on purpose).
+ * group may hold a daemon it started on purpose). `killGroup: false` kills
+ * only the CLI itself, so a daemon it is starting survives even a time-out.
  */
 function runWithTimeout(
   argv: readonly string[],
@@ -157,6 +160,7 @@ function runWithTimeout(
   timeoutMs: number,
   signal?: AbortSignal,
   cwd?: string,
+  killGroup = true,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -188,7 +192,7 @@ function runWithTimeout(
       // Once it exited, its pid (and group id) may name another process.
       if (exited) return;
       try {
-        if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+        if (killGroup && process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
         else child.kill("SIGKILL");
       } catch {
         try {
@@ -284,6 +288,25 @@ export function codexHome(e: AgentEnvironment): string {
 export function claudeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "CLAUDE_CONFIG_DIR") ?? join(e.homeDir, ".claude");
 }
+/**
+ * Claude Code's global config, the file it picks itself (2.1.316): `$CLAUDE_CONFIG_DIR/.claude.json` when that is set,
+ * else `~/.claude.json` (`.claude-custom-oauth.json` with `CLAUDE_CODE_CUSTOM_OAUTH_URL` set). A legacy `.config.json`
+ * in its config folder wins when it has anything in it, or is empty and writable with the usual file absent.
+ */
+export function claudeGlobalConfigPath(e: AgentEnvironment): string {
+  const usual = join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, e.env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? ".claude-custom-oauth.json" : ".claude.json");
+  const legacy = join(claudeConfigDir(e), ".config.json");
+  try {
+    const stat = statSync(legacy);
+    if (stat.isFile() && (stat.size > 0 || ((stat.mode & 0o222) !== 0 && !existsSync(usual)))) return legacy;
+  } catch {
+    // No legacy file: the usual one.
+  }
+  return usual;
+}
+
+/** The most `.claude.json` a read-only lookup reads (it holds per-project history and often passes 1 MiB). */
+export const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
 export function piAgentDir(e: AgentEnvironment): string {
   return envDir(e, "PI_CODING_AGENT_DIR") ?? join(e.homeDir, ".pi", "agent");
 }
@@ -646,6 +669,47 @@ export function claudePluginStateFromScopes(
   const decided = scopes.find((scope) => scope.on !== undefined);
   if (decided) return { state: decided.on ? "enabled" : "disabled", managed: decided.scope === "managed" };
   return { state: registered ? "enabled" : "absent", managed: false };
+}
+
+/**
+ * What the person's own Claude Code setup says about permission modes, read-only (the values below only,
+ * nothing else kept), from the same sources Claude Code 2.1.314 reads:
+ * - consent: `skipDangerousModePermissionPrompt` in managed or user `settings.json`, or
+ *   `bypassPermissionsModeAccepted` in the global config (`~/.claude.json`, `$CLAUDE_CONFIG_DIR/.claude.json`).
+ *   Never a project's or a `--settings` file's (Claude says those do not count), and the Inbox never writes it.
+ * - disabled: `permissions.disableBypassPermissionsMode: "disable"` (that value only) in any settings Claude
+ *   merges: managed, the user's `settings.json`, and the launch folder's `.claude/settings{,.local}.json`
+ *   (Claude never reads `~/.claude/settings.local.json` for a session in another folder).
+ * - defaultMode: `permissions.defaultMode`, the strongest scope that sets one (managed, the folder's local and
+ *   shared settings, then the user's); a folder's `bypassPermissions` is skipped, as Claude ignores it.
+ * `folder` is the launch's folder; Settings → Agents passes none (the person's own files only).
+ */
+export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = null): { consent: boolean; disabled: boolean; defaultMode: string | null } {
+  const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  const permissions = (settings: unknown) => record(record(settings).permissions);
+  const managedPath = claudeManagedSettingsPath(e);
+  const managed = managedPath ? readClaudeSettings(managedPath) : null;
+  const user = readClaudeSettings(join(claudeConfigDir(e), "settings.json"));
+  const projectLocal = folder ? readClaudeSettings(join(folder, ".claude", "settings.local.json")) : null;
+  const project = folder ? readClaudeSettings(join(folder, ".claude", "settings.json")) : null;
+  const disabled = [managed, user, projectLocal, project].some((settings) => permissions(settings).disableBypassPermissionsMode === "disable");
+  const global = readAgentFile(claudeGlobalConfigPath(e));
+  let accepted = false;
+  if (global.kind === "file") {
+    try {
+      accepted = record(JSON.parse(global.text)).bypassPermissionsModeAccepted === true;
+    } catch {
+      accepted = false;
+    }
+  }
+  const consent = accepted || [managed, user].some((settings) => record(settings).skipDangerousModePermissionPrompt === true);
+  const modeOf = (settings: unknown, fromFolder: boolean): string | null => {
+    const mode = permissions(settings).defaultMode;
+    if (typeof mode !== "string" || mode.trim() === "") return null;
+    return fromFolder && mode.trim() === "bypassPermissions" ? null : mode.trim();
+  };
+  const defaultMode = modeOf(managed, false) ?? modeOf(projectLocal, true) ?? modeOf(project, true) ?? modeOf(user, false);
+  return { consent, disabled, defaultMode };
 }
 
 /** Claude Code's managed (enterprise) settings file, per platform. */
@@ -1685,9 +1749,6 @@ export function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly
   return classify(rawJsonEntry(claudeCodeMcpPath(e), ["mcpServers"], false, read), ours, true);
 }
 
-/** The most `.claude.json` the read-only MCP lookup reads. */
-const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
-
 /** Claude Code reaches the Inbox through Plannotator's plugin (its mod registers the tool); without the plugin only a person can connect it. */
 function claudeCodeWay(e: AgentEnvironment): ConnectWay {
   return claudeCodePluginEnabled(e) ? { kind: "tool", host: "claude-code" } : { kind: "manual", why: "install Plannotator's Claude Code plugin" };
@@ -1734,7 +1795,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
   // Claude Code connected by hand through MCP, where the plugin gives it no tool (not installed, disabled, or its mod off):
   // it reaches the Inbox (without the wake). Checked before the agent is called off.
   if (id === "claude-code" && (way.kind === "manual" || !claudeCodeModOn(e)) && claudeCodeMcpEntry(e, ourCommands(options, record)).kind === "ours") {
-    return { kind: "mcp", on: true, state: "connected", path: displayPath(join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json"), e), locked: false, reason: null };
+    return { kind: "mcp", on: true, state: "connected", path: displayPath(claudeCodeMcpPath(e), e), locked: false, reason: null };
   }
   // Connected in another file than the environment names (`QWEN_HOME` differs): off here, the switch moves it.
   if (record && recordedElsewhere(spec, e, record)) {

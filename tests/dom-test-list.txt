@@ -115,6 +115,8 @@ packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
+packages/inbox/composeTrust.test.tsx
+packages/inbox/openInTerminal.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx

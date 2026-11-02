@@ -20,6 +20,8 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+/* A launched session's permission prompt (components/PermissionCard.tsx). */
+@import "../../packages/inbox/permissionCard.css";
 
 /* The shared chat window (@plannotator/ui/components/chat) keeps its own class names; these are what they mean in
    the Inbox's theme. Here and not in theme.css, which other apps import, nor in inbox.css, which also ships as a

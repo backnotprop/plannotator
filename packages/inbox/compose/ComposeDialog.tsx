@@ -18,18 +18,29 @@
  * - A reopened draft keeps the session it was for, struck through when that
  *   session has ended: it is never re-addressed on its own.
  * - Files: the paperclip, a drop or a paste (paste.ts), uploaded at once (ComposeFiles.tsx).
+ * - Launch on (`inboxLaunch.enabled`, docs/agent-guides/inbox-launch.md): To can
+ *   also name a new session ("New Claude Code session ▾ in <project> ▾"); Send
+ *   writes the thread, then the Inbox starts the agent in the project's folder.
+ *   A folder that is gone turns Send off and says so (UX screen 13).
+ * - Trust and start (approval "inbox-launch-trust-compose"): for a folder the
+ *   agent does not trust that the owner can trust from here, Send reads "Trust
+ *   and start" and the press is the consent: there is no confirm step. A question
+ *   circle beside it opens the facts, when there are any.
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
-import { whenTime } from '../format';
+import { InboxApiError, inboxApi, type DraftView, type StartThreadInput } from '../api';
+import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { SessionDetail, ToPicker } from './ToPicker';
+import { SessionDetail, ToPicker, startKey } from './ToPicker';
+import { FolderMenu } from './FolderMenu';
 import { ThreadNameChip } from './ThreadNameChip';
-import { useComposeSessions } from './useComposeSessions';
+import { TrustDetails } from './TrustDetails';
+import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
+import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
@@ -50,11 +61,16 @@ import {
   composeBoardChoice,
   rememberComposeBoardChoice,
   statusLine,
+  startStatusLine,
+  scratchFolderOf,
+  scratchProject,
+  SCRATCH_PICK,
   sendThreadName,
   suggestThreadName,
   threadNameStateOf,
   type ThreadNameState,
   type ComposeTarget,
+  type ComposeStart,
 } from './model';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
@@ -86,6 +102,8 @@ export interface ComposeSent {
   draftId: string | null;
   /** The Board card the thread was created for (`ComposeRequest.card`): link the thread to it. */
   cardId?: string | null;
+  /** It started a new agent session (launch), rather than going to a live one. */
+  launched?: boolean;
 }
 
 /**
@@ -96,7 +114,7 @@ export interface ComposeSent {
  * draft is gone; `uploads: false`: no paperclip, drop or paste).
  */
 export interface ComposeTransport {
-  sessions: () => Promise<ComposeSessionsModel>;
+  sessions: ComposeSessionsLoader;
   startThread: (input: StartThreadInput) => Promise<{ thread_id: string; project?: { id: string; name: string; root: string } }>;
   drafts: boolean;
   uploads: boolean;
@@ -178,22 +196,55 @@ export function ComposeDialog(props: ComposeDialogProps) {
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
-  const { model, load } = useComposeSessions(true, transport?.sessions);
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
+  const { model, load } = useComposeSessions(true, transport?.sessions, startPick ? { agent: startPick.agent, project: startPick.projectId } : null);
   const voice = useVoiceSession();
   const projects = model?.projects ?? [];
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
+  // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
+  const launch = model?.launch;
+  const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
+  const start: ComposeStart | null = useMemo(() => {
+    const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
+    // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
+    if (agent && startPick.projectId === SCRATCH_PICK && launch?.scratch) return { agent: agent.agent, name: agent.name, project: scratchProject(launch.scratch.root), scratch: true };
+    const project = startPick && launch?.projects.find((p) => p.id === startPick.projectId);
+    return agent && project ? { agent: agent.agent, name: agent.name, project } : null;
+  }, [startPick, launch]);
+  const [folderMenu, setFolderMenu] = useState(false);
+  const startAgent = start ? launch?.agents.find((a) => a.agent === start.agent) : undefined;
+  // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
+  // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
+  const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
+  const trustFacts = trust?.facts ?? [];
+  // The question circle's details.
+  const [trustInfo, setTrustInfo] = useState(false);
+  const trustInfoOpen = trustInfo && trustFacts.length > 0;
+  const trustCircleRef = useRef<HTMLButtonElement>(null);
+  // A press made on a reading that had gone stale: when its details opened on the new one.
+  const trustChangedAt = useRef(0);
+  useEffect(() => setTrustInfo(false), [start?.agent, start?.project.id]);
+  useEffect(() => {
+    if (!trustInfoOpen) return;
+    const onDown = (event: PointerEvent) => {
+      const at = event.target as Element | null;
+      if (at && !at.closest('[data-compose-trust-ask], [data-compose-trust-circle]')) setTrustInfo(false);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [trustInfoOpen]);
 
   // To is never filled by itself. Focus that started on To moves to the message when the
   // first read finds no live agent (To is then a line of text, not a button).
   useEffect(() => {
-    if (!model || anyLive || opening.focus !== 'to') return;
+    if (!model || anyLive || canStart || opening.focus !== 'to') return;
     const dialog = dialogRef.current;
     const active = document.activeElement;
     if (dialog && (!active || active === document.body || active === dialog || !dialog.contains(active))) textRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [model, anyLive]);
+  }, [model, anyLive, canStart]);
 
   // A draft's chosen session that is not live: struck through, never re-addressed on its own.
   const endedTo: InboxDraftTo | null = model && chosen && !target && draft?.to?.session === chosen ? draft.to : null;
@@ -238,7 +289,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const threadName = draftThreadName(nameState);
   useEffect(() => {
     sendKey.current = crypto.randomUUID();
-  }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
+  }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
@@ -274,8 +325,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, []);
 
   const requestClose = () => {
-    if (picker) {
+    if (trustInfoOpen) {
+      setTrustInfo(false);
+      if (document.activeElement !== textRef.current) trustCircleRef.current?.focus();
+      return;
+    }
+    if (picker || folderMenu) {
       setPicker(false);
+      setFolderMenu(false);
       return;
     }
     if (question) {
@@ -296,10 +353,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const send = async () => {
     // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
     if (busy || !model || voice.busy) return;
+    // The details just opened on a changed folder: a double press or a held key never answers what it hasn't shown.
+    if (Date.now() - trustChangedAt.current < ARM_MS) return;
     setError(null);
-    if (!target) {
+    if (start && !start.project.exists) {
+      setError('Nothing sent: pick a folder to start in.');
+      return;
+    }
+    if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
-      setError(anyLive ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
+      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
     if (!body.trim()) {
@@ -322,7 +385,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const skills = transport ? null : await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
       const result = await (transport ? transport.startThread : inboxApi.startThread)({
-        to: { host: target.host, session: target.session },
+        to: start
+          ? {
+              launch: {
+                ...(start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id }),
+                // The press is the consent, to what it was offered: the server refuses a folder that changed since.
+                ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
+              },
+            }
+          : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(body, skills) : body,
         idempotency_key: sendKey.current,
         uploads: uploadIds,
@@ -330,11 +401,31 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
-      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null });
+      // A launch's answer names its launch (the window's own startThread; a transport never starts one).
+      const launchId = (result as { launch?: { id: string } }).launch?.id ?? null;
+      const sentTo = start
+        ? {
+            // The placeholder the root is addressed to until the start settles: `launch:<launch id>`.
+            session: launchId ? `launch:${launchId}` : '',
+            host: start.agent as string,
+            projectName: start.project.name,
+          }
+        : { session: target!.session, host: target!.host, projectName: target!.project.name };
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, ...(start ? { launched: true } : {}) });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');
+      } else if (cause instanceof InboxApiError && (cause.code === 'folder_missing' || cause.code === 'agent_unavailable')) {
+        // Checked before anything is written: nothing was sent. The re-read strikes the folder through, or drops the agent's row.
+        void load();
+        setError(cause.message);
+      } else if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') {
+        // The folder changed since its reading: nothing was trusted or sent. The new reading, shown; the next press is on it.
+        await load();
+        trustChangedAt.current = Date.now();
+        setTrustInfo(true);
+        setError(cause.message);
       } else if (cause instanceof InboxApiError && cause.code === 'thread_name_taken') {
         setNameError('Another open thread in this project has this name.');
       } else if (cause instanceof InboxApiError && cause.code === 'project_unresolved') {
@@ -357,8 +448,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
     setError(null);
     try {
       const to = target ? draftTo(target) : chosen && draft?.to?.session === chosen ? draft.to : null;
+      // A draft keeps the project a new session would start in, not the start itself: reopened, To is chosen again.
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
+        : start && !start.scratch
+          ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
       const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
@@ -437,11 +531,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !question) {
       event.preventDefault();
-      void send();
+      if (!event.repeat) void send();
+      return;
     }
+    // A key held on the focused button clicks it again and again: a held key never presses it twice.
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = !!target;
+  const sendable = !!target || (!!start && start.project.exists);
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -449,7 +546,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Save draft only for something written: an empty compose offers none.
   const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
-  const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
+  // A scratch start names the folder a Send would make now (from the thread's name).
+  const scratchFolder = launch?.scratch ? scratchFolderOf(launch.scratch.root, threadName.trim() || suggested) : null;
+  const sendLabel = trust ? 'Trust and start' : 'Send';
+  // The details cover the error line, and on a phone the whole footer: open, they say it.
+  const errorInDetails = trustInfoOpen && !conflict;
+  const status = start
+    ? startStatusLine(start)
+    : statusLine({ target, anyLive: anyLive || canStart, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
   // Back from the picker: to the message. In the tour on a phone, to To: a focused message raises the keyboard, and in
@@ -457,9 +561,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
   const toRow = (
-    <div className="ib-cp-to">
+    <div className="ib-cp-to" data-start={start ? '' : undefined}>
       <span className="ib-cp-tol">To</span>
-      {model && !anyLive && !endedNote ? (
+      {model && !anyLive && !canStart && !endedNote ? (
         <span className="ib-cp-none-to" data-compose-to="none">
           <Icon name="info" size={15} />
           No agent is running
@@ -469,13 +573,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ref={toRef}
           type="button"
           className="ib-cp-tobtn"
-          data-compose-to={target ? target.session : endedNote ? 'ended' : 'choose'}
+          data-compose-to={target ? target.session : start ? 'start' : endedNote ? 'ended' : 'choose'}
           aria-haspopup="listbox"
           aria-expanded={picker}
           aria-label={
             target
               ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change`
-              : endedNote
+              : start
+                ? `To: a new ${start.name} session. Change`
+                : endedNote
                 ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
                 : loading
                   ? 'To: looking for live agents'
@@ -485,9 +591,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           data-loading={loading ? '' : undefined}
           // Focusable while the sessions are read (Tab still reaches it); it opens once they are.
           onClick={() => !loading && setPicker((open) => !open)}
-          disabled={!loading && !anyLive && !endedNote}
+          disabled={!loading && !anyLive && !canStart && !endedNote}
         >
-          {target ? (
+          {start ? (
+            <>
+              <HostMark host={start.agent} />
+              <b>New {start.name} session</b>
+            </>
+          ) : target ? (
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
@@ -508,6 +619,27 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
           <Icon name="chevD" size={15} />
         </button>
+      )}
+      {start && (
+        <span className="ib-cp-startin">
+          <span className="ib-cp-in">in</span>
+          <button
+            type="button"
+            className="ib-cp-tobtn"
+            data-compose-folder={start.project.id}
+            data-missing={start.project.exists ? undefined : ''}
+            aria-haspopup="listbox"
+            aria-expanded={folderMenu}
+            aria-label={`Start in: ${start.project.name}, ${tildePath(start.project.root, home)}${start.project.exists ? '' : ', not there any more'}. Change`}
+            onClick={() => {
+              setPicker(false);
+              setFolderMenu((open) => !open);
+            }}
+          >
+            {start.project.exists ? <bdi>{start.project.name}</bdi> : <s>{start.project.name}</s>}
+            <Icon name="chevD" size={15} />
+          </button>
+        </span>
       )}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
@@ -574,11 +706,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
       {picker && (
         <ToPicker
           groups={groups}
-          selected={target?.session ?? null}
+          selected={target?.session ?? (start ? startKey(start.agent) : null)}
           home={home}
           phone={phone}
+          start={launch && canStart ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null}
+          onStart={(picked) => {
+            setStartPick({ agent: picked.agent, projectId: picked.project.id });
+            // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
+            void inboxApi.launchSettingsRead(true).catch(() => {});
+            setChosen(null);
+            setPicker(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
           onPick={(picked) => {
             setChosen(picked.session);
+            setStartPick(null);
             setPicker(false);
             setError(null);
             afterPicker();
@@ -588,6 +731,42 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // Still nobody in To: back on To, where the choice is made.
             if (target) afterPicker();
             else (toRef.current ?? textRef.current)?.focus();
+          }}
+        />
+      )}
+      {folderMenu && start && launch && (
+        <FolderMenu
+          projects={launch.projects}
+          selected={start.project.id}
+          scratch={
+            launch.scratch && scratchFolder
+              ? {
+                  folder: tildePath(scratchFolder, home),
+                  root: tildePath(launch.scratch.root, home),
+                  // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it. Trust and
+                  // start says it at the button, so the row speaks only where a press can't (a guest, a root at home).
+                  trusted: startAgent?.scratch_trusted !== false || !!startAgent.untrusted?.[SCRATCH_PICK],
+                  agentName: start.name,
+                }
+              : null
+          }
+          onScratch={() => {
+            setStartPick({ agent: start.agent, projectId: SCRATCH_PICK });
+            setFolderMenu(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
+          home={home}
+          phone={phone}
+          onPick={(project) => {
+            setStartPick({ agent: start.agent, projectId: project.id });
+            setFolderMenu(false);
+            setError(null);
+            textRef.current?.focus();
+          }}
+          onClose={() => {
+            setFolderMenu(false);
+            (dialogRef.current?.querySelector<HTMLButtonElement>('[data-compose-folder]') ?? textRef.current)?.focus();
           }}
         />
       )}
@@ -625,7 +804,23 @@ export function ComposeDialog(props: ComposeDialogProps) {
           />
         )}
       </div>
-      {model && !anyLive && !endedNote && (
+      {start && !start.project.exists && (
+        <div className="ib-cp-note ib-warn" data-compose-note="folder-missing">
+          <Icon name="warn" size={16} />
+          <div>
+            <b>
+              <bdi>{tildePath(start.project.root, home)}</bdi> isn't there any more.
+            </b>
+            <p>
+              It was moved or deleted. Pick another project{launch?.scratch ? ', or a new scratch folder,' : ''} to start {start.name} in. Nothing is sent until you do.
+            </p>
+            <button type="button" className="ib-btn ib-sm" onClick={() => setFolderMenu(true)} data-compose-pick-folder="">
+              Pick a project
+            </button>
+          </div>
+        </div>
+      )}
+      {model && !anyLive && !canStart && !endedNote && (
         <div className="ib-cp-note" data-compose-note="none">
           <Icon name="info" size={16} />
           <div>
@@ -682,7 +877,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         />
       </div>
       {error && (
-        <div className="ib-cp-error" role="alert" data-compose-error="">
+        // Kept, unseen, while the details say it: the button under a press that closes them must not move.
+        <div className="ib-cp-error" role={errorInDetails ? undefined : 'alert'} data-compose-error={errorInDetails ? undefined : ''} data-in-details={errorInDetails ? '' : undefined}>
           {error}
           {conflict && (
             <span className="ib-cp-conflict">
@@ -723,6 +919,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       ) : (
         <div className="ib-cp-foot">
+          {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, home)} facts={trustFacts} said={errorInDetails ? error : null} />}
           {takesFiles ? (
             // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
             <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
@@ -769,6 +966,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </button>
             )}
           </VoiceFoot>
+          {trustFacts.length > 0 && (
+            <button
+              type="button"
+              ref={trustCircleRef}
+              className="ib-iconbtn ib-cp-trustcircle"
+              aria-label="What trusting this folder means"
+              aria-haspopup="dialog"
+              aria-expanded={trustInfoOpen}
+              aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
+              onClick={() => setTrustInfo((open) => !open)}
+              data-compose-trust-circle=""
+              data-warning={trust?.warns ? '' : undefined}
+            >
+              <Icon name="question" size={18} />
+            </button>
+          )}
           <button
             type="button"
             className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
@@ -779,7 +992,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             data-compose-send=""
           >
             <Icon name="send" size={15} />
-            {phone ? <span className="ib-cp-sendl">Send</span> : 'Send'}
+            {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
             <ShortcutHint scope={inboxThreadShortcuts} action="send" />
           </button>
         </div>

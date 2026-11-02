@@ -65,6 +65,7 @@ import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 
@@ -618,6 +619,11 @@ export interface InboxCommandAssets {
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // A launched Claude Code session's PermissionRequest hook (inbox-permission-hook.ts): never starts or connects anything.
+  if (args[0] === "permission-hook") {
+    if (args.length > 1) usageError(`Unknown inbox permission-hook option: ${args[1]}`);
+    return runPermissionHook(dataDir);
+  }
   // Only a person's `plannotator inbox` connects agents, never a detached start.
   // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
   // starts (its Restart into an updated binary, --background, a connection)

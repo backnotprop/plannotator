@@ -23,6 +23,10 @@ import type {
   InboxTourState,
   InboxThread,
   InboxComposeProject,
+  InboxComposeLaunch,
+  InboxLaunchAgent,
+  InboxLaunchTrust,
+  InboxRun,
   InboxDraft,
   InboxReplyDraft,
   InboxReplyDraftRow,
@@ -211,6 +215,10 @@ export interface ThreadModel {
   thread: InboxThread;
   /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
   row?: InboxListRow | null;
+  /** A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off. */
+  run?: InboxRun | null;
+  /** With `run`: the command that attaches to the launched session in a terminal, also while it rests; null before it exists. */
+  attach_command?: string | null;
 }
 
 export interface ReplyResult {
@@ -377,6 +385,8 @@ export interface SettingsModel {
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;
+  /** Settings → Agents' launch switch: present only while `inboxLaunch.enabled`. */
+  launch?: InboxLaunchSettings;
   store: {
     dir: string;
     bytes: number;
@@ -392,6 +402,24 @@ export interface SettingsModel {
       combined?: string[];
     }[];
   };
+}
+
+/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
+export interface InboxLaunchSettings {
+  enabled: boolean;
+  /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
+  full_permissions: boolean;
+  /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
+  follows?: 'claude' | 'shell' | null;
+  /** A launch starts in the person's own Claude default mode (not auto). */
+  own_mode?: boolean;
+  /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
+  needs_consent?: boolean;
+  /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
+  bypass_off?: boolean;
+  /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
+  scratch_dir?: string;
+  scratch_dir_shown?: string;
 }
 
 /**
@@ -867,14 +895,23 @@ export interface ComposeSessionsModel {
   projects: InboxComposeProject[];
   /** Asked for with `?session=`: whether that session is still there (with the asker grace). */
   session?: { session: string; live: boolean };
+  /** Only while `inboxLaunch.enabled`: the agents To offers to start, and the folder menu's projects. */
+  launch?: InboxComposeLaunch;
 }
 
 /** A draft as the Drafts page lists it, with its chip. */
 export type DraftView = InboxDraft & { status: InboxDraftStatus };
 
+/** The folder To names, whose files a sessions read looks at: a project's id, or `SCRATCH_PICK`. */
+export interface ComposeTrustPick {
+  agent: string;
+  project: string;
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  to: { host: string; session: string };
+  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1042,10 +1079,11 @@ export const inboxApi = {
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
-  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
+  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
+      ...(options.confirmFull ? { confirm_full: true } : {}),
     }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
@@ -1213,10 +1251,25 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null) =>
-    get<ComposeSessionsModel>(inboxUrl('/sessions', session ? `session=${encodeURIComponent(session)}` : undefined)),
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+    const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+  },
   startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>(inboxUrl('/messages'), { ...input }),
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
+  // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
+  launchStop: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`), {}),
+  launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
+  launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
+  launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
+  launchTrust: (launchId: string, warning: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`), { warning }),
+  /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
+  /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
+  launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
+  /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
+  launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */

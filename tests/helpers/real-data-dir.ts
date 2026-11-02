@@ -185,3 +185,18 @@ export function refuseRealDataDir(dir: string | undefined, what: string): string
 export function assertSandboxedDataDir(what = "Plannotator test"): string {
   return refuseRealDataDir(process.env.PLANNOTATOR_DATA_DIR, what);
 }
+
+/**
+ * Throw unless `configDir` is a scratch folder to set as CLAUDE_CONFIG_DIR. A test of anything that writes Claude
+ * Code's global config goes through this, so it can never name the person's own `~/.claude.json` or `~/.claude`.
+ * Returns `configDir`.
+ */
+export function refuseRealClaudeConfig(configDir: string, what: string): string {
+  const path = canonical(configDir);
+  const own = homes().map(canonical);
+  if (own.some((home) => path === home || path === canonical(join(home, ".claude")))) {
+    throw new Error(`${what}: refusing ${configDir}, the person's own Claude Code config. Use a scratch folder.`);
+  }
+  if (!isScratchDataDir(configDir)) throw new Error(`${what}: refusing ${configDir}: not a scratch folder (inside ${tmpdir()} or /tmp).`);
+  return configDir;
+}
