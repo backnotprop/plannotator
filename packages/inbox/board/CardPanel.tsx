@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_LIVE_COLUMNS,
   INBOX_CARD_NOTES_MAX,
   INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
@@ -44,7 +45,6 @@ export interface CardPanelProps {
   onClose: () => void;
   onColumn: (column: InboxCardColumn) => void;
   onShip: () => void;
-  onIcebox: () => void;
   onRestore: () => unknown;
   /** `fromMenu`: the reason field was opened by Drop… on the card's right-click menu (and not closed since). */
   onDrop: (reason: string | null, fromMenu: boolean) => void;
@@ -74,9 +74,9 @@ export interface CardPanelProps {
  * agent is working; the "You: …" band; notes; threads (a click opens the
  * thread in the Inbox, with a way back); links (PRs, issues), their live
  * state read when the card opens and never acted on; history, with a quiet
- * "Ask for an update"; and at the foot Ship · Icebox · Drop… (with a reason),
- * Send to an agent for a Backlog card nobody was asked about, Restore in the
- * Icebox or Dropped.
+ * "Ask for an update"; and at the foot Ship · Cancel… (with a reason),
+ * Send to an agent for a Backlog or To do card nobody was asked about,
+ * Restore on a Cancelled card.
  */
 export function CardPanel(props: CardPanelProps) {
   const { card, phone } = props;
@@ -116,7 +116,7 @@ export function CardPanel(props: CardPanelProps) {
   // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
   const you = cardYou(card);
   const threadAt = youThread(card, props.rowOf);
-  const live = card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped';
+  const live = card.column !== 'dropped' && card.column !== 'shipped';
   const askable = (agent !== null || props.canAsk) && live;
   // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
   const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
@@ -207,7 +207,7 @@ export function CardPanel(props: CardPanelProps) {
         )}
         {card.column === 'dropped' && card.dropped && (
           <p className="ib-crdp-dropped">
-            Dropped {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
+            Cancelled {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
         )}
@@ -292,7 +292,7 @@ export function CardPanel(props: CardPanelProps) {
           }}
         >
           <label htmlFor={`${headingId}-reason`} dir="auto">
-            Drop “{card.title}”
+            Cancel “{card.title}”
           </label>
           <input
             id={`${headingId}-reason`}
@@ -315,11 +315,11 @@ export function CardPanel(props: CardPanelProps) {
           />
           <div className="ib-crdp-dropacts">
             <button type="button" className="ib-btn ib-ghost" onClick={stopDropping}>
-              Cancel
+              Keep
             </button>
             <button type="submit" className="ib-btn ib-danger" data-drop-confirm="">
               <Icon name="xCircle" size={15} />
-              Drop
+              Cancel card
             </button>
           </div>
         </form>
@@ -353,12 +353,6 @@ export function CardPanel(props: CardPanelProps) {
             </OnceButton>
           )}
           <span className="ib-bsp" />
-          {foot.icebox && (
-            <button type="button" className="ib-btn ib-ghost" onClick={props.onIcebox} data-card-icebox="">
-              <Icon name="snowflake" size={15} />
-              Icebox
-            </button>
-          )}
           {foot.drop && (
             <button type="button" className="ib-btn ib-ghost" onClick={() => {
                 // The foot's own Drop…: a move from the opened card, never the menu's (no toast).
@@ -368,7 +362,7 @@ export function CardPanel(props: CardPanelProps) {
               data-card-drop=""
             >
               <Icon name="xCircle" size={15} />
-              Drop…
+              Cancel…
             </button>
           )}
         </div>
@@ -380,14 +374,15 @@ export function CardPanel(props: CardPanelProps) {
   );
 }
 
-/** The card's column, as a Move menu: the five lanes (its own checked), then Shipped and Icebox; Restore when it is aside. */
+/** The card's column, as a Move menu: the live lanes (its own checked), then Shipped; Restore when it is Cancelled. */
 function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; sent: boolean; onColumn: (column: InboxCardColumn) => void; onRestore: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const choices = columnChoices(card);
-  const aside = card.column === 'icebox' || card.column === 'dropped';
+  const aside = card.column === 'dropped';
+  const lanes = INBOX_CARD_LIVE_COLUMNS.length;
   return (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Menu.Trigger ref={trigger} className="ib-crdp-col" aria-label={`Column: ${INBOX_CARD_COLUMN_LABELS[card.column]}${sent ? ', sent' : ''}. Move`} data-card-column={card.column}>
@@ -410,7 +405,7 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
             )}
             {/* One choice, so radio items: a screen reader hears the card's column as checked. */}
             <Menu.RadioGroup value={card.column} onValueChange={(value: InboxCardColumn) => value !== card.column && onColumn(value)} aria-label="Column">
-              {choices.slice(0, 5).map((choice) => (
+              {choices.slice(0, lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
                   <span className="ib-lane-dot" data-col={choice.column} aria-hidden="true" />
                   {choice.label}
@@ -418,9 +413,9 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
                 </Menu.RadioItem>
               ))}
               <Menu.Separator className="ib-pm-sep" />
-              {choices.slice(5).map((choice) => (
+              {choices.slice(lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
-                  <Icon name={choice.column === 'shipped' ? 'checkCircle' : 'snowflake'} size={15} />
+                  <Icon name="checkCircle" size={15} />
                   {choice.label}
                   {choice.current && <Icon name="check" size={15} className="ib-pmi-check" />}
                 </Menu.RadioItem>

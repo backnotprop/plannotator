@@ -2128,10 +2128,15 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
  * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
  * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
+ * Board columns v2 (the card action's `column` lists the v2 ids, the
+ * hand-over rule and the automatic ship): the Board-on entry measured
+ * through inboxAgentTool on a real Inbox's tools/list, before and after,
+ * 11,318 → 11,268 bytes, 2,733 → 2,721 o200k tokens (-50 bytes, -12 tokens);
+ * Board off unchanged. So 11,211 with the Board on.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11211, tokens: 3038 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

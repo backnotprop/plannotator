@@ -6,21 +6,29 @@
  * from threads: threads and PRs link to it by explicit id, and nothing about
  * a card ever changes a thread's routing or its place in the person's list.
  *
- * Columns (COLUMNS.md, set d, as amended 2026-10-26): five live ones,
- * Backlog · Designing · Your look · Building · Your review, and three the
- * Board shows as links: Shipped, Icebox (only the person puts a card there
- * or takes one out; nothing happens to a card there) and Dropped. A card in
- * Backlog is not started and not sent to any agent (the column was "Asked"
- * until the owner renamed it; a stored `asked` reads as `backlog`,
- * inboxCardColumnOf). A card in the
- * person's columns (Your look, Your review) shows "You: …", what the person
- * owes; in the agents' columns it shows the agent's last word.
+ * Columns (approval "inbox-board-columns-v2", 2026-11-02): where the work
+ * stands, never whose move it is. Backlog (nobody asked for it yet: an idea,
+ * a proposal; the Icebox folded in, so an agent never moves out a card the
+ * person put here) · To do (asked or sent, not started) · In progress · In
+ * review (handed over on purpose by an agent: "You: …" says what the person
+ * owes) · Shipped, and Dropped (the Board calls it Cancelled). A card whose
+ * linked thread waits on the person shows that from the thread; it never
+ * moves the card.
+ *
+ * Cards written before v2 (no `cols: 2`) are read through a fixed map, never
+ * rewritten (`inboxCardLegacyColumn`), and every old column id is still
+ * accepted from a caller (`inboxCardColumnOf`), so an agent whose tool list
+ * or help predates v2 keeps working.
  *
  * A card shows how long ago anyone last wrote to it (`heard_at`, "2d ago");
  * no rule decides that a card is stalled (the owner dropped amber,
  * 2026-10-20). An agent's drop reaches the person: it stays unseen
  * (`dropped.seen_at` null) until they look at Dropped. Nothing moves a card
- * by guessing: a merged PR is shown, never acted on.
+ * by guessing. One rule moves a card by itself (Q3 of the v2 approval): a
+ * card in To do, In progress or In review ships once every PR it links has
+ * merged and none is open (`inboxCardAutoShip`); an unknown state does
+ * nothing, and a card the person moved out of Shipped is not shipped again
+ * for the same PRs.
  *
  * Browser-safe and dependency-free; re-exported by `inbox-types`.
  */
@@ -41,27 +49,48 @@ import type { InboxAuthor } from "./inbox-types";
 export const INBOX_CARD_ACTION_ON: boolean = true;
 
 /** Every column a card can be in, in the Board's order. */
-export const INBOX_CARD_COLUMNS = ["backlog", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"] as const;
+export const INBOX_CARD_COLUMNS = ["backlog", "todo", "in_progress", "in_review", "shipped", "dropped"] as const;
 
 export type InboxCardColumn = (typeof INBOX_CARD_COLUMNS)[number];
 
-/** The Board's live lanes; the rest (Shipped, Icebox, Dropped) are links. */
-export const INBOX_CARD_LIVE_COLUMNS: readonly InboxCardColumn[] = ["backlog", "designing", "your_look", "building", "your_review"];
+/** The columns of work not finished: Backlog, To do, In progress, In review. Shipped and Dropped are resolved. */
+export const INBOX_CARD_LIVE_COLUMNS: readonly InboxCardColumn[] = ["backlog", "todo", "in_progress", "in_review"];
 
-/** The columns where a card waits on the person: it shows "You: …" (`you`). */
-export const INBOX_CARD_PERSON_COLUMNS: readonly InboxCardColumn[] = ["your_look", "your_review"];
+/** The column where a card waits on the person: it shows "You: …" (`you`). */
+export const INBOX_CARD_PERSON_COLUMNS: readonly InboxCardColumn[] = ["in_review"];
 
-/** How the Board names each column. */
+/** The columns a card ships from by itself when every PR it links has merged (inboxCardAutoShip). */
+export const INBOX_CARD_AUTO_SHIP_COLUMNS: readonly InboxCardColumn[] = ["todo", "in_progress", "in_review"];
+
+/** How the Board names each column. Dropped is "Cancelled" to the person; its id stays, so an older Inbox still reads it. */
 export const INBOX_CARD_COLUMN_LABELS: Readonly<Record<InboxCardColumn, string>> = {
   backlog: "Backlog",
-  designing: "Designing",
-  your_look: "Your look",
-  building: "Building",
-  your_review: "Your review",
+  todo: "To do",
+  in_progress: "In progress",
+  in_review: "In review",
   shipped: "Shipped",
-  icebox: "Icebox",
-  dropped: "Dropped",
+  dropped: "Cancelled",
 };
+
+/**
+ * The column ids before v2, and `cancelled` (the Board's word for Dropped),
+ * accepted from a caller: an agent whose tool list or help predates v2 (a
+ * session keeps its tool list; the Claude Code mod caches it) keeps working.
+ * `backlog` is not here: it is a column in both, and from a caller it means
+ * the new Backlog.
+ */
+export const INBOX_CARD_COLUMN_ALIASES: Readonly<Record<string, InboxCardColumn>> = {
+  asked: "todo",
+  designing: "in_progress",
+  building: "in_progress",
+  your_look: "in_review",
+  your_review: "in_review",
+  icebox: "backlog",
+  cancelled: "dropped",
+};
+
+/** Cards written since v2 carry it; a card without it is read through inboxCardLegacyColumn. */
+export const INBOX_CARD_COLS_VERSION = 2;
 
 /** The longest title, in characters. */
 export const INBOX_CARD_TITLE_MAX = 120;
@@ -114,21 +143,49 @@ export function isInboxCardColumn(value: unknown): value is InboxCardColumn {
 }
 
 /**
- * The column a stored or sent value names, or null. `asked` (the column's
- * name until the owner renamed it Backlog, 2026-10-26) reads as `backlog`,
- * so a record written before the rename, or a caller that still says
- * `asked`, keeps working.
+ * The column a value from a caller names, or null: a v2 id, or an old id
+ * (INBOX_CARD_COLUMN_ALIASES). Case and spaces are forgiven ("In progress").
  */
 export function inboxCardColumnOf(value: unknown): InboxCardColumn | null {
-  if (value === "asked") return "backlog";
-  return isInboxCardColumn(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const id = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (isInboxCardColumn(id)) return id;
+  if (id === "to_do") return "todo";
+  return INBOX_CARD_COLUMN_ALIASES[id] ?? null;
 }
 
-/** A stored card read through inboxCardColumnOf: `asked` in `column` or `aside_from` becomes `backlog`. */
-export function readInboxCardColumns<T extends { column: string; aside_from: string | null }>(card: T): T {
-  const column = inboxCardColumnOf(card.column) ?? card.column;
-  const asideFrom = card.aside_from === null ? null : (inboxCardColumnOf(card.aside_from) ?? card.aside_from);
-  return column === card.column && asideFrom === card.aside_from ? card : { ...card, column, aside_from: asideFrom };
+/**
+ * Where a card written before v2 stands now (the migration table of the v2
+ * approval). Only Backlog needs the card: before v2 it held both work an
+ * agent was asked to do and the person's own ideas, so a card with an agent
+ * or a send reads as To do, and one nobody was asked about stays in Backlog.
+ */
+export function inboxCardLegacyColumn(value: string, card: { agent?: unknown; sent?: unknown }): InboxCardColumn | null {
+  if (value === "backlog") return card.agent || card.sent ? "todo" : "backlog";
+  return inboxCardColumnOf(value);
+}
+
+/**
+ * A stored card's columns as v2 reads them. A line with `cols: 2` is v2 (an
+ * unknown id in it, as an older Inbox might write, still goes through the
+ * aliases); any other line goes through inboxCardLegacyColumn. A pre-v2 card
+ * in the Icebox, or a person's idea in Backlog, was put there by the person,
+ * so its `moved_by` (absent before v2) is the person: the Backlog guard keeps
+ * agents off it. Otherwise `moved_by` falls back to whoever wrote last.
+ */
+export function readInboxCardColumns<T extends { column: string; aside_from: string | null; cols?: number; moved_by?: InboxAuthor | null; agent?: unknown; sent?: unknown; created_by?: InboxAuthor; heard_by?: InboxAuthor }>(card: T): T {
+  const v2 = card.cols === INBOX_CARD_COLS_VERSION;
+  const read = (value: string) => (v2 ? (inboxCardColumnOf(value) ?? value) : (inboxCardLegacyColumn(value, card) ?? value));
+  const column = read(card.column);
+  const asideFrom = card.aside_from === null || card.aside_from === undefined ? null : read(card.aside_from);
+  let movedBy = card.moved_by ?? null;
+  if (!movedBy) {
+    const parked = !v2 && (card.column === "icebox" || column === "backlog");
+    movedBy = parked ? { kind: "person" } : (card.heard_by ?? card.created_by ?? null);
+  }
+  // `cols` lives on disk only (appendCard writes it on every line): a card in memory or on the wire never carries it.
+  const { cols: _cols, ...rest } = card;
+  return { ...rest, column, aside_from: asideFrom, moved_by: movedBy } as T;
 }
 
 export function isInboxCardLiveColumn(column: InboxCardColumn): boolean {
@@ -192,12 +249,18 @@ export interface InboxCard {
   created_by: InboxAuthor;
   /** When the card last changed column. */
   moved_at: string;
+  /**
+   * Who last changed its column (v2; read as the person for a pre-v2 card in
+   * the Icebox or a person's Backlog idea). An agent moves a card out of
+   * Backlog only when an agent put it there: the person's parked cards stay.
+   */
+  moved_by: InboxAuthor | null;
   /** The last write by anyone (create, move, say, link, ship, drop): the card shows its age ("2d ago"). */
   heard_at: string;
   heard_by: InboxAuthor;
   /** Set while the card is in Dropped. */
   dropped: InboxCardDrop | null;
-  /** The column a card left for Icebox or Dropped: where restoring puts it back. */
+  /** The column a card left for Dropped: where restoring puts it back. */
   aside_from: InboxCardColumn | null;
   /** An agent's create is idempotent on it, per project. */
   idempotency_key: string | null;
@@ -220,6 +283,46 @@ export interface InboxCard {
    * through inboxCardRefsOf.
    */
   refs: InboxCardRef[];
+  /**
+   * The column scheme the line was written in: INBOX_CARD_COLS_VERSION on
+   * every line since v2. On disk only: absent on older lines, which
+   * readInboxCard maps, and dropped from the card it answers.
+   */
+  cols?: number;
+  /**
+   * The last time the Inbox shipped the card by itself (every linked PR
+   * merged, none open): when, and the PR URLs it saw. Kept after the person
+   * moves the card back, so the same PRs never ship it again; a new PR does.
+   * Null (or absent) when it never happened.
+   */
+  auto_shipped?: InboxCardAutoShip | null;
+}
+
+/** An automatic ship: when, and the URLs of the PRs that had all merged. */
+export interface InboxCardAutoShip {
+  at: string;
+  prs: string[];
+}
+
+/**
+ * Whether a card ships by itself now, given the states of its links (by
+ * URL): the URLs of its PRs when it is in To do, In progress or In review,
+ * links at least one PR, and every one of them is merged (none open, draft,
+ * closed or unknown), and it was not already shipped automatically for the
+ * same PRs (the person moved it back). Null otherwise: anything unknown does
+ * nothing.
+ */
+export function inboxCardAutoShip(
+  card: Pick<InboxCard, "column" | "prs"> & { refs?: readonly InboxCardRef[] | null; auto_shipped?: InboxCardAutoShip | null },
+  stateOf: (url: string) => InboxCardMarkState | undefined,
+): string[] | null {
+  if (!INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) return null;
+  const prs = [...new Set(inboxCardRefsOf(card).filter((ref) => ref.kind === "pr").map((ref) => ref.url))].sort();
+  if (prs.length === 0) return null;
+  if (!prs.every((url) => stateOf(url) === "merged")) return null;
+  const before = card.auto_shipped ? [...card.auto_shipped.prs].sort() : null;
+  if (before && before.length === prs.length && before.every((url, i) => url === prs[i])) return null;
+  return prs;
 }
 
 /**
@@ -304,7 +407,7 @@ export interface InboxCardSent {
 /** The longest card notes, in characters. */
 export const INBOX_CARD_NOTES_MAX = 4000;
 
-/** A stored card with the fields added since step 1 filled in (`notes`, `sent`) and its columns read (`asked` → `backlog`). */
+/** A stored card with the fields added since step 1 filled in (`notes`, `sent`, `refs`) and its columns read as v2 (readInboxCardColumns). */
 export function readInboxCard(card: InboxCard): InboxCard {
   const read = readInboxCardColumns(card);
   if (read.notes !== undefined && read.sent !== undefined && read.refs !== undefined) return read;
@@ -327,9 +430,9 @@ export function normalizeInboxCardNotes(value: unknown): { notes: string | null 
   return { notes: trimmed };
 }
 
-/** Whether the Board shows a card as "Sent to <agent>": sent, in Backlog, and not moved since. */
+/** Whether the Board shows a card as "Sent to <agent>": sent, in To do (a send puts it there), and not moved since. */
 export function isInboxCardSentWaiting(card: Pick<InboxCard, "sent" | "column" | "moved_at">): boolean {
-  return card.sent !== null && card.sent !== undefined && card.column === "backlog" && card.moved_at <= card.sent.at;
+  return card.sent !== null && card.sent !== undefined && card.column === "todo" && card.moved_at <= card.sent.at;
 }
 
 /** One line of a card's history, newest first on the wire. */
@@ -338,6 +441,7 @@ export type InboxCardHistoryEntry =
   | { at: string; by: InboxAuthor; kind: "moved"; column: InboxCardColumn; you: string | null }
   | { at: string; by: InboxAuthor; kind: "dropped"; reason: string | null }
   | { at: string; by: InboxAuthor; kind: "restored"; column: InboxCardColumn }
+  | { at: string; by: InboxAuthor; kind: "auto_shipped"; prs: string[] }
   | { at: string; by: InboxAuthor; kind: "said"; text: string }
   | { at: string; by: InboxAuthor; kind: "you"; text: string }
   | { at: string; by: InboxAuthor; kind: "linked_thread"; thread_id: string }
@@ -377,7 +481,9 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
     if ((card.notes ?? null) !== (before.notes ?? null)) out.push({ at, by, kind: "notes" });
     if (card.column !== before.column) {
       if (card.column === "dropped") out.push({ at, by, kind: "dropped", reason: card.dropped?.reason ?? null });
-      else if (before.column === "icebox" || before.column === "dropped") {
+      else if (card.column === "shipped" && card.auto_shipped && card.auto_shipped.at !== before.auto_shipped?.at) {
+        out.push({ at, by, kind: "auto_shipped", prs: [...card.auto_shipped.prs] });
+      } else if (before.column === "dropped") {
         if (card.column === (before.aside_from ?? "backlog") && by.kind === "person") out.push({ at, by, kind: "restored", column: card.column });
         else out.push({ at, by, kind: "moved", column: card.column, you: card.you });
       } else out.push({ at, by, kind: "moved", column: card.column, you: card.you });

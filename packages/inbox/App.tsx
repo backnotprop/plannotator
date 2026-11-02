@@ -253,7 +253,7 @@ interface ThreadLoad {
 
 interface Route {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board';
-  /** The Board's list (`#board`, `#board=shipped`, `#board=icebox`; approval "inbox-board", step 2). */
+  /** The Board's list (`#board`, `#board=shipped`, `#board=cancelled`; `#board=icebox` from before v2 opens Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
   card?: string | null;
@@ -327,7 +327,7 @@ function routeOf(fullHash: string): Route {
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     card: thread ? params.get('card') : null,
-    // The Board list the card was opened from (Shipped, Icebox): the way back goes there.
+    // The Board list the card was opened from (Shipped, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
     boardProject: thread && params.get('card') ? params.get('board-project') || null : null,
   };

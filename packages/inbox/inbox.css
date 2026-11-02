@@ -5773,12 +5773,11 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-lane-n { font-weight: 450; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-lane-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted-foreground); }
 .ib-lane-dot[data-col="backlog"] { background: none; box-shadow: inset 0 0 0 1.75px var(--muted-foreground); }
-.ib-lane-dot[data-col="designing"] { background: var(--primary); }
-.ib-lane-dot[data-col="your_look"] { background: var(--warning, oklch(0.75 0.15 85)); }
-.ib-lane-dot[data-col="building"] { background: color-mix(in oklab, var(--primary) 60%, var(--card)); }
-.ib-lane-dot[data-col="your_review"] { background: var(--success, oklch(0.6 0.15 150)); }
-.ib-lane-dot[data-col="shipped"] { background: var(--success, oklch(0.6 0.15 150)); opacity: 0.55; }
-.ib-lane-dot[data-col="icebox"] { background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
+.ib-lane-dot[data-col="todo"] { background: none; box-shadow: inset 0 0 0 1.75px var(--primary); }
+.ib-lane-dot[data-col="in_progress"] { background: var(--primary); }
+.ib-lane-dot[data-col="in_review"] { background: var(--warning, oklch(0.75 0.15 85)); }
+.ib-lane-dot[data-col="shipped"] { background: var(--success, oklch(0.6 0.15 150)); }
+.ib-lane-dot[data-col="dropped"] { background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
 .ib-lane-cards { list-style: none; margin: 0; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
 .ib-lane-empty { margin: 0; padding: 4px 14px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); line-height: 1.45; }
 
@@ -5857,7 +5856,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-refmark[data-ref-state="closed"][data-ref-kind="pr"] { color: var(--ib-ref-closed); }
 .ib-refmark[data-ref-state="unknown"] { color: var(--muted-foreground); opacity: 0.7; }
 @media (forced-colors: active) { .ib-refmark { color: CanvasText; } }
-/* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Shipped's and Icebox's. */
+/* A lane dot in a menu: centred in the icons' 15 px, so a lane's words line up with Shipped's. */
 .ib-pmi .ib-lane-dot { margin: 0 3.5px; }
 
 /* The agents' drops the person has not seen. */
@@ -5870,7 +5869,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bdrops li { display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
 .ib-bdrops-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 
-/* Shipped and the Icebox (with Dropped): lists on their own page. */
+/* Shipped and Cancelled: lists on their own page. */
 .ib-blists { display: flex; flex-direction: column; gap: 18px; }
 .ib-bmain > .ib-blist, .ib-bmain > .ib-blists { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 22px 24px; }
 .ib-blist { max-width: 760px; }
@@ -5891,7 +5890,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bproject { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: var(--ib-fs-14, 14px); }
 .ib-bfield-err { margin: 10px 0 0; }
 
-/* A phone: the stacked list in column order, Shipped and Icebox folded at the end. */
+/* A phone: the stacked list in column order, Shipped and Cancelled folded at the end. */
 .ib-bstack { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 calc(10px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
 /* The approved phone mock: each lane a rounded pill (still the fold's button), its cards flat rows under it. */
 .ib-bgroup-h { margin: 12px 10px 2px; }
@@ -6116,10 +6115,11 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   88% { opacity: 1; transform: translate(calc(4 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); animation-timing-function: ease-in; }
   95%, 100% { opacity: 0; transform: translate(calc(4 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)) - 6px)); }
 }
-@keyframes ib-bi-amb { 0%, 37% { opacity: 0; } 41%, 50% { opacity: 1; } 55%, 75% { opacity: 0; } 79%, 100% { opacity: 1; } }
+/* The amber line: on while the walking card waits in In review (the fourth lane), off again once it ships. */
+@keyframes ib-bi-amb { 0%, 55% { opacity: 0; } 59%, 72% { opacity: 1; } 77%, 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .ib-bi-walk, .ib-bi-walk .ib-bi-amb { animation: none; }
-  .ib-bi-walk { transform: translate(calc(2 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 1 * (var(--ch) + var(--cg)))); }
+  .ib-bi-walk { transform: translate(calc(3 * (100% + 2 * var(--p) + var(--g))), calc(var(--hh) + 2 * (var(--ch) + var(--cg)))); }
   .ib-bi-walk .ib-bi-amb { opacity: 1; }
 }
 .ib-bi-text { padding: 20px 22px 0; }

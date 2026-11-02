@@ -21,8 +21,10 @@ import {
   INBOX_CARD_LIVE_COLUMNS,
   inboxAgentName,
   inboxCardRefsOf,
+  inboxCardColumnOf,
   inboxCardTitleHint,
   isInboxCardDropUnseen,
+  isInboxCardPersonColumn,
   type InboxAuthor,
   type InboxCardColumn,
   type InboxCardWire,
@@ -40,11 +42,11 @@ export type InboxCardOp = (typeof INBOX_CARD_OPS)[number];
 
 /** For raw MCP clients; the agent tool words its action line itself (INBOX_AGENT_ACTION_LEADS.card). */
 export const CARD_DESCRIPTION =
-  "Keep a card on the person's Board for work that outlasts this reply (a lane started, a PR opened, \"I'll send you X\"), and keep it current with one short call as the work moves. op: create (a title: 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say), move (column), say (your last word, or what the person owes in `you`), link (thread_id, pr), ship, drop (with a reason), list (your cards). When a card waits on the person, link the Inbox thread where they make the call (thread_id), so \"You: …\" opens it. A merged PR never moves a card by itself: ship it when it is merged or live.";
+  "Keep a card on the person's Board for work that outlasts this reply (a lane started, a PR opened, \"I'll send you X\"), and keep it current with one short call as the work moves. op: create (a title: 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say), move (column), say (your last word, or what the person owes in `you`), link (thread_id, pr), ship, drop (with a reason), list (your cards). The column says where the work stands: move it to in_review yourself when you hand your part over, with `you` and the Inbox thread where the person makes the call (thread_id), so \"You: …\" opens it. A question you ask mid-work leaves the card where it is. A card ships by itself once every PR it links has merged; ship it yourself when it is live without a PR.";
 
 /** Short on purpose: Pi and OpenCode send it with every request (INBOX_TOOL_COST). */
 export const CARD_COLUMN_DESCRIPTION =
-  "backlog (not started yet) · designing (not code) · your_look (a non-code thing waits on the person; give `you`) · building (code, an open PR) · your_review (code or a release waits on the person; give `you`) · shipped (merged or live) · dropped (give `reason`). Waiting on the person wins. icebox: the person's only. asked: the old name of backlog.";
+  "todo (asked or sent to you, not started; the default) · in_progress (you are working on it) · in_review (your part is done and handed over: a ready PR, screenshots, a sheet; give `you`) · shipped (merged or live) · dropped (cancelled; give `reason`) · backlog (nobody asked for it yet: an idea you propose; never a signal to start).";
 
 /** What a `card` call gets while the Board is off (approval "inbox-board", 2026-10-26): nothing is written. */
 export const INBOX_BOARD_OFF_TEXT =
@@ -52,10 +54,15 @@ export const INBOX_BOARD_OFF_TEXT =
 
 const AGENT_SESSION_DESCRIPTION = "Your session id; the `plannotator inbox mcp` shim fills it. The cards you make are yours: list shows them.";
 
+/** A column as a caller sent it, made a v2 id when it names one (old ids are aliases, inboxCardColumnOf); anything else is left for the enum to refuse. */
+function columnInput(value: unknown): unknown {
+  return inboxCardColumnOf(value) ?? value;
+}
+
 /** One card as one line of text: every fact an agent acts on. */
 export function cardLineText(card: InboxCardWire): string {
   const parts = [`- ${card.id}`, JSON.stringify(card.title), INBOX_CARD_COLUMN_LABELS[card.column]];
-  if (card.you && (card.column === "your_look" || card.column === "your_review")) parts.push(`You: ${JSON.stringify(card.you)}`);
+  if (card.you && isInboxCardPersonColumn(card.column)) parts.push(`You: ${JSON.stringify(card.you)}`);
   if (card.said) parts.push(`said ${JSON.stringify(card.said)}`);
   parts.push(`heard ${shortTime(card.heard_at)}`);
   if (card.dropped) {
@@ -168,13 +175,15 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     }
     const askedBy = input.asked_by ?? (session ? "me" : "anyone");
     if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.", { field: "asked_by" });
-    const columns = new Set<InboxCardColumn>(input.include_resolved ? INBOX_CARD_COLUMNS : [...INBOX_CARD_LIVE_COLUMNS, "icebox"]);
+    const columns = new Set<InboxCardColumn>(input.include_resolved ? INBOX_CARD_COLUMNS : INBOX_CARD_LIVE_COLUMNS);
     const cards = store.listCards({ projectIds, columns, agentSession: askedBy === "me" ? session : null }).map((card) => store.cardWire(card));
     const whose = askedBy === "me" ? "Your" : "All";
     const head = `${whose} ${cards.length} card${cards.length === 1 ? "" : "s"} in ${project.name}${input.include_resolved ? "" : " (shipped and dropped left out)"}.`;
-    const iceboxed = cards.some((card) => card.column === "icebox") ? "\nA card in the Icebox is paused by the person: leave its work alone until they bring it back." : "";
+    const parked = cards.some((card) => card.column === "backlog" && card.moved_by?.kind === "person")
+      ? "\nA card the person put in Backlog is not asked for yet: leave its work alone until they send it to you."
+      : "";
     return {
-      text: cards.length > 0 ? `${head}\n${cards.map(cardLineText).join("\n")}${iceboxed}` : head,
+      text: cards.length > 0 ? `${head}\n${cards.map(cardLineText).join("\n")}${parked}` : head,
       structured: { project: { id: project.id, name: project.name, root: project.root }, cards, total: cards.length },
     };
   }
@@ -239,7 +248,8 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
           op: z.enum(INBOX_CARD_OPS),
           card_id: z.string().optional().describe("The card (crd_…); not for create or list."),
           title: z.string().optional().describe("2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in say. Create with thread_id: pass one, as subjects run long."),
-          column: z.enum([...INBOX_CARD_COLUMNS, "asked"]).optional().describe(CARD_COLUMN_DESCRIPTION),
+          // The schema lists the v2 ids only; an id from before v2 (a cached tool list, older help) is read as its v2 column first.
+          column: z.preprocess(columnInput, z.enum(INBOX_CARD_COLUMNS)).optional().describe(CARD_COLUMN_DESCRIPTION),
           say: z.string().optional().describe(`Your last word: where the work is, one line. ${INBOX_REF_LINK_POINTER}`),
           you: z.string().optional().describe(`What the person owes, one line. ${INBOX_REF_LINK_POINTER}`),
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),

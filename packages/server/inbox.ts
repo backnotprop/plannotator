@@ -47,6 +47,8 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
   INBOX_CARD_COLUMNS,
+  INBOX_CARD_AUTO_SHIP_COLUMNS,
+  inboxCardAutoShip,
   inboxCardColumnOf,
   inboxCardRefsOf,
   inboxCardMarkRef,
@@ -591,8 +593,7 @@ const ERROR_STATUS: Record<string, number> = {
   card_not_found: 404,
   card_no_project: 404,
   card_other_project: 422,
-  card_icebox_person_only: 403,
-  card_iceboxed: 409,
+  card_backlog_person_only: 409,
   card_dropped_by_person: 409,
   card_person_only: 403,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
@@ -1120,7 +1121,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The Board's cards (`GET /api/inbox/cards`): `?project=prj_…` and
-   * `?column=building,your_review` filter; every card otherwise, in the
+   * `?column=in_progress,in_review` filter; every card otherwise, in the
    * Board's column order, the latest move first.
    */
   const cardsModel = (url: URL) => {
@@ -1148,9 +1149,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The person's moves on a card (`POST /api/inbox/cards/:id`): `op` move
-   * (`column`, any; a move to dropped may carry `reason`), icebox (the pause
-   * only the person makes), drop (`reason` optional), restore (back to the
-   * column the card left for the Icebox or Dropped).
+   * (`column`, any; a move to dropped may carry `reason`), icebox (a window
+   * from before v2: Backlog, where the Icebox folded in), drop (`reason`
+   * optional), restore (back to the column the card left for Dropped).
    */
   const personCardMove = (id: string, body: Record<string, unknown>) => {
     if (!isInboxId("crd", id)) throw new InboxError("validation_error", "A card id (crd_).", { field: "card" });
@@ -1161,7 +1162,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.column === undefined) throw new InboxError("validation_error", "column: where the card goes.", { field: "column" });
         return store.updateCard(id, { by, column: body.column, reason: body.column === "dropped" ? reason : undefined });
       case "icebox":
-        return store.updateCard(id, { by, column: "icebox" });
+        return store.updateCard(id, { by, column: "backlog" });
       case "drop":
         return store.updateCard(id, { by, column: "dropped", reason });
       case "restore":
@@ -3156,16 +3157,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Cards carry the person's notes: another site's read is refused, as on the other read routes.
         if (req.method === "GET") return crossSiteCardRead(req) ?? json(cardsModel(url));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-        // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent) or the
-        // Icebox; or sent to an agent: `thread_id` is the thread the window just started for it with
-        // compose's Send (its body the notes), and the card lands in that thread's project, sent.
+        // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent; a window
+        // from before v2 says icebox, which folded into it); or sent to an agent: `thread_id` is the thread
+        // the window just started for it with compose's Send (its body the notes), and the card lands in
+        // that thread's project, sent, in To do.
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const column = body.column === undefined || body.column === null ? "backlog" : body.column;
-        if (column !== "backlog" && column !== "icebox") throw new InboxError("validation_error", "column: backlog or icebox (a New card).", { field: "column" });
+        const asked = body.column === undefined || body.column === null ? "backlog" : body.column;
+        if (asked !== "backlog" && asked !== "icebox" && asked !== "todo") throw new InboxError("validation_error", "column: backlog or todo (a New card).", { field: "column" });
+        const column = asked === "icebox" ? "backlog" : asked;
         let projectId: unknown = body.project;
         if (body.thread_id !== undefined && body.thread_id !== null) {
-          if (column !== "backlog") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Backlog.", { field: "thread_id" });
           const message = typeof body.thread_id === "string" ? store.message(body.thread_id) : null;
           if (!message) throw new InboxError("thread_not_found", `No thread ${String(body.thread_id)}.`);
           projectId = message.project_id;
@@ -3229,19 +3231,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", `cards: the crd_ ids of the cards on screen (at most ${INBOX_CARD_MARKS_MAX}).`, { field: "cards" });
         }
         const wanted: { id: string; ref: InboxCardRef }[] = [];
+        // Auto-ship (approval "inbox-board-columns-v2", Q3): a card in To do, In progress or In review has
+        // every PR it links read with its mark, in the same queries; all merged ships it (inboxCardAutoShip).
+        const shipping: { id: string; refs: InboxCardRef[] }[] = [];
         for (const id of new Set(ids as string[])) {
           const card = store.card(id);
           const ref = card ? inboxCardMarkRef(card) : null;
           if (ref) wanted.push({ id, ref });
+          if (card && INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) {
+            const prs = inboxCardRefsOf(card).filter((r) => r.kind === "pr");
+            if (prs.length > 0) shipping.push({ id, refs: prs });
+          }
         }
         const resolved = await cardMarks.marks(
-          wanted.map((w) => w.ref),
+          [...wanted.map((w) => w.ref), ...shipping.flatMap((s) => s.refs)],
           { refresh: body.refresh === true },
         );
         const marks: Record<string, InboxCardMark> = {};
         for (const { id, ref } of wanted) {
           const mark = resolved.get(ref.url);
           if (mark) marks[id] = mark;
+        }
+        // Checked again against the card as it is now (it may have moved while gh ran); an unknown state does nothing.
+        for (const { id } of shipping) {
+          const card = store.card(id);
+          const prs = card ? inboxCardAutoShip(card, (url) => resolved.get(url)?.state) : null;
+          if (prs) store.autoShipCard(id, prs);
         }
         return json({ serverSession, marks });
       }

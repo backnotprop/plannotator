@@ -110,7 +110,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   expect(JSON.parse(readFileSync(join(w.dataDir, "config.json"), "utf8")).inboxBoard).toBe(true);
   const listed = parseInboxToolList((await w.rpc("tools/list", {})).result);
   expect(listed.map((tool) => tool.name)).toContain("card");
-  const made = await w.card({ op: "create", title: "Hero scene timers", column: "building", say: "lane started" });
+  const made = await w.card({ op: "create", title: "Hero scene timers", column: "in_progress", say: "lane started" });
   expect(made.isError).toBeFalsy();
   const cardId = made.structuredContent!.card.id as string;
 
@@ -134,7 +134,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
   expect(refused.content[0]!.text).toStartWith("board_off: ");
   expect(w.server.store.cursor()).toBe(cursor);
   const kept = await w.cards();
-  expect(kept.map((c) => [c.id, c.column, c.said])).toEqual([[cardId, "building", "lane started"]]);
+  expect(kept.map((c) => [c.id, c.column, c.said])).toEqual([[cardId, "in_progress", "lane started"]]);
 
   // The rest of the Inbox goes on as before while it is off.
   const sent = await w.call("send_message", { ...w.agent, body: "an update while the Board is off" });
@@ -142,7 +142,7 @@ test("off → on → off → on: the next tools/list follows; a session's cached
 
   // off → on again: the card is as it was, and its agent can keep it current.
   await w.setBoard(true);
-  expect((await w.cards()).find((c) => c.id === cardId)).toMatchObject({ column: "building", said: "lane started" });
+  expect((await w.cards()).find((c) => c.id === cardId)).toMatchObject({ column: "in_progress", said: "lane started" });
   expect((await w.card({ op: "say", card_id: cardId, say: "back on" })).isError).toBeFalsy();
 
   // The switch never touched the person's list: the rows are the seed's, plus the update the agent sent.

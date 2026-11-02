@@ -102,7 +102,7 @@ describe("the Board page's routes", () => {
   test("a card and its history, newest first", async () => {
     const { server, base, project } = await world();
     const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Roadmap" });
-    server.store.updateCard(card.id, { by: { kind: "person" }, column: "designing" });
+    server.store.updateCard(card.id, { by: { kind: "person" }, column: "in_progress" });
     const answer = (await (await fetch(`${base}/api/inbox/cards/${card.id}`)).json()) as { card: { id: string }; history: { kind: string }[] };
     expect(answer.card.id).toBe(card.id);
     expect(answer.history.map((entry) => entry.kind)).toEqual(["moved", "created"]);
