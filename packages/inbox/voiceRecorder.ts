@@ -46,11 +46,17 @@ export async function microphoneWillPrompt(): Promise<boolean> {
   }
 }
 
+const aborted = () => new DOMException('The take ended before the microphone opened', 'AbortError');
+
 /**
  * Open the microphone. Called inside the press: the AudioContext is made before the first await, or iOS leaves it
  * suspended. The browser's own echo, noise and gain handling stay on.
+ *
+ * `signal` aborts when the take ended first (Cancel, the box closing, the session giving up on a mic that never
+ * answers): the AudioContext closes at once, not when `getUserMedia` settles, which may be never, and a stream that
+ * arrives later has its tracks stopped before anything else runs.
  */
-export function openVoiceRecorder(note: VoiceOpenNote = noteOpen): Promise<VoiceRecorder> {
+export function openVoiceRecorder(signal?: AbortSignal, note: VoiceOpenNote = noteOpen): Promise<VoiceRecorder> {
   const started = performance.now();
   const ms = () => Math.max(0, Math.round(performance.now() - started));
   let context: AudioContext;
@@ -61,20 +67,40 @@ export function openVoiceRecorder(note: VoiceOpenNote = noteOpen): Promise<Voice
     throw cause;
   }
   note({ step: 'context', ok: true, ms: ms(), audio: context.state });
+  const close = () => void context.close().catch(() => {});
+  if (signal?.aborted) {
+    close();
+    return Promise.reject(aborted());
+  }
+  signal?.addEventListener('abort', close, { once: true });
   void context.resume().catch(() => {});
-  return record(context, (step, ok, error) => note({ step, ok, ms: ms(), audio: context.state, error })).catch((cause: unknown) => {
-    void context.close().catch(() => {});
-    throw cause;
-  });
+  return record(context, signal, (step, ok, error) => note({ step, ok, ms: ms(), audio: context.state, error })).then(
+    (recorder) => {
+      // Handed over: from here the recorder's own stop and abort let go of the context.
+      signal?.removeEventListener('abort', close);
+      return recorder;
+    },
+    (cause: unknown) => {
+      signal?.removeEventListener('abort', close);
+      close();
+      throw cause;
+    },
+  );
 }
 
-async function record(context: AudioContext, step: (name: 'stream' | 'worklet' | 'ready', ok: boolean, error?: string) => void): Promise<VoiceRecorder> {
+async function record(context: AudioContext, signal: AbortSignal | undefined, step: (name: 'stream' | 'worklet' | 'ready', ok: boolean, error?: string) => void): Promise<VoiceRecorder> {
   let stream: MediaStream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
   } catch (cause) {
     step('stream', false, errorName(cause));
     throw cause;
+  }
+  if (signal?.aborted) {
+    // The take ended while the browser opened the mic: let go of it before the indicator stays on any longer.
+    for (const track of stream.getTracks()) track.stop();
+    step('stream', false, 'AbortError');
+    throw aborted();
   }
   step('stream', true);
   const release = () => {
@@ -84,9 +110,11 @@ async function record(context: AudioContext, step: (name: 'stream' | 'worklet' |
   let at: 'worklet' | 'ready' = 'worklet';
   try {
     await context.audioWorklet.addModule(inboxUrl('/voice/worklet.js'));
+    if (signal?.aborted) throw aborted();
     step('worklet', true);
     at = 'ready';
     await context.resume();
+    if (signal?.aborted) throw aborted();
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;

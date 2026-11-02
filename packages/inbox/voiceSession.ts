@@ -42,8 +42,11 @@ const WASH_ENDS_MS = 2300;
 
 export type VoicePhase = 'idle' | 'opening' | 'listening' | 'sending';
 
+/** Every reason a press can end without words; the debug log's filter must keep each (voiceDebugLog.test.ts). */
+export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff'] as const;
+
 /** Why the last press ended without words. Kept in `VoiceView` until the next press, a Discard or, for those with no clip, typing. */
-export type VoiceTrouble = 'notheard' | 'blocked' | 'micfailed' | 'nothing' | 'badclip' | 'expired' | 'refused' | 'keyrefused' | 'offline' | 'inboxgone' | 'codexfailed' | 'notready' | 'voiceoff';
+export type VoiceTrouble = (typeof VOICE_TROUBLE_CODES)[number];
 
 export interface VoiceView {
   phase: VoicePhase;
@@ -93,7 +96,8 @@ export interface VoiceField {
 export type VoiceAnswer = { text: string } | { code: InboxVoiceFailure | null; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] };
 
 export interface VoiceDeps {
-  open(): Promise<VoiceRecorder>;
+  /** Open the microphone. `signal` aborts when the take ends before it opened: the recorder lets go of what it holds. */
+  open(signal: AbortSignal): Promise<VoiceRecorder>;
   prompts(): Promise<boolean>;
   /** Throws when the Inbox could not be reached. */
   transcribe(clip: Blob, signal: AbortSignal): Promise<VoiceAnswer>;
@@ -149,6 +153,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   let recorder: VoiceRecorder | null = null;
   let clip: Blob | null = null;
   let abort: AbortController | null = null;
+  /** The open still on its way: anything that ends the take aborts it, so a hung mic holds nothing. */
+  let opener: AbortController | null = null;
   /** Bumped by anything that ends a run: an older run's late answer finds a different number and does nothing. */
   let run = 0;
   let pressed = false;
@@ -215,6 +221,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     recorder = null;
     abort?.abort();
     abort = null;
+    opener?.abort();
+    opener = null;
     pressed = false;
     secondPress = false;
     if (recording === handle) recording = null;
@@ -296,9 +304,11 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     set({ ...IDLE, phase: 'opening', caret: selection.start });
     // In the press, before any wait: see openVoiceRecorder. A throw here (the AudioContext refused) is a mic that did
     // not start, never a run left opening with no line, no Cancel and Send off.
+    const opens = new AbortController();
+    opener = opens;
     let opening: Promise<VoiceRecorder>;
     try {
-      opening = deps.open();
+      opening = deps.open(opens.signal);
     } catch (cause) {
       opening = Promise.reject(cause);
     }
@@ -309,7 +319,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
     });
     // A microphone that never answers (seen on iOS) ends with the "didn't start" note, so the box is never left
-    // waiting on it with Send off. A late mic is closed at once (`mine !== run` below).
+    // waiting on it with Send off. Giving up aborts the open (release), so the recorder lets go of its AudioContext
+    // now and of a stream that arrives later; a recorder handed over anyway is closed at once (`mine !== run` below).
     const giveUp = (unlessAsking: boolean) => {
       if (mine !== run || view.phase !== 'opening' || (unlessAsking && view.prompting)) return;
       run++;
@@ -320,6 +331,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     deps.after(VOICE_ASKING_GIVE_UP_MS, () => giveUp(false));
     opening.then(
       (opened) => {
+        if (opener === opens) opener = null;
         if (mine !== run) {
           opened.abort();
           return;

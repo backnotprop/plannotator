@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { cleanWindowRecord, INBOX_DEBUG_ON_HEADER } from '../shared/inbox/debug-log';
 import { learnDebugLog } from './debugLog';
 import { browserDeps } from './voice';
-import { createVoiceSession, type VoiceField } from './voiceSession';
+import { createVoiceSession, VOICE_TROUBLE_CODES, type VoiceField } from './voiceSession';
 
 const hasDom = typeof document !== 'undefined';
 const BUFFER = 'plannotator-inbox-debug-buffer';
@@ -101,4 +101,12 @@ describe.skipIf(!hasDom)('voice in the debug log', () => {
       expect(cleanWindowRecord(line)).toMatchObject({ side: 'window', ...fields });
     }
   });
+});
+
+// Not DOM-gated: the filter's list of trouble codes is a second copy of the session's, and a code it drops would leave
+// a stuck mic with no reason in the log.
+test('every reason a take can end without words survives the Inbox\'s filter', () => {
+  for (const trouble of VOICE_TROUBLE_CODES) {
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_phase', phase: 'idle', prompting: false, slow: false, trouble })).toMatchObject({ trouble });
+  }
 });

@@ -102,7 +102,7 @@ export function useVoiceBlock(shown: boolean): VoiceBlock | null {
 
 /** Exported for the debug log's test: what a composer's dictation runs on in the browser. */
 export const browserDeps: VoiceDeps = {
-  open: () => openVoiceRecorder(),
+  open: (signal) => openVoiceRecorder(signal),
   // The opt-in debug log; a no-op while debug is off.
   note: debugNote,
   prompts: microphoneWillPrompt,
