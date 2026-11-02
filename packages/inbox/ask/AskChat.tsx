@@ -190,7 +190,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, o
     if (!note && !askUnanswered(turn, runningTurn)) return null;
     return (
       <div className="ib-ask-note" data-ask-note="unanswered">
-        <p>{note ?? `${name} did not answer this.`}</p>
+        <p>{note ?? 'No answer arrived.'}</p>
         <span className="ib-ask-noteacts">
           {turn.answer === undefined && (
             <button type="button" className="ib-ask-notebtn" disabled={busy || posting} onClick={() => void askAgain(turn)}>

@@ -5,7 +5,7 @@
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
- *   GET  /api/inbox/threads/:id/ask        `{ conversation, running, can_ask, agent }`: null when
+ *   GET  /api/inbox/threads/:id/ask        `{ subject, project, conversation, running, can_ask, agent }`: null when
  *                                          none, the turn id being answered, whether the icons show,
  *                                          and who answers
  *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: claim the owner's
