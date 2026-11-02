@@ -443,6 +443,7 @@ packages/editor/components/CompactPlanStage.test.tsx
 packages/editor/components/FolderAnnotationEmptyState.test.tsx
 packages/editor/components/AppHeader.mobile.test.tsx
 packages/editor/components/AppHeader.documentName.test.tsx
+packages/editor/components/AppHeader.folderTabSetting.test.tsx
 packages/editor/components/CompactAnnotationControls.test.tsx
 packages/editor/components/AnnotateAgentTerminalPanel.displayReset.test.tsx
 packages/inbox/shortcutHints.test.tsx

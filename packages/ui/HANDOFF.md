@@ -2639,7 +2639,7 @@ Settings → General gains a **Hide the repository owner** switch, off by defaul
 Settings → General can show a **Name the tab after the folder** switch, off by default. Inert unless a host asks for it: the row only stores the setting, and the host names its tab from it.
 
 - **Setting `folderTabNamesFolder`** (`config/settings.ts`, cookie-only `plannotator-folder-tab-names-folder`, default false).
-- **`Settings`** gains **`showFolderTabSetting?: boolean`** (default false) to show the row. Plannotator passes true in a folder annotate session.
+- **`Settings`** gains **`showFolderTabSetting?: boolean`** (default false) to show the row. Plannotator passes true in every annotate session.
 
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 

@@ -135,8 +135,6 @@ interface AppHeaderProps {
   webmcpAvailable?: boolean;
   /** The open document is markdown or text, so Settings offers Text size and Document font (raw HTML and diagram files draw themselves). */
   documentTextSizeAvailable?: boolean;
-  /** A folder annotate session: Settings offers "Name the tab after the folder". */
-  folderTabSettingAvailable?: boolean;
   /** A browser agent has completed at least one tool call in this session.
    *  Only then does the unobtrusive "Agent" indicator appear. */
   agentConnected?: boolean;
@@ -235,7 +233,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   agentTerminalAvailable,
   webmcpAvailable = false,
   documentTextSizeAvailable = false,
-  folderTabSettingAvailable = false,
   agentConnected = false,
   onCallbackFeedback,
   onCallbackApprove,
@@ -514,7 +511,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
             webmcpAvailable={webmcpAvailable}
             showDocumentTextSize={documentTextSizeAvailable}
             showDocumentFont={documentTextSizeAvailable}
-            showFolderTabSetting={folderTabSettingAvailable}
+            showFolderTabSetting={annotateMode}
           />
         </div>
 

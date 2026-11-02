@@ -152,10 +152,11 @@ interface SettingsProps {
    */
   showDocumentFont?: boolean;
   /**
-   * Show General's "Name the tab after the folder" row. Default false, like
-   * `showDocumentTextSize`: the row does something only where the page names
-   * its tab through the `folderTabNamesFolder` setting. Plannotator passes
-   * true in a folder annotate session.
+   * Show General's "Name the tab after the folder" row. Default false: the
+   * row does something only where the page names its tab through the
+   * `folderTabNamesFolder` setting, so a host opts in. Plannotator passes true
+   * in every annotate session, a single file included, so the choice can be
+   * made before a folder is opened; the row's text scopes it to folders.
    */
   showFolderTabSetting?: boolean;
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
@@ -1822,9 +1823,10 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                       </>
                     )}
 
-                    {/* Name the tab after the folder: opt-in, cookie-only. Off
-                        keeps the owner's default (#2392): the tab names the
-                        open file, so tabs of one folder stay apart. */}
+                    {/* Name the tab after the folder: opt-in, cookie-only, shown
+                        where the host asks (every annotate session). Off keeps
+                        the owner's default (#2392): the tab names the open
+                        file, so tabs of one folder stay apart. */}
                     {showFolderTabSetting && (
                       <>
                         <div className="border-t border-border" />
@@ -1833,7 +1835,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             checked={folderTabNamesFolder}
                             onChange={(v) => configStore.set('folderTabNamesFolder', v)}
                             label="Name the tab after the folder"
-                            description="In a folder review, the browser tab names the folder instead of the open file. Leave it off to tell several tabs of one folder apart."
+                            description="In a folder review, the browser tab shows the folder name instead of the open file. Leave it off to tell several tabs of one folder apart."
                           />
                         </div>
                       </>

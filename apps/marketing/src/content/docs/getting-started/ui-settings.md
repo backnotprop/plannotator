@@ -69,7 +69,7 @@ Controls how the repository is named beside the document, in the plan diff, in c
 
 ### Name the tab after the folder
 
-Shown when you annotate a folder. Controls what the browser tab is called while you review it. Off by default: the tab names the open file, `proposal.md · acme/payments-service`, so several tabs of one folder are easy to tell apart. On, the tab names the folder whichever file is open: `add-refund-flow/ · acme/payments-service`. The header at the top of the page names the folder either way. The setting is kept in your browser.
+Shown when you annotate. Controls what the browser tab is called while you review a folder; a single file's tab always names the file. Off by default: the tab names the open file, `proposal.md · acme/payments-service`, so several tabs of one folder are easy to tell apart. On, the tab names the folder whichever file is open: `add-refund-flow/ · acme/payments-service`. The header at the top of the page names the folder either way. The setting is kept in your browser.
 
 ## Display
 
