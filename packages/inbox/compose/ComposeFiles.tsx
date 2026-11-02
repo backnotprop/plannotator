@@ -44,8 +44,10 @@ export interface PastedText {
 
 /**
  * The words of the box the files belong to, so a long paste can become a tile
- * and be put back where it was pasted. `value` is the box's text on this
- * render; `set` changes it (the host's own change: the reply box saves its draft).
+ * and be put back where it was pasted. `value` is the box's text (on this
+ * render, or as it is now: the reply box's is a getter, and that host calls
+ * `follow` on each change); `set` changes it (the host's own change: the
+ * reply box saves its draft).
  */
 export interface ComposeFilesText {
   value: string;
@@ -126,10 +128,19 @@ export function useComposeFiles(
   if (anchors.current === null) anchors.current = anchorsOf(initial);
   /** The words the anchors refer to: every other change of the box's words carries them along (mapAnchor). */
   const anchoredIn = useRef(options.text?.value ?? '');
-  if (options.text && options.text.value !== anchoredIn.current) {
-    for (const anchor of anchors.current.values()) anchor.at = mapAnchor(anchoredIn.current, options.text.value, anchor.at);
-    anchoredIn.current = options.text.value;
-  }
+  const followTo = (value: string) => {
+    if (value === anchoredIn.current) return;
+    for (const anchor of anchors.current.values()) anchor.at = mapAnchor(anchoredIn.current, value, anchor.at);
+    anchoredIn.current = value;
+  };
+  if (options.text) followTo(options.text.value);
+  /**
+   * The box's words changed without a render of this hook's host (the reply box's field draws its words
+   * itself, replyText.ts): the anchors follow them now, edit by edit, as a render would have.
+   */
+  const follow = useCallback(() => {
+    if (text.current) followTo(text.current.value);
+  }, []);
   /** The browser's undo puts this tile back while it is the field's very next edit (the paste's own undo). */
   const undoArm = useRef<{ key: string; field: HTMLTextAreaElement } | null>(null);
   /** Restored tiles whose words are being read for a Put back (a second press waits for the first). */
@@ -446,7 +457,7 @@ export function useComposeFiles(
 
   const uploaded = files.filter((file) => file.state === 'done' && file.upload).map((file) => file.upload!);
   const uploading = files.some((file) => file.state === 'uploading');
-  return { files, add, attach, remove, forget, reset, current, paste, takeText, putBack, pastedDraft, restorePasted, uploaded, uploading };
+  return { files, add, attach, remove, forget, reset, current, paste, takeText, putBack, pastedDraft, restorePasted, follow, uploaded, uploading };
 }
 
 /** A phone's picker offers the photo library and Files (iOS gives no Paste for a picture in a text field). */
