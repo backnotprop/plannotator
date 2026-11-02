@@ -363,8 +363,8 @@ test('an older Plannotator on the far side stays quiet: its row asks for an upda
     if (!older) await page.route(`**/api/inbox/accounts/${oldOne.id}*`, (route) => route.fulfill({ json: { state: 'needs_update' } }));
   };
   if (older) expect(await (await fetch(`${base(studio)}/api/inbox/accounts/${oldOne.id}`)).json()).toEqual({ state: 'needs_update' });
-  // It still links, and its threads still show: only usage waits.
-  expect((await machines(studio)).find((m) => m.name === 'Older')?.state).toBe('online');
+  // A real older build still links, and its threads still show: only usage waits. Without one, this build is linked, so there is nothing to prove.
+  if (older) expect((await machines(studio)).find((m) => m.name === 'Older')?.state).toBe('online');
   const { context, page, errors } = await desktop(browser);
   await answerAsOlder(page);
   await page.goto(`${studio.url}#settings/accounts`);

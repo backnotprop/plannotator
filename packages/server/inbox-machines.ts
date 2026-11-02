@@ -28,10 +28,10 @@ import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/i
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts, readCapped } from "./inbox-accounts";
+import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -659,15 +659,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
    * nowhere, and picked by name again. Each machine is its own request, so a
    * slow one holds up only itself. It waits past the far run's own limit, so a
    * slow run comes back as its real `timed_out`, and only a machine that does
-   * not answer at all is offline. A door that does not know the route is an
-   * older Plannotator. An answer past the cap is a failed read, and read no
-   * further.
+   * not answer at all is offline. A door that hangs while its line stays up is
+   * awake, and so is one that revoked this link: the wait outlasts the line's
+   * silence limit, so a machine truly asleep has lost its line by the end of
+   * it. A door that does not know the route is an older Plannotator. An answer
+   * past the cap is a failed read, and read no further.
    */
   const accountsOf = async (machine: string, fresh: boolean, signal: AbortSignal): Promise<InboxMachineAccountsRead> => {
     const peer = peers.get(machine);
     if (!peer) throw new InboxError("machine_not_linked", "That machine is not linked.");
     if (peer.state === "needs_update") return { state: "needs_update" };
-    if (peer.state === "offline" || peer.state === "revoked") {
+    if (peer.state === "revoked") return { state: "unreachable" };
+    if (peer.state === "offline") {
       peer.poke();
       return { state: "offline" };
     }
@@ -686,7 +689,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       if (response.status === 404 && (body as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
       return response.ok ? parsePeerAccounts(body) : { state: "unreachable" };
     } catch {
-      return { state: "offline" };
+      return { state: peer.state === "online" ? "unreachable" : "offline" };
     }
   };
 

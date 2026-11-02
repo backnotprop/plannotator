@@ -38,7 +38,7 @@
  */
 
 import type { InboxAccount, InboxAccountsFailure, InboxAccountsRead, InboxAccountUsage, InboxMachineAccountsRead, InboxUsageWindow } from "@plannotator/core/inbox-types";
-import { runUntilExit, type AgentEnvironment } from "./inbox-agents";
+import { createAgentEnvironmentFor, runUntilExit, type AgentEnvironment } from "./inbox-agents";
 
 /** The `schemaVersion` of `cswap list --json` this build reads. Extra fields are fine; another version is not. */
 const CSWAP_SCHEMA_VERSION = 1;
@@ -52,6 +52,8 @@ export const INBOX_ACCOUNTS_HARD_LIMIT_MS = 120_000;
 export const INBOX_ACCOUNTS_CACHE_MS = 30_000;
 /** The most of a linked machine's answer this Inbox reads: 16 times what a run may print (the 64 KiB cap in inbox-agents.ts). */
 export const INBOX_MACHINE_ACCOUNTS_MAX_BYTES = 1024 * 1024;
+/** No person has this many logins: the rest of a far answer's list is dropped, so it can't slow a window that draws every row. */
+const MACHINE_ACCOUNTS_MAX_ROWS = 200;
 /** No address, alias or name is this long: past it a field is dropped, so a far answer can't fill a window with one. */
 const TEXT_MAX = 1_024;
 /** The address `cswap` gives an API-key account (`api-key-3@token.local`). */
@@ -124,26 +126,8 @@ export function parsePeerAccounts(value: unknown): InboxMachineAccountsRead {
   if (!isRecord(value)) return { state: "unreachable" };
   if (value.state === "not_installed") return { state: "not_installed" };
   if (value.state === "failed") return failed(typeof value.reason === "string" && FAILURES.includes(value.reason) ? (value.reason as InboxAccountsFailure) : "run_failed");
-  const accounts = value.state === "accounts" && Array.isArray(value.accounts) ? accountList(value.accounts) : null;
+  const accounts = value.state === "accounts" && Array.isArray(value.accounts) ? accountList(value.accounts.slice(0, MACHINE_ACCOUNTS_MAX_ROWS)) : null;
   return accounts ? { state: "accounts", accounts } : { state: "needs_update" };
-}
-
-/** A far answer's body as text, reading no further than `maxBytes`: past that it cancels the stream and answers null. */
-export async function readCapped(response: Response, maxBytes: number): Promise<string | null> {
-  const reader = response.body?.getReader();
-  if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) return Buffer.concat(chunks).toString("utf8");
-    size += value.length;
-    if (size > maxBytes) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
 }
 
 /** What the window may know of `cswap list --json`'s output. */
@@ -182,6 +166,17 @@ export function accountsTestOptions(env: Record<string, string | undefined>): { 
   return { ...(env.PLANNOTATOR_TEST_CSWAP_DIR ? { cswapDir: env.PLANNOTATOR_TEST_CSWAP_DIR } : {}), ...(cache ? { cacheMs: Number(cache) } : {}) };
 }
 
+/** This Inbox's read: `environment`'s `cswap`, unless a spec in a sandbox named another (`accountsTestOptions`). */
+export function createInboxAccountsFor(environment: AgentEnvironment, options: Partial<InboxAccountsOptions> = {}, env: Record<string, string | undefined> = process.env) {
+  const { cswapDir, ...forSpec } = accountsTestOptions(env);
+  const { homeDir } = environment;
+  return createInboxAccounts({
+    environment: cswapDir ? createAgentEnvironmentFor({ platform: process.platform, homeDir, env: { HOME: homeDir, PATH: cswapDir } }) : environment,
+    ...forSpec,
+    ...options,
+  });
+}
+
 export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TIMEOUT_MS, hardLimitMs = INBOX_ACCOUNTS_HARD_LIMIT_MS, cacheMs = INBOX_ACCOUNTS_CACHE_MS }: InboxAccountsOptions) {
   const runOnce = async (cswap: string): Promise<InboxAccountsRead> => {
     const run = await runUntilExit([cswap, "list", "--json"], environment.env, hardLimitMs);
@@ -205,7 +200,9 @@ export function createInboxAccounts({ environment, timeoutMs = INBOX_ACCOUNTS_TI
         return Promise.resolve({ state: "not_installed" });
       }
       const now = Date.now();
-      if (last && now - last.at < cacheMs && (!fresh || now - startedAt < cacheMs)) return Promise.resolve(last.answer);
+      // A time ahead of now is a clock set back: not a reason to wait for it to catch up.
+      const recent = (at: number) => now >= at && now - at < cacheMs;
+      if (last && recent(last.at) && (!fresh || recent(startedAt))) return Promise.resolve(last.answer);
       if (!running) {
         startedAt = now;
         running = runOnce(cswap)

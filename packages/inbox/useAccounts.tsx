@@ -29,7 +29,7 @@ export interface Accounts {
   reading: boolean;
   /** The linked machines, as of the last read. */
   machines: MachineAccounts[];
-  /** Reads now, or joins the read already going. `fresh` (Refresh) skips the answer each Inbox keeps. */
+  /** Reads now, or joins the read already going. `fresh` (Refresh) asks each Inbox to run again, which it does once its last run is 30 s old; sooner it gets the last reading. */
   read: (options?: { fresh?: boolean }) => Promise<void>;
 }
 

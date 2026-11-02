@@ -18,11 +18,13 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { InboxAccount } from '@plannotator/core/inbox-types';
 import { fakeCswapCalls, removeFakeCswap, writeFakeCswap, type FakeCswapAnswer } from '../../tests/helpers/fake-cswap';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { PHONE_QUERY } = (hasDom ? await import('./phone') : {}) as typeof import('./phone');
+const { listedAccounts } = (hasDom ? await import('./components/Accounts') : {}) as typeof import('./components/Accounts');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 const FIXTURES = resolve(import.meta.dir, '../../tests/fixtures/cswap');
@@ -51,6 +53,8 @@ let readsAnswered = 0;
 let linked: { id: string; name: string; answer: () => unknown }[] = [];
 /** Every read of a linked machine, by URL. */
 let machineReads: string[] = [];
+/** Set by a test: the merged list has not named the machines, this one included. */
+let listNamesNoMachine = false;
 
 function call(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -104,6 +108,7 @@ beforeEach(async () => {
   accountReads = [];
   linked = [];
   machineReads = [];
+  listNamesNoMachine = false;
   // A window leaves a read behind when it closes, and the server's next caller would join that run: see it out first.
   await call('/api/inbox/accounts');
   readsAnswered = 0;
@@ -126,6 +131,7 @@ beforeEach(async () => {
     if (settingsRoute && String(input) === '/api/inbox/settings') await settingsRoute();
     const answer = await call(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     if (String(input).startsWith('/api/inbox/accounts')) readsAnswered += 1;
+    if (listNamesNoMachine && String(input).includes('machines=1')) return Response.json({ ...JSON.parse(answer.text), machines: undefined }, { status: answer.status });
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -927,7 +933,7 @@ test.skipIf(!hasDom)('rows one machine keeps apart stay apart, whatever they sha
   expect(listNames(el)).toEqual(['one', 'two']);
 });
 
-test.skipIf(!hasDom)('a number never names two logins: what two machines each call #1 is two numbers, a login keeps its own, and the machines say the same', async () => {
+test.skipIf(!hasDom)('a number never names two logins: what two machines each call #1 is two numbers, this machine keeps cswap\'s, and the machines say the same', async () => {
   answer({ stdout: listOf({ email: 'ramos@one.test', active: true }, { email: 'ramos@two.test', usageAgeSeconds: 900, usage: { fiveHour: limit(10) } }, { email: 'key@token.local', usageStatus: 'api_key' }) });
   linked = [
     {
@@ -948,6 +954,79 @@ test.skipIf(!hasDom)('a number never names two logins: what two machines each ca
   expect(new Set(numbers).size).toBe(5);
   await until(() => machineRows(el)[2]?.[1]?.startsWith('ramos') === true, 'the last machine');
   expect(shown).toContain(machineRows(el)[2]![1]!);
+});
+
+test.skipIf(!hasDom)('while the page is open a row keeps the first number it showed, and no other login takes it, whatever machines come and go', () => {
+  const login = (number: number, name: string) => farAccount({ number, email: `${name}@fake.test` }, 0) as unknown as InboxAccount;
+  const self = { name: 'Studio', accounts: [login(1, 'one'), login(2, 'two')] };
+  const machine = (id: string, ...accounts: InboxAccount[]) => ({ id, name: id, read: { state: 'accounts' as const, accounts } });
+  const seen: string[] = [];
+  const numbers = new Map<string, number>();
+  const shown = (...linked: ReturnType<typeof machine>[]) => Object.fromEntries(listedAccounts(self, linked, seen, numbers).map(({ account }) => [account.email!.split('@')[0], account.number]));
+
+  const mini = machine('mini', login(3, 'three'), login(1, 'four'));
+  expect(shown(mini)).toEqual({ one: 1, two: 2, three: 3, four: 4 });
+
+  // A later machine's top number moves nothing, and its own number is taken.
+  const lap = machine('lap', login(3, 'five'), login(8, 'six'));
+  const both = shown(mini, lap);
+  expect(both).toMatchObject({ one: 1, two: 2, three: 3, four: 4, six: 8 });
+  expect(new Set(Object.values(both)).size).toBe(6);
+
+  // A machine asleep leaves its numbers unused: they still name those logins.
+  const fifth = both.five!;
+  expect(shown(lap)).toEqual({ one: 1, two: 2, five: fifth, six: 8 });
+  const seven = shown(lap, machine('new', login(3, 'seven'))).seven!;
+  expect([1, 2, 3, 4, fifth, 8]).not.toContain(seven);
+  expect(shown(mini, lap)).toMatchObject({ three: 3, four: 4, five: fifth, six: 8 });
+
+  // The first machine answers late: the row it merges into stays as it was.
+  const held = new Map<string, number>();
+  const heldSeen: string[] = [];
+  const list = (...linked: ReturnType<typeof machine>[]) => listedAccounts({ name: 'Studio', accounts: [] }, linked, heldSeen, held).map(({ account }) => [account.email, account.number]);
+  const late = machine('late', login(5, 'b'));
+  expect(list(machine('other', login(2, 'b'), login(3, 'a')))).toEqual([['b@fake.test', 2], ['a@fake.test', 3]]);
+  expect(list(late, machine('other', login(2, 'b'), login(3, 'a')))).toEqual([['b@fake.test', 2], ['a@fake.test', 3]]);
+});
+
+test.skipIf(!hasDom)('this machine goes first and keeps its numbers, even after a first read that failed', async () => {
+  answer({ stdout: 'not the list' });
+  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ email: 'far@fake.test', active: true }, { email: 'also@fake.test' }) }];
+  const el = await open('failed');
+  await until(() => listNames(el).length === 2, 'the other machine');
+  expect(listNames(el)).toEqual(['far', 'also']);
+  answer({ stdout: listOf({ email: 'one@fake.test', active: true }, { email: 'two@fake.test' }) });
+  await until(() => !refresh(el).disabled, 'the first read to end');
+  act(() => refresh(el).click());
+  await until(() => listNames(el).length === 4, 'this machine');
+  expect(listNames(el)).toEqual(['one', 'two', 'far', 'also']);
+  const numbers = [...el.querySelectorAll('[data-account]')].map((item) => Number(item.getAttribute('data-account')));
+  expect(numbers.slice(0, 2)).toEqual([1, 2]);
+  expect(new Set(numbers).size).toBe(4);
+});
+
+test.skipIf(!hasDom)('a row never has a third line: what needs a person takes the organization\'s place, the organization a passing reason\'s, and the other waits in the open row', async () => {
+  answer({ stdout: listOf({ alias: 'work', organizationName: 'North', active: true, usageStatus: 'relogin_required', usage: { fiveHour: limit(40) } }, { alias: 'work', organizationName: 'South' }) });
+  const el = await open('accounts');
+  const lines = (rowEl: Element) => [...rowEl.querySelectorAll('.ib-acct-org, .ib-acct-why')].map((line) => line.textContent);
+  const [dead, quiet] = [row(el, 1), row(el, 2)];
+  expect(lines(dead)).toEqual(['Sign in again']);
+  expect(lines(quiet)).toEqual(['South']);
+  await act(async () => toggle(dead)!.click());
+  expect(dead.querySelector('.ib-acct-more')!.textContent).toContain('North');
+  await act(async () => toggle(quiet)!.click());
+  expect(quiet.querySelector('.ib-acct-more')!.textContent).toContain('No limits reported');
+});
+
+test.skipIf(!hasDom)('an open row says "on this machine" when this machine has no name yet', async () => {
+  listNamesNoMachine = true;
+  answer({ stdout: listOf({ alias: 'work', email: 'same@fake.test', active: true, usageStatus: 'relogin_required' }) });
+  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ email: 'same@fake.test', active: true, usage: { fiveHour: limit(40) } }) }];
+  const el = await open('accounts');
+  await until(() => bars(el.querySelector('.ib-acct')!).length > 0, "the other machine's reading");
+  const work = el.querySelector('.ib-acct')!;
+  await act(async () => toggle(work)!.click());
+  expect(work.querySelector('.ib-acct-more')!.textContent).toContain('Sign in again on this machine');
 });
 
 test.skipIf(!hasDom)('a login dead on one machine says so whatever another reads for it, and the open row says where', async () => {

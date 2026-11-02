@@ -149,7 +149,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
-import { accountsTestOptions, createInboxAccounts } from "./inbox-accounts";
+import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -2508,14 +2508,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.voice,
   });
 
-  // A spec on the compiled binary names its fake `cswap`'s folder. Without the sandbox this is never heard.
-  const { cswapDir: fakeCswap, ...accountsForSpec } = accountsTestOptions(process.env);
   /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
-  const accounts = createInboxAccounts({
-    environment: fakeCswap ? createAgentEnvironmentFor({ platform: process.platform, homeDir: agentEnvironment.homeDir, env: { HOME: agentEnvironment.homeDir, PATH: fakeCswap } }) : agentEnvironment,
-    ...accountsForSpec,
-    ...options.accounts,
-  });
+  const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({

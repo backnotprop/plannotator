@@ -34,7 +34,7 @@ interface RowName {
   label: string;
   /** Only when another row has the same label: one address can be saved under two organizations. */
   organization: string | null;
-  /** `cswap`'s number, only when the rows would still read alike. */
+  /** Its number among these rows, only when they would still read alike. */
   number: number | null;
 }
 
@@ -95,27 +95,40 @@ function newerReading(held: InboxAccount, other: InboxAccount): InboxAccount {
 
 /**
  * `cswap`'s number is unique on one machine, so across machines one row may
- * have to give way. The first row to show a number keeps it, so this machine's
- * stay the ones `cswap` prints here; a later one takes a number no row has.
+ * have to give way. This machine's rows always show the one `cswap` prints
+ * here. Any other row keeps the first number it showed for as long as the page
+ * is open (`numbers`), asleep or not, so no other login takes it, unless this
+ * machine's answer lands on it. A number already taken goes past the highest.
  */
-function uniqueNumbers(rows: ListedAccount[]): ListedAccount[] {
-  const taken = new Set<number>();
-  let spare = Math.max(0, ...rows.map((row) => row.account.number));
+function steadyNumbers(rows: ListedAccount[], own: Set<string>, numbers: Map<string, number>): ListedAccount[] {
+  const mine = new Set<number>();
+  for (const { key, account } of rows) {
+    if (!own.has(key)) continue;
+    numbers.set(key, account.number);
+    mine.add(account.number);
+  }
+  const taken = new Set(numbers.values());
+  let spare = Math.max(0, ...taken, ...rows.map((row) => row.account.number));
   return rows.map((row) => {
-    const number = taken.has(row.account.number) ? ++spare : row.account.number;
-    taken.add(number);
+    let number = numbers.get(row.key);
+    if (number === undefined || (mine.has(number) && !own.has(row.key))) {
+      number = taken.has(row.account.number) ? ++spare : row.account.number;
+      taken.add(number);
+      numbers.set(row.key, number);
+    }
     return number === row.account.number ? row : { ...row, account: { ...row.account, number } };
   });
 }
 
 /**
- * Every machine's accounts as one list, this machine's first: one login saved
- * on two machines is one row, by its address and organization. An API key has
- * no address to tell it by, so it stays its machine's own row, and rows one
+ * Every machine's accounts as one list, this machine's always first: one login
+ * saved on two machines is one row, by its address and organization. An API key
+ * has no address to tell it by, so it stays its machine's own row, and rows one
  * machine keeps apart stay apart. `seen` holds the page's order: a machine that
- * answers late adds its rows under what is showing, whatever the machines' order.
+ * answers late adds its rows under what is showing, whatever the machines'
+ * order. `numbers` holds the page's numbers.
  */
-export function listedAccounts(self: { name: string; accounts: InboxAccount[] }, linked: MachineAccounts[], seen: string[] = []): ListedAccount[] {
+export function listedAccounts(self: { name: string; accounts: InboxAccount[] }, linked: MachineAccounts[], seen: string[] = [], numbers = new Map<string, number>()): ListedAccount[] {
   const listed = new Map<string, ListedAccount>();
   const name = (machine: string) => (linked.length > 0 ? [machine] : []);
   const add = (id: string, machine: string, accounts: InboxAccount[]) => {
@@ -132,10 +145,15 @@ export function listedAccounts(self: { name: string; accounts: InboxAccount[] },
     }
   };
   add('self', self.name, self.accounts);
+  const own = new Set(listed.keys());
   for (const { id, name: machine, read } of linked) if (read?.state === 'accounts') add(id, machine, read.accounts);
   for (const key of listed.keys()) if (!seen.includes(key)) seen.push(key);
-  return uniqueNumbers([...listed.values()].sort((a, b) => seen.indexOf(a.key) - seen.indexOf(b.key)));
+  const place = (key: string) => seen.indexOf(key) + (own.has(key) ? 0 : seen.length);
+  return steadyNumbers([...listed.values()].sort((a, b) => place(a.key) - place(b.key)), own, numbers);
 }
+
+/** What this machine is called until the Inbox knows its name. */
+const THIS_MACHINE = 'This machine';
 
 /** The states a person has to act on, worst first. A login renewing or a failed fetch passes by itself, and another machine's reading can stand in. */
 const NEEDS_A_PERSON = ['relogin_required', 'no_credentials', 'foreign_credential', 'keychain_unavailable'];
@@ -149,8 +167,8 @@ function worstState(copies: ListedAccount['copies']): { reason: string; machines
   return null;
 }
 
-/** What an open row adds. An organization a row already shows is not said twice. */
-function accountMore(account: InboxAccount, meters: Meter[], name: RowName, machines: string[], worst: ReturnType<typeof worstState>): string[] {
+/** What an open row adds. An organization a row already shows is not said twice, and `reason` is one the row had no room for. */
+function accountMore(account: InboxAccount, meters: Meter[], name: RowName, machines: string[], worst: ReturnType<typeof worstState>, reason: string | null): string[] {
   const resets = meters.flatMap(({ label, window }) => {
     const when = window.clock ?? (window.countdown && `in ${window.countdown}`);
     return when ? [`${label} ${when}`] : [];
@@ -159,10 +177,11 @@ function accountMore(account: InboxAccount, meters: Meter[], name: RowName, mach
   const lines: string[] = [];
   if (account.email) lines.push(account.email);
   if (organization && !name.organization) lines.push(organization);
+  if (reason) lines.push(reason);
   if (resets.length > 0) lines.push(`Resets ${resets.join(' · ')}`);
   if (meters.length > 0 && isStale(account)) lines.push(`Last read ${ageText(account.usageAgeSeconds!)} ago`);
   if (machines.length > 0) lines.push(machines.join(', '));
-  if (worst && machines.length > 1) lines.push(`${worst.reason} on ${worst.machines.join(', ')}`);
+  if (worst && machines.length > 1) lines.push(`${worst.reason} on ${worst.machines.map((machine) => (machine === THIS_MACHINE ? 'this machine' : machine)).join(', ')}`);
   return lines;
 }
 
@@ -235,12 +254,15 @@ function AccountUsage({ account, meters }: { account: InboxAccount; meters: Mete
   );
 }
 
-function AccountRow({ row: { account, machines, copies }, name }: { row: ListedAccount; name: RowName }) {
+function AccountRow({ row: { account, machines, copies }, name: rowNamed }: { row: ListedAccount; name: RowName }) {
   const [open, setOpen] = useState(false);
   const meters = accountMeters(account);
   const worst = worstState(copies);
-  const more = accountMore(account, meters, name, machines, worst);
-  const why = worst?.reason ?? (account.usageStatus !== 'api_key' && meters.length === 0 ? noReadingReason(account) : null);
+  const reason = worst?.reason ?? (account.usageStatus !== 'api_key' && meters.length === 0 ? noReadingReason(account) : null);
+  // One line under the name, so a late answer never grows the row: what needs a person, else the organization that tells it from its namesake, else why it has no reading. The other waits in the open row.
+  const name = worst ? { ...rowNamed, organization: null } : rowNamed;
+  const why = name.organization ? null : reason;
+  const more = accountMore(account, meters, name, machines, worst, why ? null : reason);
   const head = (
     <>
       <span className="ib-acct-who">
@@ -380,12 +402,13 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
     void read();
   }, [read]);
 
-  const self = machine ?? 'This machine';
+  const self = machine ?? THIS_MACHINE;
   const own = view?.state === 'accounts' ? view.accounts : [];
   const linked = view?.state === 'owner_only' ? [] : machines;
-  // The list waits for this machine's answer, which goes first: nothing is put above rows already showing.
+  // The list waits for this machine's first answer, which goes first: nothing is put above rows already showing, unless that answer failed and a later one lands.
   const seen = useRef<string[]>([]);
-  const rows = view === null ? [] : listedAccounts({ name: self, accounts: own }, linked, seen.current);
+  const numbers = useRef(new Map<string, number>());
+  const rows = view === null ? [] : listedAccounts({ name: self, accounts: own }, linked, seen.current, numbers.current);
   const hasMachines = linked.length > 0 || own.some((account) => account.active);
   const failure = refreshFailed ?? (view ? accountsFailure(view) : null);
   return (
