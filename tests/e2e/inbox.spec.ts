@@ -484,7 +484,7 @@ test('a pick is saved at once and the agent reads it through read_thread', async
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' })).toBeVisible();
 });
 
-test('Send carries the picks and the words, wait_for_reply returns them, and the thread says Delivered', async () => {
+test('Send carries the picks and the words, read_thread returns them, and the thread says Delivered', async () => {
   const { page } = world;
   const [claude] = world.agents;
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
@@ -499,14 +499,13 @@ test('Send carries the picks and the words, wait_for_reply returns them, and the
   await box.fill('Keep the flag on for the test account first.');
   await shot('2.6-reply-box');
 
-  const reply = claude!.waitForReply(world.threads.stopped!, 50);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answered = await reply;
-  expect(answered.status).toBe('replied');
-  expect(answered.reply.body).toContain('Answered 2 questions.');
-  expect(answered.reply.body).toContain('Keep the flag on for the test account first.');
-  expect(answered.reply.body).toContain('Retry with the same idempotency key');
-  expect(answered.questions.map((q: { state: string }) => q.state)).toEqual(['sent', 'sent']);
+  const answered = await claude!.nextReply(world.threads.stopped!, 50);
+  expect(answered.body).toContain('Answered 2 questions.');
+  expect(answered.body).toContain('Keep the flag on for the test account first.');
+  expect(answered.body).toContain('Retry with the same idempotency key');
+  const asked = await claude!.readThread(world.threads.stopped!);
+  expect((asked.messages as { questions?: { state: string }[] }[]).flatMap((m) => m.questions ?? []).map((q) => q.state)).toEqual(['sent', 'sent']);
 
   const pane = page.locator('section.ib-pane');
   await expect(pane.locator('.ib-delivered')).toHaveAttribute('data-delivery', 'delivered');
@@ -561,7 +560,7 @@ test("a Sent row follows the agent's read in place, without an action: its state
   await expect(tick).toHaveAttribute('data-tick', 'saved');
   const before = await rowOrder(page);
 
-  // The agent reads the reply (as a wake's delivery or wait_for_reply would): the server lists the thread as Quiet.
+  // The agent reads the reply (as a wake's delivery would): the server lists the thread as Quiet.
   await claude2.readThread(world.threads.named!);
   await expect(row).toHaveAttribute('data-section', 'quiet');
   await expect(tick).toHaveAttribute('data-tick', 'delivered');

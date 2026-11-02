@@ -11,7 +11,7 @@
  * seen); typing pauses it and pins the moment; Comment keeps the paused
  * frame (a real JPEG in the Inbox's markups) and lists the comment with its
  * time; a dot on the rail and the panel's time pill seek back to it; Send
- * carries "At 0:02 (…)" and the frame's path, read back by wait_for_reply;
+ * carries "At 0:02 (…)" and the frame's path, read back by read_thread;
  * and the pane on a phone (the comments under the rail, the row in full screen's composer).
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -252,13 +252,11 @@ test('Mark up draws on the paused frame; the marked-up copy rides the comment, l
 test('Send carries the moment and the frame; the agent reads both', async () => {
   const page = world.page;
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('One note on the cut.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = (reply.reply as { body: string }).body;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('## film/launch-cut-v3.webm');
   expect(body).toMatch(/Feedback on: "launch-cut-v3\.webm at 0:02"\nAt 0:02 \(2\.2 s\)\n> The title holds too long here/);
   const frame = /- \[launch-cut-v3 at 0:02\] `([^`]+)`/.exec(body);

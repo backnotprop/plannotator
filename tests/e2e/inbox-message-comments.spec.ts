@@ -8,7 +8,7 @@
  *    toolbar (Comment and 👍, no Delete); Escape closes it, not the thread;
  *  - Comment opens the composer; ⌘↵ saves; the passage keeps a light
  *    highlight; the reply box's chip counts it and lists it under the message;
- *  - Send carries it, and the agent's wait_for_reply returns the quote and the
+ *  - Send carries it, and the agent's read_thread returns the quote and the
  *    comment under "Feedback on your message from <time> (<message id>)";
  *  - the person's own message and a question card's words open no toolbar;
  *  - on a phone-wide window (390 px) the same, and the toolbar stays in the window.
@@ -207,9 +207,8 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   await page.locator('.ib-rbox textarea').fill('One note on the backoff.');
   await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.locator('.ib-rbox')).toHaveCount(0);
-  const answer = await claude.waitForReply(sent.thread_id as string, 10);
-  expect(answer.status).toBe('replied');
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(sent.thread_id as string, 10);
+  const body = answer.body as string;
   expect(body).toContain('One note on the backoff.');
   expect(body).toContain('# Feedback on your messages');
   expect(body).toMatch(new RegExp(`## Feedback on your message from \\d{1,2}:\\d{2} [AP]M \\(${id}\\)`));
@@ -294,8 +293,8 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
     await shot(page, '09-phone-chip');
     await page.locator('.ib-annpop').getByRole('button', { name: 'Close the list' }).click();
     await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
-    const answer = await claude.waitForReply(sent.thread_id as string, 10);
-    const body = (answer.reply as { body: string }).body;
+    const answer = await claude.nextReply(sent.thread_id as string, 10);
+    const body = answer.body as string;
     expect(body).toContain('Feedback on: "dead-letter queue"');
     await renderReceived(page, body, '10-phone-agent-received');
   } finally {
@@ -303,9 +302,9 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
   }
 });
 
-/** The reply as the agent receives it (wait_for_reply's body), drawn as plain text for the screenshots. */
+/** The reply as the agent receives it (read_thread's body), drawn as plain text for the screenshots. */
 async function renderReceived(page: Page, body: string, name: string): Promise<void> {
-  const html = (dark: boolean) => `<!doctype html><meta charset="utf-8"><body style="margin:0;padding:24px;font:13px/1.5 ui-monospace,Menlo,monospace;background:${dark ? '#16181d' : '#fafafa'};color:${dark ? '#e6e6e6' : '#1d1d1f'}"><div style="font:600 12px system-ui;opacity:.6;margin-bottom:12px">What Claude Code receives (wait_for_reply)</div><pre style="white-space:pre-wrap;margin:0"></pre></body>`;
+  const html = (dark: boolean) => `<!doctype html><meta charset="utf-8"><body style="margin:0;padding:24px;font:13px/1.5 ui-monospace,Menlo,monospace;background:${dark ? '#16181d' : '#fafafa'};color:${dark ? '#e6e6e6' : '#1d1d1f'}"><div style="font:600 12px system-ui;opacity:.6;margin-bottom:12px">What Claude Code receives (read_thread)</div><pre style="white-space:pre-wrap;margin:0"></pre></body>`;
   // Its own tab, so the Inbox's tab keeps its page.
   const tab = await page.context().newPage();
   try {
