@@ -88,7 +88,7 @@ function fakeLaunchHost() {
     },
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
-    terminal: (launch) => `fake attach ${launch.session_ref}`,
+    terminal: (launch) => (calls.push(`terminal ${launch.session_ref}`), `fake attach ${launch.session_ref}`),
     // Pushed prompts: no hook route; its questions are written by the shared question code.
     permissions(ctx) {
       questions = createLaunchQuestions({ store: ctx.store, name: "Fake Agent", displayFolder: ctx.displayFolder, onChange: ctx.onChange, log: () => {} });
@@ -330,6 +330,18 @@ describe("a second agent behind LaunchHost", () => {
     await sweeps();
     expect(resumes()).toBe(1);
     expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("an Open in Terminal that can't run never reaches the host: its `terminal` may hand a session over", async () => {
+    const { store, project, fake, launch, post } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-open", thread_name: "Tidy", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    // The test's PATH is empty: no osascript.
+    await expect(post(prepared.launch.id, "open")).rejects.toMatchObject({ code: "open_unavailable" });
+    expect(fake.calls.filter((call) => call.startsWith("terminal"))).toEqual([]);
   });
 
   test("a host reads the login shell through its context: a fresh read when it asks, shared with one under way", async () => {
