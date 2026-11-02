@@ -6022,6 +6022,15 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-rn:hover { color: var(--foreground); text-decoration: underline; }
 .ib-crdp-rt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-crdp-rref { color: var(--muted-foreground); }
+/* A link-only reference: its source's mark (Jira's) or a plain link icon, quiet, lifting with the row's hover or its key's focus. */
+.pn-inbox svg.ib-crdp-rlink { color: var(--muted-foreground); stroke-width: 1.8; }
+.ib-crdp-rjira { color: var(--muted-foreground); transition: color 120ms ease; }
+.ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rjira { color: var(--foreground); }
+.ib-crdp-rn:focus-visible { color: var(--foreground); text-decoration: underline; }
+@media (forced-colors: active) { .ib-crdp-rjira { color: CanvasText; } }
+/* A link-only ref's URL in its tooltip: wraps only after a slash (UrlTip's <wbr>), never at the key's dash. */
+.ib-tip-url { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
+.ib-tip-url > span { white-space: nowrap; }
 .ib-crdp-rs { flex: none; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-crdp-rs[data-tone="open"] { color: var(--success, oklch(0.6 0.15 150)); }
 .ib-crdp-rs[data-tone="merged"] { color: var(--primary); }

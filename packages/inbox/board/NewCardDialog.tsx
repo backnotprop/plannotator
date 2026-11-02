@@ -184,7 +184,7 @@ export function NewCardDialog({
             <span className="ib-sr">Link an issue or PR</span>
             <input
               type="text"
-              placeholder="Link an issue or PR (owner/repo#123 or its URL)"
+              placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
               value={links}
               onChange={(event) => setLinks(event.target.value)}
               data-new-card-links=""

@@ -147,7 +147,8 @@ export interface ThreadSnoozeProps {
  * snoozed thread), Pin thread (Unpin thread while pinned; only when the Inbox keeps pins: `pin` is absent on an older
  * one) and Mark unread where the bar's read button does not offer it (`markUnread`; markRead.ts `canMarkUnread`).
  * Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
- * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key.
+ * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
+ * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
  *
  * On a phone the bar has neither, and the sheet leads with them: every read action a desktop has (`markRead`,
  * `moveBack` on a thread marked read, `markUnread`), then
@@ -164,9 +165,11 @@ export function ThreadMore(
     markUnread?: () => void;
     archive?: { archived: boolean; onToggle: () => void };
     snooze?: ThreadSnoozeProps;
+    /** Request guided review (guideRequest.ts): its own group above Archive, only where the thread offers it. */
+    requestGuide?: () => void;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -296,6 +299,15 @@ export function ThreadMore(
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
+                {requestGuide && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.Item className="ib-pmi" label="Request guided review" onClick={requestGuide} data-thread-guide-request-item="">
+                      <Icon name="book" size={15} />
+                      Request guided review
+                    </Menu.Item>
+                  </>
+                )}
                 {archive && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
