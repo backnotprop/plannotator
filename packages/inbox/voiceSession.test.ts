@@ -76,7 +76,11 @@ function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: num
     after: (ms, run) => {
       const timer = { at: clock + ms, run };
       timers.push(timer);
-      return () => timers.splice(timers.indexOf(timer), 1);
+      // As clearTimeout: a timer that already ran, or was cleared, is left alone.
+      return () => {
+        const at = timers.indexOf(timer);
+        if (at >= 0) timers.splice(at, 1);
+      };
     },
   };
   let value = 'Draft ';
@@ -595,6 +599,27 @@ describe('every path returns to rest, and no press does nothing', () => {
       if (devicesBefore) Object.defineProperty(globalThis.navigator, 'mediaDevices', devicesBefore);
       else delete (globalThis.navigator as { mediaDevices?: unknown }).mediaDevices;
     }
+  });
+
+  test("a cancelled take's give-up never reaches the next take, still opening", async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    await settle();
+    w.pass(1000);
+    w.session.cancel();
+    w.session.press();
+    w.session.release();
+    await settle();
+    // Past the first take's 10 s, short of the second's.
+    w.pass(VOICE_OPENING_GIVE_UP_MS - 500);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
+    expect(w.opens[1]!.aborted).toBe(false);
+    w.openMic();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
   });
 
   test('while the browser asks for the microphone, it waits longer before giving up', async () => {

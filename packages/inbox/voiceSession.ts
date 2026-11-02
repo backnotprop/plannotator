@@ -155,6 +155,12 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   let abort: AbortController | null = null;
   /** The open still on its way: anything that ends the take aborts it, so a hung mic holds nothing. */
   let opener: AbortController | null = null;
+  /** The opening's slow line and give-ups: cleared when it opens or ends, so none can reach a later take. */
+  let openTimers: (() => void)[] = [];
+  const clearOpenTimers = () => {
+    for (const cancelTimer of openTimers) cancelTimer();
+    openTimers = [];
+  };
   /** Bumped by anything that ends a run: an older run's late answer finds a different number and does nothing. */
   let run = 0;
   let pressed = false;
@@ -223,6 +229,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     abort = null;
     opener?.abort();
     opener = null;
+    clearOpenTimers();
     pressed = false;
     secondPress = false;
     if (recording === handle) recording = null;
@@ -281,6 +288,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     lastTick = startedAt;
     lastBar = startedAt;
     lastVoiceAt = Number.NEGATIVE_INFINITY;
+    clearOpenTimers();
     // The prompt took the press away, or the finger came up while the mic opened: a tap.
     set({ phase: 'listening', prompting: false, slow: false, mode: view.prompting || !pressed ? 'tap' : null, said: 'Listening' });
     stopTicking = deps.every(TICK_MS, tick);
@@ -315,9 +323,12 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     void deps.prompts().then((prompts) => {
       if (prompts && mine === run && view.phase === 'opening') set({ prompting: true, said: 'Asking for the microphone' });
     });
-    deps.after(VOICE_OPENING_SLOW_MS, () => {
-      if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
-    });
+    clearOpenTimers();
+    openTimers.push(
+      deps.after(VOICE_OPENING_SLOW_MS, () => {
+        if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
+      }),
+    );
     // A microphone that never answers (seen on iOS) ends with the "didn't start" note, so the box is never left
     // waiting on it with Send off. Giving up aborts the open (release), so the recorder lets go of its AudioContext
     // now and of a stream that arrives later; a recorder handed over anyway is closed at once (`mine !== run` below).
@@ -327,8 +338,10 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       release();
       set({ ...IDLE, trouble: 'micfailed', said: 'The microphone did not start' });
     };
-    deps.after(VOICE_OPENING_GIVE_UP_MS, () => giveUp(true));
-    deps.after(VOICE_ASKING_GIVE_UP_MS, () => giveUp(false));
+    openTimers.push(
+      deps.after(VOICE_OPENING_GIVE_UP_MS, () => giveUp(true)),
+      deps.after(VOICE_ASKING_GIVE_UP_MS, () => giveUp(false)),
+    );
     opening.then(
       (opened) => {
         if (opener === opens) opener = null;
