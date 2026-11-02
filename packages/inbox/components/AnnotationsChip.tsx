@@ -295,7 +295,7 @@ export function AnnotationsList({
 
 /**
  * "N comments" inside the reply box (record 2.6 to 2.8): a click opens the list.
- * With none, the chip dims to "No comments". `list` and `onList`, `editing` and
+ * With none there is no chip. `list` and `onList`, `editing` and
  * `onEditing`: a host that opens the list from elsewhere too holds them; without
  * them the chip does.
  */
@@ -313,6 +313,9 @@ export function AnnotationsChip({
   const onList = hold ?? setOwn;
   const chipRef = useRef<HTMLButtonElement>(null);
   const count = props.records.length;
+  // No comments, no chip (the owner, 2026-11-02: "not sure if worth it to even show 0 comments, it takes up
+  // space"). The list open as the last comment goes stays until it has closed itself, focus back in the box.
+  if (count === 0 && !list) return null;
   return (
     <div className="ib-annchip">
       <button

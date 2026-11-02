@@ -606,7 +606,8 @@ test('a thread with no comments gains no link', async ({ browser }) => {
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   await expect(page.locator('[data-comments-link]')).toHaveCount(0);
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
-  await expect(page.locator('[data-annotations-chip]')).toBeDisabled();
-  await expect(page.locator('[data-annotations-chip]')).toHaveText('No comments');
+  // No comments, no chip in the reply box either (the owner, 2026-11-02: a "No comments" chip only takes space).
+  await expect(pane(page).locator('.ib-rbox textarea')).toBeVisible();
+  await expect(page.locator('[data-annotations-chip]')).toHaveCount(0);
   await page.context().close();
 });
