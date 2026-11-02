@@ -274,8 +274,10 @@ test("the person's own message, a sent reply and an archived message open no com
   await expect(composer(page)).toHaveCount(0);
 
   // Archived: the agent's message before the archive takes none either.
-  await page.locator('section.ib-pane').getByRole('button', { name: /Archive/ }).first().click();
-  await expect(page.locator('section.ib-pane').getByRole('button', { name: 'Unarchive the thread' })).toBeVisible();
+  // Archive is in the header's ⋯ menu (no header button); the foot then names the archive.
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.getByRole('menuitem', { name: 'Archive thread' }).click();
+  await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
   await page.reload();
   await page.locator(`[data-message-article="${id}"] [data-fold-head]`).first().click();
   await expect(message(page, id).locator('[data-diagram-svg] svg').first()).toBeVisible();
