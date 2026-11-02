@@ -34,7 +34,44 @@ export const INBOX_TIDY_INSTRUCTION =
 
 /** The paragraph under the instruction: what tidying can mean, and how to write back. */
 export const INBOX_TIDY_HOW =
-  "That can mean sending what you finished but held back, answering what the person wrote, withdrawing a question that no longer applies (its id in `supersedes`, with one line why), marking an action item you saw done (`done`), or moving a Board card whose work moved on. Check your own context too for anything you said you would send. Write in each thread with reply_to set to the id given. Send no summary.";
+  "That can mean sending what you finished but held back, answering what the person wrote, withdrawing a question that no longer applies (its id in `supersedes`, with one line why), marking an action item you saw done (`done`), or moving a Board card whose work moved on. Check your own context too for anything you said you would send. Write in each thread with reply_to set to the id given. If you have a shell, do all of it in one script instead of one call at a time: `plannotator inbox call <action> '<json>'` runs any Inbox action (`card '{\"op\":\"list\"}'`, `send_message`, …) and prints its result as JSON, and `-` in place of the JSON reads it from stdin. Print only what you need back, and give each send_message and card create an idempotency_key, so a rerun cannot post twice. Send no summary.";
+
+/** A session id a command line can carry: what Claude Code, Pi, OpenCode and the shim's `ses_` ids use, and nothing a shell would read. */
+const INBOX_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const INBOX_SESSION_HOST = /^[a-z][a-z0-9-]{0,31}$/;
+
+export function isInboxSessionId(value: unknown): value is string {
+  return typeof value === "string" && INBOX_SESSION_ID.test(value);
+}
+
+/**
+ * The value `plannotator inbox call --session` takes for a session:
+ * `<host>:<session>`, or the session alone when it has no host. Null for a
+ * session id no command line should carry (an agent chose it, and the wake
+ * text puts it in a command).
+ */
+export function inboxSessionRef(host: string | null, session: string): string | null {
+  if (!isInboxSessionId(session)) return null;
+  return host !== null && INBOX_SESSION_HOST.test(host) ? `${host}:${session}` : session;
+}
+
+/** A `--session` value's parts, or null when it is not one. */
+export function parseInboxSessionRef(value: string): { host: string | null; session: string } | null {
+  const colon = value.indexOf(":");
+  const host = colon === -1 ? null : value.slice(0, colon);
+  const session = value.slice(colon + 1);
+  if (!isInboxSessionId(session) || (host !== null && !INBOX_SESSION_HOST.test(host))) return null;
+  return { host, session };
+}
+
+/**
+ * The line under INBOX_TIDY_HOW in one session's Tidy: the exact value that
+ * makes its script that session, the one way that works on every host
+ * (OpenCode and an MCP-only agent have no session in their shell).
+ */
+export function inboxTidySessionLine(ref: string): string {
+  return `In that script, pass \`--session ${ref}\` to every \`plannotator inbox call\`, so it writes as you.`;
+}
 
 /** The line before the Tidy text at the end of an MCP-only agent's next Inbox tool result. */
 export function inboxTidyMcpLine(id: string): string {
