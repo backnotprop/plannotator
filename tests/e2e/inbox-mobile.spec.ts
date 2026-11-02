@@ -381,7 +381,7 @@ for (const phone of [
       await expect(page.locator(".ib-listcol")).toBeHidden();
       await shot(page, '4-thread');
       expect(await sideways(page)).toEqual([]);
-      expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-phsubj[data-on], .ib-iconbtn, .ib-ptool')).toEqual([]);
+      expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-phsubj, .ib-iconbtn, .ib-ptool')).toEqual([]);
       expect(await overlaps(page, '.ib-fline.ib-is-open', '.ib-mk, .ib-fl-nm, .ib-fl-meta, .ib-fl-tm')).toEqual([]);
       const back = pane.getByRole('button', { name: 'Back to Inbox' });
       await expect(back).toBeVisible();
@@ -628,9 +628,10 @@ for (const phone of [
       await page.goto(`${world.url}#thread=${world.threads.holding}`);
       const pane = page.locator('section.ib-pane');
       await expect(pane.getByRole('heading', { name: /Install page/ })).toBeVisible();
-      const read = pane.locator('.ib-phead .ib-hbtn');
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
-      await read.click();
+      // A phone's Mark read leads the ⋯ sheet (approval "inbox-thread-header"); the bar has no read button.
+      await expect(pane.locator('.ib-phead [data-mark-read]')).toHaveCount(0);
+      await pane.locator('[data-thread-more]').click();
+      await page.locator('[data-thread-menu] [data-thread-read-item]').click();
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
@@ -832,7 +833,7 @@ for (const narrow of [
         await page.screenshot({ path: join(proofDir, `${tag}-2-thread.png`) });
         expect(await sideways(page)).toEqual([]);
         expect(await overlaps(page, '.ib-fline.ib-is-open', '.ib-mk, .ib-fl-nm, .ib-fl-meta, .ib-fl-tm')).toEqual([]);
-        expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-hbtn, .ib-phsubj[data-on], .ib-ptool')).toEqual([]);
+        expect(await overlaps(page, '.ib-phead', '.ib-pback, .ib-readbtn, .ib-phsubj, .ib-ptool')).toEqual([]);
         expect(await cardFits(page)).toEqual([]);
         // A pick: the foot gains "Draft · 1 pick" and the skip chip, and wraps rather than running past the pane.
         await pane.getByText('Retry with the same idempotency key').click();

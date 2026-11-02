@@ -209,7 +209,18 @@ async function heightOf(toast: Locator): Promise<number> {
 
 const pane = (page: Page) => page.locator('section.ib-pane');
 const toastOf = (page: Page) => page.locator('[data-inbox-toast]');
-const markRead = (page: Page, phone: boolean) => (phone ? pane(page).locator('.ib-phead .ib-hbtn') : page.locator('[data-mark-read]'));
+/** Mark read: the header's button; on a phone, the first item of the ⋯ sheet (approval "inbox-thread-header"). */
+async function pressMarkRead(page: Page, phone: boolean): Promise<void> {
+  if (!phone) {
+    const read = page.locator('[data-mark-read]');
+    await expect(read).toHaveAttribute('aria-pressed', 'false');
+    await read.click();
+    return;
+  }
+  await expect(pane(page).locator('.ib-phead [data-mark-read]')).toHaveCount(0);
+  await pane(page).locator('[data-thread-more]').click();
+  await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+}
 
 async function openThread(page: Page, thread: string, heading: RegExp) {
   await page.goto(`${world.url}#thread=${thread}`);
@@ -222,9 +233,7 @@ for (const vp of VIEWPORTS) {
     try {
       // Mark read on the stopped thread: the warning names the agent, cut at 40 characters.
       await openThread(page, world.threads.stopped, /Fix flaky tests/);
-      const read = markRead(page, vp.phone);
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
-      await read.click();
+      await pressMarkRead(page, vp.phone);
       const toast = toastOf(page);
       // A phone: what happened first, the name last, so the "…" that cuts the line only ever cuts the name.
       await expect(toast.locator('.ib-tdetail')).toHaveText(vp.phone ? `Stopped · ${AGENT_SHORT}` : `${AGENT_SHORT} was stopped`);
@@ -302,8 +311,7 @@ test('a phone: a toast raised in a thread keeps above the foot of the next threa
   const page = await open(browser, PHONE(390, 844));
   try {
     await openThread(page, world.threads.stopped, /Fix flaky tests/);
-    const read = markRead(page, true);
-    await read.click();
+    await pressMarkRead(page, true);
     const toast = toastOf(page);
     await expect(toast).toBeVisible();
     // Back to the list, then another thread, the toast still up.
@@ -327,7 +335,7 @@ test('a phone: a toast keeps above a full-screen file\'s bar and its name chip (
   const page = await open(browser, PHONE(320, 640));
   try {
     await openThread(page, world.threads.stopped, /Fix flaky tests/);
-    await markRead(page, true).click();
+    await pressMarkRead(page, true);
     const toast = toastOf(page);
     await expect(toast).toBeVisible();
     // The file opens full screen while the toast is up.
@@ -380,9 +388,7 @@ test('a narrow desktop window (the phone layout, a mouse and keys) keeps Reply a
   try {
     await openThread(page, world.threads.stopped, /Fix flaky tests/);
     expect(await page.evaluate(() => matchMedia('(pointer: coarse) and (hover: none)').matches)).toBe(false);
-    const read = markRead(page, true);
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
-    await read.click();
+    await pressMarkRead(page, true);
     const toast = toastOf(page);
     await expectFits(page, toast, 'narrow window Mark read');
     await expect(toast).toHaveClass(/ib-toast-phone/);
@@ -433,7 +439,7 @@ for (const vp of [VIEWPORTS[0]!, VIEWPORTS[2]!]) {
       // The stopped thread: Mark read is offered on it (a refused or unreached write changes nothing).
       await openThread(page, world.threads.stopped, /Fix flaky tests/);
       await page.route(READ_ROUTE, (route) => route.abort('failed'));
-      await markRead(page, vp.phone).click();
+      await pressMarkRead(page, vp.phone);
       await expect(toast).toContainText('The Inbox did not answer. Try again in a moment.');
       await expect(toast).not.toContainText(/failed to fetch/i);
       await expect(toast).toHaveClass(/ib-toast-warn/);
@@ -449,7 +455,7 @@ for (const vp of [VIEWPORTS[0]!, VIEWPORTS[2]!]) {
       // 12: the Inbox answers with a long sentence: held to its most lines, what to do whole and on screen.
       expect(LONG_ERROR.length).toBe(151);
       await page.route(READ_ROUTE, (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: LONG_ERROR, code: 'conflict' }) }));
-      await markRead(page, vp.phone).click();
+      await pressMarkRead(page, vp.phone);
       await expect(toast).toContainText(LONG_ERROR_ACTION);
       await settled();
       expect(await lines(toast), '12: lines').toBeLessThanOrEqual(most);

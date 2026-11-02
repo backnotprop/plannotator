@@ -1284,13 +1284,19 @@ function TourThreadPane({
       <span className="ib-pback-l">Inbox</span>
     </button>
   );
-  const offInTour = (label: string, icon: 'checkCircle' | 'archive', withLabel: boolean) => (
+  // The real header's icons (approval "inbox-thread-header"): each the person's own Inbox's, a nudge here.
+  const offInTour = (label: string, icon: 'mailOpen' | 'clock' | 'archive') => (
     <Tip content={`${label}: not in the tour`}>
-      <button type="button" className={withLabel ? 'ib-hbtn' : 'ib-iconbtn'} aria-disabled="true" aria-label={withLabel ? undefined : label} onClick={() => nudge(`${label} works in your own Inbox, after the tour.`)}>
-        <Icon name={icon} size={16} />
-        {withLabel && label}
+      <button type="button" className="ib-iconbtn" aria-disabled="true" aria-label={label} onClick={() => nudge(`${label} works in your own Inbox, after the tour.`)}>
+        <Icon name={icon} size={icon === 'archive' ? 16 : 17} />
       </button>
     </Tip>
+  );
+  // The subject leads the bar, as in the real header; the thread's heading (a focus target, never a tab stop).
+  const headSubject = (
+    <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1}>
+      {subject}
+    </h2>
   );
   const artifactsButton = artifacts.length > 0 && (
     <Tip content={state.artifactsOpen ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
@@ -1466,9 +1472,9 @@ function TourThreadPane({
         {phone ? (
           <>
             {back}
-            <span className="ib-sp" />
+            {headSubject}
             {artifactsButton}
-            {offInTour('Archive', 'archive', false)}
+            {offInTour('Archive', 'archive')}
           </>
         ) : (
           <>
@@ -1478,10 +1484,11 @@ function TourThreadPane({
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
-            {offInTour('Mark read', 'checkCircle', true)}
-            <span className="ib-sp" />
+            {offInTour('Mark read', 'mailOpen')}
+            {offInTour('Snooze', 'clock')}
+            {headSubject}
             {artifactsButton}
-            {offInTour('Archive', 'archive', false)}
+            {offInTour('Archive', 'archive')}
             {!stacked && (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -1509,9 +1516,6 @@ function TourThreadPane({
         </div>
       ) : (
         <div className="ib-pbody" ref={bodyRef}>
-          <h2 className="ib-subject" dir="auto" tabIndex={-1}>
-            {subject}
-          </h2>
           {thread.slice && (
             <p className="ib-tour-slice">
               <Icon name="chevD" size={14} />

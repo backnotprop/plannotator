@@ -6,7 +6,8 @@
  *  - the row's right-click menu: Snooze swaps the menu in place for its times;
  *    Tomorrow takes the thread out of its section and the counts into the
  *    folded Snoozed band; the toast's Undo puts it back;
- *  - the thread's ⋯ menu: Pick a time, two lists, by mouse, wheel and keys;
+ *  - the thread header's clock (approval "inbox-thread-header"; off a phone
+ *    it, not the ⋯ menu, holds Snooze): Pick a time, two lists, by mouse, wheel and keys;
  *    the thread says "Snoozed until …" and Unsnooze ends it;
  *  - a Stopped thread: the folded band shows the triangle;
  *  - an agent's new question does not end a snooze; the person's reply does;
@@ -185,16 +186,21 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   expect(world.errors).toEqual([]);
 });
 
-test("the ⋯ menu: Pick a time, two lists by mouse, wheel and keys; the thread says until when, opening it keeps the snooze, Unsnooze ends it", async () => {
+test("the header's clock: Pick a time, two lists by mouse, wheel and keys; the thread says until when, opening it keeps the snooze, Unsnooze ends it", async () => {
   const { page, threads } = world;
   await row(page, threads.release).click();
   await expect(page).toHaveURL(new RegExp(`thread=${threads.release}`));
+  // Off a phone Snooze is the header's clock, before the subject (approval "inbox-thread-header"); ⋯ no longer has it.
   await page.locator('[data-thread-more]').click();
-  const menu = page.locator('[data-thread-menu]');
-  await expect(menu.getByRole('menuitem').first()).toHaveText('Snooze');
-  await shot(page, 'thread-menu-light.png');
-  await menu.locator('[data-thread-snooze-item]').click();
+  await expect(page.locator('[data-thread-menu]')).toBeVisible();
+  await expect(page.locator('[data-thread-menu] [data-thread-snooze-item]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
+  await page.locator('.ib-phead [data-thread-snooze]').click();
+  const menu = page.locator('[data-thread-snooze-menu]');
+  await expect(menu.locator('[data-snooze-title]')).toHaveText('Snooze until');
   await expect(menu.locator('[data-snooze-view="times"]')).toBeVisible();
+  await shot(page, 'thread-menu-light.png');
   await menu.locator('[data-snooze-pick-time]').click();
   const picker = menu.locator('[data-snooze-picker]');
   await expect(picker).toBeVisible();

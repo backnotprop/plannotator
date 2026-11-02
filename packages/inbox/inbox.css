@@ -2712,13 +2712,18 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-npill-wrap { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; z-index: 60; pointer-events: none; }
 .pn-inbox .ib-npill { pointer-events: auto; transform: translateY(-100%); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 11px; border-radius: 999px; border: 1px solid color-mix(in oklch, var(--primary) 50%, var(--border)); background: var(--popover); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--primary); transition: opacity 160ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .pn-inbox .ib-npill[data-off] { opacity: 0; transform: translateY(-60%); pointer-events: none; visibility: hidden; transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s 120ms; }
-/* the header: the subject once it scrolls away, and Expand all / Fold all */
-.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 120ms ease-out; }
-.ib-phsubj[data-on] { opacity: 1; }
+/* the header: the subject, always (approval "inbox-thread-header"; it is the thread's h2, so the header's own rule
+   outranks the old body heading's size and margin), and Expand all / Fold all */
+.ib-phead .ib-phsubj { flex: 1; min-width: 0; margin: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-phead .ib-phsubj:focus { outline: none; }
+/* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
+   pressed over its grid; dimmed when nothing here waits on the person. */
+.pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pn-inbox .ib-iconbtn.ib-readbtn:disabled { opacity: 0.45; background: none; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
+  .pn-inbox .ib-npill { transition: none; }
 }
 /* A message that arrives while its thread is open (.product/approved/inbox-new-in-open-thread/, variant A):
    a short entrance so the eye catches what changed; none under reduced motion. */
@@ -3020,11 +3025,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-pback svg.ib-ic { width: 22px; height: 22px; stroke-width: 2; }
   .ib-pback-l { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ib-phead > .ib-sp { flex: 1; }
-  .ib-phsubj { padding: 0 4px; text-align: center; }
+  .ib-phead .ib-phsubj { padding: 0 4px; }
   .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
   .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
-  /* Mark read beside Back (no hover action on a phone's rows) */
-  .pn-inbox .ib-phead .ib-hbtn { height: 44px; padding: 0 10px; margin: 0 2px; }
   .ib-ptool-l { display: none; }
   .ib-pbody { padding: 16px 16px 24px; }
   .ib-subject { font-size: var(--ib-fs-20, 20px); overflow-wrap: anywhere; }
@@ -5253,19 +5256,16 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
   .ib-art-top { margin-bottom: 12px; }
   .ib-art-who { display: none; }
   .pn-inbox .ib-iconbtn.ib-artbtn { min-width: 44px; height: 44px; }
-  /* The header's icons keep their 44 px. Short of room it gives way (headFit.ts, `data-fit`): Mark read and the
-     way back tighten, the Artifacts count leaves the button (its name keeps it), Mark read shows its icon alone
-     (its words kept as its name, visually hidden), then the way back shows its chevron alone (its name says where). */
+  /* The header's icons keep their 44 px. Short of room for the subject it gives way (headFit.ts, `data-fit`): the
+     way back tightens, the Artifacts count leaves the button (its name keeps it), then the way back shows its
+     chevron alone (its name says where). */
   .ib-phead > .ib-iconbtn, .ib-phead > .ib-artbtn { flex: none; }
-  .pn-inbox .ib-phead[data-fit~="tight"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { padding: 0 7px; margin: 0; }
   .pn-inbox .ib-phead[data-fit~="tight"] .ib-pback { padding-right: 6px; }
   .ib-phead[data-fit~="count"] .ib-artbtn-n { display: none; }
   .pn-inbox .ib-phead[data-fit~="count"] .ib-iconbtn.ib-artbtn { width: 44px; padding: 0; }
-  .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) .ib-hbtn-l { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .pn-inbox .ib-phead[data-fit~="mark"] .ib-hbtn:is([data-mark-read], [data-mark-unread]) { width: 44px; min-width: 44px; padding: 0; margin: 0; justify-content: center; }
   .ib-phead[data-fit~="back"] .ib-pback-l { display: none; }
   .pn-inbox .ib-phead[data-fit~="back"] .ib-pback { width: 44px; padding: 0; justify-content: center; }
-  /* The scrolled-away subject with no room to be read: a sliver of it is a stray glyph. */
+  /* The subject with no room to be read even then: a sliver of it is a stray glyph. */
   .ib-phead[data-subject-off] .ib-phsubj { visibility: hidden; }
 }
 
