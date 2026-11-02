@@ -60,7 +60,7 @@ export const INBOX_UPLOADS_DIR = "uploads";
 /**
  * The lines an agent reads under a message's words for the files the person
  * attached, each with its path so the agent can open it: `Attached: name (path)`.
- * Empty when it carries none. The wake and `wait_for_reply` both append them.
+ * Empty when it carries none. The wake appends them; read_thread gives the attachment records.
  */
 export function inboxAttachedLines(message: { attachments?: readonly InboxAttachment[] | null }): string {
   return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");
@@ -71,15 +71,11 @@ export function inboxAttachedLines(message: { attachments?: readonly InboxAttach
  * `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
  * the Board request (`inboxBoardRequestBlock`). The stored body never holds it.
  */
-export function inboxBodyForAgent(
-  message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true },
-  options: { boardRequest?: boolean } = {},
-): string {
+export function inboxBodyForAgent(message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true }): string {
   const attached = inboxAttachedLines(message);
   // A reply of pasted files alone may have no words.
   let words = !attached ? message.body : message.body.trim() ? `${message.body}\n\n${attached}` : attached;
-  // `boardRequest: false`: a JSON field that keeps the person's words (the block is in the text beside it).
-  if (options.boardRequest !== false && message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
+  if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   return words;
 }
 const PENDING_DIR = "pending";

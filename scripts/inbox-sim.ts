@@ -109,9 +109,22 @@ export class SimAgent {
     return (await this.call('read_thread', { thread_id: threadId })).thread as Structured;
   }
 
-  /** `cursor`: the one a previous answer returned, to wait for a later reply only. */
-  waitForReply(threadId: string, timeoutSeconds = 50, cursor?: number): Promise<Structured> {
-    return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds, ...(cursor === undefined ? {} : { cursor }) });
+  /**
+   * The person's reply as the full record read_thread gives: the newest of their
+   * messages after `after` (a message id), or after this thread's last agent
+   * message. Reads again until one lands, as an agent that is not woken reads later.
+   */
+  async nextReply(threadId: string, timeoutSeconds = 50, after?: string): Promise<Structured> {
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    for (;;) {
+      const { thread } = await this.call('read_thread', { thread_id: threadId, format: 'full' });
+      const messages = (thread as { messages: (Structured & { id: string; author: { kind: string } })[] }).messages;
+      const from = after ? messages.findIndex((m) => m.id === after) : messages.findLastIndex((m) => m.author.kind === 'agent');
+      const reply = messages.slice(from + 1).findLast((m) => m.author.kind === 'person');
+      if (reply) return reply;
+      if (Date.now() >= deadline) throw new Error(`No reply in ${threadId} after ${timeoutSeconds} seconds`);
+      await new Promise((done) => setTimeout(done, 200));
+    }
   }
 
   close(): Promise<void> {

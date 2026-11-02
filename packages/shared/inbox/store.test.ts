@@ -118,7 +118,7 @@ type Op =
   | { op: "read"; target: number; read: boolean }
   // Mark unread (POST /api/inbox/threads/:id/mark-unread): the latest agent message is new again.
   | { op: "unread"; target: number }
-  // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
+  // An agent read the thread (read_thread).
   | { op: "agentRead"; target: number }
   // The Undo window passed: the server tells the asking agent what a Mark read set aside.
   | { op: "tell"; target: number }
