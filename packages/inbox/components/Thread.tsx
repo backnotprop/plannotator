@@ -43,7 +43,7 @@ import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
-import { MessageMenu, ThreadMore, type CopyMenuHost } from './CopyMenus';
+import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
@@ -116,7 +116,6 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
-import { ThreadChip } from './InboxList';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -124,7 +123,7 @@ import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
 import { newUuid } from '../uuid';
-import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
@@ -2218,9 +2217,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     revisions.current.clear();
   }, [thread.thread_id]);
 
-  // The subject in the header once it scrolls away, and the "↓ N new" pill
-  // while new messages the person has not seen are below the view (its count:
-  // those messages, never everything new this visit).
+  // The "↓ N new" pill while new messages the person has not seen are below
+  // the view (its count: those messages, never everything new this visit).
+  // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
   const [chrome, setChrome] = useState({ subject: false, pill: 0 });
   /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
   const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
@@ -4326,8 +4325,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
   // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
-  // The header's ⋯ More offers it where that button does not: a thread marked read. A phone keeps it there too,
-  // since its header gives way when short of room (headFit.ts).
+  // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
+  // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
   const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
@@ -4401,45 +4400,71 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         }
       });
   };
-  const markReadButton = markUnreadOffered ? (
-    <Tip content="Back to New, bold, as if you had not opened it. Nothing is sent.">
+  // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
+  // tooltip ("Mark read" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
+  // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
+  const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
+  const markReadButton = phone ? null : markUnreadOffered ? (
+    <Tip content="Mark unread">
       <button
         type="button"
-        className="ib-hbtn"
+        className="ib-iconbtn ib-readbtn"
         data-mark-unread=""
+        aria-label="Mark unread"
         onClick={(event) => {
           // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
           if (event.detail > 1) return;
           onMarkUnread!();
         }}
       >
-        <Icon name="envelope" size={16} />
-        <span className="ib-hbtn-l">Mark unread</span>
+        <Icon name="mail" size={17} />
       </button>
     </Tip>
   ) : markReadOffered ? (
     <Tip
       content={
-        readAt !== null
-          ? 'Move it back to the top'
-          : markReadEnabled
-            ? `Out of the top until ${asker} writes again. Its waiting questions close unanswered.`
-            : 'Nothing here waits on you'
+        readAt !== null ? (
+          <span className="flex flex-col gap-1">
+            <span>Read</span>
+            <span className="text-muted-foreground">Move it back to the top</span>
+          </span>
+        ) : markReadEnabled ? (
+          withShortcut('Mark read', { scope: inboxThreadShortcuts, action: 'markRead' })
+        ) : (
+          <span className="flex flex-col gap-1">
+            <span>Mark read</span>
+            <span className="text-muted-foreground">Nothing here waits on you</span>
+          </span>
+        )
       }
     >
-      <button type="button" className="ib-hbtn" data-mark-read="" aria-pressed={readAt !== null} disabled={!markReadEnabled} onClick={() => onMarkRead!(readAt === null)}>
-        <Icon name="checkCircle" size={16} />
-        <span className="ib-hbtn-l">{readAt !== null ? 'Read' : 'Mark read'}</span>
-        <ShortcutHint scope={inboxThreadShortcuts} action="markRead" className="ib-kbd ib-wide" />
+      <button
+        type="button"
+        className="ib-iconbtn ib-readbtn"
+        data-mark-read=""
+        aria-label={readAt !== null ? 'Read' : 'Mark read'}
+        aria-pressed={readAt !== null}
+        aria-keyshortcuts={readAt === null && markReadEnabled ? markReadAria : undefined}
+        disabled={!markReadEnabled}
+        onClick={() => onMarkRead!(readAt === null)}
+      >
+        <Icon name="mailOpen" size={17} />
       </button>
     </Tip>
   ) : null;
+  // A phone's ⋯ sheet offers every read action a desktop has (its bar has no read button, and a phone has no row menu
+  // and no E): Mark read whenever it can be done (a seen update the list still holds in New included, where a desktop
+  // reaches it by E or the row menu; never disabled there: the sheet lists what can be done), Move back to the top on
+  // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
+  const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  const snoozeProps = onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
-  // A phone's header gives way one step at a time so it stays on one line (headFit.ts): the Artifacts count,
-  // then Mark read's words, then the way back's label; the scrolled-away subject shows only with room to read.
+  // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
+  // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4565,18 +4590,23 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
           </>
         )}
-        {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
-            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close.
-            A phone keeps the same order after its way back. */}
+        {/* The bar (approval "inbox-thread-header", 2026-11-02): the read button and the Snooze clock, as icons, lead
+            before the subject; everything at the right is an icon with a tooltip (approval "inbox-thread-artifacts"):
+            Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close. A phone has ‹ Inbox, the
+            subject, Artifacts, Expand and ⋯: its read action and Snooze lead the ⋯ sheet. */}
         {phone && artifactsOn ? null : (
           <>
             {markReadButton}
+            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} />}
             {one && !artifactsOn && !nameChip ? (
               <span className="ib-sp" />
             ) : (
-              // The thread's name (the list's rule), always; with no name, the subject once it has scrolled away, so its words never show twice. Always over the Artifacts grid (the heading stays the one a screen reader reads).
-              <Tip content={nameChip ?? thread.subject ?? '(no subject)'} cut>
-                <span className="ib-phsubj" dir="auto" data-header-subject="" data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`), always; with no name,
+              // the subject once the body's heading has scrolled away, so its words never show twice; always over the
+              // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
+              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
+              <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+                <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
                   {nameChip ?? thread.subject ?? '(no subject)'}
                 </span>
               </Tip>
@@ -4617,9 +4647,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              markRead={phoneMarkRead}
+              moveBack={phoneMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
-              snooze={onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined}
+              snooze={snoozeProps}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
             />
 
@@ -4640,6 +4672,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
+        {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
         {machine && (
           // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
           <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
@@ -4703,13 +4737,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
           </div>
         )}
-        {/* The thread's name first (the list's own pill and rule), then the count and time; a one-message thread has only the name. */}
-        {(!one || nameChip) && (
+        {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
+            chip would (the owner, 2026-11-02: never the same words twice). */}
+        {!one && (
           <div className="ib-tmeta" data-thread-meta="">
-            <ThreadChip name={nameChip} lead="Thread name: " />
-            {/* The rest of the line moves as one beside the name: a name that leaves too little room sends it all to the next line, never one dot. */}
-            {!one && (
-              <span className="ib-tmeta-rest" data-thread-meta-rest="">
+            <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 {participants.length > 1 && (
                   <>
                     <span className="ib-tg-hwho" data-thread-participants="">
@@ -4729,7 +4761,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   </>
                 )}
               </span>
-            )}
           </div>
         )}
         {thread.messages.flatMap((message, index) => {

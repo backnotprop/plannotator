@@ -91,6 +91,7 @@ packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
+packages/inbox/threadHeader.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
