@@ -68,6 +68,7 @@ import {
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
+  INBOX_SESSION_LABEL_INPUT_MAX,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
@@ -301,6 +302,64 @@ export function inboxSessionDirOf(dataDir: string, sessionId: string): string {
   return `${dataDir}/claude-code-mod/${sessionId}/inbox`
 }
 
+/**
+ * `$.store` key: what each session was named, for the Inbox's To picker. Kept in
+ * the store, by session id, because the engine tells a plugin a session's name
+ * nowhere else: no `$` call reads it and no module event carries it, and a
+ * `--resume` restores it for the engine alone. Kept to the newest
+ * INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_NAMES = 'inboxSessionNames'
+export const INBOX_SESSION_NAMES_MAX = 500
+
+/** The slash commands that change a session's name. `command.run` resolves their aliases (`/name`, `/reset`, `/new`). */
+export const INBOX_SESSION_NAME_COMMANDS = ['clear', 'rename'] as const
+
+export type InboxSessionNames = Record<string, { name: string; at: number }>
+
+/** The stored record: session id → its name and when it was set, anything else dropped. */
+export function readSessionNames(value: unknown): InboxSessionNames {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionNames = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { name, at } = (entry ?? {}) as { name?: unknown; at?: unknown }
+    if (id && name && typeof name === 'string' && typeof at === 'number' && Number.isFinite(at)) out[id] = { name, at }
+  }
+  return out
+}
+
+function withSessionName(record: InboxSessionNames, sessionId: string, given: string, now: number): InboxSessionNames {
+  // The server reads no further, so a longer name only grows the store and every poll.
+  const name = Array.from(given.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trimEnd()
+  if ((record[sessionId]?.name ?? '') === name) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * The record after a `/rename` or `/clear` ran. `before` and `after` are the
+ * session's id either side of it, since `/clear` moves it. The engine's rules:
+ * - `/rename <name>` names the session. A bare `/rename` also names it, with a
+ *   name the model makes up, which reaches no hook and no answer here: the session
+ *   then reads as unnamed, since the name it had is no longer its name.
+ * - `/clear` writes the name onto the new session id, so the name goes with it.
+ * - `/clear <name>` names the session it left, and the new one has no name.
+ */
+export function sessionNamesAfterCommand(
+  record: InboxSessionNames,
+  run: { command: unknown; args: unknown; before: string; after: string },
+  now: number,
+): InboxSessionNames {
+  const args = typeof run.args === 'string' ? run.args.trim() : ''
+  if (run.command === 'rename') return withSessionName(record, run.after, args, now)
+  // A `/clear` that left the session where it was did nothing to its name.
+  if (run.command !== 'clear' || run.before === run.after) return record
+  if (args) return withSessionName(record, run.before, args, now)
+  const carried = record[run.before]?.name
+  return carried ? withSessionName(record, run.after, carried, now) : record
+}
+
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
 export const INBOX_CLAIM_EXIT = { won: 0, lost: 3, failed: 4 } as const
 
@@ -454,6 +513,14 @@ export interface InboxLinkOptions {
    * INBOX_PROJECT_FOLLOWS_SLASH_CD.
    */
   root?: () => Promise<string>
+  /**
+   * The name the person gave the session (`STORE_INBOX_SESSION_NAMES`), read
+   * for every poll, so a `/rename` reaches the Inbox with the next one. `''`
+   * says it has none, which clears it. A rejection says it is not known: the poll
+   * repeats the last word, since sending nothing would clear the label too. Set
+   * by the host, never by the model: it is no tool argument. Absent: no `label`.
+   */
+  label?: () => string | Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
@@ -499,6 +566,8 @@ export class InboxLink {
   private delivering = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The last title that was known; what a poll repeats when it is not. */
+  private lastLabel = ''
   private busy: boolean | null = null
   private idleSince = 0
   /**
@@ -839,6 +908,17 @@ export class InboxLink {
       .catch(() => null)
   }
 
+  /** The name this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no name source. */
+  private async labelNow(): Promise<string | null> {
+    if (!this.options.label) return null
+    try {
+      this.lastLabel = await this.options.label()
+    } catch {
+      // Not known now: the last word stands.
+    }
+    return this.lastLabel
+  }
+
   /**
    * The replies and messages the Inbox has for this session now (waitMs 0),
    * or null when it did not answer. The poll says where the session works and
@@ -849,9 +929,12 @@ export class InboxLink {
     const project = await this.projectFolder()
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
+    const label = await this.labelNow()
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       ...(project ? { project_path: project } : {}),
+      // The session's title (additive): the To picker's name for it; empty clears it.
+      ...(label === null ? {} : { label }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

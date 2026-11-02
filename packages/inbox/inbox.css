@@ -3806,6 +3806,9 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-check { width: 16px; flex: none; color: var(--primary); display: inline-flex; }
 .ib-cp-none { grid-column: 1 / -1; padding: 14px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-cp-pickhead { display: none; }
+/* A list with a session label caps the column it shares with the project, so one long label cannot take the folder's room from every row. */
+.ib-cp-list[data-session-labels] { grid-template-columns: auto max-content fit-content(24ch) minmax(min(12ch, 30%), 1fr) max-content 16px; }
+.ib-cp-ol { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Notes under To: no agent running, or the session a draft was for has ended. */
 .ib-cp-note { display: flex; gap: 10px; align-items: flex-start; padding: 12px 16px; border-bottom: 1px solid var(--ib-line); background: var(--ib-band); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); flex: none; }
@@ -4040,6 +4043,10 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-cp-picker[data-phone] .ib-cp-os { grid-area: time; }
   .ib-cp-picker[data-phone] .ib-cp-check { grid-area: check; }
   .ib-cp-picker[data-phone] .ib-cp-op { grid-area: proj; white-space: normal; overflow-wrap: anywhere; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.4; }
+  /* A label never wraps: one line, the label cut before the project is. */
+  .ib-cp-picker[data-phone] .ib-cp-op[data-session-label] { display: flex; min-width: 0; white-space: nowrap; color: var(--foreground); }
+  .ib-cp-picker[data-phone] .ib-cp-ol { flex: 0 1 auto; min-width: 0; }
+  .ib-cp-picker[data-phone] .ib-cp-olp { flex: 0 0 auto; max-width: 45%; margin-inline-start: 0.3em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
   .ib-cp-picker[data-phone] .ib-cp-of { display: none; }
   .ib-draft-open { grid-template-columns: 36px minmax(0, 1fr); }
   .pn-inbox .ib-draft-open { padding: 14px 0 14px 12px; align-items: start; }

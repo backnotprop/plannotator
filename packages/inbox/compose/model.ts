@@ -71,12 +71,12 @@ export function composeGroups(
   return [{ ...lead, sessions }, ...ordered.filter((_, i) => i !== at)];
 }
 
-/** The groups narrowed by the picker's filter: host, project name or path, and the last thread's subject. */
+/** The groups narrowed by the picker's filter: host, label, project name or path, and the last thread's subject. */
 export function filterGroups(groups: readonly ComposeGroup[], query: string): ComposeGroup[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
