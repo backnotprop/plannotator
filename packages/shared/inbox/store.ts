@@ -2977,6 +2977,37 @@ export class InboxStore {
   }
 
   /**
+   * After `markAgentChecked` for a read: each plain reply the read showed
+   * (`shown`; all without it) that this read settles but the mark could not
+   * reach, because an earlier reply still owed to another session holds it
+   * (a waking session that has not taken its reply yet, or ended), records
+   * its delivery to the session it answers. So a restarted raw MCP client's
+   * read, or a read that names no session, settles its reply in a shared
+   * thread too, and read_thread's `unread` (`readSettles`) says what the read
+   * did. A reply the reader owns is `recordOwnRead`'s. No write when nothing
+   * is left.
+   */
+  settleReadPast(threadId: string, reader: string | null, shown?: ReadonlySet<string>): void {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return;
+    let newcomer: boolean | undefined;
+    const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader));
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind !== "person" || message.delivery || isInboxNote(message) || isAckNote(message) || message.tidy) continue;
+      if (message.to || hasTags(message) || (shown && !shown.has(message.id))) continue;
+      if ((this.messageSeq.get(message.id) ?? 0) <= (this.messages.get(threadId)?.agent_checked_seq ?? 0)) continue;
+      const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+      if (asked?.author.kind !== "agent") continue;
+      if (reader !== null && asked.author.session === reader) continue;
+      if (this.owedToAnother(message, reader, isNewcomer)) continue;
+      const at = this.stamp();
+      // A session it answers when it had one; else the reader's (a message and a read that both name none: "").
+      const session = asked.author.session ?? reader ?? "";
+      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at } }, at);
+    }
+  }
+
+  /**
    * Whether `reader` is new to the thread: it never wrote there (null: no
    * agent message sent without a session), owns none of the person's
    * messages and is tagged in none.

@@ -221,6 +221,55 @@ describe("a reader new to the thread, for a recipient no connection wakes", () =
   });
 });
 
+describe("a read settles its reply past an earlier one still owed to a waking session", () => {
+  // Claude Code (woken) asked and has not taken its reply; Cursor (raw MCP) wrote too and was answered.
+  // The read mark stops at Claude Code's reply, so Cursor's read must settle Cursor's reply by itself.
+  test("S1: Cursor restarted (a new shim ses_ id) reads: its reply is delivered and not unread, Claude Code's still waits", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-claude", CLAUDE, "Should the queue own retries?");
+    const cursor = await agentSends(client, project, "ses_shim_one", CURSOR, "Which region for the queue?", asked.message_id);
+    const toClaude = await personReplies(server, asked.message_id, "Yes, the queue.", "k1");
+    const toCursor = await personReplies(server, cursor.message_id, "us-east-1", "k2");
+
+    await reads(client, asked.thread_id, "ses_shim_two");
+    const after = await thread(server, asked.thread_id);
+    expect(after.messages.find((m) => m.id === toCursor)?.delivery).toMatchObject({ state: "delivered", host: "cursor" });
+    expect(after.messages.find((m) => m.id === toClaude)?.delivery ?? null).toBeNull();
+    expect((await row(server, asked.thread_id)).delivery).toMatchObject({ state: "delivered", host: "cursor" });
+    expect(await listedUnread(client, project, "ses_shim_two", asked.thread_id)).toBe(false);
+    expect(await poll(server, "ses-claude", "claude-code", project)).toEqual([toClaude]);
+  });
+
+  test("S1b: a client that names no session, sending and reading: its read settles its reply, Claude Code's still waits", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-claude", CLAUDE, "Should the queue own retries?");
+    const cursor = await agentSends(client, project, null, CURSOR, "Which region for the queue?", asked.message_id);
+    const toClaude = await personReplies(server, asked.message_id, "Yes, the queue.", "k1");
+    const toCursor = await personReplies(server, cursor.message_id, "us-east-1", "k2");
+
+    await reads(client, asked.thread_id, null);
+    const after = await thread(server, asked.thread_id);
+    expect(after.messages.find((m) => m.id === toCursor)?.delivery).toMatchObject({ state: "delivered", host: "cursor" });
+    expect(after.messages.find((m) => m.id === toClaude)?.delivery ?? null).toBeNull();
+    expect((await row(server, asked.thread_id)).delivery?.state).toBe("delivered");
+    expect(await listedUnread(client, project, null, asked.thread_id)).toBe(false);
+    expect(await poll(server, "ses-claude", "claude-code", project)).toEqual([toClaude]);
+  });
+
+  test("Pi, a participant, reads: Cursor's reply is not Pi's to settle, so it stays saved", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses-claude", CLAUDE, "Should the queue own retries?");
+    await agentSends(client, project, "ses-pi", PI, "I raised the timeout.", asked.message_id);
+    const cursor = await agentSends(client, project, "ses_shim_one", CURSOR, "Which region for the queue?", asked.message_id);
+    await personReplies(server, asked.message_id, "Yes, the queue.", "k1");
+    const toCursor = await personReplies(server, cursor.message_id, "us-east-1", "k2");
+
+    await reads(client, asked.thread_id, "ses-pi");
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === toCursor)?.delivery ?? null).toBeNull();
+    expect((await row(server, asked.thread_id)).delivery?.state).toBe("saved");
+  });
+});
+
 describe("read_thread's unread follows what the caller's read settles", () => {
   test("another session's read: the reply owed to the asker is not 'unread' for the reader after it read", async () => {
     const { server, client, project } = await setup();

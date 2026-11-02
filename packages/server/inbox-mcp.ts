@@ -1013,6 +1013,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           if (input.format === "full") {
             // Only what this reader is owed: a reply to another session waits for that one (markAgentChecked).
             if (!guest) store.markAgentChecked(threadId, undefined, undefined, reader);
+            // What this read settles that the mark could not reach (an earlier reply still owed to another session).
+            if (!guest) store.settleReadPast(threadId, reader);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.
             if (!guest) store.markAcksSeen(threadId);
             // What this session was owed here and no wake is left to settle.
@@ -1031,6 +1033,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
           if (!guest) {
             store.markAgentChecked(threadId, readThrough, undefined, reader);
+            store.settleReadPast(threadId, reader, shown);
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.
