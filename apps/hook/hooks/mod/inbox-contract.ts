@@ -290,7 +290,7 @@ export const INBOX_SESSION_THREADS_CHANNEL = "Their decisions stay in these thre
 
 /** When to use the Inbox. Fixed text: the agent tool's lead and the Inbox's server instructions carry it whole. */
 export const INBOX_USE_RULE =
-  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, files in `attachments`), or when they ask."
+  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, its pictures in place in the body, other files in `attachments`), or when they ask."
 
 /**
  * Separate work, separate threads (the owner, 2026-10-29: an agent given new
@@ -378,6 +378,20 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
 }
 
 /**
+ * Pictures sit where they are discussed (the owner, 2026-11-02: agents sent
+ * a message's screenshots and the pictures of its options as attachments at
+ * the bottom, so the person had to scroll there to see what each option
+ * was). Fixed text: the agent tool's `body` field, the MCP server's `body`
+ * field and `plannotator inbox --help` carry it whole.
+ */
+export const INBOX_PICTURES_RULE =
+  'Pictures go where you write about them, never only in `attachments`: `![alt](/abs/path.png)` in the body shows the image at that spot, and the person can open, zoom and comment on it. Visual options are picture choices, one picture per choice: `- [ ] A · Label — ![alt](path) what it means`; the card draws them as tiles to pick, and the label comes back. A question about one picture: `Shows: ![alt](path)` after the prompt. Do not also attach an image the body shows.'
+
+/** The `attachments` field's line on pictures (fixed text, on every copy of the field). */
+export const INBOX_ATTACHMENTS_PICTURES_LINE =
+  'A screenshot or picture goes in the body instead (`![alt](path)`, where you write about it); attach what the person should open or click through.'
+
+/**
  * The agent tool's own words for the fields whose Inbox description is long
  * (the MCP server's are written for a raw MCP client, which has no other
  * guide): every Pi and OpenCode request carries the tool whole, so these keep
@@ -406,7 +420,9 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       'Your recommendation goes on the `Recommended:` line, never in a choice label. Keep the choices in their natural order; never move yours first. `:::question-multi` takes several choices, `:::question-text` free text. The person can always answer Other, add a note or skip, so never add an Other choice yourself. `Stopped: <why>` only when you cannot go on until it is answered (never `Stopped: no`); `Holds up: <work>` names work that waits while you go on. Ask only what you cannot decide alone, about 8 a round at most. Answers come back in the reply under "Answers to your questions".',
       '',
-      'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone. Visual options can be picture choices, `- [ ] Label — ![alt](path)`: the picture picks it, the label comes back.',
+      INBOX_PICTURES_RULE,
+      '',
+      'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: [name](file)` (the one file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
       '',
@@ -418,7 +434,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
     thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
     supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
-    attachments: 'Files to show the person beside the message, absolute or relative to project_path: a plan, a screenshot, an HTML mock, code, a video, any file. For something visual, a screenshot or image usually reads fastest; attach the HTML or source too when they should open or click through it. Link one from the body (`[the mock](mock.html)`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.',
+    attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
   read_thread: {
     thread_id: 'A thread id. read_thread shows its open questions, the newest messages in full, and earlier ones one line each.',

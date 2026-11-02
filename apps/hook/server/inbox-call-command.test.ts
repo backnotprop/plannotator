@@ -222,6 +222,18 @@ describe("what a script gets", () => {
     expect(JSON.parse(listed.stdout).project.root).toBe(box.project);
   });
 
+  test("a picture attached but not shown in the body: sent, stdout still one JSON value, the advice on stderr", async () => {
+    const box = await world();
+    writeFileSync(join(box.project, "look.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"));
+    const sent = await cli(box, ["send_message", JSON.stringify({ body: "The new look.", thread: "Look", attachments: ["look.png"] })]);
+    expect(sent.code).toBe(0);
+    expect(JSON.parse(sent.stdout).attached_images_not_in_body).toEqual(["look.png"]);
+    expect(sent.stderr).toContain("1 image is attached but not shown in the text");
+    const shown = await cli(box, ["send_message", JSON.stringify({ body: "The new look: ![look](look.png)", thread: "Look", attachments: ["look.png"] })]);
+    expect(shown.code).toBe(0);
+    expect(shown.stderr).toBe("");
+  });
+
   test("inside an agent Ask AI started the Inbox is off: nothing is started or sent", async () => {
     const box = sandbox();
     const result = await cli(box, ["read_thread", "{}"], { env: { PLANNOTATOR_ASK_AI_CHILD: "1" } });

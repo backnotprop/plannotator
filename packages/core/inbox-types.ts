@@ -2128,10 +2128,15 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
  * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
  * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
+ * Then pictures in place (the owner, 2026-11-02: INBOX_PICTURES_RULE on
+ * `body`, the attachments line, the lead's "its pictures in place in the
+ * body"): measured on Pi with the cost test, 10,304 bytes (tokens scaled
+ * from 2,650 and stated high). With the Board on 11,723 (11,261 + 462,
+ * estimated).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
+const INBOX_TOOL_COST_NOW = { bytes: 10304, tokens: 2800 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11723, tokens: 3200 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
