@@ -122,6 +122,11 @@
  * holds an agent's leaked tool-call text, as an Inbox older than the one-line
  * subject check kept it (tests/helpers/inbox-leaked-subject.ts); the world
  * adds `leaked` (that thread's id).
+ *
+ * With `accounts`, the PATH the Inbox reads usage on is `<data dir>/cswap-bin`
+ * and nothing else: a test writes a fake `cswap` there
+ * (tests/helpers/fake-cswap.ts). Without it that PATH is empty. Either way no
+ * real claude-swap can be reached.
  */
 import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -314,6 +319,9 @@ const server = await startInboxServer({
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
   ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
+  // Every window reads usage when it opens: only `accounts` finds a `cswap`, and never on this process's own PATH, which can hold a real one.
+  // No kept answer: the tests change the fake between reads.
+  accounts: { environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: extra === "accounts" ? join(dataDir, "cswap-bin") : "" } }), cacheMs: 0 },
   ...(restartMode
     ? {
         version: "0.28.25",

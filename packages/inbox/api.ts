@@ -38,6 +38,7 @@ import type {
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
@@ -47,6 +48,8 @@ import type { InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotat
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
+  InboxAccountsRead,
+  InboxMachineAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
   InboxCardColumn,
@@ -130,6 +133,8 @@ export interface MachineView {
   waiting: number;
   /** The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox. */
   list_cursor?: number | null;
+  /** Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: no Snooze on its rows. */
+  snoozes?: boolean;
 }
 
 /** A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame). */
@@ -186,6 +191,12 @@ export interface ListModel {
   projects: ProjectFolder[];
   project: string | null;
   sections: InboxListSection[];
+  /**
+   * The threads snoozed now, soonest back first (approval "inbox-snooze"): the
+   * band under Quiet. They are in no section, so no count reads them. Absent
+   * from an older Inbox: the window then offers no snooze.
+   */
+  snoozed?: InboxListRow[];
   /**
    * The sidebar's pinned threads (approval "inbox-pinned-threads"), in pin
    * order, whatever the project filter (an archived thread stays pinned).
@@ -354,6 +365,8 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
+  cswap?: boolean;
   /**
    * Plannotator's appearance in config.json (`theme`), the value plan review
    * reads too: null when never chosen. Absent from an Inbox that predates it.
@@ -792,7 +805,7 @@ const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encod
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
-  const rows = model.sections.flatMap((section) => section.threads);
+  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
   // machine's row with the same id never takes one over. Two linked machines naming one id leave it contested.
   rememberLocal(localIdsIn(model));
@@ -963,8 +976,11 @@ export const inboxApi = {
   // window and the phone, which ask without this, still get them in Quiet.
   // `machines=1`: the merged view (linked machines). An Inbox with nothing linked answers its own list, each row and
   // project naming this Inbox; an older Inbox ignores the parameter.
+  // `snoozed=exclude` the same way: snoozed threads come apart from the sections, for the band under Quiet. The rule
+  // runs here again with this window's clock, which is the one the person reads the time on.
   list: () =>
-    get<ListModel>(inboxUrl('/threads?archived=exclude&machines=1')).then((model) => {
+    get<ListModel>(inboxUrl('/threads?archived=exclude&snoozed=exclude&machines=1')).then((read) => {
+      const model = read.snoozed ? { ...read, ...inboxSectionsAsOf(read.sections, read.snoozed) } : read;
       learnMachines(model);
       return model;
     }),
@@ -1312,6 +1328,9 @@ export const inboxApi = {
   /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
+  /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
+  snooze: (threadId: string, until: string | null, at?: string) =>
+    post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
   discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
@@ -1358,6 +1377,11 @@ export const inboxApi = {
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),
   setLan: (on: boolean) => post<{ lan: LanState }>(inboxUrl('/lan'), { on }),
+  /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  /** `fresh`: skip the answer the Inbox keeps 30 s (Refresh). */
+  accounts: (fresh = false) => get<InboxAccountsRead>(inboxUrl('/accounts', fresh ? 'fresh=1' : undefined)),
+  /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
+  machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
   agents: () => get<InboxAgentsModel>(inboxUrl('/agents')),
   saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>
@@ -1442,6 +1466,8 @@ export interface InboxEventHandlers {
   onDrafts?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
+  /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
+  onSnoozes?: () => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1477,7 +1503,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'pins', 'snoozes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1540,6 +1566,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'pins':
       handlers.onPins?.();
+      return;
+    case 'snoozes':
+      handlers.onSnoozes?.();
       return;
     case 'machine':
       try {

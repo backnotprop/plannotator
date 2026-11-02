@@ -8,7 +8,6 @@
 
 import { forwardRef, lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { diagramTargetName, diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import { sliceText } from '@plannotator/core/inbox-questions';
 import { inboxAttachmentKindLabel, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type SurfaceOpenAttachment } from '@plannotator/core/inbox-types';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
@@ -17,7 +16,7 @@ import { AnnotationType, type Annotation, type EditorMode, type HostDraft, type 
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DocumentContents } from '@plannotator/ui/components/DocumentContents';
-import { annotationOf, attachmentBlocks, codeRangeOf } from '../attachments';
+import { annotationOf, attachmentBlocks, codeRangeOf, shortLabel } from '../attachments';
 import { showsContents } from '../contents';
 import { Icon } from '../icons';
 import { postToShell } from './bridge';
@@ -45,14 +44,6 @@ function newId(): string {
   return typeof crypto.randomUUID === 'function' && window.isSecureContext
     ? crypto.randomUUID()
     : `ann-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/** A quote as a sheet's title names it: one line, cut at a word. */
-function shortLabel(text: string): string {
-  const line = text.replace(/\s+/g, ' ').trim();
-  if (line.length <= 60) return line;
-  const cut = line.slice(0, 60);
-  return `${cut.lastIndexOf(' ') > 30 ? cut.slice(0, cut.lastIndexOf(' ')) : sliceText(line, 60)}…`;
 }
 
 export const SurfaceDocument = forwardRef<SurfaceDocumentHandle, Props>(function SurfaceDocument({ open, records, interact }, ref) {

@@ -8,7 +8,7 @@
  * once not to wait on them. It comes back when an agent writes again.
  */
 
-import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId } from '@plannotator/core/inbox-types';
 import { agentName, plural, shortAgentName } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
@@ -31,7 +31,7 @@ export const waitsOnPerson = inboxRowWaitsOnPerson;
  */
 export function canToggleRead(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'read_at' | 'agent_after_archive'>,
-  drawn?: InboxSectionId | null,
+  drawn?: InboxListGroupId | null,
 ): boolean {
   if (row.resolved_at !== null && row.agent_after_archive !== true) return false;
   return (row.read_at ?? null) !== null || waitsOnPerson(row) || seenHeldInNew(row, drawn);
@@ -42,7 +42,7 @@ export function canToggleRead(
  * on Sent or Quiet, except a row the list still draws in New
  * (`seenHeldInNew`).
  */
-export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxSectionId | null): boolean {
+export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxListGroupId | null): boolean {
   return inboxRowOffersMarkRead(row) || seenHeldInNew(row, drawn);
 }
 
@@ -56,7 +56,7 @@ export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>
  * Not a thread with a question or unsent work (the server keeps those out of
  * Quiet), one marked read, or an archived one.
  */
-export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxSectionId | null | undefined): boolean {
+export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxListGroupId | null | undefined): boolean {
   return drawn === 'new' && row.section === 'quiet' && row.resolved_at === null && (row.read_at ?? null) === null;
 }
 
@@ -72,7 +72,7 @@ export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'>
  */
 export function canMarkUnread(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
-  drawn?: InboxSectionId | null,
+  drawn?: InboxListGroupId | null,
 ): boolean {
   if (row.resolved_at !== null || row.unread) return false;
   if (waitsOnPerson(row) || seenHeldInNew(row, drawn)) return false;

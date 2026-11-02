@@ -628,7 +628,23 @@ an `ask` is submitted as a real turn (`$.prompt.submit`), identified at
 `busy` = a MAIN-LOOP turn is running (pushed on `turn.start` / `turn.complete`, not only
 at the next poll; a subagent's `turn.start`, which every hook hears, is ignored by `onTurnStart`: its end is never counted, so counting it left the session busy for good after a background subagent started, and the Inbox wake never delivered); `interrupt` aborts the running turn (`$.turn.abort`), except a turn another plugin's prompt started (below), which it refuses with `ok: false` and `OTHER_PLUGIN_INTERRUPT_TEXT` ("The session is answering a message from another plugin, so Plannotator will not stop it. Ask when it finishes instead.", `bridge.ts`);
 cancel aborts our own turn, or, while it is still queued, confirms at once and
-aborts its turn the moment it starts. Claude Code never raises a plugin's own hooks
+aborts its turn the moment it starts. A question still queued when the process
+moves to another session (`/clear` queued in the turn it waits behind, or an
+in-process resume) is dropped the same way: a pending `$.prompt.submit` can't
+be withdrawn, so `currentMod` calls `PlannotatorMod.carryQueued`, which hands
+every question prompt that may still wait in the engine (a live question's not
+started, one Stopped while queued, one carried from an earlier switch:
+`TurnTracker.queuedPrompts` / `dropQueued`) to the new instance's tracker. That
+tracker aborts the turn when it starts, so no answer runs in the new
+conversation, but the aborted turn's user row (the framed question, with its
+drafts and context) and an interrupted marker stay in the cleared conversation's
+transcript, where the model sees them on the person's next prompt: nothing can
+withdraw it (a question Stopped while queued leaves the same). Each carried
+prompt follows its submit (`QueuedPrompt`): rejected, it is forgotten at once;
+taken, at the next turn's end, so a prompt the engine never ran can't abort the
+same words asked again. The window then sees `session_gone`, and Ask again sends
+it once (`inbox-ask.test.ts` and `turns.test.ts`; `ClaudeSession.clear` calls
+the same `carryQueued`). Claude Code never raises a plugin's own hooks
 for a prompt its code submitted (the debug log says "skipped: re-entry"), so the
 mod's `prompt.submit` hook sees every OTHER prompt (the user's Enter, a
 notification, another plugin); a turn whose text is exactly one of those is
