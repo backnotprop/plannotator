@@ -1294,16 +1294,17 @@ function TourThreadPane({
       </button>
     </Tip>
   );
-  // The title leads the bar, as in the real header: the thread's name by the list's rule, else the subject, with the
-  // whole subject in the name's tooltip; the thread's heading (a focus target, never a tab stop).
+  // The bar's title, as in the real header: the thread's name by the list's rule, its tooltip the whole subject. With no
+  // name the real bar shows the subject only once the body's heading scrolls away; the tour's bar keeps the room empty.
   const headName = threadChipName(tourThreadName(thread), subject);
-  const headSubject = (
-    <Tip content={subject} cut={!headName}>
-      <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1}>
-        {headName ?? subject}
-        {headName && <span className="ib-sr">: {subject}</span>}
-      </h2>
+  const headSubject = headName ? (
+    <Tip content={subject}>
+      <span className="ib-phsubj" dir="auto" data-header-subject="" data-on="" aria-hidden="true">
+        {headName}
+      </span>
     </Tip>
+  ) : (
+    <span className="ib-sp" />
   );
   const artifactsButton = artifacts.length > 0 && (
     <Tip content={state.artifactsOpen ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
@@ -1523,6 +1524,9 @@ function TourThreadPane({
         </div>
       ) : (
         <div className="ib-pbody" ref={bodyRef}>
+          <h2 className="ib-subject" dir="auto" tabIndex={-1}>
+            {subject}
+          </h2>
           {thread.slice && (
             <p className="ib-tour-slice">
               <Icon name="chevD" size={14} />

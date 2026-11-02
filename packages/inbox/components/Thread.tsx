@@ -2182,8 +2182,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // The "↓ N new" pill while new messages the person has not seen are below
   // the view (its count: those messages, never everything new this visit).
-  // The subject is always in the header (approval "inbox-thread-header").
-  const [chrome, setChrome] = useState({ pill: 0 });
+  // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
+  const [chrome, setChrome] = useState({ subject: false, pill: 0 });
   /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
   const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
   const passedIds = useCallback((): Set<string> => {
@@ -2195,9 +2195,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const updateChrome = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
+    const box = body.getBoundingClientRect();
+    const subject = body.querySelector<HTMLElement>('.ib-subject');
     const shown = showingRef.current && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
-    const next = { pill: newBelow(body, passedIds(), shown).length };
-    setChrome((current) => (current.pill === next.pill ? current : next));
+    const next = {
+      subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
+      pill: newBelow(body, passedIds(), shown).length,
+    };
+    setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
   }, [passedIds]);
 
   // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
@@ -2260,7 +2265,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
     const button = artifactsButtonRef.current;
     if (button) button.focus();
-    else sectionRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
+    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
   }, [artifactsOn]);
   // The thread's scroll, kept while the grid is shown over it.
   useEffect(() => {
@@ -4208,8 +4213,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
   // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
-  // The header's ⋯ More offers it where that button does not: a thread marked read. A phone keeps it there too,
-  // since its header gives way when short of room (headFit.ts).
+  // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
+  // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
   const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
@@ -4307,7 +4312,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     <Tip
       content={
         readAt !== null ? (
-          'Read'
+          <span className="flex flex-col gap-1">
+            <span>Read</span>
+            <span className="text-muted-foreground">Move it back to the top</span>
+          </span>
         ) : markReadEnabled ? (
           withShortcut('Mark read', { scope: inboxThreadShortcuts, action: 'markRead' })
         ) : (
@@ -4332,16 +4340,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       </button>
     </Tip>
   ) : null;
-  // A phone's ⋯ sheet: Mark read where the bar's button would offer it (never disabled there: the sheet lists what
-  // can be done), and Mark unread (`markUnreadInMenu`, which a phone always offers when it can).
-  const phoneMarkRead = phone && markReadOffered && !markUnreadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  // A phone's ⋯ sheet offers every read action a desktop has (its bar has no read button, and a phone has no row menu
+  // and no E): Mark read whenever it can be done (a seen update the list still holds in New included, where a desktop
+  // reaches it by E or the row menu; never disabled there: the sheet lists what can be done), Move back to the top on
+  // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
+  const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
   const snoozeProps = onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined;
 
   // A phone's header gives way one step at a time so it stays on one line with room for the subject (headFit.ts):
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4475,16 +4486,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           <>
             {markReadButton}
             {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} />}
-            {/* The thread's name (main's rule: `threadChipName`, the list's), else its subject (the owner, 2026-11-02, on
-                approval "inbox-thread-header"), cut with "…". With a name the tooltip always shows the whole subject and a
-                screen reader hears it after the name; with none the tooltip shows the subject only when it is cut. It is
-                the thread's heading, and the focus target the way back falls back to (a stacked thread), never a tab stop. */}
-            <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
-              <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={nameChip ? '' : undefined}>
-                {nameChip ?? thread.subject ?? '(no subject)'}
-                {nameChip && <span className="ib-sr">: {thread.subject ?? '(no subject)'}</span>}
-              </h2>
-            </Tip>
+            {one && !artifactsOn && !nameChip ? (
+              <span className="ib-sp" />
+            ) : (
+              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`), always; with no name,
+              // the subject once the body's heading has scrolled away, so its words never show twice; always over the
+              // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
+              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut.
+              <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+                <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={nameChip ? '' : undefined} data-on={nameChip || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
+                  {nameChip ?? thread.subject ?? '(no subject)'}
+                </span>
+              </Tip>
+            )}
             {artifactsButton && (
               <Tip content={artifactsOn ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
                 <button
@@ -4522,6 +4536,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
               markRead={phoneMarkRead}
+              moveBack={phoneMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               snooze={snoozeProps}
@@ -4542,6 +4557,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       </div>
       {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
       <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
+        {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
+        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
         {machine && (
           // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
           <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>

@@ -215,21 +215,19 @@ test.afterAll(async () => {
   }
 });
 
-test('opened, the thread lands at "New since you looked" with the last read line above it; the subject is the header\'s', async () => {
+test('opened, the thread lands at "New since you looked" with the last read line above it; the subject moves into the header', async () => {
   const { page, ids } = world;
   await page.goto(world.url);
   await page.locator(`.ib-lbody [data-thread-id="${world.threadId}"]`).click();
   await expect(pane().locator('[data-thread-meta]')).toContainText(/^7 messages.*1 new since you looked$/);
   const divider = pane().locator('[data-new-divider]');
   await expect(divider).toHaveText('New since you looked');
-  // The last read line just above the divider, both in view; the subject is the header's (approval
-  // "inbox-thread-header"), in view whatever the scroll.
+  // The last read line just above the divider, both in view; the subject scrolled away into the header.
   await expect(article(ids[5]!)).toBeInViewport();
   await expect(divider).toBeInViewport();
-  await expect(pane().locator('.ib-phead h2.ib-subject')).toBeInViewport();
-  await expect(pane().locator('.ib-phead [data-header-subject]')).toHaveText('Search for the docs site');
-  // The body's top (its meta line, where the subject heading was) scrolled away: it landed below it.
-  await expect(pane().locator('[data-thread-meta]')).not.toBeInViewport();
+  await expect(pane().locator('h2.ib-subject')).not.toBeInViewport();
+  await expect(pane().locator('[data-header-subject]')).toHaveAttribute('data-on', '');
+  await expect(pane().locator('[data-header-subject]')).toHaveText('Search for the docs site');
   // The new message is open with its New pill and its question card; it is the last, so the pill is off.
   await expect(article(ids[6]!)).toHaveAttribute('data-new', '');
   await expect(article(ids[6]!)).toHaveAttribute('data-open', '');
@@ -361,7 +359,7 @@ test("Expand all gives back today's fully open thread; scrolled up past the new 
   const pill = pane().locator('[data-new-pill]');
   await page.waitForTimeout(300);
   await expect(pill).toHaveAttribute('data-off', '');
-  await expect(pane().locator('.ib-phead [data-header-subject]')).toBeVisible();
+  await expect(pane().locator('[data-header-subject]')).not.toHaveAttribute('data-on', '');
   await shot('4-expanded-scrolled-up');
   // n still goes down to the first new message.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -402,7 +400,6 @@ test('a pick folded says it is not sent; the reply that sends it is a look, so n
   await page.locator(`.ib-lbody [data-thread-id="${world.threadId}"]`).click();
   await expect(pane().locator('[data-thread-meta]')).toHaveText(/^8 messages/);
   await expect(pane().locator('[data-new-divider]')).toHaveCount(0);
-  // At the top: the body's first line (the subject is the header's, always in view).
-  await expect(pane().locator('[data-thread-meta]')).toBeInViewport();
+  await expect(pane().locator('h2.ib-subject')).toBeInViewport();
   expect(world.errors).toEqual([]);
 });

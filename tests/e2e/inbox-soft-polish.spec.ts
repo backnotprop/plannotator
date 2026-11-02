@@ -170,6 +170,8 @@ test("Mark read's E is a keycap in its tooltip; the icon button fills on hover i
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-mark-read-hover.png') });
   await page.mouse.move(700, 880);
+  // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
+  // `.ib-hbtn` buttons are gone.
   const back = await todays(page, 'hbtns');
   await button.hover();
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');

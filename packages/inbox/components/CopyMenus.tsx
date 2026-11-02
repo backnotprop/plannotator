@@ -149,7 +149,8 @@ export interface ThreadSnoozeProps {
  * Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key.
  *
- * On a phone the bar has neither, and the sheet leads with them: the read action (`markRead`, `markUnread`), then
+ * On a phone the bar has neither, and the sheet leads with them: every read action a desktop has (`markRead`,
+ * `moveBack` on a thread marked read, `markUnread`), then
  * Snooze, which swaps the sheet in place for "‹ Snooze until" and its times, and Unsnooze; then a divider, Pin thread
  * in its own group, and the rest as above.
  */
@@ -158,12 +159,14 @@ export function ThreadMore(
     pin?: { pinned: boolean; onToggle: () => void };
     /** A phone's Mark read: the header's read button, moved into the sheet. */
     markRead?: () => void;
+    /** A phone's Move back to the top on a thread marked read: the pressed Read button's click, moved into the sheet. */
+    moveBack?: () => void;
     markUnread?: () => void;
     archive?: { archived: boolean; onToggle: () => void };
     snooze?: ThreadSnoozeProps;
   },
 ) {
-  const { thread, phone, pin, markRead, markUnread, archive, snooze } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -182,6 +185,12 @@ export function ThreadMore(
         <Menu.Item className="ib-pmi" label="Mark read" onClick={markRead} data-thread-read-item="">
           <Icon name="mailOpen" size={15} />
           Mark read
+        </Menu.Item>
+      )}
+      {moveBack && (
+        <Menu.Item className="ib-pmi" label="Move back to the top" onClick={moveBack} data-thread-move-back-item="">
+          <Icon name="inbox" size={15} />
+          Move back to the top
         </Menu.Item>
       )}
       {markUnread && (
@@ -204,7 +213,7 @@ export function ThreadMore(
       {pin.pinned ? 'Unpin thread' : 'Pin thread'}
     </Menu.Item>
   );
-  const phoneLeads = !!(markRead || markUnread || snooze);
+  const phoneLeads = !!(markRead || moveBack || markUnread || snooze);
   const lead = phone ? (
     <>
       {readItems}
@@ -229,7 +238,7 @@ export function ThreadMore(
     </>
   );
   // Whether anything leads the menu (the divider before Copy thread): off a phone, Snooze itself is in the bar.
-  const leads = phone ? phoneLeads || !!pin : !!(snooze?.snoozed || pin || markRead || markUnread);
+  const leads = phone ? phoneLeads || !!pin : !!(snooze?.snoozed || pin || markRead || moveBack || markUnread);
   return (
     <Menu.Root
       modal={false}

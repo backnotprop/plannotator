@@ -173,11 +173,13 @@ test('desktop beside the list: full screen, then Mark read and Snooze lead befor
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
   expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'snooze', 'artifacts', 'expand', 'more', 'close']);
-  // The title sits between the clock and Artifacts: the thread's heading. A named thread shows its name (the list's
-  // rule, the owner's 2026-11-02 call); its tooltip shows the whole subject, and the meta line has no chip repeating it.
-  const subject = pane.locator('.ib-phead h2.ib-subject');
-  expect(await subject.evaluate((h) => h.firstChild?.textContent)).toBe('invoices');
-  await expect(subject).toHaveAccessibleName('invoices: Invoice list: cards or a table?');
+  // The title sits between the clock and Artifacts. A named thread shows its name at once (the list's rule, the owner's
+  // 2026-11-02 call); its tooltip shows the whole subject, the body's heading stays the subject, and the meta line has
+  // no pill repeating the name.
+  const subject = pane.locator('.ib-phead [data-header-subject]');
+  await expect(subject).toHaveText('invoices');
+  await expect(subject).toHaveAttribute('data-on', '');
+  await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Invoice list: cards or a table?');
   await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
   await subject.hover();
   await expect(page.locator('[data-side].bg-popover')).toHaveText('Invoice list: cards or a table?');
@@ -551,9 +553,10 @@ for (const phone of [
       await expect(pane.locator('[data-phone-back]')).toBeVisible();
       await shot(page, `7-phone-${phone.name.replace(/\W+/g, '-').toLowerCase()}`, ['light', 'dark']);
       expect(await headerOrder(pane)).toEqual(['back', 'artifacts', 'expand', 'more']);
-      // The subject is drawn (approval "inbox-thread-header": it no longer vanishes on a phone).
-      await expect(pane.locator('.ib-phead h2.ib-subject')).toBeVisible();
-      expect(await pane.locator('.ib-phead h2.ib-subject').evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
+      // The title (this named thread's name) is drawn with room to read (approval "inbox-thread-header").
+      const title = pane.locator('.ib-phead [data-header-subject][data-on]');
+      await expect(title).toHaveText('invoices');
+      expect(await title.evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
       // The read button and Snooze moved into the ⋯ sheet, where they lead.
       await pane.locator('[data-thread-more]').click();
       const sheet = page.locator('[data-thread-menu]');

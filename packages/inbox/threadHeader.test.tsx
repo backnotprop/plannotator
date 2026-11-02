@@ -3,18 +3,21 @@
  * phone the bar reads [full screen] | read button, Snooze clock, subject …
  * Artifacts, Expand, ⋯ | ×; the read button and the clock are icons whose
  * words are in their tooltips (E with Mark read). On a phone the bar is
- * ‹ Inbox, subject, Artifacts, Expand, ⋯, and the ⋯ sheet leads with the read
- * action, then Snooze (which swaps the sheet for "‹ Snooze until"), a
- * divider, and the rest. The title has room on a phone at 320 and 390 px.
- * The title is the thread's name by the list's rule, else its subject (the
- * owner, 2026-11-02), with the whole subject in the name's tooltip and no
- * name chip on the meta line.
+ * ‹ Inbox, subject, Artifacts, Expand, ⋯, and the ⋯ sheet leads with every
+ * read action the desktop has in that state, then Snooze (which swaps the
+ * sheet for "‹ Snooze until"), a divider, and the rest. The title has room on
+ * a phone at 320 and 390 px. The title is the thread's name by the list's
+ * rule, else its subject once the body's heading scrolls away (as on main;
+ * the owner, 2026-11-02), with the whole subject in its tooltip and no name
+ * pill on the meta line; the body's heading stays the subject.
  *
  * The failures this catches: the read button or the clock drifting to the
  * right (or after the subject), either one showing in a phone's bar, the
- * phone's ⋯ losing them or their order, the clock not opening the times (or
- * Pick a time not snoozing), a tooltip losing its words or the E, and the
- * phone's subject vanishing for want of room.
+ * phone's ⋯ losing a read action the desktop has (or their order), the clock
+ * not opening the times (or Pick a time not snoozing), a Snooze or an Escape
+ * from the clock disturbing the read button or the thread, a tooltip losing
+ * its words or the E, the phone's title vanishing for want of room, and the
+ * same words shown twice.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -129,7 +132,7 @@ async function settle() {
   }
 }
 
-async function render(state: InboxListRow, phone = false, thread: InboxThread = THREAD) {
+async function render(state: InboxListRow, phone = false, thread: InboxThread = THREAD, drawn: 'quiet' | 'new' = 'quiet') {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     if (String(input).includes('/attachments')) return Response.json({ serverSession: 's', attachments: ATTACHMENTS, annotations: [] });
@@ -150,12 +153,12 @@ async function render(state: InboxListRow, phone = false, thread: InboxThread = 
         sent={null}
         onQuestions={() => {}}
         onChanged={async () => {}}
-        onClose={() => {}}
+        onClose={() => calls.push('close')}
         file={null}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
         row={state}
-        drawn="quiet"
+        drawn={drawn}
         onMarkRead={(read) => calls.push(read ? 'mark read' : 'move back')}
         onMarkUnread={() => calls.push('mark unread')}
         onSnooze={(until) => snoozed.push(until)}
@@ -196,9 +199,9 @@ const head = () => host!.querySelector<HTMLElement>('.ib-phead')!;
 /** The bar's controls and its subject, left to right (DOM order is the drawn order: one flex row). */
 function bar(): string[] {
   const names: string[] = [];
-  for (const el of head().querySelectorAll<HTMLElement>('button, h2, .ib-vsep')) {
+  for (const el of head().querySelectorAll<HTMLElement>('button, [data-header-subject], .ib-vsep')) {
     if (el.classList.contains('ib-vsep')) names.push('|');
-    else if (el.tagName === 'H2') names.push('subject');
+    else if (el.hasAttribute('data-header-subject')) names.push('subject');
     else if (el.hasAttribute('data-phone-back')) names.push('‹ Inbox');
     else if (el.hasAttribute('data-artifacts-button')) names.push('Artifacts');
     else if (el.hasAttribute('data-expand-all')) names.push('Expand');
@@ -223,7 +226,7 @@ async function openMore() {
 test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before the subject; Artifacts, Expand, ⋯ and × stay at the right', async () => {
   await render(OPENED);
   expect(bar()).toEqual(['Hide the sidebar and the list', '|', 'Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
-  expect(head().querySelector('h2')!.firstChild!.textContent).toBe('customize row look');
+  expect(head().querySelector('[data-header-subject]')!.textContent).toBe('customize row look');
   // The read button is an icon: its words are its name, never drawn text.
   for (const button of head().querySelectorAll('[data-mark-unread], [data-thread-snooze]')) expect(button.textContent).toBe('');
   // The other states take the same slot.
@@ -267,7 +270,10 @@ test.skipIf(!hasDom)('tooltips: the read button says its words, with E for Mark 
   host!.remove();
   await render(MARKED);
   const read = head().querySelector('[data-mark-read]')!;
-  expect(await tooltipOf(read.closest('[data-tip-wrap]') ?? read)).toBe('Read');
+  // The pressed Read says what a click does (as on main): it moves the thread back to the top.
+  const readTip = await tooltipOf(read.closest('[data-tip-wrap]') ?? read);
+  expect(readTip).toContain('Read');
+  expect(readTip).toContain('Move it back to the top');
 });
 
 test.skipIf(!hasDom)("a phone's ⋯ leads with the read action, then Snooze, a divider, Pin, and the rest", async () => {
@@ -280,6 +286,29 @@ test.skipIf(!hasDom)("a phone's ⋯ leads with the read action, then Snooze, a d
   calls.length = 0;
   await render(WAITING, true);
   expect(menuItems(await openMore()).slice(0, 3)).toEqual(['Mark read', 'Snooze', '—']);
+  await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
+  expect(calls).toEqual(['mark read']);
+});
+
+// Parity with the desktop's read button, state by state: a phone has no read button in its bar, no row menu and no E,
+// so its ⋯ sheet is the only place these are.
+test.skipIf(!hasDom)("a phone's ⋯ offers every read action the desktop has: Move back to the top when marked read, Mark read and Mark unread on a seen update held in New", async () => {
+  // Marked read: the desktop's pressed Read moves it back (and its ⋯ offers Mark unread).
+  await render(MARKED, true);
+  expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Move back to the top', 'Mark unread', 'Snooze', '—']);
+  await press(threadMenu()!.querySelector('[data-thread-move-back-item]')!);
+  expect(calls).toEqual(['move back']);
+  act(() => root!.unmount());
+  host!.remove();
+  calls.length = 0;
+  // A seen update the list still holds in New: the desktop's button is Mark unread, and Mark read is its E and row menu.
+  const held = row({ section: 'quiet' });
+  await render(held, false, THREAD, 'new');
+  expect(head().querySelector('[data-mark-unread]')).not.toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+  await render(held, true, THREAD, 'new');
+  expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Mark read', 'Mark unread', 'Snooze', '—']);
   await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
   expect(calls).toEqual(['mark read']);
 });
@@ -323,6 +352,35 @@ test.skipIf(!hasDom)("desktop: the clock opens the times, titled Snooze until; a
   await press(snoozeMenu()!.querySelector('[data-snooze-go]')!);
   expect(snoozed).toHaveLength(2);
   expect(Date.parse(snoozed[1]!)).toBeGreaterThan(Date.now());
+});
+
+test.skipIf(!hasDom)('desktop: a Snooze from the clock leaves the read button as it was; Escape closes the clock menu, never the thread', async () => {
+  const snoozeMenu = () => document.querySelector<HTMLElement>('[data-thread-snooze-menu]');
+  for (const [state, name, pressed] of [[WAITING, 'Mark read', 'false'], [MARKED, 'Read', 'true']] as const) {
+    await render(state);
+    await press(head().querySelector('[data-thread-snooze]')!);
+    await until(() => !!snoozeMenu(), 'the times');
+    await press(snoozeMenu()!.querySelector('[data-snooze-choice]')!);
+    await until(() => !snoozeMenu(), 'the menu to close');
+    const read = head().querySelector('[data-mark-read]')!;
+    expect(read.getAttribute('aria-label')).toBe(name);
+    expect(read.getAttribute('aria-pressed')).toBe(pressed);
+    act(() => root!.unmount());
+    host!.remove();
+    for (const undo of restore.splice(0).reverse()) undo();
+  }
+  expect(snoozed).toHaveLength(2);
+  await render(WAITING);
+  await press(head().querySelector('[data-thread-snooze]')!);
+  await until(() => !!snoozeMenu(), 'the times again');
+  const target = (document.activeElement && snoozeMenu()!.contains(document.activeElement) ? document.activeElement : snoozeMenu())!;
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await until(() => !snoozeMenu(), 'Escape to close the menu');
+  expect(calls).not.toContain('close');
+  expect(head().querySelector('[data-thread-snooze]')).not.toBeNull();
+  expect(snoozed).toHaveLength(2);
 });
 
 /**
@@ -371,14 +429,14 @@ function layOutPhoneBar(width: number) {
 }
 
 for (const width of [320, 390]) {
-  test.skipIf(!hasDom)(`a phone at ${width} px: the title (name or subject) is drawn with room to read it, "Inbox" whole and the count kept`, async () => {
+  test.skipIf(!hasDom)(`a phone at ${width} px: the title has room to read it, "Inbox" whole and the count kept`, async () => {
     for (const [thread, shown] of [[THREAD, 'customize row look'], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
       await render(OPENED, true, thread);
       layOutPhoneBar(width);
       expect(fitPhoneHead(head())).toEqual([]);
       expect(head().hasAttribute('data-subject-off')).toBe(false);
-      const title = head().querySelector<HTMLElement>('h2.ib-phsubj')!;
-      expect(title.firstChild!.textContent).toBe(shown);
+      const title = head().querySelector<HTMLElement>('.ib-phsubj')!;
+      expect(title.textContent).toBe(shown);
       expect(title.getBoundingClientRect().width).toBeGreaterThanOrEqual(SUBJECT_FLOOR);
       act(() => root?.unmount());
       host?.remove();
@@ -387,41 +445,44 @@ for (const width of [320, 390]) {
   });
 }
 
-/** The bar's title: the thread's name by the list's rule (`threadChipName`), else its subject (the owner, 2026-11-02). */
-const title = () => host!.querySelector<HTMLElement>('.ib-phead h2.ib-subject')!;
-const shownTitle = () => title().firstChild!.textContent;
-const metaChip = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
+/**
+ * The bar's title (the owner, 2026-11-02): the thread's name by the list's rule (`threadChipName`), else the subject,
+ * shown as main shows it (a name always; the subject once the body's heading has scrolled away). The body keeps the
+ * subject as the thread's heading. Its tooltip is the whole subject. No name pill on the meta line.
+ */
+const title = () => host!.querySelector<HTMLElement>('.ib-phead [data-header-subject]');
+const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
+const namePill = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
 
-test.skipIf(!hasDom)('a named thread: the bar shows the name, its tooltip the whole subject (cut or not), and the meta line has no chip', async () => {
+test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its tooltip the whole subject; the heading is the subject; no name pill', async () => {
   await render(OPENED);
-  expect(shownTitle()).toBe('customize row look');
-  expect(title().hasAttribute('data-header-name')).toBe(true);
-  // A screen reader hears the subject after the name: the heading still says what the thread is about.
-  expect(title().querySelector('.ib-sr')!.textContent).toBe(`: ${SUBJECT}`);
-  expect(await tooltipOf(title())).toBe(SUBJECT);
-  expect(metaChip()).toBeNull();
-  expect(host!.querySelector('.ib-pbody [data-thread-meta]')!.textContent).toMatch(/^3 messages/);
+  expect(title()!.textContent).toBe('customize row look');
+  expect(title()!.hasAttribute('data-on')).toBe(true);
+  expect(title()!.getAttribute('aria-hidden')).toBe('true');
+  expect(heading()!.textContent).toBe(SUBJECT);
+  expect(await tooltipOf(title()!)).toBe(SUBJECT);
+  expect(namePill()).toBeNull();
   expect(host!.textContent!.split('customize row look').length - 1).toBe(1);
 });
 
-test.skipIf(!hasDom)('no name: the bar shows the subject, with a tooltip only when it is cut, and no chip', async () => {
+test.skipIf(!hasDom)('no name: the bar holds the subject (shown once the heading scrolls away: threadNameMeta.test.tsx), its tooltip only when cut; no pill', async () => {
   await render(OPENED, false, { ...THREAD, thread_name: null });
-  expect(shownTitle()).toBe(SUBJECT);
-  expect(title().textContent).toBe(SUBJECT);
-  expect(title().hasAttribute('data-header-name')).toBe(false);
-  expect(await tooltipOf(title())).toBeNull();
-  unhover(title());
-  sized(title(), 900, 120);
-  expect(await tooltipOf(title())).toBe(SUBJECT);
-  expect(metaChip()).toBeNull();
+  expect(title()!.textContent).toBe(SUBJECT);
+  expect(heading()!.textContent).toBe(SUBJECT);
+  expect(await tooltipOf(title()!)).toBeNull();
+  unhover(title()!);
+  sized(title()!, 900, 120);
+  expect(await tooltipOf(title()!)).toBe(SUBJECT);
+  expect(namePill()).toBeNull();
 });
 
-test.skipIf(!hasDom)('a name the subject already starts with (or equals): the subject, once, as the list shows it', async () => {
+test.skipIf(!hasDom)('a name equal to the subject, or one the subject starts with: the subject, by the list rule, never the same words twice', async () => {
   for (const [name, subject] of [['Fix login', 'Fix login'], ['fix login', 'Fix login: the token refresh races the logout']] as const) {
     await render(OPENED, false, { ...THREAD, thread_name: name, subject, messages: THREAD.messages.map((m) => (m.id === ROOT ? { ...m, subject } : m)) });
-    expect(title().textContent).toBe(subject);
-    expect(title().hasAttribute('data-header-name')).toBe(false);
-    expect(metaChip()).toBeNull();
+    expect(title()!.textContent).toBe(subject);
+    expect(title()!.hasAttribute('data-header-name')).toBe(false);
+    expect(heading()!.textContent).toBe(subject);
+    expect(namePill()).toBeNull();
     act(() => root?.unmount());
     host?.remove();
     for (const undo of restore.splice(0).reverse()) undo();
