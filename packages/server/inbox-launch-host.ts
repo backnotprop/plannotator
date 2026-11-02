@@ -6,8 +6,10 @@
  *
  *   inbox-launch-claude.ts             Claude Code (`claude --bg`, its settings file, trust)
  *   inbox-launch-claude-permission.ts  Claude Code's permission hook, key and leases
+ *   inbox-launch-codex.ts              Codex (its app-server daemon, over the control socket)
+ *   inbox-launch-codex-permission.ts   Codex's approval requests, pushed over that socket
  *
- * The engine holds `{ "claude-code": claude }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, codex }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
@@ -30,6 +32,16 @@ export interface LaunchHostResult {
   exitCode: number;
   text: string;
 }
+
+/**
+ * What a host did with the Inbox's wake text for one of its sessions (`deliver`): it went in as a turn
+ * (`delivered`, recorded at once), the wake's own way should carry it (`queue`: Codex's `codex queue`, for a
+ * session busy with a turn), it could not (`failed`: tried again later, as a failed `codex queue` is), or it
+ * may have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue`
+ * that ran out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way
+ * either; the item waits in the Inbox (a deleted launch's session, or a reply the person's Stop held).
+ */
+export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 
 /**
  * The folder the person's files sent to an agent sit in (a message's `attachments`). A launched session reads them
@@ -193,6 +205,13 @@ export interface LaunchHost {
    * (why, and what a reply does). Null, or no `stoppedNote`: "Your reply starts it again." (Claude Code).
    */
   stoppedNote?(launch: InboxLaunchRecord): string | null;
+  /**
+   * Only a host whose sessions the Inbox wakes itself (Codex: inbox-codex-wake.ts, no mod poll): the wake text
+   * of a person's item for a launched session goes in as that session's turn. Without it, the wake's own way.
+   * `signal`: the person pressed Stop or Delete meanwhile (the engine waits for this call before it stops the
+   * session): start no turn after it.
+   */
+  deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
   /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
   close?(): void;
 }

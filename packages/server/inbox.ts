@@ -177,6 +177,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
+import type { LaunchDelivery } from "./inbox-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
@@ -422,7 +423,8 @@ export interface InboxServerOptions {
    * Codex CLI besides `agentEnvironment`'s PATH (default: the ChatGPT app's,
    * never under the test sandbox), and how often to look for replies to queue.
    */
-  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
+  /** `deliver`: tests stand in for the launch engine's (what a launched thread's host answers). */
+  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number; deliver?: (session: string, text: string) => Promise<LaunchDelivery> };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
@@ -2393,12 +2395,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session)],
   });
 
+  /** The launch engine exists (the Codex wake is made before it, and its first sweep may already run). */
+  let launchReady = false;
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
   // once each (inbox-codex-wake.ts). Worded like any bridge command.
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A Codex session the Inbox launched: its host puts the item in as a turn (launch is made below; until then, the queue).
+    deliver: options.codexWake?.deliver ?? ((session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve("queue" as const))),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -2508,6 +2514,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The permission hook runs this Plannotator.
     selfCommand,
   });
+  launchReady = true;
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
 
