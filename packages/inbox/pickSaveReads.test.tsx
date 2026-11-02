@@ -301,10 +301,15 @@ test.skipIf(!hasDom)('a save that lands after the pane closed reads the list the
 
 test.skipIf(!hasDom)('a record held for a save is read as the pane closes, the save still out', async () => {
   const field = await open();
-  slow = true;
+  const question = await ownQuestion();
+  // A save that never lands: only the close can read for this record.
+  hang = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
-  reads = [];
+  seq += 1;
+  frame('record', { seq, kind: 'question', id: 'qst_own', question });
+  await wait(120);
+  expect(count('/api/inbox/drafts')).toBe(0);
   await closePane();
   await until(() => count('/api/inbox/drafts') === 1, 'the read the record owed');
 });
