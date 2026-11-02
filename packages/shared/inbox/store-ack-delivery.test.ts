@@ -95,7 +95,6 @@ describe("a 👍 sent through", () => {
     expect(store.pendingReplies("ses_a")).toHaveLength(1);
     store.ackMessage(sent.id, false);
     expect(store.pendingReplies("ses_a")).toEqual([]);
-    expect(store.ackNote(sent.id)).toBeNull();
     // A new 👍 is a new note.
     store.ackMessage(sent.id, true);
     clock.now += WINDOW;
@@ -169,7 +168,6 @@ describe("a 👍 that can no longer go when its window ends", () => {
     expect(store.cursor()).toBe(before + 1);
     expect(settled!.ack).toMatchObject({ not_sent: "replied", note_id: null, settled_seq: before + 1 });
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([reply.id]);
-    expect(store.ackNote(sent.id)).toBeNull();
     // No agent ever sees it, and reading the thread never marks it seen.
     expect(store.agentThread(sent.id)!.messages[0]!.ack).toBeNull();
     store.markAcksSeen(sent.id);

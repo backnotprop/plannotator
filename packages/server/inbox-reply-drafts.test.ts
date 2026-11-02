@@ -238,7 +238,7 @@ describe("reply drafts", () => {
     expect(await total("quiet")).toBe(1);
   });
 
-  test("never in the event log, never seen by an agent: read_thread and wait_for_reply carry none of it", async () => {
+  test("never in the event log, never seen by an agent: read_thread carries none of it", async () => {
     const { server, client, send } = await setup();
     const { thread_id } = await send("The build is green.", "ses_d");
     const cursor = server.store.cursor();
@@ -247,8 +247,6 @@ describe("reply drafts", () => {
     expect(server.store.changesSince(cursor)).toEqual([]);
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id, agent_session: "ses_d" } });
     expect(JSON.stringify(read)).not.toContain("SECRET-DRAFT-WORDS");
-    const waited = await client.callTool({ name: "wait_for_reply", arguments: { thread_id, agent_session: "ses_d", timeout_seconds: 1 } });
-    expect(JSON.stringify(waited)).not.toContain("SECRET-DRAFT-WORDS");
     const search = await (await fetch(url(server, "/api/inbox/search?q=SECRET"))).json();
     expect(JSON.stringify(search)).not.toContain("SECRET-DRAFT-WORDS");
   });

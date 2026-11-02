@@ -419,7 +419,7 @@ describe("send_message's body teaches the Inbox-only Stopped / Holds up lines", 
 });
 
 describe("questions end to end: MCP send, window picks and Send, agent reads", () => {
-  test("send_message with question blocks, pick, Send, wait_for_reply returns the answer", async () => {
+  test("send_message with question blocks, pick, Send, read_thread returns the answer", async () => {
     const root = tempRoot();
     const project = gitProject(root);
     const server = await start(join(root, "data"));
@@ -529,9 +529,6 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     });
     expect(badLabel.status).toBe(422);
 
-    // The agent waits while the person writes their Send.
-    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, timeout_seconds: 20 } });
-    await Bun.sleep(200);
     const sendBody = {
       idempotency_key: "send-1",
       words: "Go ahead.",
@@ -548,13 +545,6 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(sendJson.reply.body).toContain("## Answers to your questions");
     expect(sendJson.reply.body).toContain("Answer: Retry with the same idempotency key (your recommendation)");
 
-    const reply = structured<{ status: string; reply: { body: string; message_id: string }; questions: InboxQuestion[] }>(await waiting);
-    expect(reply.status).toBe("replied");
-    expect(reply.reply.message_id).toBe(sendJson.reply.id);
-    expect(reply.reply.body).toContain("Go ahead.");
-    expect(reply.reply.body).toContain("> Log the Stripe request id.");
-    expect(reply.questions.every((q) => q.state === "sent" && q.sent_reply_id === sendJson.reply.id)).toBe(true);
-
     // Send is idempotent on its key: a retry writes nothing new.
     const retry = await (await post(server, `/api/inbox/messages/${sent.message_id}/reply`, sendBody)).json();
     expect(retry).toMatchObject({ replayed: true, reply: { id: sendJson.reply.id } });
@@ -562,11 +552,16 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect(after.thread.messages).toHaveLength(2);
 
     // read_thread, from the agent's side; then the agent resolves the thread.
-    const read = structured<{ thread: { messages: { author: { kind: string } }[] } }>(
+    const read = structured<{ thread: { messages: { id: string; body: string; author: { kind: string }; questions?: InboxQuestion[] }[] } }>(
       await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id } }),
     );
     expect(read.thread.messages.map((m) => m.author.kind)).toEqual(["agent", "person"]);
-    const mine = structured<{ threads: { thread_id: string }[] }>(
+    const answered = read.thread.messages[1]!;
+    expect(answered.id).toBe(sendJson.reply.id);
+    expect(answered.body).toContain("Go ahead.");
+    expect(answered.body).toContain("> Log the Stripe request id.");
+    expect(read.thread.messages[0]!.questions!.every((q) => q.state === "sent")).toBe(true);
+    const mine =structured<{ threads: { thread_id: string }[] }>(
       await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses_test" } }),
     );
     expect(mine.threads.map((t) => t.thread_id)).toEqual([sent.thread_id]);
@@ -584,20 +579,6 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     const late = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "late", words: "one more" });
     expect(late.status).toBe(409);
     expect((await late.json()).code).toBe("thread_resolved");
-  });
-
-  test("wait_for_reply on a thread already resolved answers at once instead of holding the call", async () => {
-    const root = tempRoot();
-    const server = await start(join(root, "data"));
-    const client = await mcpClient(server);
-    const sent = structured<{ thread_id: string }>(
-      await client.callTool({ name: "send_message", arguments: { body: "Never mind", project_path: gitProject(root) } }),
-    );
-    await client.callTool({ name: "resolve_message", arguments: { message_id: sent.thread_id } });
-    const started = Date.now();
-    const result = structured<{ status: string }>(await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id } }));
-    expect(result.status).toBe("resolved");
-    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   test("a refusal reads as isError with <snake_code>: <message>", async () => {
@@ -652,24 +633,6 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect([...seqs].sort((a, b) => a - b)).toEqual(seqs);
     controller.abort();
   });
-
-  test("wait_for_reply with nothing arriving returns { status: waiting, cursor } within 45-55 s", async () => {
-    const root = tempRoot();
-    const server = await start(join(root, "data"));
-    const client = await mcpClient(server);
-    const sent = structured<{ thread_id: string }>(
-      await client.callTool({ name: "send_message", arguments: { body: "Anyone there?", project_path: gitProject(root) } }),
-    );
-    const started = Date.now();
-    const result = structured<{ status: string; cursor: number }>(
-      await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id } }, { timeout: 70_000 }),
-    );
-    const elapsed = Date.now() - started;
-    expect(result.status).toBe("waiting");
-    expect(typeof result.cursor).toBe("number");
-    expect(elapsed).toBeGreaterThanOrEqual(45_000);
-    expect(elapsed).toBeLessThan(55_000);
-  }, 70_000);
 });
 
 describe("the window's routes: settings, restart, favicon", () => {

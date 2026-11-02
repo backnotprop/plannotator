@@ -82,7 +82,7 @@ plannotator/
 │   │   ├── review.ts             # startReviewServer(), handleReviewServerReady()
 │   │   ├── annotate.ts           # startAnnotateServer(), handleAnnotateServerReady()
 │   │   ├── inbox.ts              # startInboxServer(), handleInboxServerReady(): the Plannotator Inbox (Bun-only, loopback-only; see "Plannotator Inbox")
-│   │   ├── inbox-mcp.ts          # The Inbox's MCP tools (send_message, read_thread, resolve_message, wait_for_reply, get_guide_brief, submit_guide)
+│   │   ├── inbox-mcp.ts          # The Inbox's MCP tools (send_message, read_thread, resolve_message, get_guide_brief, submit_guide)
 │   │   ├── inbox-tailscale.ts    # "Over your tailnet": `plannotator inbox --tailscale`, the owner-only tailnet listener and its serve mapping (see "Plannotator Inbox")
 │   │   ├── storage.ts            # Re-exports from @plannotator/shared/storage
 │   │   ├── share-url.ts          # Server-side share URL generation for remote sessions
