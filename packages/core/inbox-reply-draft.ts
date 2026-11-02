@@ -5,8 +5,10 @@
  * "ideally it just syncs").
  *
  * Two halves, both browser-safe (no `node:`):
- *  - the rules every draft store runs, as pure functions: what a save keeps,
- *    how two windows' file changes merge, and what a Send leaves;
+ *  - the rules every draft store runs, as pure functions: a save carries the
+ *    box's file changes (added, removed, placed) and the store applies them to
+ *    the draft's files as they are, so two windows' changes never overwrite
+ *    each other; and what a Send leaves;
  *  - the seam a host plugs its storage into (`ReplyDraftStore`,
  *    `DraftFileUploader`). The Plannotator Inbox's adapters are HTTP
  *    (packages/inbox/replyDraftHttp.ts): drafts in `inbox/reply-drafts/`,
@@ -26,23 +28,60 @@ export interface ReplyDraftFileRef {
 }
 
 /**
- * Two windows changed one draft's files: this window's own change (what it
- * added and removed since `base`, the ids it last read or saved) applied to
- * `theirs`, the list the store holds now. Add and remove commute, so files two
- * windows attach at the same time both stay, and a file either one removed
- * goes. Order: theirs, then what this window added. A file both lists hold
- * takes this window's entry (its long paste's place follows this window's words).
+ * A save's file changes, relative to what that window's box last held: files it
+ * added (`add`, each with its place when a long paste), ids it removed
+ * (`remove`), and the current place of long pastes it still holds (`place`).
+ * The Inbox applies them to the draft's files as they are then
+ * (`applyReplyDraftFileOps`), so a save never touches a file it does not name:
+ * another window's file stays, and one another window removed stays removed.
  */
-export function mergeReplyDraftFiles<F extends { upload_id: string }>(base: readonly string[], mine: readonly F[], theirs: readonly F[]): F[] {
-  const before = new Set(base);
-  const mineIds = new Set(mine.map((file) => file.upload_id));
-  const theirIds = new Set(theirs.map((file) => file.upload_id));
-  const removed = new Set(base.filter((id) => !mineIds.has(id)));
-  const ownEntry = new Map(mine.map((file) => [file.upload_id, file]));
-  return [
-    ...theirs.filter((file) => !removed.has(file.upload_id)).map((file) => ownEntry.get(file.upload_id) ?? file),
-    ...mine.filter((file) => !before.has(file.upload_id) && !theirIds.has(file.upload_id)),
-  ];
+export interface ReplyDraftFileOps<F extends ReplyDraftFileRef = ReplyDraftFileRef> {
+  add: F[];
+  remove: string[];
+  place: { upload_id: string; pasted: InboxDraftPasted }[];
+}
+
+export const NO_FILE_OPS: ReplyDraftFileOps = { add: [], remove: [], place: [] };
+
+/**
+ * The draft's files after a save's changes: removed ids go, an added file joins
+ * (once; one already there takes the added entry's place), and a long paste
+ * still there takes its new place. A change for a file the draft does not hold
+ * (removed, or placed) does nothing. Applying the same changes twice is the
+ * same as once.
+ */
+export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(existing: readonly F[], ops: ReplyDraftFileOps<F>): F[] {
+  const removed = new Set(ops.remove);
+  const added = new Map(ops.add.map((file) => [file.upload_id, file]));
+  const places = new Map(ops.place.map((entry) => [entry.upload_id, entry.pasted]));
+  const kept = existing
+    .filter((file) => !removed.has(file.upload_id))
+    .map((file) => {
+      const again = added.get(file.upload_id);
+      if (again) return again;
+      const pasted = places.get(file.upload_id);
+      return pasted && file.pasted ? { ...file, pasted } : file;
+    });
+  const here = new Set(kept.map((file) => file.upload_id));
+  return [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
+}
+
+/** What changed from `before` (ids) to `after` (the box's files): added files and removed ids. */
+export function diffReplyDraftFiles<F extends ReplyDraftFileRef>(before: readonly string[], after: readonly F[]): ReplyDraftFileOps<F> {
+  const was = new Set(before);
+  const now = new Set(after.map((file) => file.upload_id));
+  return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [] };
+}
+
+/** `first`, then `then`: one set of changes (the later says last for an id). */
+export function composeReplyDraftFileOps<F extends ReplyDraftFileRef>(first: ReplyDraftFileOps<F>, then: ReplyDraftFileOps<F>): ReplyDraftFileOps<F> {
+  const touched = new Set([...then.add.map((file) => file.upload_id), ...then.remove]);
+  const placed = new Set(then.place.map((entry) => entry.upload_id));
+  return {
+    add: [...first.add.filter((file) => !touched.has(file.upload_id)), ...then.add],
+    remove: [...first.remove.filter((id) => !touched.has(id)), ...then.remove],
+    place: [...first.place.filter((entry) => !placed.has(entry.upload_id)), ...then.place],
+  };
 }
 
 /**
@@ -99,21 +138,23 @@ export function settleReplyDraftAfterSend<F extends { upload_id: string; pasted?
 /** A save as the window sends it to its draft store. */
 export interface ReplyDraftSaveInput {
   body: string;
-  /** The version this window last knew (`updated_at` here), or null for none: a compare-and-set. */
+  /**
+   * The version this window last knew (`updated_at` here), or null for none: a compare-and-set on the words. A
+   * save is refused (`draft_conflict`) only when the draft's words changed elsewhere: another window's file
+   * changes never refuse it.
+   */
   base: string | null;
-  /** The words this window saved last, for a save a step behind on `base`. */
+  /** The words this window saved last, for a save a step behind on `base` (the draft still holding them is its own). */
   baseBody: string | null;
-  /** Every finished file in the box. */
-  files: readonly ReplyDraftFileRef[];
-  /** The refs this window saved last (with `baseBody`). */
-  baseFiles: readonly string[] | null;
+  /** The box's file changes since it last held the draft's files: the store applies them (`applyReplyDraftFileOps`). */
+  files: ReplyDraftFileOps;
 }
 
 /**
- * Where a host keeps reply drafts. A refusal rejects with an error carrying
- * `code`: `draft_conflict` (another window changed it; the store's newer draft
- * is read with `read`), `validation_error` (its `message` says which field),
- * or `upload_not_found` (`field`: `files[i]`, a file whose bytes are gone).
+ * Where a host keeps reply drafts. `save` answers the draft as it is then (its files after this save's changes and
+ * every other window's). A refusal rejects with an error carrying `code`: `draft_conflict` (the words changed in
+ * another window; the store's newer draft is read with `read`) or `validation_error` (its `message` says which
+ * field). A file added whose bytes are gone (sent or swept) is not added; the save does not fail for it.
  */
 export interface ReplyDraftStore {
   read(threadId: string): Promise<InboxReplyDraft | null>;

@@ -125,14 +125,14 @@ import {
   type InboxDraftFile,
   type InboxInlineImage,
 } from "@plannotator/core/inbox-types";
-import { replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
+import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
 import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
@@ -4703,12 +4703,30 @@ export class InboxStore {
    */
   saveReplyDraft(
     threadId: string,
-    input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown; all_files?: unknown },
+    input: InboxReplyDraftInput,
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
+    if (ops) {
+      // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
+      // Only the words are compared: a file change elsewhere never refuses this save.
+      const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
+      if ((existing?.updated_at ?? null) !== base && !ownWords) {
+        throw new InboxError(
+          "draft_conflict",
+          existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
+          { draft: existing },
+        );
+      }
+      const after = applyReplyDraftFileOps(existing?.files ?? [], ops);
+      if (body.trim() === "" && after.length === 0) {
+        this.deleteReplyDraft(threadId);
+        return null;
+      }
+      return this.writeReplyDraft(threadId, existing, body, after);
+    }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
     const files = replyDraftFilesAfterSave(existing?.files ?? [], incoming, allFiles);

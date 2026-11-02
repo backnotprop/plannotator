@@ -565,6 +565,63 @@ describe("reply drafts keep every attached file", () => {
     expect(page.replies.find((row) => row.thread_id === thread_id)?.reply_preview).toBe("dashboard.png");
   });
 
+  test("a page's file changes apply to the files as they are: another window's file stays, one it removed stays out, and only the words refuse a save", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the dashboard.", "ses_f9");
+    const mine = await upload(server, "mine.png", PNG);
+    const theirs = await upload(server, "theirs.png", Uint8Array.from([...PNG, 1]));
+    const later = await upload(server, "later.png", Uint8Array.from([...PNG, 2]));
+    const first = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files_add: [mine.upload_id], files_remove: [], files_place: [] })))!;
+    expect(ids(first)).toEqual([mine.upload_id]);
+    // Another window adds its file (a step ahead of this one).
+    const other = (await draftOf(await save(server, thread_id, { body: "Shots", base: first.updated_at, base_body: "Shots", files_add: [theirs.upload_id], files_remove: [], files_place: [] })))!;
+    // This window, a version behind, adds one more and names nothing else: theirs stays. Its words are its own (base_body).
+    const behind = await save(server, thread_id, { body: "Shots, both", base: first.updated_at, base_body: "Shots", files_add: [later.upload_id], files_remove: [], files_place: [] });
+    expect(behind.status).toBe(200);
+    const both = (await draftOf(behind))!;
+    expect(ids(both)).toEqual([mine.upload_id, theirs.upload_id, later.upload_id]);
+    expect(both.updated_at > other.updated_at).toBe(true);
+    // Removing a file another window already removed, and adding one twice, change nothing more.
+    const again = (await draftOf(await save(server, thread_id, { body: "Shots, both", base: both.updated_at, files_add: [later.upload_id], files_remove: [mine.upload_id], files_place: [] })))!;
+    expect(ids(again)).toEqual([theirs.upload_id, later.upload_id]);
+    const twice = (await draftOf(await save(server, thread_id, { body: "Shots, both", base: again.updated_at, files_add: [], files_remove: [mine.upload_id], files_place: [] })))!;
+    expect(ids(twice)).toEqual([theirs.upload_id, later.upload_id]);
+    // Different words from elsewhere do refuse it, with the newer draft.
+    await save(server, thread_id, { body: "Other words", base: twice.updated_at, files_add: [], files_remove: [], files_place: [] });
+    const refused = await save(server, thread_id, { body: "Mine", base: twice.updated_at, base_body: "Shots, both", files_add: [], files_remove: [theirs.upload_id], files_place: [] });
+    expect(refused.status).toBe(409);
+    expect(ids((await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json() as { draft: InboxReplyDraft }).draft)).toEqual([theirs.upload_id, later.upload_id]);
+  });
+
+  test("a page's added file whose upload is gone (sent or swept) is left out and the save lands; a long paste's place follows; nothing left deletes the draft", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the log.", "ses_f10");
+    const gone = await upload(server, "gone.png", PNG);
+    const paste = await upload(server, "pasted-text.txt", LOG);
+    rmSync(join(server.store.dir, "uploads", "pending", `${gone.upload_id}.json`), { force: true });
+    const saved = await save(server, thread_id, {
+      body: "Log: ",
+      base: null,
+      files_add: [gone.upload_id, { upload_id: paste.upload_id, pasted: { at: 5, preview: "2026-11-01" } }],
+      files_remove: [],
+      files_place: [],
+    });
+    expect(saved.status).toBe(200);
+    const draft = (await draftOf(saved))!;
+    expect(ids(draft)).toEqual([paste.upload_id]);
+    // The words grew before the paste: its place moves with them; a place for a file not in the draft does nothing.
+    const moved = (await draftOf(
+      await save(server, thread_id, { body: "The log: ", base: draft.updated_at, files_add: [], files_remove: [], files_place: [{ upload_id: paste.upload_id, pasted: { at: 9, preview: "2026-11-01" } }, { upload_id: gone.upload_id, pasted: { at: 0, preview: "x" } }] }),
+    ))!;
+    expect(moved.files!.map((file) => [file.upload_id, file.pasted?.at])).toEqual([[paste.upload_id, 9]]);
+    // No words and no file left: the draft goes.
+    const emptied = await save(server, thread_id, { body: "", base: moved.updated_at, files_add: [], files_remove: [paste.upload_id], files_place: [] });
+    expect(await draftOf(emptied)).toBeNull();
+    // A malformed change is refused, naming its field.
+    const bad = await save(server, thread_id, { body: "x", base: null, files_add: [], files_remove: "nope", files_place: [] });
+    expect(bad.status).toBe(422);
+  });
+
   test("the compare-and-set covers every file, and base_files names them: a save a step behind holds only while the draft holds what it saved last", async () => {
     const { server, send } = await setup();
     const { thread_id } = await send("Here is the dashboard.", "ses_f2");

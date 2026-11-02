@@ -31,7 +31,8 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
-import { checkInboxDraftFiles, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
 
 export const INBOX_REPLY_DRAFTS_DIR = "reply-drafts";
@@ -107,7 +108,7 @@ export function sameInboxUploadIds(a: readonly string[], b: readonly string[]): 
  */
 export function checkInboxReplyDraftInput(
   inboxDirPath: string,
-  input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown; all_files?: unknown },
+  input: InboxReplyDraftInput,
 ): {
   body: string;
   base: string | null;
@@ -115,6 +116,8 @@ export function checkInboxReplyDraftInput(
   files: InboxDraftFile[];
   baseFiles: string[] | null;
   allFiles: boolean;
+  /** The file changes this save makes (an Inbox page that sends them), applied to the draft's files as they are. */
+  ops: ReplyDraftFileOps<InboxDraftFile> | null;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -131,7 +134,29 @@ export function checkInboxReplyDraftInput(
     throw new InboxError("validation_error", "base_files: the upload ids this window saved last, or null.", { field: "base_files" });
   }
   const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length);
-  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true };
+  const opsGiven = input.files_add !== undefined || input.files_remove !== undefined || input.files_place !== undefined;
+  const ops = opsGiven
+    ? {
+        // A file sent or swept since is not added: the save never fails for it (no retry, no loop).
+        add: checkInboxDraftFiles(inboxDirPath, input.files_add, body.length, { list: "files_add", skipGone: true }),
+        remove: checkInboxDraftIds(input.files_remove, "files_remove"),
+        place: checkInboxDraftPlaces(input.files_place, body.length, "files_place"),
+      }
+    : null;
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops };
+}
+
+/** What a reply draft save may carry (`POST /api/inbox/threads/:id/draft`). */
+export interface InboxReplyDraftInput {
+  body?: unknown;
+  base?: unknown;
+  base_body?: unknown;
+  files?: unknown;
+  base_files?: unknown;
+  all_files?: unknown;
+  files_add?: unknown;
+  files_remove?: unknown;
+  files_place?: unknown;
 }
 
 /** Write one draft whole (owner-only folder and file). */

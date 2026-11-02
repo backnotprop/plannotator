@@ -422,7 +422,7 @@ test.skipIf(!hasDom)("a paste still uploading stays when another window saves th
   expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
 }, 30_000);
 
-test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others, and the restart guard asks for the one it lost', async () => {
+test.skipIf(!hasDom)('one paste a phone sent: the draft and the box keep the others, and the next save never names it again', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, BEFORE + AFTER, BEFORE.length);
@@ -443,13 +443,18 @@ test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others
 
   // A phone's Send carries the first paste: its upload is no longer pending, and the server's draft drops it.
   await phoneSend([first!]);
-  // The next save here still names both; refused for the first, it saves the second beside the words, as this window's own.
+  // The next save here changes the words only: the draft keeps the second paste, and the box follows the draft (the
+  // first paste is an attachment of the phone's reply now, not this box's to send again).
   type(replyText(el)!, `${BEFORE}${AFTER} Thanks.`);
   await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks.`, 'the words saved');
   expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
-  // The first tile is still in the box but no longer in any draft: a restart would lose it.
-  expect(pastedTiles(el).length).toBe(2);
-  expect(unsentReply()).not.toBeNull();
+  await until(() => pastedTiles(el).length === 1, 'the sent paste out of the box');
+  await until(() => unsentReply() === null, 'the guard at rest after the phone sent one');
+  const before = posted.length;
+  type(replyText(el)!, `${BEFORE}${AFTER} Thanks!`);
+  await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks!`, 'one more key saved');
+  expect(posted.slice(before).some((p) => JSON.stringify(p.body).includes(first!))).toBe(false);
+  expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
 }, 30_000);
 
 test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the tile and the words stay', async () => {

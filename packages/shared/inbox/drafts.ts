@@ -149,10 +149,10 @@ function checkCard(value: unknown): InboxDraft["card"] | null {
 }
 
 /** A long paste's place in a draft's words (`InboxDraftPasted`), checked; null when the file is not one. */
-function checkPasted(value: unknown, index: number, bodyLength: number): InboxDraftPasted | null {
+function checkPasted(value: unknown, index: number, bodyLength: number, list = "files"): InboxDraftPasted | null {
   if (value === undefined || value === null) return null;
   const pasted = value as Record<string, unknown>;
-  const field = `files[${index}].pasted`;
+  const field = `${list}[${index}].pasted`;
   if (typeof value !== "object" || Array.isArray(value)) throw new InboxError("validation_error", `${field}: { at, lead?, preview } or null.`, { field });
   const at = pasted.at;
   if (typeof at !== "number" || !Number.isInteger(at) || at < 0 || at > bodyLength) {
@@ -175,19 +175,52 @@ function checkPasted(value: unknown, index: number, bodyLength: number): InboxDr
  * it goes back in the words (`pasted`, approval "inbox-paste-attachment").
  * New message's drafts and reply drafts check their files alike.
  */
-export function checkInboxDraftFiles(inboxDirPath: string, input: unknown, bodyLength: number): InboxDraftFile[] {
+export function checkInboxDraftFiles(
+  inboxDirPath: string,
+  input: unknown,
+  bodyLength: number,
+  how: { list?: string; skipGone?: boolean } = {},
+): InboxDraftFile[] {
+  const list = how.list ?? "files";
   const files: InboxDraftFile[] = [];
   const listed = input === undefined || input === null ? [] : input;
-  if (!Array.isArray(listed)) throw new InboxError("validation_error", "files: a list of upload ids.", { field: "files" });
+  if (!Array.isArray(listed)) throw new InboxError("validation_error", `${list}: a list of upload ids.`, { field: list });
   listed.forEach((entry, index) => {
     const object = entry && typeof entry === "object" ? (entry as { upload_id?: unknown; pasted?: unknown }) : null;
     const uploadId = typeof entry === "string" ? entry : object ? object.upload_id : null;
-    const pasted = checkPasted(object?.pasted, index, bodyLength);
+    const pasted = checkPasted(object?.pasted, index, bodyLength, list);
     const upload = readInboxUpload(inboxDirPath, uploadId);
-    if (!upload) throw new InboxError("upload_not_found", `files[${index}]: that file is no longer here; attach it again.`, { field: `files[${index}]` });
+    if (!upload) {
+      // `skipGone`: a file sent or swept since is simply not added (a reply draft's added files).
+      if (how.skipGone) return;
+      throw new InboxError("upload_not_found", `${list}[${index}]: that file is no longer here; attach it again.`, { field: `${list}[${index}]` });
+    }
     if (!files.some((file) => file.upload_id === upload.upload_id)) files.push(pasted ? { ...upload, pasted } : upload);
   });
   return files;
+}
+
+/** Long pastes' places in the words: `{ upload_id, pasted }` each (a place for a file the draft does not hold is ignored). */
+export function checkInboxDraftPlaces(input: unknown, bodyLength: number, list: string): { upload_id: string; pasted: InboxDraftPasted }[] {
+  const listed = input === undefined || input === null ? [] : input;
+  if (!Array.isArray(listed)) throw new InboxError("validation_error", `${list}: a list of { upload_id, pasted }.`, { field: list });
+  return listed.map((entry, index) => {
+    const object = entry && typeof entry === "object" ? (entry as { upload_id?: unknown; pasted?: unknown }) : null;
+    const pasted = checkPasted(object?.pasted, index, bodyLength, list);
+    if (!object || typeof object.upload_id !== "string" || !pasted) {
+      throw new InboxError("validation_error", `${list}[${index}]: { upload_id, pasted }.`, { field: `${list}[${index}]` });
+    }
+    return { upload_id: object.upload_id, pasted };
+  });
+}
+
+/** Upload ids, as strings (a reply draft's removed files). */
+export function checkInboxDraftIds(input: unknown, list: string): string[] {
+  const listed = input === undefined || input === null ? [] : input;
+  if (!Array.isArray(listed) || listed.some((id) => typeof id !== "string")) {
+    throw new InboxError("validation_error", `${list}: a list of upload ids.`, { field: list });
+  }
+  return listed as string[];
 }
 
 /**

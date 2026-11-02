@@ -19,26 +19,26 @@ export const KEEPALIVE_BODY_MAX = 60 * 1024;
 
 /**
  * The page's last save as a fetch's `body` and `keepalive`. Whole when it fits a keepalive. Larger (a long draft
- * whose last save's words, `base_body`, double it), it goes without `base_body` and `base_files`: the words alone,
- * compared on `base` only. Still larger (the words themselves over the limit), it goes as an ordinary fetch: sent
- * as the page goes, it lands only if the page lives long enough to send it.
+ * whose last save's words, `base_body`, double it), it goes without `base_body`: the words alone, compared on
+ * `base` only. Still larger (the words themselves over the limit), it goes as an ordinary fetch: sent as the page
+ * goes, it lands only if the page lives long enough to send it.
  */
 export function keepaliveBody(full: Record<string, unknown>): { body: string; keepalive: boolean } {
   const fits = (text: string) => new TextEncoder().encode(text).length <= KEEPALIVE_BODY_MAX;
   const whole = JSON.stringify(full);
   if (fits(whole)) return { body: whole, keepalive: true };
-  const { base_body: _baseBody, base_files: _baseFiles, ...words } = full;
+  const { base_body: _baseBody, ...words } = full;
   const lean = JSON.stringify(words);
   return { body: lean, keepalive: fits(lean) };
 }
 
-const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, input.base, input.baseBody, input.files, input.baseFiles);
+const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, input.base, input.baseBody, input.files);
 
 /** Reply drafts on this computer's Inbox. */
 export const httpReplyDraftStore: ReplyDraftStore = {
   read: async (threadId) => (await inboxApi.replyDraft(threadId)).draft ?? null,
   save: async (threadId, input, options) => {
-    if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.baseFiles);
+    if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files);
     // As the page goes: its answer is never read (the window reads the draft back when it comes back).
     const session = pageServerSession();
     void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`), {
