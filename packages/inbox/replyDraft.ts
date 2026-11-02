@@ -224,11 +224,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   const held = useRef(new Map<string, readonly string[]>());
   /** Per thread: the saves queued or in flight, oldest first. */
   const queued = useRef(new Map<string, QueuedSave[]>());
-  /**
-   * Per thread, per file: the last change of this window's that landed (`add` or `remove`). A save queued before
-   * it does not send the same change again (so it never brings back a file another window removed since).
-   */
-  const landedAs = useRef(new Map<string, Map<string, 'add' | 'remove'>>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = useRef(threadId);
   current.current = threadId;
@@ -285,22 +280,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     const ops = carried.get(target) ?? NO_FILE_OPS;
     if (carried.delete(target)) unsavedChanged();
     return ops;
-  };
-  /** Without the changes this window already landed (a save queued before them must not send them again). */
-  const fresh = (target: string, ops: ReplyDraftFileOps): ReplyDraftFileOps => {
-    const landed = landedAs.current.get(target);
-    if (!landed) return ops;
-    return {
-      add: ops.add.filter((file) => landed.get(file.upload_id) !== 'add'),
-      remove: ops.remove.filter((id) => landed.get(id) !== 'remove'),
-      place: ops.place,
-    };
-  };
-  const landed = (target: string, ops: ReplyDraftFileOps) => {
-    let map = landedAs.current.get(target);
-    if (!map) landedAs.current.set(target, (map = new Map()));
-    for (const file of ops.add) map.set(file.upload_id, 'add');
-    for (const id of ops.remove) map.set(id, 'remove');
   };
   /** Every change of this window's not landed yet, oldest first: left over, queued, waiting for the pause. */
   const outstanding = (target: string): ReplyDraftFileOps => {
@@ -413,7 +392,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
           handOn();
           return;
         }
-        const ops = fresh(target, save.ops);
+        const ops = save.ops;
         let answer: { draft: InboxReplyDraft | null };
         sentWords.current.set(target, text);
         try {
@@ -466,7 +445,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         }
         leave();
         if (generation !== generationOf(target)) return;
-        landed(target, ops);
         markRefused(target, false);
         learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
@@ -477,7 +455,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         const latest = await readDraft(target);
         if (generation === generationOf(target) && !claimed.current.has(target) && holds(latest, text, save.ops)) {
           leave();
-          landed(target, save.ops);
           markRefused(target, false);
           learn(target, latest!);
           show(target, latest!);
@@ -530,7 +507,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       pending.current = null;
       if (timer.current) clearTimeout(timer.current);
       if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
-      const ops = fresh(next.threadId, composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops));
+      const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
         .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops }, { keepalive: true })
@@ -550,7 +527,6 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         const latest = await readDraft(kept.threadId);
         if (kept.generation !== generationOf(kept.threadId) || !holds(latest, kept.text, kept.ops)) return;
         takeCarried(kept.threadId);
-        landed(kept.threadId, kept.ops);
         learn(kept.threadId, latest!);
         show(kept.threadId, latest!);
         boxTakes(kept.threadId, latest!);
