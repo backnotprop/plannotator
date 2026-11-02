@@ -6,11 +6,15 @@
  * nothing here has storage of its own: the `plannotator-theme` cookie and
  * config.json `theme`, and config.json `inboxTextSize` with its cookie.
  *
- * What the step opened with is kept, so Skip puts it back (`restore`, through
- * the card's handle); the card's Next ("Connect agents next") keeps what was
- * picked. Under the colour sets, how many more Settings offers (counted from
- * the palette registry), with the link to Settings → General. A colour set is picked for
- * both halves at once (the three offered draw both); Settings still picks a
+ * Skip puts back only what the card itself changed, each field to its value
+ * just before the card first changed it (`restore`, through the card's
+ * handle): never a snapshot from the card's first render, which can come
+ * before the first settings read and would write the cookie's or the default
+ * values over config.json. Before writing, Skip reads the settings again and
+ * leaves a field another window changed since. The card's Next ("Connect
+ * agents next") keeps what was picked. Under the colour sets, how many more
+ * Settings offers (counted from the palette registry), with the link to
+ * Settings → General. A colour set is picked for both halves at once (the three offered draw both); Settings still picks a
  * palette per half, and offers every palette. No keyboard shortcut: each
  * control is a native radio group, one tab stop, the arrows move the pick.
  */
@@ -20,6 +24,7 @@ import { paletteSwatchColors } from '@plannotator/ui/components/ThemeTab';
 import { BUILT_IN_THEMES, type ThemeColors, type ThemeHalf, type ThemeInfo } from '@plannotator/ui/utils/themeRegistry';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { INBOX_TEXT_SIZES, type InboxTextSize } from '@plannotator/core/inbox-types';
+import { inboxApi } from '../api';
 import { Icon } from '../icons';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
@@ -63,36 +68,75 @@ function MiniWindow({ colors }: { colors: ThemeColors }) {
   );
 }
 
-interface Opened {
+interface Fields {
   mode: Mode;
   light: string;
   dark: string;
   size: InboxTextSize;
 }
+type Field = keyof Fields;
+
+/** One field the card changed: its value just before the card's first change, and the card's latest pick. */
+interface Changed<K extends Field> {
+  before: Fields[K];
+  wrote: Fields[K];
+}
+type ChangedFields = { [K in Field]?: Changed<K> };
+
+/** config.json's value of each field, from a settings read (undefined: never saved, or the read failed). */
+function savedFields(settings: { theme?: { mode?: unknown; light?: unknown; dark?: unknown } | null; text_size?: unknown } | null): Partial<Record<Field, unknown>> {
+  return { mode: settings?.theme?.mode, light: settings?.theme?.light, dark: settings?.theme?.dark, size: settings?.text_size };
+}
+
+/**
+ * The fields Skip puts back: each one the card changed, unless config.json now holds a third value (another
+ * window changed it since; the card's write may still be on its way, so its own pick or the value before it
+ * both count as untouched).
+ */
+export function tourSkipRestores(changed: ChangedFields, saved: Partial<Record<Field, unknown>>): Partial<Fields> {
+  const out: Partial<Fields> = {};
+  for (const field of Object.keys(changed) as Field[]) {
+    const c = changed[field]!;
+    // Changed and changed back: nothing to put back.
+    if (c.before === c.wrote) continue;
+    const now = saved[field];
+    if (now !== undefined && now !== c.before && now !== c.wrote) continue;
+    (out as Record<Field, unknown>)[field] = c.before;
+  }
+  return out;
+}
 
 export interface TourSettingsHandle {
-  /** Skip: put back what the step opened with (only what changed is written again). */
-  restore: () => void;
+  /** Skip: put back what the card itself changed, each to its value just before (never a whole snapshot). */
+  restore: () => Promise<void>;
 }
 
 export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => void }>(function TourSettings({ onSettings }, ref) {
   const theme = useInboxTheme();
   const palettes = useInboxPalettes();
   const size = useInboxTextSize();
-  const opened = useRef<Opened | null>(null);
-  if (!opened.current) opened.current = { mode: theme.mode, light: palettes.pair.light, dark: palettes.pair.dark, size };
+  const changed = useRef<ChangedFields>({});
   const now = useRef({ theme, palettes, size });
   now.current = { theme, palettes, size };
+  /** The card changes `field` from `before` to `to`: the first change keeps `before`, every change keeps `to`. */
+  const note = <K extends Field>(field: K, before: Fields[K], to: Fields[K]) => {
+    const c = (changed.current[field] ??= { before, wrote: to } as ChangedFields[K]) as Changed<K>;
+    c.wrote = to;
+  };
   useImperativeHandle(
     ref,
     () => ({
-      restore: () => {
-        const was = opened.current!;
-        const { theme: t, palettes: p, size: s } = now.current;
-        if (t.mode !== was.mode) t.choose(was.mode);
-        if (p.pair.light !== was.light) p.choose('light', was.light);
-        if (p.pair.dark !== was.dark) p.choose('dark', was.dark);
-        if (s !== was.size) void chooseTextSize(was.size);
+      restore: async () => {
+        const mine = { ...changed.current };
+        changed.current = {};
+        if (Object.keys(mine).length === 0) return;
+        const { theme: t, palettes: p } = now.current;
+        const saved = savedFields(await inboxApi.settings().catch(() => null));
+        const back = tourSkipRestores(mine, saved);
+        if (back.mode !== undefined) t.choose(back.mode);
+        if (back.light !== undefined) p.choose('light', back.light);
+        if (back.dark !== undefined) p.choose('dark', back.dark);
+        if (back.size !== undefined) await chooseTextSize(back.size);
       },
     }),
     [],
@@ -111,7 +155,16 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
             const on = theme.mode === choice.id;
             return (
               <label key={choice.id} className="ib-tset-tile ib-tset-mode" data-on={on ? '' : undefined} data-tour-mode={choice.id}>
-                <input type="radio" name="ib-tset-mode" value={choice.id} checked={on} onChange={() => theme.choose(choice.id)} />
+                <input
+                  type="radio"
+                  name="ib-tset-mode"
+                  value={choice.id}
+                  checked={on}
+                  onChange={() => {
+                    note('mode', theme.mode, choice.id);
+                    theme.choose(choice.id);
+                  }}
+                />
                 {choice.id === 'system' ? (
                   <span className="ib-tset-split" aria-hidden="true">
                     <MiniWindow colors={colorsOf(palettes.pair.light, 'light')} />
@@ -148,6 +201,8 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
                   aria-label={set.name}
                   onChange={() => {
                     // Both halves: one POST of { light, dark } (theme.ts batches the marks).
+                    note('light', palettes.pair.light, set.id);
+                    note('dark', palettes.pair.dark, set.id);
                     palettes.choose('light', set.id);
                     palettes.choose('dark', set.id);
                   }}
@@ -186,7 +241,17 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
         <span className="ib-seg" role="radiogroup" aria-labelledby="ib-tset-size">
           {INBOX_TEXT_SIZES.map((n) => (
             <label key={n} className="ib-seg-o" data-on={size === n ? '' : undefined}>
-              <input type="radio" name="ib-tset-size" value={n} checked={size === n} aria-label={`${n} px`} onChange={() => void chooseTextSize(n)} />
+              <input
+                type="radio"
+                name="ib-tset-size"
+                value={n}
+                checked={size === n}
+                aria-label={`${n} px`}
+                onChange={() => {
+                  note('size', size, n);
+                  void chooseTextSize(n);
+                }}
+              />
               {n}
             </label>
           ))}

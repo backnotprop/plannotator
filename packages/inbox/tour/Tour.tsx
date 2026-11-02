@@ -301,7 +301,10 @@ function watchModality(): void {
   if (modalityWatched || typeof document === 'undefined') return;
   modalityWatched = true;
   document.addEventListener('keydown', (event) => {
-    if (!event.metaKey && !event.ctrlKey && !event.altKey) keyboardLast = true;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    keyboardLast = true;
+    // A key on a quietly focused title (an arrow to scroll) brings its ring back.
+    (document.activeElement as HTMLElement | null)?.removeAttribute?.('data-quiet-focus');
   }, true);
   document.addEventListener('pointerdown', () => {
     keyboardLast = false;
@@ -720,7 +723,8 @@ export function TourCoach({
             type="button"
             className="ib-tc-back"
             onClick={() => {
-              settingsRef.current?.restore();
+              // Puts back what the card changed (after one settings read), while the tour goes on.
+              void settingsRef.current?.restore();
               onSkip();
             }}
             data-tour-skip=""

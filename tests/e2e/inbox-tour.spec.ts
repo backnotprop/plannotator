@@ -532,6 +532,9 @@ test('keyboard only: Tab and Enter through the coach cards, focus never on the p
   await page.keyboard.press('Enter');
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '1');
   await focusKept(page);
+  // Reached by a key: the next card's title has focus and shows its ring (only a click or a tap keeps it quiet).
+  await expect(coach(page).locator('h2')).toBeFocused();
+  await expect(coach(page).locator('h2')).not.toHaveCSS('outline-style', 'none');
   // The thread's row by keyboard.
   await page.locator('[data-thread-id="tour-vscode"]').first().focus();
   await page.keyboard.press('Enter');
@@ -1021,7 +1024,7 @@ test('step 11 and after a reload: every way out leaves the tour behind; from ste
     await pastIntro(page);
   };
   // Reached by its address: step 11 is the person's own Inbox, whatever came before.
-  const toStep9 = async () => {
+  const toStep11 = async () => {
     // In the tour's own history entry, as a step change is.
     await page.evaluate(() => {
       location.replace('#tour=11');
@@ -1043,7 +1046,7 @@ test('step 11 and after a reload: every way out leaves the tour behind; from ste
   const finishedAt = () => config(w).inboxTour?.finished_at ?? null;
 
   await fromSettings();
-  await toStep9();
+  await toStep11();
   const before = finishedAt();
   await page.getByRole('button', { name: 'How to allow' }).click();
   await expect(page).toHaveURL(/#settings\/general$/);
@@ -1055,7 +1058,7 @@ test('step 11 and after a reload: every way out leaves the tour behind; from ste
 
   for (const row of ['[data-inbox-nav]', '.ib-setrow .ib-nav']) {
     await fromSettings();
-    await toStep9();
+    await toStep11();
     const was = finishedAt();
     await page.locator(row).first().click();
     await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
@@ -1121,3 +1124,79 @@ test('the fixture routes: read only, embedded in the binary, the film by range, 
     expect(served.equals(readFileSync(join(content, name))), name).toBe(true);
   }
 });
+
+// The narrowest phones (the reviewer's 320 and 390 px probe, kept as a test): at 14 and at 15 px text, "Make it yours" stays
+// inside the screen, three tiles a row, no caption cut, 44 px targets, the buttons one line each.
+for (const width of [320, 390]) {
+  test(`"Make it yours" on a ${width} px phone, at 14 and 15 px text: inside the screen, tiles a row, 44 px, nothing cut`, async () => {
+    const w = startWorld(`yours${width}`);
+    const errors: string[] = [];
+    const browser = await webkit.launch({ args: [] });
+    try {
+      const { context, page } = await open(browser, w, errors, { ...devices['iPhone 15'], viewport: { width, height: width === 320 ? 568 : 844 }, colorScheme: 'light' });
+      await page.locator('[data-tour-start]').tap();
+      await pastIntro(page, 'tap');
+      await page.evaluate(() => location.replace('#tour=10'));
+      await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || (a.effect as KeyframeEffect | null)?.getComputedTiming().iterations === Infinity));
+      for (const size of ['14', '15']) {
+        if (size === '15') {
+          await page.locator('[data-tour-settings] input[name="ib-tset-size"][value="15"]').tap({ force: true });
+          await expect(page.locator('html')).toHaveCSS('--inbox-text-size', '15');
+          await page.waitForTimeout(300);
+        }
+        const m = await page.evaluate(() => {
+          const box = (e: Element) => {
+            const b = e.getBoundingClientRect();
+            return { left: b.left, right: b.right, top: Math.round(b.top), width: b.width, height: b.height };
+          };
+          const all = (s: string) => [...document.querySelectorAll(s)].map(box);
+          const card = document.querySelector('[data-tour-coach]') as HTMLElement;
+          const wordLines = (el: Element) => {
+            const tops = new Set<number>();
+            for (const node of el.childNodes) {
+              if (node.nodeType !== Node.TEXT_NODE) continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              for (const q of range.getClientRects()) if (q.width > 0 && q.height > 0) tops.add(Math.round(q.top));
+            }
+            return tops.size;
+          };
+          return {
+            docOverflowX: document.documentElement.scrollWidth - innerWidth,
+            cardOverflowX: card.scrollWidth - card.clientWidth,
+            card: box(card),
+            modes: all('[data-tour-mode]'),
+            pals: all('[data-tour-palette]'),
+            sizes: all('[data-tour-settings] .ib-seg-o'),
+            buttons: all('[data-tour-skip], [data-tour-next]'),
+            buttonLines: [...document.querySelectorAll('[data-tour-skip], [data-tour-next]')].map(wordLines),
+            cut: [...document.querySelectorAll('.ib-tset-cap, .ib-tset-more')].filter((e) => (e as HTMLElement).scrollWidth > (e as HTMLElement).clientWidth + 0.5).map((e) => e.textContent),
+          };
+        });
+        const at = `${width} px, ${size} px text`;
+        expect(m.docOverflowX, `${at}: the page`).toBeLessThanOrEqual(0);
+        expect(m.cardOverflowX, `${at}: the card`).toBeLessThanOrEqual(0);
+        expect(m.card.left, at).toBeGreaterThanOrEqual(0);
+        expect(m.card.right, at).toBeLessThanOrEqual(width);
+        expect(new Set(m.modes.map((b) => b.top)).size, `${at}: the theme tiles one row`).toBe(1);
+        expect(new Set(m.pals.map((b) => b.top)).size, `${at}: the colour tiles one row`).toBe(1);
+        expect(new Set(m.sizes.map((b) => b.top)).size, `${at}: the sizes one row`).toBe(1);
+        expect(new Set(m.buttons.map((b) => b.top)).size, `${at}: Skip and Next one row`).toBe(1);
+        expect(m.buttonLines, `${at}: each button one line`).toEqual([1, 1]);
+        expect(m.cut, `${at}: nothing cut`).toEqual([]);
+        for (const b of [...m.modes, ...m.pals, ...m.sizes, ...m.buttons]) {
+          expect(b.height, at).toBeGreaterThanOrEqual(44);
+          expect(b.width, at).toBeGreaterThanOrEqual(44);
+          expect(b.left, at).toBeGreaterThanOrEqual(m.card.left);
+          expect(b.right, at).toBeLessThanOrEqual(m.card.right);
+        }
+        await shoot(page, `phone-${width}-make-it-yours-${size}`, ['light']);
+      }
+      expect(errors).toEqual([]);
+      await context.close();
+    } finally {
+      await browser.close();
+    }
+  });
+}

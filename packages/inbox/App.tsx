@@ -4036,7 +4036,7 @@ function Inbox() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tourCoachKey]);
-  // The last step (10) is real: Back in the tour bar has no step to go to, and Finish ends it.
+  // The last step (11) is real: Back in the tour bar has no step to go to, and Finish ends it.
   const tourRealStep = tourOn && tourState.step === TOUR_STEPS;
   /** A sidebar row: on step 11 (the real sidebar shows there) it ends the tour, finished, in the tour's own entry. */
   const leave = (to: Route) => (tourRealStep ? endTour('finish', to) : go(to));

@@ -1041,3 +1041,70 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     resetInboxTextSizeForTests();
   }
 }, 120_000);
+
+test.skipIf(!hasDom)('"Make it yours": Skip puts back only what the card changed, never a value from before the first settings read, never over another window; Back there is finished', async () => {
+  const { resetInboxThemeForTests } = await import('./theme');
+  const { resetInboxTextSizeForTests } = await import('./textSize');
+  const htmlClass = () => document.documentElement.className;
+  const size = () => document.documentElement.style.getPropertyValue('--inbox-text-size');
+  const themeWrites = () => posts.filter((p) => p.path === '/api/inbox/settings' && ('theme' in p.body || 'text_size' in p.body));
+  try {
+    // The person's saved look; this browser has no cookie for it (a new browser, a phone, a private window).
+    await loopback('/api/inbox/settings', 'POST', JSON.stringify({ theme: { mode: 'dark', light: 'catppuccin', dark: 'catppuccin' }, text_size: 15 }));
+    // The first settings read is slow: the card shows before it answers.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let gets = 0;
+    intercept = (path, method) =>
+      path.startsWith('/api/inbox/settings') && method === 'GET' && gets++ === 0
+        ? (held.then(() => loopback(path)).then((a) => new Response(a.text, { status: a.status, headers: { 'Content-Type': a.type } })) as unknown as Response)
+        : null;
+    window.location.hash = '#tour=10';
+    const el = await renderApp();
+    await until(() => coachKey(el) === '10-yours', 'Make it yours, before the settings read');
+    expect(htmlClass()).not.toContain('theme-catppuccin');
+    await act(async () => release());
+    await until(() => htmlClass().includes('theme-catppuccin') && size() === '15', 'the saved look adopted');
+    // Skip with nothing picked writes no theme and no size, and config.json is as it was.
+    await click($(el, '[data-tour-skip]'));
+    await until(() => window.location.hash === '#tour=11', 'step 11 after Skip');
+    await wait(700);
+    expect(themeWrites()).toEqual([]);
+    expect(config().theme).toEqual({ mode: 'dark', light: 'catppuccin', dark: 'catppuccin' });
+    expect(config().inboxTextSize).toBe(15);
+    expect(htmlClass()).toContain('theme-catppuccin');
+    expect(size()).toBe('15');
+
+    // A pick, then another window changes the dark palette: Skip puts back the light palette, leaves the other window's dark.
+    await act(async () => {
+      window.location.replace('#tour=10');
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours again');
+    await click($(el, '[data-tour-palette="plannotator-modern"] input'));
+    await until(() => config().theme?.light === 'plannotator-modern' && config().theme?.dark === 'plannotator-modern', 'the pick saved');
+    await loopback('/api/inbox/settings', 'POST', JSON.stringify({ theme: { dark: 'plannotator-graphite' } }));
+    posts.length = 0;
+    await click($(el, '[data-tour-skip]'));
+    await until(() => window.location.hash === '#tour=11', 'step 11 after the second Skip');
+    await until(() => config().theme?.light === 'catppuccin', 'the light palette put back');
+    await wait(700);
+    expect(config().theme).toEqual({ mode: 'dark', light: 'catppuccin', dark: 'plannotator-graphite' });
+    expect(config().inboxTextSize).toBe(15);
+    expect(themeWrites().map((p) => p.body)).toEqual([{ theme: { light: 'catppuccin' } }]);
+
+    // The browser's Back on "Make it yours" (no Exit): the replay is over, so the tour is finished, not skipped.
+    await act(async () => {
+      window.location.replace('#tour=10');
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours, once more');
+    await act(async () => {
+      window.location.hash = '';
+    });
+    await until(() => $(el, '[data-tour-bar]') === null, 'out of the tour');
+    await until(() => !!config().inboxTour?.finished_at, 'finished remembered');
+    expect(config().inboxTour.skipped_at ?? null).toBeNull();
+  } finally {
+    resetInboxThemeForTests();
+    resetInboxTextSizeForTests();
+  }
+}, 120_000);
