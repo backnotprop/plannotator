@@ -614,6 +614,72 @@ test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send press
   expect(replies().map((r) => (r.path.includes(M1) ? 'A' : 'B'))).toEqual(['A', 'B']);
 });
 
+// A Send that waited for the ended check went on with what the press saw. Both cases below hold A's read, as above.
+async function typeInBox(el: HTMLElement, words: string) {
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, words);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+}
+
+async function waitingSend(words: string) {
+  liveness = { ses_asker: true, ses_b: true };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  holdAsker = { session: 'ses_asker', held: [] };
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  await typeInBox(el, words);
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toEqual([]);
+  return el;
+}
+
+async function releaseHeld() {
+  await act(async () => {
+    holdAsker!.held.splice(0).forEach((go) => go());
+  });
+  await settle();
+  await settle();
+}
+
+test.skipIf(!hasDom)('a Send waiting for the ended check, and the person opens another thread: nothing of the first thread goes to the other', async () => {
+  await waitingSend('Words for thread one.');
+  const T2 = 'msg_01M4HC9Z8Y7X6W5V4T3S2R1Q0P';
+  const other: InboxThread = {
+    thread_id: T2,
+    project: PROJECT,
+    subject: 'Another thread',
+    thread_name: null,
+    resolved_at: null,
+    messages: [{ ...laterUpdate(), id: T2, thread_id: T2, reply_to: null, author: { kind: 'agent', host: 'pi', session: 'ses_other', name: null }, subject: 'Another thread', body: 'Shall I bump the cache?' }],
+  };
+  // The pane stays mounted (no key per thread): the same ThreadPane draws the other thread.
+  act(() =>
+    root!.render(
+      <div className="pn-inbox">
+        <ThreadPane thread={other} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      </div>,
+    ),
+  );
+  await settle();
+  await releaseHeld();
+  expect(replies()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a Send waiting for the ended check, and the person types more: the words in the box when it goes are the ones sent', async () => {
+  const el = await waitingSend('First part.');
+  await typeInBox(el, 'First part. And the rest.');
+  await releaseHeld();
+  expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.words])).toEqual([
+    ['A', ''],
+    ['B', 'First part. And the rest.'],
+  ]);
+});
+
 test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   annotations = [{ id: 'ann_1', project_id: PROJECT.id, thread_id: M1, message_id: M1, attachment_id: '', path: M1, version: 'current', message: { at: '2026-10-11T10:41:00.000Z' }, annotation: { id: 'ann_1', type: 'COMMENT', text: 'Why three?', originalText: 'retry policy' }, created_at: '2026-10-11T10:50:00.000Z', updated_at: '2026-10-11T10:50:00.000Z', removed_at: null, sent_reply_id: null }];

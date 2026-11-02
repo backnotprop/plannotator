@@ -1919,6 +1919,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const checkingEnded = useRef(false);
   /** Counts the Sends that started posting: a Send that waited for the ended check goes only if none started meanwhile. */
   const sendStarts = useRef(0);
+  /** The newest render's `send`: a Send that waited for the ended check goes on with the state of now, not of the press. */
+  const latestSend = useRef<(options?: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> }) => Promise<void>>(async () => {});
   /** What the route choice is for: a reply, or a Re-ask (the same choice, its own words). */
   const [routeFor, setRouteFor] = useState<'reply' | 'reask'>('reply');
   const reaskRef = useRef<HTMLButtonElement>(null);
@@ -3412,7 +3414,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * the person must read in the thread first (a replaced pick's guard, where an ended session's reply goes)
    * takes them there, on the device's route.
    */
-  const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean } = {}) => {
+  const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> } = {}): Promise<void> => {
     // Whether this Send came from the ⌘Enter key (it draws no focus ring on the head it focuses): read at once.
     const byChord = sentByChord.current;
     sentByChord.current = false;
@@ -3434,18 +3436,27 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // so "not read yet" never sends to an ended session without the choice (handoff "multi-agent-thread-model").
     let gateEnded = askerEnded;
     let gateAsking = asking;
-    if (!options.routed && !askerEnded && !resolved && otherEnded.unchecked) {
+    if (!options.routed && !askerEnded && !resolved && !options.endedChecked && otherEnded.unchecked) {
       checkingEnded.current = true;
       const starts = sendStarts.current;
+      const startedOn = thread.thread_id;
       let ended: ReadonlySet<string>;
       try {
         ended = await otherEnded.check();
       } finally {
         checkingEnded.current = false;
       }
-      // Another Send went while this one waited: this one's replies went with it.
-      if (sendStarts.current !== starts) return;
-      const other = otherSessions.filter((s) => ended.has(s.session)).at(-1) ?? null;
+      // Another Send went while this one waited: this one's replies went with it. The person opened another
+      // thread meanwhile (the pane stays mounted): nothing of this thread goes to that thread's agent.
+      if (sendStarts.current !== starts || threadRef.current.thread_id !== startedOn) return;
+      // What the press saw is stale now (words typed, picks made during the read): the newest Send goes, with
+      // what the read found, and does not wait again.
+      sentByChord.current = byChord;
+      return latestSend.current({ ...options, endedChecked: ended });
+    }
+    if (!options.routed && !askerEnded && !resolved && options.endedChecked) {
+      const found = options.endedChecked;
+      const other = otherSessions.filter((s) => found.has(s.session) || endedOthers.has(s.session)).at(-1) ?? null;
       if (other) {
         gateEnded = true;
         gateAsking = other;
@@ -3782,6 +3793,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       }
     }
   };
+  latestSend.current = send;
 
   const resolve = async (next: boolean) => {
     setError(null);
