@@ -78,6 +78,8 @@ let gate: (() => void)[] | null;
 let saveMs: number;
 /** What the next saves answer instead of saving, one per save. */
 let refusals: { status: number; code: string; error: string }[];
+/** Set: reading the thread again waits here. */
+let changed: Promise<void> | null;
 
 const FULL = { status: 500, code: 'error', error: 'The disk is full.' };
 
@@ -145,6 +147,7 @@ beforeEach(() => {
   gate = null;
   saveMs = 0;
   refusals = [];
+  changed = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -224,7 +227,10 @@ function Pane() {
       onQuestions={(messageId, questions) =>
         setThread((current) => ({ ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }))
       }
-      onChanged={async () => setThread(threadNow())}
+      onChanged={async () => {
+        await changed;
+        setThread(threadNow());
+      }}
       onClose={() => {}}
       file={null}
       onOpenFile={() => {}}
@@ -493,6 +499,27 @@ test.skipIf(!hasDom)('a change after the press, both saves refused: the error sh
   await until(() => sendButton(el)?.disabled === false, 'the Send back');
   expect(replies).toHaveLength(0);
   expect(otherField(el).value).toBe('pin it');
+});
+
+test.skipIf(!hasDom)('the error cleared while a refused save is read back: the stopped Send still says why', async () => {
+  const el = await render();
+  await answered(el);
+  gate = [];
+  refusals = [FULL];
+  type(el, 'pi');
+  await until(() => picks.length === 2, 'the save in flight');
+  await press(el);
+  let reread!: () => void;
+  changed = new Promise<void>((resolve) => (reread = resolve));
+  await release();
+  await until(() => el.textContent?.includes('The disk is full.') === true, 'the refusal said');
+  // Answering the other question clears the error while the refused save still reads the thread again.
+  gate = null;
+  await act(async () => option(el, 'One minute').click());
+  expect(el.textContent).not.toContain('The disk is full.');
+  await act(async () => reread());
+  await until(() => el.textContent?.includes('The pick was not saved.') === true, 'why the Send stopped');
+  expect(replies).toHaveLength(0);
 });
 
 test.skipIf(!hasDom)('changes after the press go in the Send, up to the point the line closes; one after that never reopens the question', async () => {
