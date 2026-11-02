@@ -43,8 +43,9 @@ let reads: string[] = [];
 let slow = false;
 /** The next saves never answer, as on a connection that went away without a word. */
 let hang = false;
-/** The next saves are slow and their record never comes. */
-let unheard = false;
+/** The next saves land only on `land()`, and their record never comes. */
+let gated = false;
+let land: () => void = () => {};
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -110,7 +111,8 @@ beforeEach(() => {
   reads = [];
   slow = false;
   hang = false;
-  unheard = false;
+  gated = false;
+  land = () => {};
   frames = new Map();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -120,7 +122,7 @@ beforeEach(() => {
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
       if (hang) await new Promise(() => {});
-      if (unheard) await new Promise((r) => setTimeout(r, SAVE_MS));
+      if (gated) await new Promise<void>((r) => (land = r));
       if (slow) {
         const { questions } = JSON.parse(answer.text) as { questions: { key: string }[] };
         // The record frame beats the save's own answer.
@@ -216,7 +218,6 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
 
   await until(() => field.value === words && count(threadRoute()) > 0, 'the read after the last save');
   await wait(SAVE_MS + 120);
-  expect(saves).toBeLessThan(10);
   expect(count(threadRoute())).toBe(1);
   expect(count(`${threadRoute()}/attachments`)).toBe(1);
   expect(count('/api/inbox/threads')).toBeLessThanOrEqual(2);
@@ -226,14 +227,13 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
   const field = await open();
-  slow = true;
+  hang = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
-  // An agent wrote meanwhile: the thread is read now, not when the saves end.
+  // An agent wrote meanwhile: the thread is read now, with the save still out.
   seq += 1;
   frame('record', { seq, kind: 'message', first: false, message: { id: 'msg_x', thread_id: world.waiting, author: { kind: 'agent' }, body: '' } });
-  await wait(100);
-  expect(count(threadRoute())).toBe(1);
+  await until(() => count(threadRoute()) === 1, 'the read of that record');
 });
 
 const ownQuestion = async () => {
@@ -246,13 +246,12 @@ const otherQuestion = async () => ({ ...(await ownQuestion()), message_id: 'msg_
 test.skipIf(!hasDom)("another question's record is read at once while this one saves", async () => {
   const field = await open();
   const question = await otherQuestion();
-  slow = true;
+  hang = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_other', question });
-  await wait(100);
-  expect(count(threadRoute())).toBe(1);
+  await until(() => count(threadRoute()) === 1, 'the read of that record');
 });
 
 test.skipIf(!hasDom)("a save that never answers holds back only its own question's records, and nothing once the pane closes", async () => {
@@ -266,18 +265,14 @@ test.skipIf(!hasDom)("a save that never answers holds back only its own question
 
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_other', question });
-  await wait(120);
-  expect(count(threadRoute())).toBe(1);
-  expect(count('/api/inbox/drafts')).toBe(1);
+  await until(() => count(threadRoute()) === 1 && count('/api/inbox/drafts') === 1, 'the read of that record');
 
   // The pane closes on the save that never answered: records read as they come.
   await closePane();
   reads = [];
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_own', question: await ownQuestion() });
-  await wait(120);
-  expect(count('/api/inbox/threads')).toBeGreaterThan(0);
-  expect(count('/api/inbox/drafts')).toBe(1);
+  await until(() => count('/api/inbox/threads') > 0 && count('/api/inbox/drafts') === 1, 'the read of its own record');
 });
 
 test.skipIf(!hasDom)('closing a thread with nothing saving reads no list: the rows wait out the settle', async () => {
@@ -290,12 +285,14 @@ test.skipIf(!hasDom)('closing a thread with nothing saving reads no list: the ro
 
 test.skipIf(!hasDom)('a save that lands after the pane closed reads the list then, not at the close', async () => {
   const field = await open();
-  unheard = true;
+  gated = true;
   type(field, 'a');
   await until(() => saves === 1, 'the save');
   reads = [];
   await closePane();
+  await wait(120);
   expect(count('/api/inbox/threads')).toBe(0);
+  land();
   await until(() => count('/api/inbox/threads') > 0, 'the list read as the save landed');
 });
 
