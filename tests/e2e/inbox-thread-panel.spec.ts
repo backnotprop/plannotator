@@ -12,6 +12,9 @@
  *  - A window too narrow for two panes stacks and never shows the panel; a phone has neither the panel nor the item;
  *    the tour and an empty Inbox show neither.
  *  - Rows at the short width: agents against the project, the project cut with "…", one line.
+ *  - The panel's art in the built single-file window, under its real CSP: the mask paints (read back from a
+ *    screenshot) in the line's color, light and dark, by the app's mode against the computer's; click, Enter and Space
+ *    turn it with no layout shift; it outlives a thread and a reload puts it back on the keycap.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-thread-panel.spec.ts`.
@@ -188,6 +191,155 @@ async function recordFrames(context: BrowserContext): Promise<void> {
 }
 const frames = (p: Page) => p.evaluate(() => (window as unknown as { __frames: { list: number; empty: boolean }[] }).__frames);
 
+const art = (p: Page) => p.getByRole('button', { name: 'Show another picture' });
+const artBox = (p: Page) => art(p).evaluate((el) => {
+  const { x, y, width, height } = el.getBoundingClientRect();
+  return { x, y, width, height };
+});
+
+/** A window on the panel in one app mode, with the computer set to the other: the app's mode has to decide. */
+async function themed(browser: Browser, theme: 'light' | 'dark'): Promise<Page> {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme === 'light' ? 'dark' : 'light', reducedMotion: 'reduce' });
+  await panelOn(context);
+  await context.addCookies([{ name: 'plannotator-theme', value: theme, url: world.url }]);
+  const page = await context.newPage();
+  await page.goto(world.url);
+  await expect(art(page)).toBeVisible();
+  return page;
+}
+
+/** The mask the window was built with, as the single-file build inlines it. */
+const maskBytes = (name: string) => readFileSync(join(repo, 'packages/inbox/components/panel-art', `${name}.png`)).toString('base64');
+const drawnMask = (p: Page) => p.locator('.ib-pempty-piece').evaluate((el) => (el as HTMLElement).style.getPropertyValue('--ib-pempty-mask'));
+
+/**
+ * What the screen shows in the art's box, read from a real screenshot, so a mask the CSP blocked (nothing drawn) or a
+ * mask ignored (a solid square) both fail. The clip starts outside the box, so its first pixel is the pane.
+ */
+async function painted(p: Page): Promise<{ share: number; ink: boolean; bitmap: string }> {
+  const box = await artBox(p);
+  const margin = 4;
+  const shot = await p.screenshot({ clip: { x: box.x - margin, y: box.y - margin, width: box.width + margin * 2, height: box.height + margin * 2 } });
+  return p.evaluate(async ({ png, margin }) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${png}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const draw = canvas.getContext('2d', { willReadFrequently: true })!;
+    draw.drawImage(image, 0, 0);
+    const { data } = draw.getImageData(0, 0, image.width, image.height);
+    const at = (i: number) => [data[i]!, data[i + 1]!, data[i + 2]!];
+    const distance = (a: number[], b: number[]) => Math.abs(a[0]! - b[0]!) + Math.abs(a[1]! - b[1]!) + Math.abs(a[2]! - b[2]!);
+    const paper = at(0);
+    // The line's color, as a pixel: the ink has to be that color, not merely some mark.
+    draw.fillStyle = getComputedStyle(document.querySelector('[data-thread-panel-empty] p')!).color;
+    draw.fillRect(0, 0, 1, 1);
+    const ink = [...draw.getImageData(0, 0, 1, 1).data].slice(0, 3);
+    let marked = 0;
+    let closest = Number.POSITIVE_INFINITY;
+    let bitmap = '';
+    for (let y = margin; y < image.height - margin; y++) {
+      for (let x = margin; x < image.width - margin; x++) {
+        const pixel = at((y * image.width + x) * 4);
+        const on = distance(pixel, paper) > 24;
+        if (on) marked += 1;
+        if (on) closest = Math.min(closest, distance(pixel, ink));
+        bitmap += on ? '1' : '0';
+      }
+    }
+    return { share: marked / (image.width - margin * 2) / (image.height - margin * 2), ink: closest < 12, bitmap };
+  }, { png: shot.toString('base64'), margin });
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`the art paints in the built window, ${theme}: its own mask, in the line's color, whatever the computer prefers`, async ({ browser }) => {
+    const page = await themed(browser, theme);
+    await expect(page.locator('html')).toHaveClass(theme === 'light' ? /\blight\b/ : /^(?!.*\blight\b)/);
+    expect(await drawnMask(page)).toContain(`data:image/png;base64,${maskBytes(theme === 'light' ? 'keycap' : 'keycap-dark')}`);
+
+    const keycap = await painted(page);
+    expect(keycap.ink).toBe(true);
+    expect(keycap.share).toBeGreaterThan(0.05);
+    expect(keycap.share).toBeLessThan(0.8);
+    await expect(page.locator('.ib-pempty-piece')).toHaveCSS('background-color', await page.locator('[data-thread-panel-empty] p').evaluate((el) => getComputedStyle(el).color));
+
+    await art(page).click();
+    await page.mouse.move(0, 0);
+    await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+    const saturn = await painted(page);
+    expect(saturn.ink).toBe(true);
+    expect(saturn.bitmap).not.toBe(keycap.bitmap);
+
+    // Every other piece paints too, each its own picture.
+    const seen = new Set([keycap.bitmap, saturn.bitmap]);
+    for (let i = 2; i < 15; i++) {
+      await art(page).click();
+      await page.mouse.move(0, 0);
+      const piece = await painted(page);
+      expect(piece.share, await art(page).getAttribute('data-piece') ?? '').toBeGreaterThan(0.02);
+      seen.add(piece.bitmap);
+    }
+    expect(seen.size).toBe(15);
+    await page.context().close();
+  });
+}
+
+test('the art turns by click, Enter and Space, with a pointer and a ring, and nothing moves', async ({ browser }) => {
+  const page = await open(browser);
+  await expect(art(page)).toHaveAttribute('data-piece', 'keycap');
+  await expect(art(page)).toHaveCSS('cursor', 'pointer');
+  const before = await artBox(page);
+  expect(before).toMatchObject({ width: 96, height: 96 });
+  const line = () => page.locator('[data-thread-panel-empty] p').evaluate((el) => el.getBoundingClientRect().top);
+  const lineTop = await line();
+  const rows = await rowTops(page);
+
+  await art(page).click();
+  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+  expect(await artBox(page)).toEqual(before);
+  expect(await line()).toBe(lineTop);
+
+  // Tab comes to it from the column's edge, the last stop before the panel, and draws the ring.
+  await page.locator('section.ib-listcol [role="separator"]').focus();
+  await page.keyboard.press('Tab');
+  await expect(art(page)).toBeFocused();
+  await expect(art(page)).toHaveCSS('outline-style', 'solid');
+  await expect(art(page)).toHaveCSS('outline-width', '2px');
+
+  await page.keyboard.press('Enter');
+  await expect(art(page)).toHaveAttribute('data-piece', 'anvil');
+  await page.keyboard.press('Space');
+  await expect(art(page)).toHaveAttribute('data-piece', 'android');
+
+  // The keys stayed on the button: no row opened and nothing moved.
+  await expect(art(page)).toBeFocused();
+  await expect(subject(page)).toHaveCount(0);
+  await expect(empty(page)).toBeVisible();
+  expect(await artBox(page)).toEqual(before);
+  expect(await rowTops(page)).toEqual(rows);
+  await page.context().close();
+});
+
+test('the art keeps its place while a thread is open, and a reload is back on the keycap with nothing saved', async ({ browser }) => {
+  const page = await open(browser);
+  const saved = await page.context().cookies();
+  await art(page).click();
+  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+
+  await row(page, threads.ledger).click();
+  await expect(subject(page)).toBeVisible();
+  await expect(art(page)).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close the thread' }).click();
+  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+
+  expect((await page.context().cookies()).map((c) => c.name).sort()).toEqual(saved.map((c) => c.name).sort());
+  await page.reload();
+  await expect(art(page)).toHaveAttribute('data-piece', 'keycap');
+  await page.context().close();
+});
+
 test('the default is the wide view: no cookie, a thread beside the list, closing gives the wide list back', async ({ browser }) => {
   const page = await open(browser, { panel: false });
   await expect(empty(page)).toHaveCount(0);
@@ -214,7 +366,7 @@ test('the ⋮ item: panel view at once, the menu stays open, a ✓, remembered; 
   await openMenu(page);
   await item(page).click();
   await expect(empty(page)).toBeVisible();
-  await expect(empty(page)).toHaveText('Open a thread to read it here.');
+  await expect(empty(page)).toHaveText('No thread selected');
   await expect(item(page)).toBeVisible();
   await expect(item(page)).toHaveAttribute('aria-checked', 'true');
   await expect(item(page).locator('.ib-pmi-check')).toBeVisible();

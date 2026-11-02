@@ -2169,6 +2169,7 @@ function Inbox() {
   // no thread open. Off by default, and never on a phone or in a window that stacks.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
   const panelView = threadPanelShows(threadPanelOn, { phone, stacked: stack.thread });
+  const [panelPiece, setPanelPiece] = useState(0);
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -4452,7 +4453,7 @@ function Inbox() {
         )}
         {panelView && !route.thread && (
           <div className="ib-pane ib-pempty" data-thread-panel-empty="">
-            <EmptyThreadPanel />
+            <EmptyThreadPanel piece={panelPiece} onPiece={setPanelPiece} />
           </div>
         )}
         {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
