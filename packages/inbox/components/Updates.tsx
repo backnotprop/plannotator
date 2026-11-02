@@ -836,7 +836,7 @@ export function checksOffWords(details: UpdateDetails | null): ReactNode {
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
  * Check now; the failing-check line with the install command when checking
- * fails. The page never renders it when opened over the tailnet.
+ * fails. The page never renders it for a tailnet guest.
  */
 export function GeneralUpdateRow({
   version,
@@ -965,14 +965,19 @@ export function AboutBlock({
   onWhatsNew,
   where,
   updates = true,
+  whatsNewRunning = false,
 }: {
   /**
-   * False on a page opened over the tailnet, where every /api/inbox/update*
-   * route answers 403 local_only: the block shows the version, and for the
-   * computer's owner (an `onWhatsNew` given) a link to What's new in it, and
-   * no Update, Check now or update switch.
+   * False on a tailnet guest's page, where every /api/inbox/update* route
+   * answers 403 local_only: the block shows the version, and no What's new,
+   * Update, Check now or update switch.
    */
   updates?: boolean;
+  /**
+   * The owner's page over the tailnet: also a link to What's new in the
+   * release this Inbox runs (none for a development build).
+   */
+  whatsNewRunning?: boolean;
   version: string;
   details: UpdateDetails | null;
   switches: UpdateSwitches | undefined;
@@ -1002,9 +1007,9 @@ export function AboutBlock({
   const available = update?.version ?? (latest && newerThan(latest.version, version) ? latest.version : null);
   const updateLabel = update?.state === 'ready' ? 'Restart to update' : update?.state === 'failed' ? 'Update failed…' : 'Update now';
   const locked = (checks?.env !== null && checks?.env !== undefined) || (auto?.env !== null && auto?.env !== undefined);
+  // The running release's notes; a development build has none to name.
+  const running = whatsNewRunning && onWhatsNew && STABLE.test(version) ? version : null;
   if (!updates) {
-    // The running release's notes; a development build has none to name.
-    const running = onWhatsNew && STABLE.test(version) ? version : null;
     return (
       <>
         <section className="ib-sgroup ib-sgroup-first" data-settings-about="tailnet" aria-label="Version">
@@ -1015,13 +1020,6 @@ export function AboutBlock({
               </span>
               <span className="ib-txt">
                 <span className="ib-l">Plannotator {version}</span>
-                {running && (
-                  <span className="ib-desc" data-update-status="">
-                    <button type="button" className="ib-lnk" data-about-whats-new={running} onClick={() => onWhatsNew!(running)}>
-                      What&apos;s new in {running}
-                    </button>
-                  </span>
-                )}
               </span>
             </div>
           </div>
@@ -1053,6 +1051,14 @@ export function AboutBlock({
                     {' · '}
                     <button type="button" className="ib-lnk" onClick={() => onWhatsNew(available)}>
                       What&apos;s new in {available}
+                    </button>
+                  </>
+                )}
+                {running && (
+                  <>
+                    {' · '}
+                    <button type="button" className="ib-lnk" data-about-whats-new={running} onClick={() => onWhatsNew!(running)}>
+                      What&apos;s new in {running}
                     </button>
                   </>
                 )}
