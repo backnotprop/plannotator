@@ -68,6 +68,14 @@ async function rowOf(server: InboxServer, threadId: string): Promise<InboxListRo
   return model.sections.flatMap((s) => s.threads).find((r) => r.thread_id === threadId)!;
 }
 
+/** The thread's newest message, as the agent reads it. */
+async function lastMessage(client: Client, threadId: string): Promise<{ body: string }> {
+  const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_mr" } })) as {
+    structuredContent: { thread: { messages: { body: string }[] } };
+  };
+  return read.structuredContent.thread.messages.at(-1)!;
+}
+
 async function questionsOf(server: InboxServer, threadId: string): Promise<InboxQuestion[]> {
   const model = (await (await fetch(url(server, `/api/inbox/threads/${threadId}`))).json()) as { thread: { messages: { questions?: InboxQuestion[] }[] } };
   return model.thread.messages.flatMap((m) => m.questions ?? []);
@@ -110,7 +118,7 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
     expect(((await res.json()) as { code: string }).code).toBe("thread_resolved");
   });
 
-  test("after the Undo window the asking agent gets one set-aside note, which wait_for_reply returns", async () => {
+  test("after the Undo window the asking agent gets one set-aside note, which read_thread returns", async () => {
     const { server, client, threadId } = await setup();
     await post(server, `/api/inbox/threads/${threadId}/read`, {});
     // Inside the window nothing was written.
@@ -119,11 +127,8 @@ describe("POST /api/inbox/threads/:id/read and /unread", () => {
     const messages = server.store.thread(threadId)!.messages;
     expect(messages).toHaveLength(2);
     expect(messages[1]!.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string; reply?: { body: string } };
-    };
-    expect(waited.structuredContent.status).not.toBe("waiting");
-    expect(JSON.stringify(waited.structuredContent)).toContain("Which layout should the invoice list use?");
+    const read = await lastMessage(client, threadId);
+    expect(read.body).toContain("Which layout should the invoice list use?");
     expect((await rowOf(server, threadId)).section).toBe("quiet");
   });
 
@@ -210,7 +215,7 @@ describe("POST /api/inbox/messages/:id/reply with a skip list (approval inbox-ex
 describe("POST /api/inbox/messages/:id/reply with words only (approval inbox-words-only-reply)", () => {
   const STILL_OPEN = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
 
-  test("Keep open: the question stays open and wait_for_reply hands the agent the words and the still-open line", async () => {
+  test("Keep open: the question stays open and read_thread hands the agent the words and the still-open line", async () => {
     const { server, client, threadId, messageId } = await setup();
     const res = await post(server, `/api/inbox/messages/${messageId}/reply`, {
       idempotency_key: "k-1",
@@ -222,10 +227,7 @@ describe("POST /api/inbox/messages/:id/reply with words only (approval inbox-wor
     expect(body.reply.body).toBe(`Received, I'll answer later.\n\n${STILL_OPEN}`);
     expect(body.questions[0]).toMatchObject({ state: "open", answer: null });
     expect((await rowOf(server, threadId)).section).toBe("stopped");
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string; reply?: { body: string } };
-    };
-    expect(waited.structuredContent.reply?.body).toBe(`Received, I'll answer later.\n\n${STILL_OPEN}`);
+    expect((await lastMessage(client, threadId)).body).toBe(`Received, I'll answer later.\n\n${STILL_OPEN}`);
   });
 
   test("no skip list at all: the same reply", async () => {
@@ -236,8 +238,8 @@ describe("POST /api/inbox/messages/:id/reply with words only (approval inbox-wor
   });
 });
 
-describe("wait_for_reply on a reply that answers several messages (approval inbox-explicit-skip)", () => {
-  test("its structured questions and its facts line name every message the reply answered or skipped on", async () => {
+describe("read_thread on a reply that answers several messages (approval inbox-explicit-skip)", () => {
+  test("each message's questions say sent, and the reply says what was skipped", async () => {
     const { server, client, project, threadId, messageId } = await setup();
     const second = (await client.callTool({
       name: "send_message",
@@ -252,17 +254,10 @@ describe("wait_for_reply on a reply that answers several messages (approval inbo
       skip: [{ message_id: messageId, key: first!.key }],
     });
     expect(res.status).toBe(200);
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
-      content: { text: string }[];
-      structuredContent: { questions: { message_id: string; key: string; state: string; answer: { skipped?: boolean } | null }[] };
-    };
-    expect(waited.structuredContent.questions.map((q) => [q.message_id, q.key, q.state, q.answer?.skipped ?? false])).toEqual([
-      [messageId, first!.key, "sent", true],
-      [secondId, next!.key, "sent", false],
-    ]);
-    const text = waited.content[0]!.text;
-    expect(text).toContain(`questions of ${messageId}: Q1 ${first!.key} sent`);
-    expect(text).toContain(`questions of ${secondId}: Q1 ${next!.key} sent`);
+    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_mr" } })) as { content: { text: string }[] };
+    const text = read.content[0]!.text;
+    expect(text).toContain(`Q1 ${first!.key} sent`);
+    expect(text).toContain(`Q1 ${next!.key} sent`);
     expect(text).toContain("Skipped by the person");
   });
 });
@@ -285,10 +280,7 @@ describe("POST /api/inbox/threads/:id/mark-unread", () => {
     const messages = server.store.thread(threadId)!.messages;
     expect(messages).toHaveLength(2);
     expect(messages[1]!.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: "ses_mr", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string; reply?: { body: string } };
-    };
-    expect(waited.structuredContent.reply?.body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
+    expect((await lastMessage(client, threadId)).body.split("\n")[0]).toBe(INBOX_SET_ASIDE_HEADING);
     // The agent reading the thread does not make it read for the person.
     expect((await rowOf(server, threadId)).unread).toBe(true);
   });

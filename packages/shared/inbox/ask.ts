@@ -6,7 +6,7 @@
  *
  * Files, not the store's JSONL, as reply drafts are (reply-drafts.ts): a
  * conversation must never enter the event log, which the window's stream,
- * wait_for_reply's cursor, the phone relay and search read. So agents, the
+ * read_thread's cursor, the phone relay and search read. So agents, the
  * MCP, the list and search never see it, and End deletes it for good.
  *
  * This file is the only copy of the person's words, so only "no such file"

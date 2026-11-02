@@ -4,8 +4,8 @@
  * `POST /api/inbox/messages/:id/ack` on a running Inbox (temp data dir,
  * loopback), the agent side over the official MCP client, the wake over the
  * bridge. Inside the Undo window (shortened here) nothing is sent; after it
- * the 👍 is delivered once: as a wake turn to a connection's session, or as
- * wait_for_reply's `acknowledged`, and read_thread shows it.
+ * the 👍 is delivered once as a wake turn to a connection's session, and
+ * read_thread shows it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -81,13 +81,6 @@ async function windowMessage(server: InboxServer, threadId: string, messageId: s
 async function readThread(client: Client, threadId: string) {
   return (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId } })) as {
     structuredContent: { thread: { messages: (InboxMessageWire & { ack?: unknown })[] } };
-  };
-}
-
-async function waitForReply(client: Client, threadId: string, seconds = 1) {
-  return (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: SESSION, timeout_seconds: seconds } })) as {
-    content: { text: string }[];
-    structuredContent: { status: string; acks?: { message_id: string; label: string }[]; cursor: number };
   };
 }
 
@@ -194,7 +187,6 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     expect(row.ack ?? null).toBeNull();
     await Bun.sleep(DELAY + 400);
     expect((await readThread(client, threadId)).structuredContent.thread.messages[0]!.ack ?? null).toBeNull();
-    expect((await waitForReply(client, threadId)).structuredContent.status).toBe("waiting");
   });
 
   test("an already-read thread stays read when the 👍 is taken back", async () => {
@@ -227,57 +219,11 @@ describe("what the agent sees", () => {
     expect(seen.settled_seq).toEqual(expect.any(Number));
   });
 
-  test("wait_for_reply returns acknowledged after the window (a held wait and a later call), and it is not a person reply", async () => {
-    const { server, client, threadId, messageId } = await setup();
-    const held = waitForReply(client, threadId, 5);
-    await Bun.sleep(50);
-    await ack(server, messageId);
-    const waited = await held;
-    expect(waited.structuredContent.status).toBe("acknowledged");
-    expect(waited.structuredContent.acks).toEqual([{ message_id: messageId, label: "Looks good", at: expect.any(String) }]);
-    expect(waited.content[0]!.text).toContain("No reply is coming");
-    // The note that carried it is not listed: the thread still holds the one agent message.
-    expect(server.store.thread(threadId)!.messages.map((m) => m.author.kind)).toEqual(["agent"]);
-    expect((await windowMessage(server, threadId, messageId)).ack!.seen_at).toEqual(expect.any(String));
-    // Without a cursor it answers again; with the cursor it waits.
-    expect((await waitForReply(client, threadId)).structuredContent.status).toBe("acknowledged");
-    const next = (await client.callTool({
-      name: "wait_for_reply",
-      arguments: { thread_id: threadId, agent_session: SESSION, timeout_seconds: 1, cursor: waited.structuredContent.cursor },
-    })) as { structuredContent: { status: string } };
-    expect(next.structuredContent.status).toBe("waiting");
-  });
-
-  test("a 👍 already given never answers a later wait across every thread (no thread, no cursor)", async () => {
-    const { server, client, messageId } = await setup("Deploy done.");
-    await ack(server, messageId);
-    await Bun.sleep(DELAY + 400);
-    const waitAll = async () =>
-      (await client.callTool({ name: "wait_for_reply", arguments: { agent_session: SESSION, timeout_seconds: 1 } })) as {
-        structuredContent: { status: string; thread_id?: string };
-      };
-    // The first wait across threads gets the 👍 (the agent had not seen it).
-    expect((await waitAll()).structuredContent.status).toBe("acknowledged");
-    // Then the agent asks something in another thread and waits on everything it asked: the old 👍 is not the answer.
-    const asked = (await client.callTool({
-      name: "send_message",
-      arguments: {
-        project_path: server.store.project(server.store.message(messageId)!.project_id)!.root,
-        agent_session: SESSION,
-        thread: "db",
-        body: [":::question", "Which database?", "", "- [ ] Postgres", "- [ ] SQLite", ":::"].join("\n"),
-      },
-    })) as { structuredContent: { thread_id: string } };
-    expect(asked.structuredContent.thread_id).not.toBe(messageId);
-    expect((await waitAll()).structuredContent.status).toBe("waiting");
-  });
-
-  test("an Undo inside the window: wait_for_reply never sees it, read_thread neither", async () => {
+  test("an Undo inside the window: read_thread never sees it", async () => {
     const { server, client, threadId, messageId } = await setup();
     await ack(server, messageId);
     await ack(server, messageId, false);
     await Bun.sleep(DELAY + 400);
-    expect((await waitForReply(client, threadId)).structuredContent.status).toBe("waiting");
     expect((await readThread(client, threadId)).structuredContent.thread.messages[0]!.ack ?? null).toBeNull();
   });
 
@@ -309,9 +255,6 @@ describe("what the agent sees", () => {
     expect(row.section).toBe("quiet");
     expect(row.message_count).toBe(1);
     expect(row.ack).toMatchObject({ label: "Looks good" });
-    // Delivered by the wake: a wait across every thread is not answered by it again.
-    const across = (await client.callTool({ name: "wait_for_reply", arguments: { agent_session: SESSION, timeout_seconds: 1 } })) as { structuredContent: { status: string } };
-    expect(across.structuredContent.status).toBe("waiting");
   });
 
   test("a held bridge poll wakes when the window passes", async () => {
@@ -338,18 +281,17 @@ describe("what the agent sees", () => {
     expect(await poll(after.server, SESSION)).toHaveLength(1);
     await ack(after.server, after.messageId, false);
     expect(await poll(after.server, SESSION)).toEqual([]);
-    expect((await waitForReply(after.client, after.threadId)).structuredContent.status).toBe("waiting");
     // A new 👍 later is sent again, once.
     await ack(after.server, after.messageId);
     await Bun.sleep(DELAY + 400);
     expect(await poll(after.server, SESSION)).toHaveLength(1);
   });
 
-  test("wait_for_reply's acknowledged counts as the delivery: the wake never hands the same 👍 again", async () => {
+  test("an agent that is not woken reads the 👍: read_thread counts as the delivery, and the wake never hands it again", async () => {
     const { server, client, threadId, messageId } = await setup();
     await ack(server, messageId);
     await Bun.sleep(DELAY + 400);
-    expect((await waitForReply(client, threadId)).structuredContent.status).toBe("acknowledged");
+    await readThread(client, threadId);
     expect(await poll(server, SESSION)).toEqual([]);
     expect((await windowMessage(server, threadId, messageId)).ack!.delivered_at).toEqual(expect.any(String));
   });
@@ -398,77 +340,17 @@ describe("a 👍 the window ends after the thread moved on", () => {
     await Bun.sleep(DELAY + 400);
     expect((await poll(server, SESSION)).map((c) => [c.id, c.ack_of ?? null])).toEqual([[replyId, null]]);
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ not_sent: "replied", delivered_at: null });
-    const waited = await waitForReply(client, threadId);
-    expect(waited.structuredContent.status).toBe("replied");
     expect((await readThread(client, threadId)).structuredContent.thread.messages[0]!.ack ?? null).toBeNull();
   });
 
-  test("the agent wrote again inside the window: the 👍 is not sent for the older message, and a wait on the newer question keeps waiting", async () => {
+  test("the agent wrote again inside the window: the 👍 is not sent for the older message, and read_thread does not show it", async () => {
     const { server, client, threadId, messageId, send } = await setup();
     await ack(server, messageId);
     await send(QUESTION, messageId);
     await Bun.sleep(DELAY + 400);
     expect(await poll(server, SESSION)).toEqual([]);
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ not_sent: "wrote_again", delivered_at: null });
-    expect((await waitForReply(client, threadId)).structuredContent.status).toBe("waiting");
-  });
-});
-
-describe("wait_for_reply never answers acknowledged for a 👍 that was not sent", () => {
-  const waitWith = async (client: Client, threadId: string, cursor: number | undefined, seconds = 1) =>
-    (await client.callTool({
-      name: "wait_for_reply",
-      arguments: { thread_id: threadId, agent_session: SESSION, timeout_seconds: seconds, ...(cursor === undefined ? {} : { cursor }) },
-    })) as { structuredContent: { status: string; cursor: number; reply?: { message_id: string } } };
-
-  test("replied, stored: after the reply was returned, a wait past it finds the settled-but-not-sent 👍 and keeps waiting", async () => {
-    const { server, client, threadId, messageId } = await setup();
-    await ack(server, messageId);
-    const replied = await post(server, `/api/inbox/messages/${messageId}/reply`, { serverSession: server.serverSession, idempotency_key: "r-stored", words: "Also bump the version." });
-    const replyId = ((await replied.json()) as { reply: { id: string } }).reply.id;
-    const got = await waitWith(client, threadId, undefined);
-    expect(got.structuredContent.status).toBe("replied");
-    expect(got.structuredContent.reply?.message_id).toBe(replyId);
-    await Bun.sleep(DELAY + 400);
-    // The ack settled after the reply, on the caller's latest message: only `not_sent` keeps it out.
-    // Read the values first: Bun's toMatchObject writes an asymmetric matcher into the object it is given.
-    const settled = { ...server.store.message(messageId)?.ack };
-    expect(settled.not_sent).toBe("replied");
-    expect(settled.settled_seq ?? 0).toBeGreaterThan(got.structuredContent.cursor);
-    expect((await waitWith(client, threadId, got.structuredContent.cursor)).structuredContent.status).toBe("waiting");
-  });
-
-  test("replied, live: a wait held past the reply is not ended by the settle line of the not-sent 👍", async () => {
-    const { server, client, threadId, messageId } = await setup();
-    await ack(server, messageId);
-    const replied = await post(server, `/api/inbox/messages/${messageId}/reply`, { serverSession: server.serverSession, idempotency_key: "r-live", words: "Also bump the version." });
-    expect(replied.status).toBe(200);
-    const got = await waitWith(client, threadId, undefined);
-    expect(got.structuredContent.status).toBe("replied");
-    const held = waitWith(client, threadId, got.structuredContent.cursor, 2);
-    await Bun.sleep(DELAY + 400);
-    expect(server.store.message(messageId)!.ack).toMatchObject({ not_sent: "replied" });
-    expect((await held).structuredContent.status).toBe("waiting");
-  });
-
-  test("wrote again, stored: the agent's newer question is what a wait waits on; the old 👍 never answers it", async () => {
-    const { server, client, threadId, messageId, send } = await setup();
-    await ack(server, messageId);
-    await send(QUESTION, messageId);
-    await Bun.sleep(DELAY + 400);
-    expect(server.store.message(messageId)!.ack).toMatchObject({ not_sent: "wrote_again" });
-    expect((await waitWith(client, threadId, undefined)).structuredContent.status).toBe("waiting");
-    expect((await waitWith(client, threadId, 0)).structuredContent.status).toBe("waiting");
-  });
-
-  test("wrote again, live: a wait held on the newer question keeps waiting through the settle line", async () => {
-    const { server, client, threadId, messageId, send } = await setup();
-    await ack(server, messageId);
-    await send(QUESTION, messageId);
-    const held = waitWith(client, threadId, undefined, 2);
-    await Bun.sleep(DELAY + 400);
-    expect(server.store.message(messageId)!.ack).toMatchObject({ not_sent: "wrote_again" });
-    expect((await held).structuredContent.status).toBe("waiting");
+    expect((await readThread(client, threadId)).structuredContent.thread.messages[0]!.ack ?? null).toBeNull();
   });
 });
 
