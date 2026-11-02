@@ -105,8 +105,10 @@ const held = (key: string, state: OutboxView['state'] = 'queued'): OutboxView =>
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-let picks: { url: string; body: { questions: { key: string; revision: number }[] } }[] = [];
+let picks: { url: string; body: { questions: { key: string; revision: number; answer: { other?: string } | null }[] } }[] = [];
 let toasts: Omit<InboxToastModel, 'id'>[] = [];
+/** Set: each pick waits here until the test releases it, the POST already seen. */
+let gate: (() => void)[] | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -115,13 +117,17 @@ beforeEach(() => {
   rememberMachine([M1], MAC);
   picks = [];
   toasts = [];
+  gate = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (path.endsWith('/picks') && init?.method === 'POST') {
       picks.push({ url: path, body: JSON.parse(String(init.body)) });
+      const number = picks.length;
+      const waiting = gate;
+      if (waiting) await new Promise<void>((resolve) => waiting.push(resolve));
       // MacBook sleeps: this Inbox holds the pick and says so (202).
-      return Response.json({ outbox: held(`k${picks.length}`), machine: MACBOOK }, { status: 202 });
+      return Response.json({ outbox: held(`k${number}`), machine: MACBOOK }, { status: 202 });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
@@ -230,4 +236,33 @@ test.skipIf(!hasDom)('a second pick on the same question while the first waits g
   expect(picks.map((pick) => pick.body.questions[0]!.revision)).toEqual([3, 4]);
   await settle();
   expect(option(el, 'Loosen it').checked).toBe(true);
+});
+
+test.skipIf(!hasDom)('an answer typed behind a held pick: only its newest words are held next, and a refusal of them unpicks them', async () => {
+  const el = await render();
+  const field = el.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  const type = (words: string) =>
+    act(() => {
+      setter.call(field, words);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  gate = [];
+  await choose(el, 'Pin it');
+  await until(() => picks.length === 1, 'the first pick');
+  for (const words of ['l', 'lo', 'loo', 'loose']) type(words);
+  const release = gate[0]!;
+  gate = null;
+  await act(async () => release());
+  await until(() => picks.length === 2, 'the newest words');
+  await settle();
+  expect(picks).toHaveLength(2);
+  // Held behind the first, it goes with the revision the first will make there.
+  expect(picks[1]!.body.questions[0]!.revision).toBe(4);
+  expect(picks[1]!.body.questions[0]!.answer?.other).toBe('loose');
+  expect(field.value).toBe('loose');
+
+  act(() => draw([held('k1'), held('k2', 'refused')]));
+  await until(() => field.value === '', 'the words undone');
+  expect(toasts.at(-1)!.lead.startsWith('Pick not saved.')).toBe(true);
 });
