@@ -331,7 +331,14 @@ describe("linked machines, on three real Inboxes", () => {
       const uploaded = await upload(serverSession);
       expect(uploaded.status).toBe(200);
       expect(uploaded.headers.get("x-plannotator-outbox")).toBeNull();
-      expect(((await uploaded.json()) as Json).upload).toBeDefined();
+      const upload_ = ((await uploaded.json()) as Json).upload as Json;
+      expect(upload_).toBeDefined();
+      // Its words read back from A's window (a long paste put back, approval "inbox-paste-attachment"): forwarded to B,
+      // whose pending upload it is; A holds no such upload.
+      const text = await fetch(`${base(A)}/api/inbox/m/${B.id}/uploads/${upload_.upload_id}/text`);
+      expect(text.status).toBe(200);
+      expect(((await text.json()) as Json).text).toBe("notes for B");
+      expect((await fetch(`${base(A)}/api/inbox/uploads/${upload_.upload_id}/text`)).status).toBe(404);
     } finally {
       await agent.client.close().catch(() => {});
     }

@@ -24,6 +24,7 @@ import type {
   InboxThread,
   InboxComposeProject,
   InboxDraft,
+  InboxDraftPasted,
   InboxReplyDraft,
   InboxReplyDraftRow,
   InboxDraftStatus,
@@ -106,6 +107,9 @@ export interface CardsModel {
   /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
   threads?: Record<string, InboxListRow | null>;
 }
+
+/** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
+export type DraftFileInput = string | { upload_id: string; pasted: InboxDraftPasted };
 
 /**
  * A machine as the merged list and its `machines` frames name it (linked machines,
@@ -1224,12 +1228,28 @@ export const inboxApi = {
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null) =>
+  /**
+   * `files`: the long pastes kept beside the words (approval "inbox-paste-attachment"); `baseFiles`: the upload
+   * ids this window saved last, which `base_body`'s shortcut must also match.
+   */
+  saveReplyDraft: (
+    threadId: string,
+    body: string,
+    base: string | null,
+    baseBody: string | null = null,
+    files: readonly DraftFileInput[] = [],
+    baseFiles: readonly string[] | null = null,
+  ) =>
     post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), {
       body,
       base,
       ...(baseBody !== null ? { base_body: baseBody } : {}),
+      ...(files.length > 0 ? { files } : {}),
+      ...(baseBody !== null && baseFiles !== null ? { base_files: baseFiles } : {}),
     }),
+  /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
+  uploadText: (uploadId: string, machine: string | null = null) =>
+    get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
   // Pins (approval "inbox-pinned-threads"): the sidebar's pinned threads.
   /** Pin a thread (at the bottom of Pinned) or unpin it. */
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
@@ -1290,7 +1310,7 @@ export const inboxApi = {
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
   discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
-  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: string[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
+  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
   sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = []) => {

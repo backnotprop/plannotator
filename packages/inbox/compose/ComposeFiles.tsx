@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent } from 'react';
-import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxUpload } from '@plannotator/core/inbox-types';
-import { InboxApiError, uploadFile } from '../api';
+import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxDraftFile, type InboxDraftPasted, type InboxUpload } from '@plannotator/core/inbox-types';
+import { inboxApi, InboxApiError, uploadFile } from '../api';
 import { formatBytes } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from '../components/FileName';
@@ -33,8 +33,8 @@ export interface ComposeFile {
 
 /** A long paste the person can put back in the box. */
 export interface PastedText {
-  /** The exact text pasted. */
-  text: string;
+  /** The exact text pasted; null for a tile a draft brought back (read from its upload on Put back). */
+  text: string | null;
   /** The tile's name line: the first words (pastedPreview). */
   preview: string;
   /** When it was pasted (ms): the tile reads "Undo" for PASTED_UNDO_MS. */
@@ -57,16 +57,37 @@ interface PasteAnchor {
   lead: string;
 }
 
-const fromUpload = (upload: InboxUpload): ComposeFile => ({
-  key: upload.upload_id,
-  name: upload.name,
-  size: upload.size,
-  state: 'done',
-  progress: 1,
-  upload,
-  error: null,
-  preview: null,
-});
+/** A draft's file as a tile; a long paste comes back as a pasted text tile, its words read on Put back. */
+const fromUpload = (file: InboxDraftFile): ComposeFile => {
+  const { pasted, ...upload } = file;
+  return {
+    key: upload.upload_id,
+    name: upload.name,
+    size: upload.size,
+    state: 'done',
+    progress: 1,
+    upload,
+    error: null,
+    preview: null,
+    // `at` 0: long past its Undo, so the tile offers Put back in box.
+    ...(pasted ? { pasted: { text: null, preview: pasted.preview, at: 0 } } : {}),
+  };
+};
+
+/** The anchors of a draft's long pastes, by their tiles' keys. */
+const anchorsOf = (files: readonly InboxDraftFile[]): Map<string, PasteAnchor> =>
+  new Map(files.flatMap((file) => (file.pasted ? [[file.upload_id, { at: file.pasted.at, lead: file.pasted.lead ?? '' }] as const] : [])));
+
+/** The drafts' tiles a save names (`DraftFileInput`): a long paste with where it goes back in `words`. */
+export interface DraftPastedFile {
+  upload_id: string;
+  pasted: InboxDraftPasted;
+}
+
+/** Which long pastes a draft holds (their upload ids, in order): a change of them alone is saved. */
+export function pastedSignature(files: readonly { upload_id: string }[]): string {
+  return files.map((file) => file.upload_id).join(',');
+}
 
 /** What a paste attached, as a screen reader hears it: "Attached notes.png", "Attached 2 files: a.png, b.png". */
 export function attachedAnnouncement(names: readonly string[]): string {
@@ -81,7 +102,7 @@ export function attachedAnnouncement(names: readonly string[]): string {
  * the browser's own undo, as the very next edit, return to the box.
  */
 export function useComposeFiles(
-  initial: readonly InboxUpload[],
+  initial: readonly InboxDraftFile[],
   options: { onPasted?: (names: string[]) => void; machine?: string | null; text?: ComposeFilesText; onPutBack?: () => void } = {},
 ) {
   const [files, setFiles] = useState<ComposeFile[]>(() => initial.map(fromUpload));
@@ -99,8 +120,9 @@ export function useComposeFiles(
   machine.current = options.machine ?? null;
   const text = useRef(options.text);
   text.current = options.text;
-  /** Each pasted text tile's place in the box's words, by its file's key. */
-  const anchors = useRef(new Map<string, PasteAnchor>());
+  /** Each pasted text tile's place in the box's words, by its file's key (a reopened draft's long pastes too). */
+  const anchors = useRef<Map<string, PasteAnchor>>(null as unknown as Map<string, PasteAnchor>);
+  if (anchors.current === null) anchors.current = anchorsOf(initial);
   /** The words the anchors refer to: every other change of the box's words carries them along (mapAnchor). */
   const anchoredIn = useRef(options.text?.value ?? '');
   if (options.text && options.text.value !== anchoredIn.current) {
@@ -109,6 +131,8 @@ export function useComposeFiles(
   }
   /** The browser's undo puts this tile back while it is the field's very next edit (the paste's own undo). */
   const undoArm = useRef<{ key: string; field: HTMLTextAreaElement } | null>(null);
+  /** Restored tiles whose words are being read for a Put back (a second press waits for the first). */
+  const reading = useRef(new Set<string>());
   /** After a put back: the caret goes after the words once the box shows them. */
   const caretAfter = useRef<{ field: HTMLTextAreaElement; caret: number } | null>(null);
   const release = (key: string) => {
@@ -252,12 +276,34 @@ export function useComposeFiles(
     const file = filesRef.current.find((f) => f.key === key);
     // A read-only box (a Send on its way carries the words in it) takes nothing back.
     if (!host || !file?.pasted || field?.readOnly) return false;
+    if (file.pasted.text !== null) return insertBack(key, file.pasted.text, field);
+    // A tile a draft brought back (a reload, another window): its words are the upload's, read now.
+    const upload = file.upload;
+    if (!upload || reading.current.has(key)) return false;
+    reading.current.add(key);
+    patch(key, { error: null });
+    inboxApi
+      .uploadText(upload.upload_id, machine.current)
+      .then(({ text: words }) => {
+        if (!filesRef.current.some((f) => f.key === key)) return;
+        if (field?.readOnly) return;
+        insertBack(key, words, field);
+      })
+      .catch(() => patch(key, { error: 'That pasted text could not be read back. It is still attached.' }))
+      .finally(() => reading.current.delete(key));
+    return true;
+  }, []);
+
+  /** Put `words` (a tile's paste) back at its place in the box: the tile goes, the caret after them. */
+  const insertBack = (key: string, words: string, field: HTMLTextAreaElement | null): boolean => {
+    const host = text.current;
+    if (!host) return false;
     const value = host.value;
     if (anchoredIn.current !== value) {
       for (const anchor of anchors.current.values()) anchor.at = mapAnchor(anchoredIn.current, value, anchor.at);
     }
     const own = anchors.current.get(key) ?? { at: value.length, lead: '' };
-    const inserted = own.lead + file.pasted.text;
+    const inserted = own.lead + words;
     const back = putTextBack(value, own.at, inserted);
     const place = back.caret - inserted.length;
     // The other tiles' places: after this one's move by its length. One pasted later at the same place came after it.
@@ -274,6 +320,51 @@ export function useComposeFiles(
     if (target) caretAfter.current = { field: target, caret: back.caret };
     onPutBack.current?.();
     return true;
+  };
+
+  /**
+   * The long pastes as a draft keeps them (`files`, approval
+   * "inbox-paste-attachment"): each uploaded pasted tile with where it goes
+   * back in `words` (the box's words being saved; the anchors follow them).
+   */
+  const pastedDraft = useCallback((words?: string): DraftPastedFile[] => {
+    const from = anchoredIn.current;
+    const out: DraftPastedFile[] = [];
+    for (const file of filesRef.current) {
+      const anchor = anchors.current.get(file.key);
+      if (!file.pasted || !anchor || file.state !== 'done' || !file.upload) continue;
+      const at = words === undefined || words === from ? anchor.at : mapAnchor(from, words, anchor.at);
+      const length = words ?? from;
+      out.push({
+        upload_id: file.upload.upload_id,
+        pasted: { at: Math.min(at, length.length), ...(anchor.lead ? { lead: anchor.lead } : {}), preview: file.pasted.preview.slice(0, 200) },
+      });
+    }
+    return out;
+  }, []);
+
+  /**
+   * The box takes a draft's words and long pastes (a reload, another window's
+   * save): its pasted tiles become the draft's, anchored in `words`. Files that
+   * are not long pastes stay. Tiles already here keep their state.
+   */
+  const restorePasted = useCallback((list: readonly InboxDraftFile[], words: string) => {
+    const wanted = new Set(list.filter((file) => file.pasted).map((file) => file.upload_id));
+    const here = new Set(filesRef.current.filter((file) => file.pasted && file.upload).map((file) => file.upload!.upload_id));
+    for (const file of filesRef.current) {
+      if (file.pasted && !(file.upload && wanted.has(file.upload.upload_id))) release(file.key);
+    }
+    for (const file of list) {
+      if (!file.pasted) continue;
+      const key = filesRef.current.find((f) => f.upload?.upload_id === file.upload_id)?.key ?? file.upload_id;
+      anchors.current.set(key, { at: file.pasted.at, lead: file.pasted.lead ?? '' });
+    }
+    anchoredIn.current = words;
+    undoArm.current = null;
+    const added = list.filter((file) => file.pasted && !here.has(file.upload_id)).map(fromUpload);
+    const next = [...filesRef.current.filter((file) => !file.pasted || (file.upload && wanted.has(file.upload.upload_id))), ...added];
+    filesRef.current = next;
+    setFiles(next);
   }, []);
 
   // The caret after the words put back, once the field shows them (a controlled field puts it at its end).
@@ -340,7 +431,7 @@ export function useComposeFiles(
 
   const uploaded = files.filter((file) => file.state === 'done' && file.upload).map((file) => file.upload!);
   const uploading = files.some((file) => file.state === 'uploading');
-  return { files, add, attach, remove, forget, reset, current, paste, takeText, putBack, uploaded, uploading };
+  return { files, add, attach, remove, forget, reset, current, paste, takeText, putBack, pastedDraft, restorePasted, uploaded, uploading };
 }
 
 /** A phone's picker offers the photo library and Files (iOS gives no Paste for a picture in a text field). */
@@ -533,7 +624,7 @@ function PastedTextTile({ file, pasted, onRemove, onPutBack }: { file: ComposeFi
         <span className="ib-nm ib-pt-nm" dir="auto">
           {pasted.preview}
         </span>
-        {file.state === 'refused' ? (
+        {file.state === 'refused' || file.error ? (
           <span className="ib-cp-ferr" role="alert">
             {file.error ?? 'Not attached.'}
           </span>

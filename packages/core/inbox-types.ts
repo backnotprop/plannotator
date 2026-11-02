@@ -2159,7 +2159,30 @@ export interface InboxReplyDraft {
   body: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Long pastes kept as files beside the words (approval "inbox-paste-attachment"), each an upload not sent
+   * yet with where it goes back in `body`. Absent: none (and on a draft an older Inbox wrote).
+   */
+  files?: InboxDraftFile[];
 }
+
+/**
+ * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
+ * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's
+ * space), `preview` the tile's name line (the paste's first words). The text itself is the upload's bytes.
+ */
+export interface InboxDraftPasted {
+  at: number;
+  lead?: string;
+  preview: string;
+}
+
+/** A draft's file: an upload not sent yet, and, for a long paste, where it goes back. */
+export type InboxDraftFile = InboxUpload & { pasted?: InboxDraftPasted };
+
+/** The longest pasted-text preview a draft keeps, and the longest `lead`. */
+export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
+export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
@@ -2188,7 +2211,7 @@ export interface InboxDraft {
   to: InboxDraftTo | null;
   /** The project it was written in (the chosen session's, or the one open in the list). */
   project: { id: string | null; root: string; name: string } | null;
-  files: InboxUpload[];
+  files: InboxDraftFile[];
   /**
    * The thread's name the person typed in compose (the chip), as typed.
    * Absent while the chip follows the message (compose's suggestion, worked

@@ -216,6 +216,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Uploads and drawings (7.48, 7.49): raw bodies, the key in the query; never through the relay.
   { method: "POST", route: /^uploads$/, window: () => "/api/inbox/uploads", raw: { max: INBOX_UPLOAD_MAX_BYTES, code: "upload_too_large", what: "a file" } },
   { method: "POST", route: /^markups$/, window: () => "/api/inbox/markups", raw: { max: INBOX_DEVICE_MARKUP_MAX_BYTES, code: "markup_too_large", what: "a drawing" } },
+  // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
+  // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
+  { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
 ];
 
 /** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */

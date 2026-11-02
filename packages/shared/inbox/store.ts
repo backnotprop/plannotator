@@ -130,7 +130,7 @@ import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
@@ -4573,14 +4573,19 @@ export class InboxStore {
    * body (whitespace only) deletes the draft and answers null. Never a line in
    * the event log: agents, the MCP and search never see it.
    */
-  saveReplyDraft(threadId: string, input: { body?: unknown; base?: unknown; base_body?: unknown }): InboxReplyDraft | null {
+  saveReplyDraft(threadId: string, input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown }): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody } = checkInboxReplyDraftInput(input);
+    const { body, base, baseBody, files, baseFiles } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
     // before that write's answer came back; the draft still holding those words is the window's own.
-    const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
+    // With `base_files` (the long pastes it wrote last), the draft must hold those too: the compare covers both.
+    const ownWords =
+      baseBody !== null &&
+      existing !== null &&
+      existing.body === baseBody &&
+      (baseFiles === null || sameInboxUploadIds(inboxReplyDraftFileIds(existing), baseFiles));
     if ((existing?.updated_at ?? null) !== base && !ownWords) {
       throw new InboxError(
         "draft_conflict",
@@ -4588,14 +4593,22 @@ export class InboxStore {
         { draft: existing },
       );
     }
-    if (body.trim() === "") {
+    // Nothing left: no words and no long paste kept beside them.
+    if (body.trim() === "" && files.length === 0) {
       this.deleteReplyDraft(threadId);
       return null;
     }
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
-    const draft: InboxReplyDraft = { v: 1, thread_id: threadId, body, created_at: existing?.created_at ?? at, updated_at: updatedAt };
+    const draft: InboxReplyDraft = {
+      v: 1,
+      thread_id: threadId,
+      body,
+      created_at: existing?.created_at ?? at,
+      updated_at: updatedAt,
+      ...(files.length > 0 ? { files } : {}),
+    };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.replyDraftChanged(threadId);
@@ -4623,6 +4636,13 @@ export class InboxStore {
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
+  }
+
+  /** The uploads every reply draft keeps (its long pastes): the upload sweep keeps them. */
+  replyDraftUploadIds(): Set<string> {
+    const out = new Set<string>();
+    for (const draft of this.replyDrafts.values()) for (const id of inboxReplyDraftFileIds(draft)) out.add(id);
+    return out;
   }
 
   /** Bytes the reply drafts take on disk (Settings → Storage). */
