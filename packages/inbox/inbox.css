@@ -2087,7 +2087,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-rchip.ib-none { opacity: 0.55; }
 /* --ib-annpop-shift: AnnotationsChip moves the list left when it would run past the window (to the reply box's right edge). */
 .ib-annpop { position: absolute; left: var(--ib-annpop-shift, 0px); bottom: calc(100% + 10px); white-space: normal; width: 540px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); z-index: 30; }
-.ib-aph { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; font-size: var(--ib-fs-13-5, 13.5px); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+/* The header stays: opened far down a long list, its count and Close are still there. */
+.ib-aph { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; background: var(--popover); font-size: var(--ib-fs-13-5, 13.5px); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
 .ib-aph b { font-weight: 600; }
 .ib-aph .ib-sp, .ib-arow .ib-sp, .ib-abt .ib-sp { flex: 1; }
 .ib-arow { padding: 10px 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
@@ -3930,7 +3931,7 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .pn-inbox .ib-cp-del:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 8%, transparent); }
 .ib-cp-status { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); text-align: right; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-foot { flex-wrap: nowrap; }
-.ib-cp-foot > .ib-btn { flex: none; }
+.ib-cp-foot .ib-btn { flex: none; }
 .pn-inbox .ib-cp-foot .ib-btn.ib-pri .ib-kbd { color: inherit; border: 0; padding: 0; font-family: inherit; font-size: var(--ib-fs-12-5, 12.5px); opacity: 0.8; letter-spacing: 0.04em; }
 .ib-cp-drop { position: absolute; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 10px; border: 2px dashed color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--popover) 88%, var(--primary)); color: var(--primary); font-weight: 600; pointer-events: none; }
 
@@ -3999,28 +4000,32 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
   .ib-key.ib-cp-tname { position: relative; height: 34px; padding: 0 9px; }
   .ib-key.ib-cp-tname::after { content: ''; position: absolute; inset: -5px -2px; }
   .pn-inbox .ib-cp-tname-in { font-size: var(--ib-fs-16-in, 16px); position: relative; z-index: 1; }
-  /* The foot: one row of 44 px targets, attachments and mic at the left, the one action at the right. Whatever else is on
-     the row gives way first, so the action keeps at least 12 px from the buttons on its left. */
+  /* The foot: one row of 44 px targets, attachments at the left, the mic and the one action at the right, as a reply's
+     mic is. Whatever else is on the row gives way first, so the action keeps at least 12 px from the buttons on its left. */
   .ib-cp-foot { min-height: 0; padding: 4px 12px 4px 4px; gap: 0; }
   .pn-inbox .ib-cp-clip { flex: none; width: 44px; height: 44px; }
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic { width: 44px; height: 44px; }
   .pn-inbox dialog.ib-cp[data-phone] .ib-cp-foot .ib-vmic::after { inset: 0; }
-  .ib-cp-foot .ib-dtfoot { flex: none; }
   .ib-cp-foot > .ib-sp { flex: 1 1 12px; min-width: 12px; }
   .pn-inbox .ib-cp-send { flex: none; padding: 0 14px; gap: 6px; }
+  .pn-inbox .ib-cp-foot .ib-dtfoot + .ib-cp-send { margin-left: 12px; }
   .ib-cp-clipn { display: none; }
   /* The saved state: the check, the word, the time on one line; what does not fit wraps out of sight whole. */
   .ib-cp-foot > .ib-cp-savedline { display: flex; flex-wrap: wrap; column-gap: 5px; flex: 0 1 auto; min-width: 14px; height: 20px; margin-left: 6px; overflow: hidden; line-height: 20px; white-space: nowrap; }
   .ib-cp-foot > .ib-cp-savedline > svg { margin-block: 3px; }
   /* Dictating: the row is the status, as the reply row's is, and the clip and mic stay under the finger. Send is off
-     until the words land; on the narrowest phones it is the bare arrow, its name kept for a screen reader. */
-  .ib-cp-foot .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+     until the words land. On the narrowest phones it is always the bare arrow, its name kept for a screen reader: it
+     can't narrow only while dictating, or the mic beside it would move. */
   .ib-cp-foot .ib-vline b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .ib-cp-foot:has(.ib-vline) > :is(.ib-cp-savedline, .ib-sp) { display: none; }
-  .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { margin-left: 8px; }
+  /* "Listening" is whole or not there: the bars, the clock and the stop button say it, and they take its room. A screen
+     reader keeps the status (VoiceFoot). */
+  .ib-cp-foot .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { flex: none; }
+  @media (max-width: 429px) {
+    .ib-cp-foot .ib-vline:is([data-voice-line="hold"], [data-voice-line="tap"], [data-voice-line="nearcap"]) b { display: none; }
+  }
   @media (max-width: 359px) {
-    .pn-inbox .ib-cp-foot:has(.ib-vline) .ib-cp-send { width: 44px; padding: 0; justify-content: center; }
-    .ib-cp-foot:has(.ib-vline) .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .pn-inbox .ib-cp-foot .ib-cp-send { width: 44px; padding: 0; justify-content: center; }
+    .ib-cp-foot .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   }
   /* The keyboard is up (phone.ts): the head folds to one line. To takes the top bar's line in the title's place, with
      the room Cancel and Save draft leave. Thread, the notes and the tiles step aside until it closes (the row says how
@@ -6545,7 +6550,11 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */
 .ib-dtfoot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .ib-rfoot > .ib-dtfoot, .ib-fcomp-foot > .ib-dtfoot { flex: 1 1 0; margin-left: 6px; }
-.ib-dtfoot.ib-vlead { justify-content: flex-start; }
+/* New message's row: at rest the row's room goes to the spacer before the mic and Save draft. Dictating, that room is
+   the status's, so they never move, the bars have their width and nothing is drawn over the clock. */
+.ib-cp-foot .ib-dtfoot { flex: none; }
+.ib-cp-foot .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+.ib-cp-foot:has(.ib-vline) > :is(.ib-sp, .ib-cp-status) { display: none; }
 /* Full screen's card has one short row: the status takes it from the chips until the words land. */
 .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-chips { display: none; }
 .ib-vline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
@@ -6588,7 +6597,9 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
   .pn-inbox .ib-dtlink { padding: 8px 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
-  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip) { display: none; }
+  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip), .ib-cp-foot:has(.ib-vline) > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]) { display: none; }
+  /* New message's field runs past what a phone's keyboard leaves: its note stays in sight, at the body's foot. */
+  .ib-cp-field .ib-vnote { position: sticky; bottom: 0; z-index: 1; padding: 6px 0; background: var(--card); }
   .ib-vline { gap: 8px; }
 }
 /* The announcement (components/VoiceIntro.tsx): the list intro's dialog, its picture a reply box. */
@@ -6604,3 +6615,37 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }
 .pn-inbox .ib-vkey { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line); border-radius: 7px; background: var(--background); color: var(--foreground); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-vkey:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* The count opens the list of comments (AnnotationsChip.tsx). In the closed foot, a quiet link; its bigger press area
+   is an overlay, so the foot's row keeps its size and nothing moves. */
+.pn-inbox button.ib-comments-link { position: relative; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); }
+.pn-inbox button.ib-comments-link:hover { color: var(--foreground); text-decoration-color: currentColor; }
+.pn-inbox button.ib-comments-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.pn-inbox button.ib-comments-link::after { content: ""; position: absolute; inset: -11px -6px; }
+.pn-inbox button.ib-draft-pc.ib-comments-link { text-decoration: none; }
+.pn-inbox button.ib-draft-pc.ib-comments-link:hover { color: inherit; text-decoration: underline; }
+/* Step 4 clips the words out of sight (footFit.ts): the pill's count is the way in, and the words leave the Tab order. */
+.ib-footrow[data-fit~="draft"] .ib-draft-foot .ib-st .ib-comments-link { visibility: hidden; }
+.pn-inbox button.ib-fcomp-chip { border: 0; font: inherit; font-weight: 600; cursor: pointer; }
+.pn-inbox button.ib-fcomp-chip:hover, .pn-inbox button.ib-fcomp-chip[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+.pn-inbox button.ib-fcomp-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-annpop:focus, .ib-fcomp:focus { outline: none; }
+.ib-arow.ib-at { background: color-mix(in oklch, var(--primary) 7%, transparent); }
+/* The list's place outside the reply box. It never grows what it sits over: the box above the foot's row, inside the
+   foot's own side padding; above the full-screen card, centred on it. */
+.ib-annat { position: absolute; z-index: 10; }
+.ib-annat-in { position: relative; }
+.ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
+.ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
+.ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+/* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
+.ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The sheet (above) wherever it opens from. */
+  .ib-annat, .ib-annat-in { position: static; transform: none; width: auto; }
+  .ib-annat .ib-annpop { left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); width: auto; }
+  .ib-anncard .ib-annpop { max-height: calc(var(--ib-vvh, 100%) * 0.72); }
+  /* 44 px to press, drawn on the overlay: the count stays the size it is, and nothing moves. */
+  .pn-inbox button.ib-comments-link::after { inset: auto -6px; top: 50%; height: 44px; transform: translateY(-50%); }
+  .pn-inbox button.ib-draft-pc.ib-comments-link::after { inset: auto; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+}
