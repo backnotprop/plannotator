@@ -66,7 +66,7 @@ const swapped = (text: string) => text.replace(OLD_REPLY, NEW_REPLY);
 const results = (options?: Parameters<typeof refreshInboxNotes>[2]) => refreshInboxNotes(dataDir, e, options).map((r) => `${r.agent}:${r.result}`);
 
 test("every version's block is frozen: a released note's bytes never change without a new version", () => {
-  // v1 (0.28.x, on users' disks), v2 (never released), v3 (0.28.34, on users' disks), v4 (0.28.36, on users' disks), v5 (on users' disks), v6 (on users' disks), v7. A change here means notes on disk would read as
+  // v1 (0.28.x, on users' disks), v2 (never released), v3 (0.28.34, on users' disks), v4 (0.28.36, on users' disks), v5 (on users' disks), v6 (on users' disks), v7 (on users' disks), v8. A change here means notes on disk would read as
   // the person's edit and never be refreshed again: add a version instead (INBOX_NOTE_VERSION, the old block
   // into INBOX_NOTE_EARLIER_BLOCKS).
   expect([...INBOX_NOTE_EARLIER_BLOCKS, INBOX_NOTE_BLOCK].map(sha)).toEqual([
@@ -77,6 +77,7 @@ test("every version's block is frozen: a released note's bytes never change with
     "e4d74994695afaf8987b16abed9b818ae736f34ca44621d84e4babb7195a0477",
     "a0277d864dafe4e39d73c4abf24ca9927d995f44734fc3254589d5b64404ec9d",
     "4d6224a3daf125ccf9e873d46a38d746b0f470b92ea83a7472a7f3581ceac89e",
+    "bd3e11a4f20f4af9117afb8ec9808758f33a609bec703140f3d6f28e471586e2",
   ]);
   expect(INBOX_NOTE_EARLIER_BLOCKS[0]).toBe(V1_BLOCK);
 });

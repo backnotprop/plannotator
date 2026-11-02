@@ -759,7 +759,32 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   /** A save is waiting for the pause in typing (the words are not on the server yet). */
   const waiting = useCallback(() => pending.current !== null, []);
 
-  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, withMyChanges };
+  /**
+   * Before a reload (the stale page notice, stalePage.ts): the box's words (`text`, null for a closed box) and files
+   * (`draftFiles`) are saved now, with this window's file changes still waiting (`carried`), and every save is
+   * answered. A save the Inbox refused earlier (it restarted under the page) is made again. True when the Inbox holds
+   * exactly these words and files; false while they are not saved (a conflict to resolve, too long, refused, no answer,
+   * a file change still waiting, a Send on its way). Another machine's thread keeps no draft: true, as a reload always did.
+   */
+  const settle = useCallback(
+    async (text: string | null, files: ReplyDraftFiles = NO_FILES): Promise<boolean> => {
+      const target = current.current;
+      if (machineOf(target)) return true;
+      if (text !== null && (carried.has(target) || replyContentKey(text, files) !== (synced.current.get(target) ?? ''))) save(text, files);
+      else if (text === null && carried.has(target)) write(target, syncedWords.current.get(target) ?? '');
+      flush();
+      for (let seen = chain.current; ; seen = chain.current) {
+        await seen;
+        if (seen === chain.current) break;
+      }
+      if (target !== current.current || claimed.current.has(target) || conflicts.current.has(target)) return false;
+      if (tooLongThreads.has(target) || refusedThreads.has(target) || carried.has(target)) return false;
+      return text === null || replyContentKey(text, files) === (synced.current.get(target) ?? '');
+    },
+    [save, flush, write],
+  );
+
+  return { ...state, save, flush, discard, sent, waiting, claim, release, reload, keepMine, takeTheirs, expectOwnClear, boxTook, withMyChanges, settle };
 }
 
 /** The thread's draft in the store (null: none), or undefined when it could not be read. */

@@ -10,7 +10,7 @@ import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { RowAgents, RowAgentTiles } from './RowAgents';
-import { ProjectTipText, Tip } from './Tip';
+import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
@@ -51,7 +51,13 @@ export interface InboxListProps {
    */
   narrow: boolean;
   selectedThreadId: string | null;
-  notice: string | null;
+  /**
+   * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
+   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
+   */
+  notice: { count: number; project?: string | null } | null;
+  /** This page is older than the Inbox (StalePageNotice, stalePage.ts): at the list's top, above the notifications line. */
+  stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
   onShowNew: () => void;
@@ -349,6 +355,33 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
 }
 
 /**
+ * The held list's "N new" line: one line at every width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…"
+ * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
+ * while it is cut the whole line is the tooltip.
+ */
+function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
+  const full = project ? `${count} new in ${project}` : `${count} new`;
+  return (
+    <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
+      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
+        <Icon name="inbox" size={15} />
+        <span className="ib-notice-text">
+          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
+          {/* A space for the line's text and accessible name; the flex gap draws it. */}
+          {project && ' '}
+          {project && (
+            <bdi className="ib-notice-proj" data-notice-project={project}>
+              {project}
+            </bdi>
+          )}
+        </span>
+        <b>Show</b>
+      </button>
+    </Tip>
+  );
+}
+
+/**
  * The count in words (`countWords`), nothing when the count is `?N` or there is none. A three-line or phone row draws
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
@@ -628,7 +661,7 @@ function RowWithAction({
   children,
 }: {
   row: InboxListRow;
-  /** The group the row sits in on screen: a seen update the list still holds in New keeps Mark read. */
+  /** The group the row sits in on screen (markRead.ts `seenHeldInNew`). */
   drawn: InboxListGroupId;
   menu: boolean;
   onMarkRead?: (row: InboxListRow) => void;
@@ -636,9 +669,12 @@ function RowWithAction({
   onSendNow?: (row: InboxListRow) => void;
   children: ReactNode;
 }) {
-  const offer = onMarkRead && offersRowMarkRead(row, drawn);
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
-  const unread = !offer && onMarkUnread && canMarkUnread(row);
+  // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
+  // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
+  // Its Mark read (move it to Quiet now) stays in the row menu and the header.
+  const unread = onMarkUnread && canMarkUnread(row);
+  const offer = !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
   const sendNow = onSendNow && !offer && !unread && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
   return (
@@ -1102,6 +1138,7 @@ export function InboxList(props: InboxListProps) {
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
         >
+          {props.stale}
           {props.ask}
           {awayLines.map((line) => (
             // A linked machine that is away: one quiet line, as a thread's meta line reads (its rows are greyed below).
@@ -1110,13 +1147,7 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && (
-            <button type="button" className="ib-notice" onClick={props.onShowNew} data-inbox-notice="">
-              <Icon name="inbox" size={15} />
-              {props.notice}
-              <b>Show</b>
-            </button>
-          )}
+          {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {visible.every((section) => section.id === 'snoozed') && props.empty}
           {visible.map((section) => {

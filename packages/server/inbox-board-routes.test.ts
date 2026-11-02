@@ -4,7 +4,8 @@
  * through the hover cards' resolver only when asked, with their live state,
  * refused to another site; a card's history; and the first-visit dialog
  * claimed once per machine. What regresses: a link fetched before the card is
- * opened, a host outside the hover cards' rules being asked, the dialog
+ * opened, a host outside the hover cards' rules being asked, a Jira issue URL
+ * refused (or fetched) again, the dialog
  * showing on every visit (or to two tabs), or a read-only config showing it
  * forever.
  */
@@ -15,6 +16,7 @@ import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { RefCli, RefCommandResult, RefRunner } from "./ref-cards";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -99,10 +101,49 @@ describe("the Board page's routes", () => {
     expect((await fetch(`${base}/api/inbox/cards/crd_00000000000000000000000000/refs`)).status).toBe(404);
   });
 
+  test("a Jira issue URL links through the agent's card call: stored as its key, kept on reopen, never fetched", async () => {
+    const { dataDir, server, base, project, calls } = await world();
+    mkdirSync(project.root, { recursive: true });
+    const mcp = async (args: Record<string, unknown>) => {
+      const response = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card", arguments: { project_path: project.root, agent_session: "ses_j", agent_host: "claude-code", ...args } } }),
+      });
+      const text = await response.text();
+      const data = text.split("\n").find((line) => line.startsWith("data:"));
+      return JSON.parse(data ? data.slice(5) : text).result as { isError?: boolean; content: { text: string }[]; structuredContent?: { card?: { refs: unknown[] } } };
+    };
+    const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Jira" });
+    // User feedback #9's exact call.
+    const linked = await mcp({ op: "link", card_id: card.id, ref: "https://example.atlassian.net/browse/DEMO-123" });
+    expect(linked.isError ?? false).toBe(false);
+    const jira = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://example.atlassian.net/browse/DEMO-123", via: "ref" };
+    expect(linked.structuredContent?.card?.refs).toEqual([jira]);
+    // The same issue pasted from a board is the same link, not a second one.
+    const again = await mcp({ op: "link", card_id: card.id, ref: "https://example.atlassian.net/jira/software/projects/DEMO/boards/1?selectedIssue=DEMO-123" });
+    expect(again.structuredContent?.card?.refs).toEqual([jira]);
+    // The same key on another Jira site is another issue: both are kept.
+    const other = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://jira.acme.corp/browse/DEMO-123", via: "ref" };
+    const twoSites = await mcp({ op: "link", card_id: card.id, ref: other.url });
+    expect(twoSites.structuredContent?.card?.refs).toEqual([jira, other]);
+    // An ordinary page is still refused, with the accepted forms in the answer.
+    const refused = await mcp({ op: "link", card_id: card.id, ref: "https://example.com/docs/browse/DEMO-123" });
+    expect(refused.content[0]!.text).toStartWith("validation_error: ref:");
+    expect(refused.content[0]!.text).toContain("atlassian.net/browse/KEY-123");
+    // Opened, it has no resolver: unsupported, and no gh or glab ran for it.
+    const { refs } = (await (await fetch(`${base}/api/inbox/cards/${card.id}/refs`)).json()) as { refs: { ref: unknown; result: { ok: boolean; error?: string } }[] };
+    const unsupported = { result: expect.objectContaining({ ok: false, error: "unsupported" }) };
+    expect(refs).toEqual([{ ref: jira, ...unsupported }, { ref: other, ...unsupported }]);
+    expect(calls).toEqual([]);
+    // Stored like any ref: the card read back from disk keeps them.
+    expect(InboxStore.open(dataDir).card(card.id)!.refs).toEqual([jira, other]);
+  });
+
   test("a card and its history, newest first", async () => {
     const { server, base, project } = await world();
     const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Roadmap" });
-    server.store.updateCard(card.id, { by: { kind: "person" }, column: "designing" });
+    server.store.updateCard(card.id, { by: { kind: "person" }, column: "in_progress" });
     const answer = (await (await fetch(`${base}/api/inbox/cards/${card.id}`)).json()) as { card: { id: string }; history: { kind: string }[] };
     expect(answer.card.id).toBe(card.id);
     expect(answer.history.map((entry) => entry.kind)).toEqual(["moved", "created"]);

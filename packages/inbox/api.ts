@@ -744,6 +744,16 @@ export function setPageSession(value: string): void {
   if (pageSession === null) pageSession = value;
 }
 
+/**
+ * Only the stale page notice's Reload (stalePage.ts `reloadOntoInbox`) calls this. The Inbox restarted under the page,
+ * so the saves made before the reload carry the running Inbox's session (only when that Inbox is this page's own);
+ * when they do not all land, Reload sets the first session back, so the page's later writes are refused (409) as
+ * before. No other code changes the page's session after the first list read.
+ */
+export function adoptPageSession(value: string): void {
+  pageSession = value;
+}
+
 /** For a DOM test file that runs after another one in the same process (without `--isolate`) against its own server: the first file's session would otherwise stay. */
 export function resetPageSessionForTests(): void {
   pageSession = null;
@@ -1163,6 +1173,8 @@ export const inboxApi = {
   resolve: (messageId: string, resolved: boolean) =>
     post<unknown>(messageUrl(messageId, `/resolve`), { resolved }),
   health: () => get<InboxHealth>(inboxUrl('/health')),
+  /** The health, or InboxReadTimeout past `timeoutMs` (the stale page notice's checks and its Reload). */
+  healthWithin: (timeoutMs: number) => getWithin<InboxHealth>(inboxUrl('/health'), timeoutMs),
   /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
   guide: (messageId: string) =>
     get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
@@ -1278,13 +1290,13 @@ export const inboxApi = {
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
   cards: () => get<CardsModel>(inboxUrl('/cards')),
   /**
-   * The person's New card: a title, notes and links, in Backlog or the Icebox; or sent: `thread_id` is
-   * the thread compose's Send just started for it (the card lands in that thread's project).
+   * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
+   * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
-  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'icebox'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
+  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
     post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
-  /** The person's move: `move` to a column, `icebox`, `drop` (reason optional), `restore`. */
-  moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'icebox' } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
+  /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
+  moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
   /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
   editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>

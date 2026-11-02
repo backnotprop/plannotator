@@ -129,7 +129,7 @@ export interface AgentMessage {
    * the person's words.
    */
   board_request?: true;
-  /** With `board_request`: the cards in flight that link this thread already (not shipped, not dropped), for `messageText`. */
+  /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
 }
 
@@ -526,12 +526,12 @@ export function windowedThread(
   const formOf = (id: string): AgentMessageForm => (whole.has(id) ? "whole" : personEarlier.has(id) ? "earlier" : "window");
   const caller = input.caller ?? null;
   // A Board request in full names the cards that link the thread already (review of #2249: no second card on a re-read).
-  // Only cards still in flight: a shipped card is done (new work in the thread gets a new card), and the card
-  // list op hides shipped and dropped cards by default, so the agent's list agrees with this line.
+  // Only cards still in flight: a card in Done is finished (new work in the thread gets a new card), and the card
+  // list op hides done and dropped cards by default, so the agent's list agrees with this line.
   const linkedCards = () =>
     store
       .listCards({ projectIds: new Set([thread.project.id]) })
-      .filter((card) => card.column !== "dropped" && card.column !== "shipped" && card.threads.includes(threadId))
+      .filter((card) => card.column !== "dropped" && card.column !== "done" && card.threads.includes(threadId))
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))

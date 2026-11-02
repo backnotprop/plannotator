@@ -9,6 +9,7 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
@@ -46,7 +47,9 @@ import { MessageMenu, ThreadMore, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
+import { registerReloadFlush } from '../stalePage';
 import { landInReplyDraft, useReplyDraft } from '../replyDraft';
+import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -456,9 +459,9 @@ export function MessageBody({
   const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
   const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
   const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
-  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false }) : []), [restShown]);
-  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false }) : []), [feedbackShown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown, ownReply]);
+  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown, ownReply]);
+  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown, ownReply]);
   const refRepo = useRefRepo(repo);
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
@@ -827,6 +830,7 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    <SoftLineBreaksContext.Provider value={ownReply}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
@@ -887,6 +891,7 @@ export function MessageBody({
       )}
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
   );
 }
@@ -981,8 +986,10 @@ export interface ThreadPaneProps {
   onMarkRead?: (read: boolean) => void;
   /**
    * Mark unread (markRead.ts `canMarkUnread`): on a thread read by opening it
-   * (not marked read) the header's disabled Mark read becomes Mark unread.
-   * Absent: the button stays Mark read.
+   * (not marked read) the header's Mark read becomes Mark unread, the moment
+   * `row` reads it as looked at (its look on its way included) and while the
+   * list still holds its row in New (the owner, 2026-11-02). It closes the
+   * thread, which stays unread. Absent: the button stays Mark read.
    */
   onMarkUnread?: () => void;
   /**
@@ -1350,6 +1357,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
   const restoringRef = useRef(false);
+  /** The box as the focus effect last saw it, and the thread it was in: Reply takes focus only when that box closes. */
+  const boxSeen = useRef({ open: false, thread: thread.thread_id });
   /** The thread whose draft was put back already (once per visit). */
   const restoredFor = useRef<string | null>(null);
   /**
@@ -2857,6 +2866,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
   useEffect(() => {
+    const before = boxSeen.current;
+    boxSeen.current = { open: box.open, thread: thread.thread_id };
     if (restoringRef.current) {
       restoringRef.current = false;
       return;
@@ -2864,7 +2875,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (box.open) textRef.current?.focus();
     // The box closed (Escape, Cancel, a Send that did not go) and took focus with it: the foot's Reply (or Edit
     // draft) has it next. A Send that went gives focus to the reply in the thread instead (send, `focusSent`).
-    else if (!focusSent.current && !sendingFromComposer.current) {
+    // Only a box that was open in THIS thread: a thread opening (this effect's first run) or another thread
+    // closing the last one's box leaves focus where the person put it, so a click or a tap that opens a thread
+    // never rings Reply (the browser draws a ring for a script's focus that no key or click of the page's came
+    // before, as on the first thread after a load).
+    else if (before.open && before.thread === thread.thread_id && !focusSent.current && !sendingFromComposer.current) {
       const active = document.activeElement;
       if (!active || active === document.body || !active.isConnected) {
         requestAnimationFrame(() => {
@@ -2874,6 +2889,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the box opens or closes, never on a thread change alone
   }, [box.open]);
 
   // The update control's restart guard: an unsent reply is the one thing a
@@ -2899,6 +2915,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     reportUnsentReply({ subject: unsentSubject, files: unsentFiles, writing: unsentWriting });
     return () => reportUnsentReply(null);
   }, [unsentSubject, unsentFiles, unsentWriting]);
+
+  // The stale page notice's Reload (stalePage.ts) saves first: the reply box's words as its draft, and every answer on
+  // the cards. Files in the box that the draft does not keep would be lost, so they stop the reload too, as do words in
+  // the box of another machine's thread (its drafts live on that machine, which keeps none from here).
+  const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
+  reloadFlush.current = async () => {
+    const current = boxRef.current;
+    const text = current.open ? current.text : null;
+    const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.draftFiles(text)), pickQueue.settled()]);
+    const awayWords = !!machine && text !== null && text.trim() !== '';
+    return reply && answers && !unsentFiles && !awayWords;
+  };
+  useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
 
   const questionById = (id: string): InboxQuestion | undefined => {
     for (const message of threadRef.current.messages) {
@@ -4000,6 +4029,49 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     }
   };
 
+  // Request guided review (the header's ⋯, guideRequest.ts): the person's reply asking for a guided review of the
+  // thread's code changes, to the session a typed reply reaches. Hidden on an archived thread, for a host that gets
+  // no guided reviews, and while the session it would reach has ended, as the window knows it. That session is the
+  // target's (after a hand-off, the new owner's), read with the asker's liveness when it is the same session, else
+  // on its own.
+  const guideTarget = guideRequestTarget(thread);
+  const guideSession = guideTarget && guideTargetCanEnd(guideTarget) ? guideTarget.to.session : null;
+  const guideWatch = guideSession !== null && guideSession !== askerToWatch ? guideSession : null;
+  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null);
+  const guideLiveNow = guideSession === null ? null : guideSession === askerToWatch ? live : guideLive;
+  const guideEnded = guideSession !== null && guideLiveNow?.asker?.session === guideSession && guideLiveNow.asker.live === false;
+  const guideOffered = guideTarget !== null && !guideEnded;
+  /** One request at a time (a double click sends one). */
+  const requestingGuide = useRef(false);
+  /** The key of a request that did not land, kept for a retry of that same request: the message it answers, and the key. */
+  const guideKey = useRef<{ message: string; key: string } | null>(null);
+  /**
+   * An ordinary reply of words alone, through the reply route: stored, shown as the person's message with its
+   * Delivered or Queued line, and waking the session as a typed reply does. The reply box, its draft, picks and
+   * comments are left as they are: the request carries none of them.
+   */
+  const requestGuide = async () => {
+    if (requestingGuide.current || sending) return;
+    const target = guideRequestTarget(threadRef.current);
+    if (!target) return;
+    requestingGuide.current = true;
+    setError(null);
+    // A retry of the same request keeps its key; a request to another message (another thread, or the agent wrote
+    // again) is a new one, never a key the Inbox has seen on another reply (`idempotency_key_reused`).
+    if (guideKey.current?.message !== target.message.id) guideKey.current = { message: target.message.id, key: newUuid() };
+    try {
+      await inboxApi.reply(target.message.id, { idempotency_key: guideKey.current.key, words: GUIDE_REQUEST_WORDS, questions: [] });
+      guideKey.current = null;
+      announce(`Asked ${hostName(target.to.host)} for a guided review.`);
+      await onChanged();
+      requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    } catch (cause) {
+      setError(`The guided review request was not sent. ${cause instanceof InboxApiError ? cause.message : 'Try again.'}`);
+    } finally {
+      requestingGuide.current = false;
+    }
+  };
+
   // Open questions in this thread (approval "inbox-thread-open-questions", option A): the "N open questions"
   // button lists them (Re-ask at its foot), and a row takes the person to the card (unfolding its message).
   const openQFromServer = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
@@ -4262,12 +4334,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
-  // Mark unread takes the place of the disabled Mark read ("Nothing here waits on you") on a thread the person
-  // read by opening it, an agent having written last (markRead.ts `canMarkUnread`). A thread marked read keeps
-  // the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
-  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!, drawn);
-  // The header's ⋯ More offers it where that button does not: a thread the list still holds in New, one marked read.
-  // A phone keeps it there too, since its header gives way when short of room (headFit.ts).
+  // Mark unread takes Mark read's place on a thread the person read by opening it, an agent having written last
+  // (markRead.ts `canMarkUnread`), as the row's hover action does: the list still holding the row in New
+  // (`seenHeldInNew`) and the look still on its way (App.tsx `looking`) included (the owner, 2026-11-02: "If I open
+  // a thread, and it transitions to [read] because there's no questions or anything, then I need the ability to
+  // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
+  // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
+  // The header's ⋯ More offers it where that button does not: a thread marked read. A phone keeps it there too,
+  // since its header gives way when short of room (headFit.ts).
   const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
@@ -4560,6 +4635,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               snooze={onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined}
+              requestGuide={guideOffered ? () => void requestGuide() : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
