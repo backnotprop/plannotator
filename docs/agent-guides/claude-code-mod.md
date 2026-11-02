@@ -629,11 +629,20 @@ cancel aborts our own turn, or, while it is still queued, confirms at once and
 aborts its turn the moment it starts. A question still queued when the process
 moves to another session (`/clear` queued in the turn it waits behind, or an
 in-process resume) is dropped the same way: a pending `$.prompt.submit` can't
-be withdrawn, so `currentMod` hands its text to the new instance's tracker
-(`TurnTracker.queuedAsk` / `dropQueued`), which aborts that turn when it starts
-instead of letting it run in the new conversation; the window then sees
-`session_gone`, and Ask again sends it once (`inbox-ask.test.ts`, via
-`ClaudeSession.clear`, which mirrors `currentMod`). Claude Code never raises a plugin's own hooks
+be withdrawn, so `currentMod` calls `PlannotatorMod.carryQueued`, which hands
+every question prompt that may still wait in the engine (a live question's not
+started, one Stopped while queued, one carried from an earlier switch:
+`TurnTracker.queuedPrompts` / `dropQueued`) to the new instance's tracker. That
+tracker aborts the turn when it starts, so no answer runs in the new
+conversation, but the aborted turn's user row (the framed question, with its
+drafts and context) and an interrupted marker stay in the cleared conversation's
+transcript, where the model sees them on the person's next prompt: nothing can
+withdraw it (a question Stopped while queued leaves the same). Each carried
+prompt follows its submit (`QueuedPrompt`): rejected, it is forgotten at once;
+taken, at the next turn's end, so a prompt the engine never ran can't abort the
+same words asked again. The window then sees `session_gone`, and Ask again sends
+it once (`inbox-ask.test.ts` and `turns.test.ts`; `ClaudeSession.clear` calls
+the same `carryQueued`). Claude Code never raises a plugin's own hooks
 for a prompt its code submitted (the debug log says "skipped: re-entry"), so the
 mod's `prompt.submit` hook sees every OTHER prompt (the user's Enter, a
 notification, another plugin); a turn whose text is exactly one of those is

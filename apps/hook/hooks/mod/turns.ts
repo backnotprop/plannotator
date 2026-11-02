@@ -93,9 +93,40 @@ function takeoverTurn(prompt: Omit<EnteredPrompt, 'text'>): string | null {
   return TAKEOVER_ORIGINS.has(prompt.originKind) ? prompt.turnId : null
 }
 
+/**
+ * A question's `$.prompt.submit` that the engine may still hold. A pending submit
+ * can't be withdrawn, so its turn is aborted when it starts unless a live question
+ * owns it, by whichever tracker holds this then (the one it was asked in, or the
+ * next session's after `/clear` or a resume: `PlannotatorMod.carryQueued`).
+ * The submit settling bounds it, so a prompt the engine never runs can't
+ * shadow the same words asked again: rejected, it never runs and is
+ * forgotten at once; resolved, the engine took it, so its turn has started by
+ * the next turn's end, and it is forgotten then.
+ */
+export class QueuedPrompt {
+  state: 'waiting' | 'taken' | 'failed' = 'waiting'
+  constructor(readonly text: string) {}
+
+  follow(submit: Promise<unknown>): void {
+    submit.then(
+      () => {
+        if (this.state === 'waiting') this.state = 'taken'
+      },
+      () => {
+        this.state = 'failed'
+      },
+    )
+  }
+}
+
+/** Prompts to drop kept at most (each is a question nobody owns any more). */
+const MAX_DROPS = 16
+
 interface ActiveAsk {
   askId: string
   text: string
+  /** Its submit, while its turn has not started. */
+  prompt: QueuedPrompt
   sink: AskSink
   turnId: string | null
   cancelled: boolean
@@ -118,8 +149,12 @@ export class TurnTracker {
   /** The main-loop turn running now, if any. */
   runningTurnId: string | null = null
   private ask: ActiveAsk | null = null
-  /** A question cancelled while still queued: its turn is aborted when it starts. */
-  private dropText: string | null = null
+  /**
+   * Questions no live ask owns whose prompts may still wait in the engine (one
+   * cancelled while queued, or carried from another session): each one's turn
+   * is aborted when it starts.
+   */
+  private drops: QueuedPrompt[] = []
   /**
    * Prompts that entered the session from anyone but this plugin (the user's
    * Enter, a notification, another plugin), as `prompt.submit` saw them. The
@@ -238,6 +273,7 @@ export class TurnTracker {
     this.ask = {
       askId,
       text,
+      prompt: new QueuedPrompt(text),
       sink,
       turnId: null,
       cancelled: false,
@@ -252,19 +288,40 @@ export class TurnTracker {
     return true
   }
 
-  /** The question submitted whose turn has not started: its prompt still waits in the engine, which can't withdraw it. */
-  queuedAsk(): string | null {
-    const ask = this.ask
-    return ask && !ask.finished && !ask.cancelled && ask.turnId === null ? ask.text : null
+  /** `askId`'s `$.prompt.submit`, so its prompt is forgotten once the engine settles it. */
+  followSubmit(askId: string, submit: Promise<unknown>): void {
+    if (this.ask?.askId === askId) this.ask.prompt.follow(submit)
   }
 
   /**
-   * Another instance's queued question (`/clear` or a resume moved the process to
-   * another session under it): its turn is aborted when it starts, as a
-   * cancelled queued question's is, so it never runs in the new conversation.
+   * Every question prompt that may still wait in the engine, which can't withdraw
+   * it: a live question whose turn has not started, and those already
+   * to be dropped (cancelled while queued, or carried here from an earlier session).
    */
-  dropQueued(text: string): void {
-    this.dropText = text
+  queuedPrompts(): QueuedPrompt[] {
+    this.prune('failed')
+    const ask = this.ask
+    const live = ask && !ask.finished && ask.turnId === null && !this.drops.includes(ask.prompt) ? [ask.prompt] : []
+    return [...this.drops, ...live]
+  }
+
+  /**
+   * Another instance's queued prompts (`/clear` or a resume moved the process to
+   * another session under them): each one's turn is aborted when it starts, as
+   * a cancelled queued question's is. Those already held here are kept.
+   */
+  dropQueued(prompts: readonly QueuedPrompt[]): void {
+    for (const prompt of prompts) this.addDrop(prompt)
+  }
+
+  private addDrop(prompt: QueuedPrompt): void {
+    if (prompt.state === 'failed' || this.drops.includes(prompt)) return
+    this.drops.push(prompt)
+    if (this.drops.length > MAX_DROPS) this.drops.shift()
+  }
+
+  private prune(...states: QueuedPrompt['state'][]): void {
+    this.drops = this.drops.filter((prompt) => !states.includes(prompt.state))
   }
 
   isActiveAsk(askId: string): boolean {
@@ -279,8 +336,11 @@ export class TurnTracker {
       if (foreign.originKind === OTHER_PLUGIN_ORIGIN) this.otherPluginTurns.add(turnId)
       return null
     }
-    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
-      this.dropText = null
+    this.prune('failed')
+    // The engine runs prompts in order, so a dropped prompt of the same words runs before a new ask's.
+    const drop = this.drops.findIndex((prompt) => sameQuestion(text, prompt.text))
+    if (drop >= 0) {
+      this.drops.splice(drop, 1)
       return turnId
     }
     const ask = this.ask
@@ -338,6 +398,8 @@ export class TurnTracker {
     if (this.runningTurnId === turnId) this.runningTurnId = null
     this.takenOverTurns.delete(turnId)
     this.otherPluginTurns.delete(turnId)
+    // A prompt the engine took before this turn ended has had its turn start: one still held never runs.
+    this.prune('failed', 'taken')
     const ask = this.ask
     if (!ask || ask.finished || ask.turnId !== turnId) return
     ask.finished = true
@@ -389,7 +451,7 @@ export class TurnTracker {
     if (ask.turnId) return ask.turnId
     // Still queued behind another turn: confirm now, abort its turn when it starts.
     ask.finished = true
-    this.dropText = ask.text
+    this.addDrop(ask.prompt)
     ask.sink.error('aborted')
     return null
   }
