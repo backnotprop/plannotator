@@ -49,12 +49,26 @@ export function labelPath(root: string): { parts: string[]; checkout: string | n
 }
 
 /**
+ * Where a home folder ends in `parts` (`/Users/<x>`, `/home/<x>`, `<drive>:\\Users\\<x>`): the index of `<x>`, or
+ * -1. The parents a clash adds never spell it out: from there up they read "~".
+ */
+function homeAt(parts: readonly string[]): number {
+  const at = parts[0]?.endsWith(':') ? 1 : 0;
+  return parts.length > at + 1 && ['users', 'home'].includes(sameKey(parts[at]!)) ? at + 1 : -1;
+}
+
+/**
  * Each project's name by id, for the projects given (the ones on screen): its
  * folder's name (its repository's, for a checkout in `worktrees`: `labelPath`),
- * with the fewest parent folders that tell apart the projects whose names
- * clash. Two checkouts of one repository (`appnotes/worktrees/main` and
- * `appnotes/worktrees/fix`) differ only by the checkout, which then names them
- * ("appnotes · main", "appnotes · fix"). A project whose root has no last
+ * with the fewest parent folders that tell it apart from the other places of
+ * that name. A place is one folder: a repository, the plain folder its
+ * checkouts sit in (Workspaces' `appnotes` beside `appnotes/worktrees/main`),
+ * and its checkouts share one, so their parents never tell them apart. Within
+ * a place the checkout does ("appnotes · main", "appnotes · fix"); the folder
+ * itself reads its bare name ("appnotes"). The parents are the shortest suffix
+ * that differs for that project, normally one folder ("appnotes · projects"),
+ * and a home folder in them reads "~" ("api · ~" beside "api · work"), unless
+ * that would make two names the same. A project whose root has no last
  * segment (a filesystem root) keeps `name`. A project the person renamed
  * (`display_name`) reads that name as it is, and takes no part in clashes.
  */
@@ -78,28 +92,44 @@ export function shortProjectNames(projects: readonly LabeledProject[]): Map<stri
       out.set(ids[0]!, base.get(ids[0]!)!.name);
       continue;
     }
-    const pathKey = (id: string) => sameKey(base.get(id)!.parts.join('/'));
-    // Checkouts of one repository and nothing else: the checkout tells them apart.
-    if (new Set(ids.map(pathKey)).size === 1 && ids.every((id) => base.get(id)!.checkout !== null)) {
-      for (const id of ids) out.set(id, `${base.get(id)!.name} · ${base.get(id)!.checkout}`);
-      continue;
-    }
-    // The fewest parent folders that tell every project of the group apart.
-    const parentsOf = (id: string, depth: number) => {
-      const { parts } = base.get(id)!;
-      return parts.slice(Math.max(0, parts.length - 1 - depth), parts.length - 1).join('/');
-    };
-    const deepest = Math.max(...ids.map((id) => base.get(id)!.parts.length - 1));
-    // Checkouts of one repository share every parent (the checkout tells them apart below): one to tell apart.
-    const apart = new Set(ids.map((id) => (base.get(id)!.checkout === null ? `\0${id}` : pathKey(id)))).size;
-    let depth = 1;
-    while (depth < deepest && new Set(ids.map((id) => sameKey(parentsOf(id, depth)))).size < apart) depth += 1;
+    // One entry per place (folder): the projects there, told apart by their checkout only.
+    const places = new Map<string, string[]>();
     for (const id of ids) {
-      const parents = parentsOf(id, depth);
-      const { name, checkout } = base.get(id)!;
-      // Still the same as another (two checkouts of one repository among others): the checkout too.
-      const twin = checkout !== null && ids.some((other) => other !== id && pathKey(other) === pathKey(id));
-      out.set(id, `${parents ? `${name} · ${parents}` : name}${twin ? ` · ${checkout}` : ''}`);
+      const key = sameKey(base.get(id)!.parts.join('/'));
+      places.set(key, [...(places.get(key) ?? []), id]);
+    }
+    const parents = new Map<string, string>();
+    if (places.size > 1) {
+      const heads = [...places.values()].map((members) => base.get(members[0]!)!.parts);
+      // A place's parents `depth` folders up, as written, and as compared.
+      const parentsOf = (parts: readonly string[], depth: number) => parts.slice(Math.max(0, parts.length - 1 - depth), parts.length - 1);
+      const raw = heads.map((parts) => {
+        // The shortest suffix of parents no other place of the name shares (at its whole path, when none is shorter).
+        let depth = 1;
+        const differs = (d: number) => heads.every((other) => other === parts || sameKey(parentsOf(other, d).join('/')) !== sameKey(parentsOf(parts, d).join('/')));
+        while (depth < parts.length - 1 && !differs(depth)) depth += 1;
+        return { parts, shown: parentsOf(parts, depth) };
+      });
+      // A home folder spelled out ("Users/ramos/…") reads "~", unless two places would then read the same.
+      const tilde = raw.map(({ parts, shown }) => {
+        const home = homeAt(parts);
+        const from = parts.length - 1 - shown.length;
+        return home >= 0 && home < parts.length - 1 && from <= home ? ['~', ...parts.slice(home + 1, parts.length - 1)].join('/') : shown.join('/');
+      });
+      const plain = raw.map(({ shown }) => shown.join('/'));
+      const readable = new Set(tilde.map(sameKey)).size === tilde.length ? tilde : plain;
+      [...places.values()].forEach((members, index) => {
+        for (const id of members) parents.set(id, readable[index]!);
+      });
+    }
+    for (const members of places.values()) {
+      for (const id of members) {
+        const { name, checkout } = base.get(id)!;
+        const where = parents.get(id);
+        // Only another project in the same place needs the checkout named.
+        const own = members.length > 1 && checkout !== null ? ` · ${checkout}` : '';
+        out.set(id, `${where ? `${name} · ${where}` : name}${own}`);
+      }
     }
   }
   return out;

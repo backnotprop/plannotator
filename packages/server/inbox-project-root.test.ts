@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createInboxProjectRoots,
+  INBOX_PROJECT_CONTAINER_SCAN_MAX,
   inboxGitRunner,
   inboxProjectRootGitEnv,
   nearestProjectHolding,
@@ -208,6 +209,92 @@ describe("resolveInboxProjectRoot", () => {
     await expect(resolveInboxProjectRoot("relative/path")).rejects.toThrow("must be an absolute path");
     await expect(resolveInboxProjectRoot(join(root, "missing"))).rejects.toThrow("no such folder");
     await expect(resolveInboxProjectRoot(join(root, "file.txt"))).rejects.toThrow("no such folder");
+  });
+});
+
+/**
+ * The owner's layout (2026-11-02): `~/workspaces/projects/appnotes` is a plain folder of notes, and its
+ * `worktrees` folder holds the repository's checkouts: the main checkout `worktrees/main` and linked
+ * worktrees beside it. A session started in `appnotes` made a folder project named "appnotes" next to the
+ * repository's, which reads "appnotes" too.
+ */
+function appnotesLayout(root: string) {
+  const folder = join(root, "workspaces", "projects", "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  for (const sub of ["scripts", "art", ".impeccable"]) mkdirSync(join(folder, sub));
+  writeFileSync(join(folder, "DESIGN.md"), "# Design\n");
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const branch = join(folder, "worktrees", "agent-pr-plan-box");
+  git(main, "worktree", "add", "-q", branch, "-b", "agent-pr-plan-box");
+  return { folder, main, branch };
+}
+
+describe("a plain folder that holds one repository's checkouts", () => {
+  test("files into that repository's project, as its checkouts do; the folder is kept as the root an older Inbox used", async () => {
+    const { folder, main, branch } = appnotesLayout(tempRoot());
+    expect(await resolveInboxProjectRoot(folder)).toEqual({ root: main, name: "main", folder, worktree: folder, settled: true });
+    expect(await resolveInboxProjectRoot(branch)).toMatchObject({ root: main, worktree: branch });
+    // A subfolder of notes is not read: it holds no checkouts of its own.
+    expect(await resolveInboxProjectRoot(join(folder, "scripts"))).toMatchObject({ root: join(folder, "scripts"), worktree: null });
+  });
+
+  test("checkouts in `.worktrees` count the same way; checkouts right in a folder do not", async () => {
+    const root = tempRoot();
+    const dotted = join(root, "tool");
+    mkdirSync(join(dotted, ".worktrees"), { recursive: true });
+    const { main } = repoWithWorktree(join(dotted, ".worktrees"), "main");
+    expect(await resolveInboxProjectRoot(dotted)).toMatchObject({ root: main, worktree: dotted, settled: true });
+    // `code/api` and `code/api-wt` side by side: `code` is a folder of projects, not the repository.
+    const code = join(root, "code");
+    mkdirSync(code);
+    repoWithWorktree(code);
+    expect(await resolveInboxProjectRoot(code)).toMatchObject({ root: code, worktree: null });
+  });
+
+  test("checkouts of two repositories leave the folder its own project", async () => {
+    const { folder, main } = appnotesLayout(tempRoot());
+    const other = join(tempRoot(), "other");
+    git(tempRoot(), "init", "-q", other);
+    writeFileSync(join(other, "a.txt"), "a\n");
+    git(other, "add", ".");
+    git(other, "commit", "-qm", "a");
+    git(other, "worktree", "add", "-q", join(folder, "worktrees", "other-fix"), "-b", "fix");
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null, settled: true });
+    expect(await resolveInboxProjectRoot(join(folder, "worktrees", "main"))).toMatchObject({ root: main });
+  });
+
+  test("a lone main checkout in the worktrees folder makes it the repository's; checkouts of a repository elsewhere do not", async () => {
+    const root = tempRoot();
+    const wrapper = join(root, "wrapper");
+    mkdirSync(join(wrapper, "worktrees"), { recursive: true });
+    git(wrapper, "init", "-q", join(wrapper, "worktrees", "only"));
+    // A main checkout (an empty repository still has a toplevel git confirms): the folder holds the repository.
+    expect(await resolveInboxProjectRoot(wrapper)).toMatchObject({ root: join(wrapper, "worktrees", "only"), worktree: wrapper });
+    // `elsewhere/worktrees/x` is a worktree of `api`, outside `elsewhere`: Codex's `~/.codex/worktrees/<id>` shape.
+    const { main } = repoWithWorktree(root);
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(join(elsewhere, "worktrees"), { recursive: true });
+    git(main, "worktree", "add", "-q", join(elsewhere, "worktrees", "x"), "-b", "x");
+    expect(await resolveInboxProjectRoot(elsewhere)).toMatchObject({ root: elsewhere, worktree: null });
+  });
+
+  test("a worktrees folder with more entries than the scan reads leaves the folder its own project", async () => {
+    const { folder } = appnotesLayout(tempRoot());
+    for (let i = 0; i < INBOX_PROJECT_CONTAINER_SCAN_MAX; i += 1) mkdirSync(join(folder, "worktrees", `n${i}`));
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
+  });
+
+  test("without git the folder is its own project; a git that does not answer for the checkout leaves an unsettled guess", async () => {
+    const { folder, main } = appnotesLayout(tempRoot());
+    const none: InboxGitRunner = async () => ({ exitCode: 127, stdout: "" });
+    expect(await resolveInboxProjectRoot(folder, { git: none })).toMatchObject({ root: folder, worktree: null, settled: true });
+    const real = createRealRunnerFor();
+    const halfway: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
+    expect(await resolveInboxProjectRoot(folder, { git: halfway })).toMatchObject({ root: folder, worktree: null, settled: false });
   });
 });
 

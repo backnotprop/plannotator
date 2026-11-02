@@ -14,6 +14,17 @@
  *     how Claude Code isolates an agent in `.claude/worktrees/agent-…`).
  *     Then the project is the repository's main worktree, so every worktree
  *     of one repository files into one project instead of one each.
+ *  4. Not in a git work tree, but a folder that holds one repository's
+ *     checkouts (Workspaces' `<repo>/worktrees/<branch>`, whose `<repo>` is
+ *     a plain folder of notes beside the checkouts): that repository's
+ *     project, so a session started in `<repo>` files where its checkouts
+ *     do (`repositoryHeldBy`). Read from disk without git and bounded: the
+ *     entries of its `worktrees` / `.worktrees` folder, at most
+ *     `INBOX_PROJECT_CONTAINER_SCAN_MAX`, and each one's `.git`. Only
+ *     checkouts in such a folder count (a `~/code` holding `api` and
+ *     `api-wt` side by side is a folder of projects, not a repository);
+ *     every one must be of one repository, whose root git confirms and which
+ *     lies in the folder. A home folder or a filesystem root is never folded.
  *
  * A linked worktree is recognized by git's own layout: its git dir is
  * `<common dir>/worktrees/<id>` (`--git-dir` against `--git-common-dir`). A
@@ -53,8 +64,9 @@
  * is an answer: every folder is its own project, as before.
  */
 
-import { realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { lstatSync, opendirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
@@ -64,6 +76,8 @@ export const INBOX_PROJECT_ROOT_GIT_TIMEOUT_MS = 3_000;
 export const INBOX_PROJECT_ROOT_TTL_MS = 60_000;
 /** At most this many folders are cached (the oldest leaves first). */
 export const INBOX_PROJECT_ROOT_CACHE_MAX = 512;
+/** A `worktrees` folder with more entries than this is not read for checkouts (rule 4): its folder stays its own project. */
+export const INBOX_PROJECT_CONTAINER_SCAN_MAX = 256;
 
 export interface InboxProjectRoot {
   /** The project's root: a realpath. */
@@ -73,8 +87,12 @@ export interface InboxProjectRoot {
   /** The folder the path named, as a realpath: where the agent works. */
   folder: string;
   /**
-   * The linked worktree's toplevel when the folder lies in one that was
-   * folded into its main repository's project (`root`), else null.
+   * The root an older Inbox filed this folder under, when this answer folds
+   * it into another project (`root`): the linked worktree's toplevel the
+   * folder lies in, or the folder itself when it holds one repository's
+   * checkouts (rule 4). Null otherwise. Reads still find that project's
+   * threads (`threadReadScope`, `findProjects`) and a send from it keeps the
+   * folder as its `base_path`.
    */
   worktree: string | null;
   /**
@@ -264,12 +282,122 @@ async function mainWorktreeOf(git: InboxGitRunner, commonDir: string): Promise<{
   return candidate ? verifiedMain(git, candidate, commonDir) : { root: null, settled: true };
 }
 
+/** The folders a repository's checkouts are kept in, inside the folder that holds it (as `labelPath` in packages/inbox). */
+const CHECKOUT_FOLDERS = ["worktrees", ".worktrees"];
+
+/** The names of the folders right in `folder` (symlinks not followed), or null when it has more entries than the scan reads. */
+function childFolders(folder: string): string[] | null {
+  let dir: ReturnType<typeof opendirSync>;
+  try {
+    dir = opendirSync(folder);
+  } catch {
+    return [];
+  }
+  const names: string[] = [];
+  try {
+    for (let seen = 0; ; seen += 1) {
+      const entry = dir.readSync();
+      if (entry === null) return names;
+      if (seen >= INBOX_PROJECT_CONTAINER_SCAN_MAX) return null;
+      if (entry.isDirectory()) names.push(entry.name);
+    }
+  } catch {
+    return null;
+  } finally {
+    dir.closeSync();
+  }
+}
+
+/**
+ * A checkout's repository, read from its `.git` without git: the common dir
+ * (realpath) of the `.git` folder, or of the git dir its `gitdir:` file names
+ * (a linked worktree's names its common dir in `commondir`). `main` when the
+ * `.git` is a folder. Null when the folder is no checkout.
+ */
+function checkoutOf(folder: string): { common: string; main: boolean } | null {
+  const dotGit = join(folder, ".git");
+  try {
+    const stat = lstatSync(dotGit);
+    if (stat.isDirectory()) return { common: realpathSync(dotGit), main: true };
+    if (!stat.isFile() || stat.size > 4096) return null;
+    const named = /^gitdir:[ \t]*(.+?)[ \t\r]*$/m.exec(readFileSync(dotGit, "utf8"))?.[1];
+    if (!named) return null;
+    const gitDir = resolve(folder, named);
+    let common = gitDir;
+    try {
+      const recorded = readFileSync(join(gitDir, "commondir"), "utf8").trim();
+      if (recorded) common = resolve(gitDir, recorded);
+    } catch {
+      // No `commondir`: the git dir is its own common dir (a submodule, a separate git dir).
+    }
+    return { common: realpathSync(common), main: false };
+  } catch {
+    return null;
+  }
+}
+
+/** A home folder (`/Users/<x>`, `/home/<x>`, `<drive>:\Users\<x>`, `/root`, this user's) or a filesystem root: never folded. */
+function isHomeOrRoot(folder: string): boolean {
+  if (folder === parse(folder).root) return true;
+  try {
+    if (folder === realpathSync(homedir())) return true;
+  } catch {
+    // No home folder on record: the shapes below still count.
+  }
+  const parts = folder.split(/[\\/]+/).filter((part) => part.length > 0);
+  const top = parts[0]?.endsWith(":") ? parts.slice(1) : parts;
+  return (top.length === 2 && ["users", "home"].includes(top[0]!.toLowerCase())) || (top.length === 1 && top[0] === "root");
+}
+
+/**
+ * Rule 4: the repository a plain folder holds, from the checkouts in its
+ * `worktrees` / `.worktrees` folder, all of one repository (`checkoutOf`, no
+ * git). A checkout of another repository there, none, or too many entries
+ * to read, leave it a folder. The repository's root is
+ * then asked of git (`resolveWorkTree` on a checkout, the main one first)
+ * and counts only when git confirms it (a linked worktree that folds, or the
+ * main checkout itself) and it lies in the folder. Null: the folder stays
+ * its own project.
+ */
+async function repositoryHeldBy(folder: string, git: InboxGitRunner): Promise<Resolved | null> {
+  if (isHomeOrRoot(folder)) return null;
+  const checkouts: { path: string; common: string; main: boolean }[] = [];
+  for (const name of CHECKOUT_FOLDERS) {
+    try {
+      if (!lstatSync(join(folder, name)).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const inner = childFolders(join(folder, name));
+    if (inner === null) return null;
+    for (const child of inner) {
+      const found = checkoutOf(join(folder, name, child));
+      if (found) checkouts.push({ path: join(folder, name, child), ...found });
+    }
+  }
+  if (new Set(checkouts.map((checkout) => checkout.common)).size !== 1) return null;
+  const checkout = checkouts.find((one) => one.main) ?? checkouts[0]!;
+  const resolved = await resolveWorkTree(checkout.path, git);
+  if (resolved === null) return null;
+  if (!resolved.settled) return { root: folder, worktree: null, settled: false };
+  const confirmed = resolved.worktree !== null || (checkout.main && resolved.root === checkout.path);
+  if (!confirmed || !isInsideFolder(resolved.root, folder)) return null;
+  return { root: resolved.root, worktree: resolved.root === folder ? null : folder, settled: true };
+}
+
 /** The project root of a folder (a realpath). Never throws. */
 async function resolveFolder(folder: string, git: InboxGitRunner): Promise<Resolved> {
+  const inWorkTree = await resolveWorkTree(folder, git);
+  if (inWorkTree !== null) return inWorkTree;
+  // Not a work tree (or a repository git cannot open): the folder is the project, unless it holds one repository's checkouts.
+  return (await repositoryHeldBy(folder, git)) ?? { root: folder, worktree: null, settled: true };
+}
+
+/** The project root of a folder in a git work tree (rules 3), or null when git says it is in none. Never throws. */
+async function resolveWorkTree(folder: string, git: InboxGitRunner): Promise<Resolved | null> {
   const answer = await ask(git, ["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"], folder);
   if (answer.kind === "unavailable") return { root: folder, worktree: null, settled: false };
-  // Not a work tree (or a repository git cannot open): the folder is the project.
-  if (answer.kind === "refused") return { root: folder, worktree: null, settled: true };
+  if (answer.kind === "refused") return null;
   const toplevel = gitPath(answer.lines[0], folder) ?? folder;
   const gitDir = gitPath(answer.lines[1], folder);
   const commonDir = gitPath(answer.lines[2], folder);
