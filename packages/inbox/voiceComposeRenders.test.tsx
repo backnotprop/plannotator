@@ -145,4 +145,30 @@ describe.skipIf(!hasDom)('dictating in New message', () => {
     expect(changes).toBe(1);
     expect(commits, `${commits} commits for 40 words`).toBeLessThan(12);
   });
+
+  test('a slow mic: the tap shows at once, a second tap keeps it busy, and it listens once the mic opens', async () => {
+    let answer: ((stream: unknown) => void) | null = null;
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: () => new Promise((resolve) => (answer = resolve)) } });
+    const button = await openDialog();
+    press(button, 'pointerdown');
+    press(button, 'pointerup');
+    // In the same moment as the tap, before any wait: lit, with the spinner, and Send off.
+    const mic = () => host!.querySelector('[data-voice-mic]')!;
+    expect(mic().getAttribute('data-state')).toBe('live');
+    expect(mic().querySelector('.ib-spin')).not.toBeNull();
+    expect(host!.querySelector<HTMLButtonElement>('[data-compose-send]')!.disabled).toBe(true);
+    // Its words follow a moment later, with Cancel.
+    await until(() => host!.querySelector('[data-voice-line="opening"]') !== null);
+    expect(host!.querySelector('[data-voice-line="opening"] [data-voice-cancel]')).not.toBeNull();
+
+    // A second tap: nothing cancelled, the busy look stays.
+    press(mic(), 'pointerdown');
+    press(mic(), 'pointerup');
+    expect(mic().querySelector('.ib-spin')).not.toBeNull();
+    expect(host!.querySelector('[data-voice-line="opening"]')).not.toBeNull();
+
+    act(() => answer!({ getTracks: () => [], getAudioTracks: () => [] }));
+    await until(() => host!.querySelector('[data-voice-line="tap"]') !== null);
+    expect(mic().querySelector('.ib-spin')).toBeNull();
+  });
 });

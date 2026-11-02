@@ -28,15 +28,25 @@ const BAR_MS = 70;
 /** The newest of the level's history; a phone shows the last few. */
 export const VOICE_BARS = 32;
 const QUIET_BAR = 0.08;
-/** No line in the instant a mic opens: only a mic that hasn't by now gets one. */
-export const VOICE_OPENING_SLOW_MS = 1000;
+/**
+ * The button shows it is opening from the press itself (lit, with the spinner). Its words wait this long, so a mic
+ * that opens at once doesn't flash a line; any longer and a tap looks like it did nothing.
+ */
+export const VOICE_OPENING_SLOW_MS = 150;
+/** A mic that hasn't opened by now, with no browser prompt up, is a mic that didn't start: the next tap tries again. */
+export const VOICE_OPENING_GIVE_UP_MS = 10_000;
+/** While the browser asks, the person is answering it: a longer wait before giving up. */
+export const VOICE_ASKING_GIVE_UP_MS = 30_000;
 const WASH_FADES_MS = 1300;
 const WASH_ENDS_MS = 2300;
 
 export type VoicePhase = 'idle' | 'opening' | 'listening' | 'sending';
 
+/** Every reason a press can end without words; the debug log's filter must keep each (voiceDebugLog.test.ts). */
+export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff'] as const;
+
 /** Why the last press ended without words. Kept in `VoiceView` until the next press, a Discard or, for those with no clip, typing. */
-export type VoiceTrouble = 'notheard' | 'blocked' | 'micfailed' | 'nothing' | 'badclip' | 'expired' | 'refused' | 'keyrefused' | 'offline' | 'inboxgone' | 'codexfailed' | 'notready' | 'voiceoff';
+export type VoiceTrouble = (typeof VOICE_TROUBLE_CODES)[number];
 
 export interface VoiceView {
   phase: VoicePhase;
@@ -86,7 +96,8 @@ export interface VoiceField {
 export type VoiceAnswer = { text: string } | { code: InboxVoiceFailure | null; engine?: InboxVoiceEngine; reason?: InboxVoiceStatus['state'] };
 
 export interface VoiceDeps {
-  open(): Promise<VoiceRecorder>;
+  /** Open the microphone. `signal` aborts when the take ends before it opened: the recorder lets go of what it holds. */
+  open(signal: AbortSignal): Promise<VoiceRecorder>;
   prompts(): Promise<boolean>;
   /** Throws when the Inbox could not be reached. */
   transcribe(clip: Blob, signal: AbortSignal): Promise<VoiceAnswer>;
@@ -95,6 +106,8 @@ export interface VoiceDeps {
   now(): number;
   every(ms: number, run: () => void): () => void;
   after(ms: number, run: () => void): () => void;
+  /** The opt-in debug log (`debugNote`): phases, modes and inputs only, never audio or words. */
+  note?(ev: 'voice_press' | 'voice_phase', fields: Record<string, unknown>): void;
 }
 
 export interface VoiceSession extends VoicePressTarget {
@@ -140,6 +153,14 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   let recorder: VoiceRecorder | null = null;
   let clip: Blob | null = null;
   let abort: AbortController | null = null;
+  /** The open still on its way: anything that ends the take aborts it, so a hung mic holds nothing. */
+  let opener: AbortController | null = null;
+  /** The opening's slow line and give-ups: cleared when it opens or ends, so none can reach a later take. */
+  let openTimers: (() => void)[] = [];
+  const clearOpenTimers = () => {
+    for (const cancelTimer of openTimers) cancelTimer();
+    openTimers = [];
+  };
   /** Bumped by anything that ends a run: an older run's late answer finds a different number and does nothing. */
   let run = 0;
   let pressed = false;
@@ -158,8 +179,20 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   let stopWatching: (() => void) | null = null;
   let washTimers: (() => void)[] = [];
 
+  const note = (ev: 'voice_press' | 'voice_phase', fields: Record<string, unknown>) => {
+    try {
+      deps.note?.(ev, fields);
+    } catch {
+      // The log never changes a take.
+    }
+  };
+
   const set = (next: Partial<VoiceView>) => {
+    const was = view;
     view = { ...view, ...next };
+    if (was.phase !== view.phase || was.mode !== view.mode || was.prompting !== view.prompting || was.slow !== view.slow || was.trouble !== view.trouble) {
+      note('voice_phase', { phase: view.phase, mode: view.mode ?? undefined, prompting: view.prompting, slow: view.slow, trouble: view.trouble ?? undefined });
+    }
     const wanted = view.phase !== 'idle' || view.wash !== null || view.trouble !== null;
     if (wanted && !stopWatching && field) stopWatching = field.watch(onCaret, onInput);
     if (!wanted && stopWatching) {
@@ -194,6 +227,9 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     recorder = null;
     abort?.abort();
     abort = null;
+    opener?.abort();
+    opener = null;
+    clearOpenTimers();
     pressed = false;
     secondPress = false;
     if (recording === handle) recording = null;
@@ -252,6 +288,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     lastTick = startedAt;
     lastBar = startedAt;
     lastVoiceAt = Number.NEGATIVE_INFINITY;
+    clearOpenTimers();
     // The prompt took the press away, or the finger came up while the mic opened: a tap.
     set({ phase: 'listening', prompting: false, slow: false, mode: view.prompting || !pressed ? 'tap' : null, said: 'Listening' });
     stopTicking = deps.every(TICK_MS, tick);
@@ -273,16 +310,41 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     before = { ...selection, text: field.text() };
     if (!fromKeyboard) field.focus();
     set({ ...IDLE, phase: 'opening', caret: selection.start });
-    // In the press, before any wait: see openVoiceRecorder.
-    const opening = deps.open();
+    // In the press, before any wait: see openVoiceRecorder. A throw here (the AudioContext refused) is a mic that did
+    // not start, never a run left opening with no line, no Cancel and Send off.
+    const opens = new AbortController();
+    opener = opens;
+    let opening: Promise<VoiceRecorder>;
+    try {
+      opening = deps.open(opens.signal);
+    } catch (cause) {
+      opening = Promise.reject(cause);
+    }
     void deps.prompts().then((prompts) => {
       if (prompts && mine === run && view.phase === 'opening') set({ prompting: true, said: 'Asking for the microphone' });
     });
-    deps.after(VOICE_OPENING_SLOW_MS, () => {
-      if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
-    });
+    clearOpenTimers();
+    openTimers.push(
+      deps.after(VOICE_OPENING_SLOW_MS, () => {
+        if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
+      }),
+    );
+    // A microphone that never answers (seen on iOS) ends with the "didn't start" note, so the box is never left
+    // waiting on it with Send off. Giving up aborts the open (release), so the recorder lets go of its AudioContext
+    // now and of a stream that arrives later; a recorder handed over anyway is closed at once (`mine !== run` below).
+    const giveUp = (unlessAsking: boolean) => {
+      if (mine !== run || view.phase !== 'opening' || (unlessAsking && view.prompting)) return;
+      run++;
+      release();
+      set({ ...IDLE, trouble: 'micfailed', said: 'The microphone did not start' });
+    };
+    openTimers.push(
+      deps.after(VOICE_OPENING_GIVE_UP_MS, () => giveUp(true)),
+      deps.after(VOICE_ASKING_GIVE_UP_MS, () => giveUp(false)),
+    );
     opening.then(
       (opened) => {
+        if (opener === opens) opener = null;
         if (mine !== run) {
           opened.abort();
           return;
@@ -318,11 +380,26 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       return;
     }
     set({ phase: 'sending', mode: null, clipMs: meter.elapsedMs, said: 'Transcribing' });
-    void taken.stop().then((chunks) => {
-      if (mine !== run) return;
-      clip = encodeWav(chunks, taken.rate);
-      void send();
-    });
+    void taken
+      .stop()
+      .then((chunks) => {
+        if (mine !== run) return;
+        clip = encodeWav(chunks, taken.rate);
+        void send();
+      })
+      .catch(() => {
+        // No clip came out of the recorder: back at rest with a line, never a spinner that stays.
+        try {
+          taken.abort();
+        } catch {
+          // Already let go of.
+        }
+        if (mine !== run) return;
+        run++;
+        release();
+        clip = null;
+        set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
+      });
   };
 
   const send = async () => {
@@ -361,6 +438,9 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     set({ ...IDLE, trouble: known.trouble, engine: answer.engine ?? null, kept: known.keeps, clipMs: view.clipMs, said: 'Dictation failed' });
   };
 
+  /** Each input with the state it met, so a tap that did nothing shows in the log. */
+  const pressNote = (input: 'press' | 'release' | 'lost' | 'toggle') => note('voice_press', { input, phase: view.phase, mode: view.mode ?? undefined });
+
   const session: VoiceSession = {
     view: () => view,
     meter: () => meter,
@@ -384,16 +464,21 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       };
     },
     press: () => {
+      pressNote('press');
       if (view.phase === 'listening' && view.mode === 'tap') {
         secondPress = true;
         return;
       }
+      // Opening or sending: the button already shows it is busy (lit with the spinner), so another tap changes nothing
+      // and the take goes on. Cancel on the bar is the way out (owner's call, 2026-11-02: a tap that cancels unseen is
+      // worse than a tap that waits in sight).
       if (view.phase !== 'idle') return;
       pressed = true;
       pressedAt = deps.now();
       start(false);
     },
     release: () => {
+      pressNote('release');
       if (secondPress) {
         secondPress = false;
         stop();
@@ -407,12 +492,14 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       else stop();
     },
     lost: () => {
+      pressNote('lost');
       secondPress = false;
       if (!pressed) return;
       pressed = false;
       if (view.phase === 'listening' && view.mode !== 'tap') cancel();
     },
     toggle: () => {
+      pressNote('toggle');
       if (view.phase === 'listening') stop();
       else if (view.phase === 'idle') start(true);
     },
