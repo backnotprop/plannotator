@@ -196,6 +196,89 @@ test('with richMarkdown what Workspaces draws draws, and hostile text is still i
   expect(await page.evaluate(() => document.getElementById('host-button')?.tagName)).toBe('BUTTON');
 });
 
+test.describe('with richMarkdown, images', () => {
+  const TALL = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="900"></svg>';
+  const PANE = '[aria-label="Conversation"]';
+  /** The bare host has no Tailwind: the pane's scrolling, and the image rule preflight gives every real host. */
+  const looks = `${PANE} { overflow-y: auto; height: 200px; display: flex; flex-direction: column } img { display: block; max-width: 100%; height: auto }`;
+
+  /** One tall image that arrives only when the test says so. */
+  async function holdAnImage(page: Page) {
+    let arrive = () => {};
+    const arrival = new Promise<void>((resolve) => { arrive = resolve; });
+    await page.route('https://images.test/tall.svg', async (route) => {
+      await arrival;
+      await route.fulfill({ contentType: 'image/svg+xml', body: TALL });
+    });
+    return arrive;
+  }
+
+  const gapToBottom = (page: Page) =>
+    page.locator(PANE).evaluate((pane) => pane.scrollHeight - pane.scrollTop - pane.clientHeight);
+  const loaded = (page: Page) =>
+    expect.poll(() => page.locator(`${PANE} img`).evaluate((image: HTMLImageElement) => image.naturalHeight)).toBe(900);
+
+  test('that arrive after the last delta leave the pane at its live edge', async ({ page }) => {
+    await open(page);
+    await page.addStyleTag({ content: looks });
+    const arrive = await holdAnImage(page);
+    await page.evaluate(() => (window as any).__chat.rich());
+    await show(page, [say('a', 'assistant', '![x](https://images.test/tall.svg)\n\nThe last line.')]);
+    expect(await gapToBottom(page)).toBe(0);
+
+    arrive();
+    await loaded(page);
+    await expect.poll(() => gapToBottom(page)).toBe(0);
+  });
+
+  test('that arrive late leave a person who scrolled away where they are', async ({ page }) => {
+    await open(page);
+    await page.addStyleTag({ content: `${looks} p { min-height: 400px }` });
+    const arrive = await holdAnImage(page);
+    await page.evaluate(() => (window as any).__chat.rich());
+    await show(page, [say('a', 'assistant', 'First.\n\n![x](https://images.test/tall.svg)\n\nThe last line.')]);
+
+    // Scrolled up, with the image on screen: it grows below the line the person is reading.
+    await page.locator(PANE).evaluate(async (pane) => {
+      pane.scrollTop = 300;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    arrive();
+    await loaded(page);
+    expect(await page.locator(PANE).evaluate((pane) => pane.scrollTop)).toBe(300);
+  });
+
+  for (const [name, write] of [
+    ['markdown', (at: number) => `![a](https://images.test/${at}.png)`],
+    ['raw tags', (at: number) => `<img src="https://images.test/${at}.png" alt="a">`],
+  ] as const) {
+    test(`in ${name} make no more than a hundred requests, however far the person scrolls`, async ({ page }) => {
+      const requested = new Set<string>();
+      const body = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+      await page.route('https://images.test/**', (route) => {
+        requested.add(route.request().url());
+        return route.fulfill({ contentType: 'image/png', body });
+      });
+      await open(page);
+      await page.addStyleTag({ content: `${looks} img { min-height: 50px }` });
+      await page.evaluate(() => (window as any).__chat.rich());
+      await show(page, [say('a', 'assistant', Array.from({ length: 500 }, (_, at) => write(at)).join(' '))]);
+      await expect(page.locator(`${PANE} img`)).toHaveCount(100);
+
+      // Past the limit there is no element to come near, so scrolling all the way adds none.
+      await page.locator(PANE).evaluate(async (pane) => {
+        for (let top = 0; top <= pane.scrollHeight; top += 150) {
+          pane.scrollTop = top;
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+      });
+      await expect(page.locator(`${PANE} img`)).toHaveCount(100);
+      expect(requested.size).toBeGreaterThan(0);
+      expect(requested.size).toBeLessThanOrEqual(100);
+    });
+  }
+});
+
 test('agent text cannot lay a link over the host', async ({ page }) => {
   await open(page);
   await show(page, [

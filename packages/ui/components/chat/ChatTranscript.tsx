@@ -379,6 +379,15 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
     return () => observer.disconnect();
   }, [paneRef]);
 
+  // An image grows the text with no change to `messages`, and the observer above
+  // watches the pane's box, not what is in it. `load` does not bubble, so this
+  // takes it on the way down. Only with `richMarkdown`: otherwise no image in text
+  // can load, and a host's own image must not move the pane.
+  const followImage = () => {
+    const node = paneRef.current;
+    if (node !== null && atBottomRef.current) node.scrollTop = node.scrollHeight;
+  };
+
   // An assistant turn that has painted nothing yet would be a bare name row,
   // so it is dropped and the pending turn stands in its place.
   const drawn = (message: ChatMessage<Part>, live: boolean): boolean =>
@@ -392,6 +401,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
         const node = event.currentTarget;
         atBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
       }}
+      onLoadCapture={richMarkdown ? followImage : undefined}
       // Focusable, so a keyboard user can Tab in and arrow-scroll. Deliberately
       // not a live region: streamed deltas would announce token by token.
       role={panel === undefined ? 'region' : 'tabpanel'}

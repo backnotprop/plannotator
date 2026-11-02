@@ -141,7 +141,7 @@ describe.if(hasDom)('which addresses an image may have', () => {
 describe.if(hasDom)('a raw image in an agent\'s text', () => {
   test('draws with its sizes, as Workspaces does', () => {
     const image = rich('<img src="https://example.test/a.png" alt="a" title="t" width="120" height="80">').querySelector('img');
-    expect(attributesOf(image)).toEqual(['alt', 'height', 'src', 'title', 'width']);
+    expect(attributesOf(image)).toEqual(['alt', 'height', 'loading', 'src', 'title', 'width']);
     expect(image?.getAttribute('width')).toBe('120');
     expect(image?.getAttribute('height')).toBe('80');
   });
@@ -164,7 +164,7 @@ describe.if(hasDom)('a raw image in an agent\'s text', () => {
         'style="position:fixed" data-text-part="" aria-hidden="true" id="root" srcset="https://evil.test/b.png 2x" ' +
         'usemap="#m" align="left" crossorigin="use-credentials" name="q">',
     ).querySelector('img');
-    expect(attributesOf(image)).toEqual(['src']);
+    expect(attributesOf(image)).toEqual(['loading', 'src']);
   });
 
   test('a quote inside a value cannot end the tag', () => {
@@ -207,6 +207,91 @@ describe.if(hasDom)('a raw image in an agent\'s text', () => {
     expect(view.querySelector('img')).not.toBeNull();
     expect(view.querySelector('p[align]')).toBeNull();
     expect(view.textContent).toContain('<p align="center">');
+  });
+});
+
+describe.if(hasDom)('how many images one message can ask for', () => {
+  const LIMIT = 100;
+  const addresses = (view: Element) => [...view.querySelectorAll('img')].map((image) => image.getAttribute('src'));
+  const address = (at: number) => `https://example.test/${at}.png`;
+  const each = (count: number, write: (at: number) => string) =>
+    Array.from({ length: count }, (_, at) => write(at)).join(' ');
+  const inMarkdown = (at: number) => `![alt ${at}](${address(at)})`;
+  const asRawTag = (at: number) => `<img src="${address(at)}" alt="alt ${at}">`;
+
+  test.each([
+    ['markdown', (count: number) => each(count, inMarkdown), rich],
+    ['raw tags in a sentence', (count: number) => `See ${each(count, asRawTag)}`, rich],
+    ['a raw block', (count: number) => `${each(count, asRawTag)}\n`, rich],
+    ['a raw block in a wrapper', (count: number) => `<div>\n${each(count, asRawTag)}\n</div>\n`, rich],
+    ['a person\'s markdown', (count: number) => each(count, inMarkdown), richPerson],
+  ])('%s stops requesting at the limit, in order', (_name, text, render) => {
+    const found = addresses(render(text(LIMIT + 50)));
+    expect(found.length).toBe(LIMIT);
+    expect(found[0]).toBe(address(0));
+    expect(found[LIMIT - 1]).toBe(address(LIMIT - 1));
+  });
+
+  test('the limit itself is allowed', () => {
+    expect(addresses(rich(each(LIMIT, inMarkdown))).length).toBe(LIMIT);
+  });
+
+  test('markdown and raw tags count together', () => {
+    const view = rich(`${each(60, inMarkdown)} ${each(60, asRawTag)}`);
+    expect(addresses(view).length).toBe(LIMIT);
+  });
+
+  test('past the limit an image is its alt text, so nothing the author wrote is lost', () => {
+    const view = rich(each(LIMIT + 2, inMarkdown));
+    expect(view.textContent).toContain(`alt ${LIMIT}`);
+    expect(view.textContent).toContain(`alt ${LIMIT + 1}`);
+    expect(view.textContent).not.toContain('alt 0');
+  });
+
+  test('alt text past the limit is text, whatever it spells', () => {
+    const view = rich(`${each(LIMIT, inMarkdown)} <img src="https://evil.test/a.png" alt="<b onclick=x>y</b>">`);
+    expect(view.querySelector('b')).toBeNull();
+    expect(view.textContent).toContain('<b onclick=x>y</b>');
+  });
+
+  test('past the limit an image with no alt text draws nothing', () => {
+    const view = rich(`${each(LIMIT, inMarkdown)} ![](https://example.test/none.png)`);
+    expect(addresses(view)).not.toContain('https://example.test/none.png');
+  });
+
+  test('an image inside a link keeps the link and loses the request', () => {
+    const view = rich(`${each(LIMIT, inMarkdown)} [![badge](https://example.test/b.svg)](https://example.test)`);
+    expect(view.querySelector('a[href="https://example.test"]')?.textContent).toBe('badge');
+    expect(view.querySelector('a[href="https://example.test"] img')).toBeNull();
+  });
+
+  test('each message has its own count', () => {
+    const text = each(LIMIT, inMarkdown);
+    expect(addresses(rich(text)).length).toBe(LIMIT);
+    expect(addresses(rich(text)).length).toBe(LIMIT);
+  });
+
+  test('so does each redraw of a stream', () => {
+    const render = chatTextRenderer(false, true);
+    render(each(LIMIT, inMarkdown), true);
+    expect(addresses(parsed(render(`${each(LIMIT, inMarkdown)} more`, true))).length).toBe(LIMIT);
+  });
+});
+
+describe.if(hasDom)('an image waits until it is near', () => {
+  test.each([
+    ['markdown', '![a](https://example.test/a.png)'],
+    ['a raw tag', '<img src="https://example.test/a.png">'],
+    ['a raw tag that asks to load at once', '<img src="https://example.test/a.png" loading="eager">'],
+  ])('%s loads lazily', (_name, text) => {
+    expect(rich(text).querySelector('img')?.getAttribute('loading')).toBe('lazy');
+  });
+
+  // Firefox reads `loading` only if it comes before `src` (bug 1647077).
+  test('`loading` is written before `src`', () => {
+    const names = rich('![a](https://example.test/a.png)').querySelector('img')!.getAttributeNames();
+    expect(names).toContain('loading');
+    expect(names.indexOf('loading')).toBeLessThan(names.indexOf('src'));
   });
 });
 
@@ -340,6 +425,13 @@ describe.if(hasDom)('the limits, with the switch on', () => {
     const view = rich(`![a](data:image/png;base64,${'A'.repeat(9_000)})`);
     expect(view.querySelector('img')).toBeNull();
     expect(view.textContent).toContain('![a]');
+  });
+
+  // What took a long unbroken word in WebKit from minutes to 130 ms.
+  test('a long word in a raw block still gets its place to break', () => {
+    const view = rich(`<div><img src="https://example.test/a.png">${'a'.repeat(300)}</div>\n`);
+    expect(view.querySelector('wbr')).not.toBeNull();
+    expect(view.textContent).toContain('a'.repeat(300));
   });
 
   test('raw tags still never reach the parser: unclosed formatting stays text', () => {
@@ -524,22 +616,75 @@ describe.if(hasDom)('the switch on the transcript', () => {
     expect(view.querySelector('img')).not.toBeNull();
   });
 
-  test('outside a transcript the props say it alone', () => {
-    const view = render({
-      renderMessage: () => null,
-      empty: (
-        <>
-          <ChatMessageView message={say('1', 'assistant', picture)} agentName="Claude" />
-          <ChatMarkdown text={picture} />
-          <div data-on>
-            <ChatMessageView message={say('2', 'assistant', picture)} agentName="Claude" richMarkdown />
-            <ChatMarkdown text={picture} richMarkdown />
-          </div>
-        </>
-      ),
+  // Both are public, so a host can draw them with no `ChatTranscript` around them.
+  // There the context's own default decides, and an image is a request the host
+  // never asked for. These roots are their own, outside every Provider.
+  describe('with no transcript around it', () => {
+    function bare(element: React.ReactElement) {
+      host ??= document.createElement('div');
+      document.body.appendChild(host);
+      root ??= createRoot(host);
+      act(() => root!.render(element));
+      return host;
+    }
+
+    test('a bare ChatMarkdown draws no image', () => {
+      expect(bare(<ChatMarkdown text={picture} />).querySelector('img')).toBeNull();
     });
-    expect(view.querySelectorAll('img').length).toBe(2);
-    expect(view.querySelectorAll('[data-on] img').length).toBe(2);
+
+    test('a bare ChatMessageView draws no image', () => {
+      const view = bare(<ChatMessageView message={say('1', 'assistant', picture)} agentName="Claude" />);
+      expect(view.querySelector('img')).toBeNull();
+    });
+
+    test('a bare ChatMarkdown draws one when it says so', () => {
+      expect(bare(<ChatMarkdown text={picture} richMarkdown />).querySelector('img')).not.toBeNull();
+    });
+
+    test('a bare ChatMessageView draws one when it says so', () => {
+      const view = bare(<ChatMessageView message={say('1', 'assistant', picture)} agentName="Claude" richMarkdown />);
+      expect(view.querySelector('img')).not.toBeNull();
+    });
+  });
+
+  // An image is the first content that grows with no change to `messages`, so
+  // nothing else tells the pane its text moved. `load` does not bubble: a listener
+  // has to catch it on the way down. Chromium proves the same with a real image in
+  // `tests/e2e/chat-window.spec.ts`.
+  describe('an image that arrives late', () => {
+    function pane(view: HTMLElement, scrollHeight: number, clientHeight: number) {
+      const element = view.querySelector<HTMLElement>('[role="region"]')!;
+      Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollHeight });
+      Object.defineProperty(element, 'clientHeight', { configurable: true, value: clientHeight });
+      return element;
+    }
+    const arrive = (image: Element | null) => act(() => void image!.dispatchEvent(new Event('load')));
+
+    test('keeps a pane at its live edge there', () => {
+      const view = render({ messages: [say('1', 'assistant', picture)], richMarkdown: true });
+      const element = pane(view, 1_000, 100);
+      arrive(view.querySelector('img'));
+      expect(element.scrollTop).toBe(1_000);
+    });
+
+    test('leaves a person who scrolled away where they are', () => {
+      const view = render({ messages: [say('1', 'assistant', picture)], richMarkdown: true });
+      const element = pane(view, 1_000, 100);
+      element.scrollTop = 200;
+      act(() => void element.dispatchEvent(new Event('scroll', { bubbles: true })));
+      arrive(view.querySelector('img'));
+      expect(element.scrollTop).toBe(200);
+    });
+
+    test('with the switch off, an image a host drew itself moves nothing', () => {
+      const view = render({
+        messages: [say('1', 'assistant', 'Hi')],
+        renderPart: () => <img alt="" src="https://example.test/host.png" />,
+      });
+      const element = pane(view, 1_000, 100);
+      arrive(view.querySelector('img'));
+      expect(element.scrollTop).toBe(0);
+    });
   });
 
   describe('agentBadge', () => {

@@ -135,15 +135,39 @@ const RICH_PROOF_FAILED = /javascript:|class=|data-c|onclick|onerror|<script|typ
 
 type Sanitize = (html: string) => string;
 
+/**
+ * How many images one text can ask for. `MAX_HTML_CHARS` bounds the DOM but not the
+ * network: 255 KB of `<img>` is 15,000 requests, each with the host's cookies when
+ * the address is its own. Past this an image is its alt text. Counted here because
+ * every image passes here, from markdown and from a raw tag alike.
+ */
+const MAX_IMAGES_IN_TEXT = 100;
+
+/** Firefox reads `loading` only if it comes before `src` (bug 1647077). */
+function loadWhenNear(image: Element): void {
+  const address = image.getAttribute('src');
+  image.removeAttribute('src');
+  image.setAttribute('loading', 'lazy');
+  if (address !== null) image.setAttribute('src', address);
+}
+
 function buildSanitizer(rich: boolean): Sanitize | null {
   if (typeof window === 'undefined') return null;
   // A private instance: a hook on the shared one would reach every other caller.
   const purifier = DOMPurify(window);
+  let images = 0;
   purifier.addHook('afterSanitizeAttributes', (node) => {
     // No form control a message can write: a checkbox only, and never a live one.
     if (node.nodeName === 'INPUT') {
       if (node.getAttribute('type')?.toLowerCase() === 'checkbox') node.setAttribute('disabled', '');
       else node.remove();
+      return;
+    }
+    // `rich`, because this hook also sees what the default's allowlist took out.
+    if (rich && node.nodeName === 'IMG') {
+      images += 1;
+      if (images > MAX_IMAGES_IN_TEXT) node.replaceWith(node.getAttribute('alt') ?? '');
+      else loadWhenNear(node);
       return;
     }
     // Links open in a new tab: a host must not lose its page to a link in a
@@ -153,9 +177,13 @@ function buildSanitizer(rich: boolean): Sanitize | null {
     node.setAttribute('rel', 'noopener noreferrer');
   });
   const config = chatPurifyConfig(rich);
-  const proof = purifier.sanitize(rich ? RICH_PROOF_INPUT : PROOF_INPUT, config);
+  const sanitize: Sanitize = (html) => {
+    images = 0;
+    return purifier.sanitize(html, config);
+  };
+  const proof = sanitize(rich ? RICH_PROOF_INPUT : PROOF_INPUT);
   if ((rich ? RICH_PROOF_FAILED : PROOF_FAILED).test(proof) || !proof.includes('kept')) return null;
-  return (html) => purifier.sanitize(html, config);
+  return sanitize;
 }
 
 /** One proof per mode: passing one says nothing about the other's allowlist. */
