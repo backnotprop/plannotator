@@ -4119,8 +4119,9 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
     .ib-cp-foot .ib-cp-sendl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   }
   /* The keyboard is up (phone.ts): the head folds to one line. To takes the top bar's line in the title's place, with
-     the room Cancel and Save draft leave. Thread, the notes and the tiles step aside until it closes (the row says how
-     many files), except a Thread row in use or saying something, and a tile that was refused. */
+     the room Cancel and Save draft leave. The notes and the tiles step aside until it closes (the row says how many
+     files), except a tile that was refused. Thread stays: picking the agent puts focus in the message and raises the
+     keyboard, and a Thread row hidden then read as the subject lost (the owner, 2026-11-02). */
   :root[data-ib-keyboard] .ib-cp-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; border-bottom: 1px solid var(--ib-line); }
   :root[data-ib-keyboard] .ib-cp-bar { grid-area: 1 / 1 / 2 / -1; grid-template-columns: subgrid; height: 48px; border-bottom: 0; }
   :root[data-ib-keyboard] .ib-cp-bar [data-compose-cancel] { grid-column: 1; }
@@ -4138,7 +4139,6 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   /* One line whatever the room: the narrowest phone has Save draft beside it. */
   :root[data-ib-keyboard] .ib-cp-none-to { display: block; min-width: 0; padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
-  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-thread:not(:focus-within, :has([data-compose-thread-name-error], [data-compose-thread-name-note])) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
