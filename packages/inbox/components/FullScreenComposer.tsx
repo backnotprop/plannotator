@@ -23,11 +23,15 @@
  *   paste or a drop on the card attaches as in the box. They are the box's
  *   files (one reply), shown here with the box's tiles.
  *
+ * - "N comments" opens the thread's list of comments (AnnotationsChip.tsx). The list is the card's sibling, never
+ *   its child: the card's backdrop filter would hold a phone's sheet, a fixed box, inside the card.
+ *
  * The card is the file's foot (`data-file-foot`, AttachmentPane measures it):
  * the toolbar on a phone, the chip and the notes sit above it. A phone's pill
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
-import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { useVoiceSession } from '../voice';
@@ -54,6 +58,8 @@ export interface FullScreenReply {
   /** What rides the Send besides the words. */
   picks: number;
   annotations: number;
+  /** The thread's list of comments, and whether it is open. */
+  comments: AnnotationsListProps & { list: CommentsListAt | null; onList: (next: CommentsListAt | null) => void };
   actions: number;
   /** The reply box's files (pasted, dropped, picked), shown in the card as the box shows them. */
   files: readonly ComposeFile[];
@@ -112,7 +118,7 @@ function useSentFlash(sentAt: number | null): boolean {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The chips of what rides the Send, and the open questions (a way to them, in the thread). */
-function Rides({ reply }: { reply: FullScreenReply }) {
+function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef: RefObject<HTMLButtonElement | null>; onComments: () => void }) {
   const chips = useRef<HTMLSpanElement>(null);
   const [form, setForm] = useState<OpenQuestionsLabelForm>('full');
   const n = reply.openQuestions;
@@ -155,10 +161,19 @@ function Rides({ reply }: { reply: FullScreenReply }) {
         </span>
       )}
       {reply.annotations > 0 && (
-        <span className="ib-fcomp-chip">
+        <button
+          ref={linkRef}
+          type="button"
+          className="ib-fcomp-chip"
+          data-fcomp-comments=""
+          data-comments-link=""
+          aria-expanded={reply.comments.list !== null}
+          aria-haspopup="dialog"
+          onClick={onComments}
+        >
           <Icon name="comment" size={12} />
           {plural(reply.annotations, 'comment')}
-        </span>
+        </button>
       )}
       {/* The thread foot's words (openItemsLabel): "2 open questions", "1 open action item", "2 questions, 1 action item".
           Its question count leaves out picked questions, which the foot counts until they are sent. */}
@@ -202,6 +217,9 @@ export function FullScreenComposer({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  const commentsRef = useRef<HTMLButtonElement | null>(null);
+  /** The card's height when the list opened: the list sits just above the card. */
+  const [cardHeight, setCardHeight] = useState(0);
   const voice = useVoiceSession();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
@@ -227,6 +245,13 @@ export function FullScreenComposer({
   // Read-only while a Send is on its way, as the thread's box is: the words it carries are the words shown.
   useEffect(() => {
     if (replyRef.current) replyRef.current.readOnly = reply.sending;
+  });
+
+  // The list goes with the card's Reply tab: it opens from there, and the card can leave without a press outside.
+  const listAt = reply.comments.list;
+  const listShown = listAt !== null && !state.minimized && mode === 'reply' && !value.tucked;
+  useEffect(() => {
+    if (listAt && !listShown) reply.comments.onList(null);
   });
 
   const nounText = noun === 'video' ? 'this video' : 'this image';
@@ -325,7 +350,14 @@ export function FullScreenComposer({
         ) : reply.conflict ? (
           <span className="ib-fcomp-note">This reply changed in another window.</span>
         ) : (
-          <Rides reply={reply} />
+          <Rides
+            reply={reply}
+            linkRef={commentsRef}
+            onComments={() => {
+              setCardHeight(cardRef.current?.offsetHeight ?? 0);
+              reply.comments.onList(listAt ? null : { at: null });
+            }}
+          />
         )}
         <VoiceFoot voice={voice} phone={phone} />
         <button type="button" className="ib-fcomp-link" onClick={reply.onOpenThread} data-fcomp-open-thread="">
@@ -335,11 +367,29 @@ export function FullScreenComposer({
     ) : null;
 
   return (
+    <>
+    {listShown && (
+      <div className="ib-annat ib-anncard" style={{ '--ib-fcomp-h': `${cardHeight}px` } as CSSProperties}>
+        <div className="ib-annat-in">
+          <AnnotationsList
+            {...reply.comments}
+            at={listAt.at}
+            press={listAt.press}
+            onClose={(back) => {
+              reply.comments.onList(null);
+              // With no comment left there is no count. The card, on a phone: the reply field would raise the keyboard.
+              if (back) (commentsRef.current ?? (phone ? cardRef.current : replyRef.current))?.focus({ preventScroll: true });
+            }}
+          />
+        </div>
+      </div>
+    )}
     <div
       ref={cardRef}
       className={`ib-fcomp ib-mode-${mode}${phone ? ' ib-phone' : ''}`}
       role="group"
       aria-label={label}
+      tabIndex={-1}
       inert={value.tucked || undefined}
       data-fcomp=""
       data-fcomp-mode-on={mode}
@@ -454,5 +504,6 @@ export function FullScreenComposer({
         </div>
       )}
     </div>
+    </>
   );
 }
