@@ -104,6 +104,9 @@ async function createWorld(): Promise<World> {
     PATH: process.env.PATH ?? '',
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
+    CLAUDE_CONFIG_DIR: join(root, 'claude'),
+    CODEX_HOME: join(root, 'codex'),
+    OPENCODE_CONFIG_DIR: join(root, 'opencode'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -809,7 +812,7 @@ test('Mod+Enter and Q stand down where Send is not on screen or the key is not t
     });
     await gotoThread(t.late);
     await tabTo(card('Spot late').getByRole('textbox'));
-    // One character: one delayed save (a longer word would queue several, and outlast the wait below).
+    // One character: one delayed save (a longer word would save again behind it, and outlast the wait below).
     await page.keyboard.type('h', { delay: 0 });
     was = sent();
     await mod('Enter');

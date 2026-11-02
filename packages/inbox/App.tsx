@@ -82,6 +82,7 @@ import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { ThreadWait } from './components/ThreadWait';
+import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
@@ -116,6 +117,8 @@ import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { threadPanelShows, useThreadPanel } from './threadPanel';
+import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
@@ -646,6 +649,8 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
+  /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
+  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
@@ -1432,6 +1437,18 @@ function Inbox() {
     let machinesSet = '';
     let machinesAdopt = false;
     let cancelled = false;
+    const readAfterRecord = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void refreshList(false).then((next) => next && flushNotifications(next));
+        void refreshDecisions();
+        const open = routeRef.current.thread;
+        if (open) void refreshThread(open);
+        // Picks and comments are unsent work too: the Drafts row follows them.
+        void refreshDrafts();
+      }, 80);
+    };
+    pickSaves.current.read = readAfterRecord;
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
     void (async () => {
@@ -1462,15 +1479,12 @@ function Inbox() {
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
           if (event?.kind === 'question') for (const listener of questionListeners.current) listener(event.question);
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            void refreshList(false).then((next) => next && flushNotifications(next));
-            void refreshDecisions();
-            const open = routeRef.current.thread;
-            if (open) void refreshThread(open);
-            // Picks and comments are unsent work too: the Drafts row follows them.
-            void refreshDrafts();
-          }, 80);
+          // The record of a question this window is saving: read once, when the last of them lands (onPickSaves).
+          if (event?.kind === 'question' && pickSaves.current.saving.has(`${event.question.message_id}/${event.question.key}`)) {
+            pickSaves.current.owed = true;
+            return;
+          }
+          readAfterRecord();
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
@@ -1590,6 +1604,7 @@ function Inbox() {
     })();
     return () => {
       cancelled = true;
+      pickSaves.current.read = () => {};
       discardPreparedInboxEvents();
       unsubscribe();
       if (timer) clearTimeout(timer);
@@ -2177,6 +2192,10 @@ function Inbox() {
   sidebarHeldNow.current = sidebarHeld;
   // Full screen changes the sidebar's and the list's room without a route change: measured again too.
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
+  // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
+  // no thread open. Off by default, and never on a phone or in a window that stacks.
+  const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
+  const panelView = threadPanelShows(threadPanelOn, { phone, stacked: stack.thread });
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -2206,11 +2225,28 @@ function Inbox() {
         ? { ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }
         : current,
     );
+  };
+
+  /**
+   * The questions the open thread is saving answers to (a card saves on every
+   * change). Each save's answer already brought its questions, so what the
+   * reads show waits for the last one: one read for the lot. Only the records
+   * of those questions wait, and only while the pane is open, so a save that
+   * never answers holds back nothing else; any other record is read as it comes.
+   * `paneClosed` only ends the hold: nothing landed, and a read here would put
+   * the list on screen ahead of the close's own settle (settle.ts).
+   */
+  const onPickSaves = useCallback((saving: ReadonlySet<string>, paneClosed = false) => {
+    pickSaves.current.saving = saving;
+    if (saving.size > 0) return;
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
     // the list catches up when the thread closes (settle.ts).
-    void refreshList(!routeRef.current.thread, true);
-  };
+    if (!paneClosed) void refreshList(!routeRef.current.thread, true);
+    if (!pickSaves.current.owed) return;
+    pickSaves.current.owed = false;
+    pickSaves.current.read();
+  }, [refreshList]);
 
   const afterWrite = async () => {
     const open = routeRef.current.thread;
@@ -4360,7 +4396,22 @@ function Inbox() {
       />
     );
   } else if (!latest || !shown) {
-    main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
+    const loading = loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>;
+    // The thread panel view has its two panes from the first paint, so a reload never draws the wide list first. Blank:
+    // whether a thread opens here, or the first-run screen takes the window, is not known yet. The column's edge sets
+    // the width the person dragged, as it does for the list that takes its place.
+    main =
+      panelView && !fileOpen && !fromCard ? (
+        <>
+          <div className="ib-listcol ib-narrow ib-resizable">
+            {loading}
+            <ListColumnEdge />
+          </div>
+          <div className="ib-pane" data-thread-panel-loading="" />
+        </>
+      ) : (
+        <div className="ib-listcol">{loading}</div>
+      );
   } else if (showTourEntry) {
     main = (
       <TourEntry
@@ -4398,7 +4449,8 @@ function Inbox() {
           hideAway={hideAway}
           onHideAway={setHideAway}
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
-          narrow={route.thread !== null && !stack.thread}
+          narrow={(route.thread !== null || panelView) && !stack.thread}
+          threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
@@ -4458,6 +4510,11 @@ function Inbox() {
           }
         />
         )}
+        {panelView && !route.thread && (
+          <div className="ib-pane ib-pempty" data-thread-panel-empty="">
+            <EmptyThreadPanel />
+          </div>
+        )}
         {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
             and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
         {route.thread && !(thread && thread.thread_id === route.thread) && ((!phone && !stack.thread) || awayWait) && (
@@ -4515,6 +4572,7 @@ function Inbox() {
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
             onQuestions={patchQuestions}
+            onPickSaves={onPickSaves}
             onChanged={afterWrite}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
