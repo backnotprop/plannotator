@@ -57,13 +57,19 @@
  *   start), a one-line reminder naming the tool's full name rides the
  *   conversation's first prompt as `prompt.submit` context, unless
  *   `{ "inboxReminder": false }` turns it off; a resumed conversation's first
- *   prompt carries the session's open Inbox threads instead. No
- *   `prompt.context` or `classic.SessionStart` hook (#2243): a guard plugin
- *   seated above the mod skips both, and Claude Code then prints a "hook was
- *   skipped" line every session. After a compaction the plugin's
+ *   prompt carries the session's open Inbox threads instead. The reminder
+ *   needs no `prompt.context` or `classic.SessionStart` hook (#2243): a guard
+ *   plugin seated above the mod skips both, and Claude Code then prints a
+ *   "hook was skipped" line every session. After a compaction the plugin's
  *   `SessionStart` `compact` command hook (hooks.json) prints the reminder
  *   again from `PLANNOTATOR_INBOX_REMINDER`, which session.start sets and each
  *   `session.compact` sets again with the session's open Inbox threads.
+ * - The session's name for the Inbox's To picker: a session named with
+ *   `/rename` shows it, an unnamed one reads as it always did (owner's decision
+ *   on #2450, 2026-11-01). No classic hook: `session_title`, the only input that
+ *   carries a title, costs a "hook was skipped" line under
+ *   `cc-plugin-sec-default` (#2243). `command.run` on `/rename` and `/clear` keeps
+ *   the name in `$.store` by session id, and each Inbox poll reads it.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
  *   every process the session starts inherits, so a Plannotator server can be
  *   matched to the session that started it.
@@ -83,10 +89,14 @@ import {
   inboxRegistryPathOf,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
+  INBOX_SESSION_NAME_COMMANDS,
   pluginVersionOf,
   readReminderSessions,
+  readSessionNames,
+  sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
+  STORE_INBOX_SESSION_NAMES,
   withReminderSession,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
@@ -327,6 +337,9 @@ async function reminderGateDecided($: Engine): Promise<boolean | null> {
 /** The longest a resumed conversation's first prompt waits for its thread list. */
 const SESSION_THREADS_RESUME_MS = 1_500
 
+/** How long a `/rename` or `/clear` that already ran waits for its name to be kept: the person is waiting on the prompt. */
+const SESSION_NAME_WRITE_MS = 500
+
 /**
  * PLANNOTATOR_INBOX_REMINDER holds the reminder plus the thread list (ids and
  * subjects), set for one compaction's SessionStart `compact` command hook: the
@@ -424,6 +437,31 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
 }
 
 /**
+ * Keeps what a `/rename` or `/clear` did to the session's name
+ * (`sessionNamesAfterCommand`), after it ran. By session id and in `$.store`, not
+ * on the instance: `session.start` does not fire for `/clear` or an in-process
+ * resume, and a `--resume` is another process that has to find the name again.
+ * Never fails the command over a label. Writes only a change: the record is
+ * read and written back whole, so a write that changed nothing could only put
+ * back what another session's command just replaced.
+ */
+async function noteSessionName($: Engine, e: { command?: unknown; args?: unknown }, before: string): Promise<void> {
+  try {
+    const after = String(await $.session.id())
+    const stored = readSessionNames(await $.store.get(STORE_INBOX_SESSION_NAMES))
+    const updated = sessionNamesAfterCommand(stored, { command: e.command, args: e.args, before, after }, await $.clock.now())
+    if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_NAMES, updated)
+  } catch {
+    // The poll says the last word it had.
+  }
+}
+
+/** The name kept for `sessionId`; `''` when it has none. Rejects when the store cannot say, and the poll then repeats its last word. */
+async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
+  return readSessionNames(await $.store.get(STORE_INBOX_SESSION_NAMES))[sessionId]?.name ?? ''
+}
+
+/**
  * The instance for the session the process is in NOW. `session.start` does
  * not fire for `/clear` or an in-process resume (the process goes on under
  * another session id), so the id is checked here and a new instance is made
@@ -449,6 +487,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
+      label: () => sessionNameOf($, String(sessionId)),
       ...(inboxTools
         ? {
             inboxTools,
@@ -665,6 +704,24 @@ export function register(on: On) {
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
+  })
+
+  // The session's name (see the header). Matched by name, as above, so at most
+  // these two commands' answers are touched. It hands the engine's answer back as
+  // it is, and a real session on 2.1.316, the one version this was watched on,
+  // showed no credit line on `/rename` or `/clear`. The engine's command runs and
+  // answers whatever `$` does: a read that throws or a store that never settles
+  // costs the label, never `/clear`. After `next`: a command that threw named
+  // nothing, and `/clear` has moved the session id by then. Before session.start
+  // has decided too, since a first `/rename` can beat it; once it said no (the mod
+  // off, `-p`) nothing polls, so nothing is written.
+  on('command.run', { command: [...INBOX_SESSION_NAME_COMMANDS] }, async ($: Engine, e: any, next: Next) => {
+    const before = await Promise.resolve()
+      .then(() => $.session.id())
+      .then(String, () => '')
+    const result = await next(e)
+    if (before && (allowed || reminderGateValue === null)) await withinMs($, SESSION_NAME_WRITE_MS, () => noteSessionName($, e, before))
+    return result
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
