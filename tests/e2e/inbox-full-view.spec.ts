@@ -629,6 +629,16 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       expect(barBox.y + barBox.height).toBeGreaterThan(viewport.height - 40);
       expect(Math.abs(pillBox.y + pillBox.height - (barBox.y + barBox.height))).toBeLessThanOrEqual(2);
       expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(barBox.x);
+      // The pill opens the reply card at the foot (approval "inbox-fullscreen-composer"), and the toolbar sits just above it.
+      await pane(page).locator('[data-fcomp-pill]').click();
+      await expect(pane(page).locator('[data-fcomp]')).toBeVisible();
+      const composerBox = (await pane(page).locator('[data-fcomp]').boundingBox())!;
+      const openBarBox = (await bar(page).boundingBox())!;
+      expect(composerBox.y + composerBox.height).toBeGreaterThan(viewport.height - 40);
+      expect(openBarBox.y + openBarBox.height).toBeLessThanOrEqual(composerBox.y + 1);
+      expect(openBarBox.y + openBarBox.height).toBeGreaterThan(composerBox.y - 40);
+      await pane(page).locator('[data-fcomp-minimize]').click();
+      await expect(pane(page).locator('[data-fcomp]')).toHaveCount(0);
       for (const control of ['[data-full-view-exit="back"]', '[data-full-view-pen]', '[data-full-view-comments]', '[data-full-view-position]', '[data-full-view-more]', '[data-full-view-hide]']) {
         const b = (await bar(page).locator(control).boundingBox())!;
         expect(b.width).toBeGreaterThanOrEqual(44);

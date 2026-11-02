@@ -46,6 +46,8 @@ const pixel = (() => {
 
 interface World {
   root: string;
+  /** Where the sent files are on disk: a test can change one after it was sent. */
+  dir: string;
   url: string;
   agent: SimAgent;
   thread: string;
@@ -70,7 +72,7 @@ async function world(): Promise<World> {
   const names = ['report.html', 'second.html', 'shot.png'];
   const sent = await agent.send({ project_path: project, subject: 'The report', attachments: names.map((n) => `files/${n}`), body: 'The report, a second page, and a picture.' });
   const ids = Object.fromEntries((sent.attachments as { id: string; name: string }[]).map((a) => [a.name, a.id])) as Record<string, string>;
-  return { root, url, agent, thread: sent.thread_id as string, ids };
+  return { root, dir, url, agent, thread: sent.thread_id as string, ids };
 }
 
 const launch = (engine: 'webkit' | 'chromium'): Promise<Browser> => (engine === 'webkit' ? webkit.launch({ args: [] }) : chromium.launch());
@@ -302,6 +304,25 @@ for (const phone of [
     });
   });
 
+  test(`${phone.name}: a reply card opened, then a pin, then the next file: the next page still opens clear`, async () => {
+    await withPhone(phone.engine, async (w, page) => {
+      await open(w, page, 'report.html');
+      await replyPill(page).tap();
+      await expect(composer(page)).toBeVisible();
+      await pen(page).tap();
+      await frame(page).locator('#n1').tap();
+      await expect(card(page)).toBeVisible();
+      // The Reply tab brings the toolbar back; the pin's draft, with no words, is still held.
+      await page.locator('[data-fcomp-mode="reply"]').tap();
+      await bar(page).locator('[data-full-view-position]').tap();
+      await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
+      await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['second.html']!);
+      await expect(frame(page).locator('#tap')).toBeVisible();
+      await expect(replyPill(page)).toBeVisible();
+      await expect(composer(page)).toHaveCount(0);
+    });
+  });
+
   test(`${phone.name}: an image on the same thread keeps its card and its Comment tab`, async () => {
     await withPhone(phone.engine, async (w, page) => {
       await open(w, page, 'shot.png');
@@ -376,6 +397,29 @@ test('Pixel 7 (Chromium), real pinch: the next file opens at full view, and pinc
   });
 });
 
+test('Pixel 7 (Chromium): words in the card wait for an answer before the other version opens', async () => {
+  await withPhone('chromium', async (w, page) => {
+    writeFileSync(join(w.dir, 'report.html'), pageOf('Latency report, rewritten'));
+    await open(w, page, 'report.html');
+    await pen(page).tap();
+    await frame(page).locator('#n1').tap();
+    await field(page).fill('Keep this');
+    await page.locator('[data-fcomp-minimize]').tap();
+    await page.getByRole('button', { name: 'Open the version it sent' }).tap();
+    await expect(page.locator('.ib-stepguard')).toBeVisible();
+    await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
+    // Keep writing brings the card back on its words.
+    await page.locator('[data-guard-keep]').tap();
+    await expect(field(page)).toHaveValue('Keep this');
+    await expect(field(page)).toBeFocused();
+    // Discarded on purpose, the other version opens.
+    await page.locator('[data-fcomp-minimize]').tap();
+    await page.getByRole('button', { name: 'Open the version it sent' }).tap();
+    await page.locator('[data-guard-discard]').tap();
+    await expect(page.locator('.ib-fvver-t')).toHaveText('Showing the sent version');
+  });
+});
+
 test('iPhone 15 (WebKit): forced zoom (a stubbed visualViewport.scale): the parent reads it and the tools tuck', async () => {
   await withPhone('webkit', async (w, page) => {
     await open(w, page, 'report.html');
@@ -424,6 +468,9 @@ test('desktop: nothing changed: pen on, the reply card open, the selection bridg
       expect(await frame(page).locator('body').evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(false);
       await forceSelection(page, 'p1', 5, 20);
       await page.waitForTimeout(700);
+      // A selection the bridge reported would open the selection toolbar here (no mouseup made this one).
+      await expect(page.locator('[data-pn-annotation-toolbar-row]')).toHaveCount(0);
+      await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
       await expect(card(page)).toHaveCount(0);
       await frame(page).locator('#p2').click();
       await expect(page.getByPlaceholder('Add a comment...')).toBeVisible();

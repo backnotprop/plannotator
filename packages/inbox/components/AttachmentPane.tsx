@@ -1568,8 +1568,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
 
   const chooseVersion = (next: 'current' | 'sent') => {
-    remember(attachment.id, { version: next });
-    props.onVersion(next);
+    const go = () => {
+      remember(attachment.id, { version: next });
+      props.onVersion(next);
+    };
+    // A phone page's card drops its words on the other version (its fileKey): asked first, as for another file.
+    if (htmlComment.open) leave(`the ${next} version`, go);
+    else go();
   };
   const close = () => leave(null, props.onClose);
   closeRef.current = close;

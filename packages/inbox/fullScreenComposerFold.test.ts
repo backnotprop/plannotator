@@ -46,6 +46,20 @@ test('a comment opens the Comment tab, and its restore puts back what it found',
   expect(composerMinimized(T, true)).toBe(true);
 });
 
+// Failure to catch: the next HTML page opening with the card up. The pane forgets the opened card in a layout effect,
+// and the old page's draft restores its fold later, in its passive cleanup.
+test('a card opened, then a comment, then the next page: the restore keeps the page clear', () => {
+  setComposerMinimized(T, false);
+  const restore = openComposerComment(T);
+  forgetComposerOpened(T);
+  restore();
+  expect(composerMinimized(T, true)).toBe(true);
+  // With no next page in between, the opened card comes back as the person left it.
+  setComposerMinimized(T, false);
+  openComposerComment(T)();
+  expect(composerMinimized(T, true)).toBe(false);
+});
+
 // Failure to catch: the person going to Reply mid-comment, and the next pin opening behind it.
 test('a new target shows the comment again, and restore still goes back to the start', () => {
   const restore = openComposerComment(T);

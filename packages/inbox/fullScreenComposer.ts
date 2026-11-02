@@ -71,7 +71,10 @@ export function openComposerComment(threadId: string): () => void {
   return () => {
     if (hadTab === undefined) picked.delete(threadId);
     else picked.set(threadId, hadTab);
-    if (hadFold === undefined) minimized.delete(threadId);
+    // No fold now: the next HTML page opened clear (forgetComposerOpened) before this draft's cleanup ran, so a card
+    // the person had opened stays forgotten.
+    const forgotten = !minimized.has(threadId);
+    if (hadFold === undefined || (hadFold === false && forgotten)) minimized.delete(threadId);
     else minimized.set(threadId, hadFold);
     changed();
   };
