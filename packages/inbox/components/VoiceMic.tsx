@@ -84,13 +84,15 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   );
 }
 
-export function VoiceFoot({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
+/** `children` sit between the status and the mic: the status grows to their left, so they stay put when it comes. */
+export function VoiceFoot({ voice, phone, children }: { voice: VoiceHandle; phone: boolean; children?: ReactNode }) {
   const shown = useVoiceShown();
   const block = useVoiceBlock(shown);
-  if (!shown) return null;
+  if (!shown) return children;
   return (
     <div className="ib-dtfoot" data-voice-foot="">
       <VoiceStatus voice={voice} phone={phone} />
+      {children}
       <MicButton voice={voice} phone={phone} block={block} />
       <span className="ib-sr" role="status">
         {voice.view.said}

@@ -14,9 +14,10 @@
  *    and a touch the system takes away ends the take with nothing sent.
  *  - Reply box, compose, and full screen's composer.
  *  - New message dictates as the reply box does, in Chromium and in WebKit (WebKit has no fake capture device, so a tone
- *    through a real MediaStream stands in for the microphone), at 320 and 390 px, the keyboard a stand-in: the mic at the
+ *    through a real MediaStream stands in for the microphone), at 320 to 390 px, the keyboard a stand-in: the mic at the
  *    row's right end and still when it starts, the level drawn and moving, nothing over the clock. Words land where they
- *    did; Cancel, the draft question and the To sheet each leave no microphone open.
+ *    did; Cancel and the draft question leave no microphone open; To ends a take and keeps its words; a save waits for
+ *    a take on its way. On a desktop Save draft stays put when listening starts.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
  *  - A file or the artifacts opening over the box closes the microphone.
  *
@@ -738,6 +739,8 @@ test.describe('New message dictates as the reply box does', () => {
   interface Row {
     mic: { left: number; right: number };
     row: { left: number; right: number; height: number };
+    /** Where the row's end is for the mic: Send's left edge, or the row's right edge with no Send on it. */
+    end: number;
     bars: number;
     level: string;
   }
@@ -747,6 +750,7 @@ test.describe('New message dictates as the reply box does', () => {
     scope.evaluate((box) => {
       const row = box.querySelector('.ib-rfoot, .ib-cp-foot')!.getBoundingClientRect();
       const mic = box.querySelector('[data-voice-mic]')!.getBoundingClientRect();
+      const send = box.querySelector('.ib-cp-foot [data-compose-send]')?.getBoundingClientRect();
       const strip = box.querySelector('.ib-vbars');
       const room = strip?.getBoundingClientRect();
       const strokes = strip ? [...strip.children] : [];
@@ -757,6 +761,7 @@ test.describe('New message dictates as the reply box does', () => {
       return {
         mic: { left: mic.left, right: mic.right },
         row: { left: row.left, right: row.right, height: row.height },
+        end: send?.left ?? row.right,
         bars: shown.length,
         level: shown.map((stroke) => (stroke as HTMLElement).style.transform).join(' '),
       };
@@ -779,9 +784,9 @@ test.describe('New message dictates as the reply box does', () => {
   }
 
   const onTheRight = (row: Row, name: string) => {
-    const middle = (row.row.left + row.row.right) / 2;
     // Soft: the side and the level are two faults, and the run should show both.
-    expect.soft(row.mic.left, `${name}: the mic is in the row's right half`).toBeGreaterThan(middle);
+    expect.soft(row.end - row.mic.right, `${name}: the mic is at the row's right end`).toBeLessThanOrEqual(24);
+    expect.soft(row.end - row.mic.right, `${name}: and clear of what comes after it`).toBeGreaterThanOrEqual(0);
   };
 
   const keyboardUp = (page: Page, ios: boolean, height: number) =>
@@ -840,6 +845,10 @@ test.describe('New message dictates as the reply box does', () => {
   const SIZES = [
     { width: 390, height: 660, keyboard: 403 },
     { width: 320, height: 568, keyboard: 353 },
+    // The tightest: Send is the bare arrow under 360, so 360 to 389 have the least room for the status.
+    { width: 360, height: 640, keyboard: 383 },
+    { width: 375, height: 667, keyboard: 410 },
+    { width: 389, height: 660, keyboard: 403 },
   ] as const;
 
   for (const engine of ENGINES) {
@@ -866,6 +875,7 @@ test.describe('New message dictates as the reply box does', () => {
             onTheRight(await readRow(pane(reply.page)), `reply, ${where}`);
             await mic(pane(reply.page)).tap();
             await expect(line(pane(reply.page), 'tap')).toBeVisible();
+            expect((await readRow(pane(reply.page))).bars, `reply, ${where}: the level is drawn`).toBeGreaterThanOrEqual(4);
             await reply.context.close();
 
             for (const pick of [false, true]) {
@@ -885,8 +895,7 @@ test.describe('New message dictates as the reply box does', () => {
               await listensWell(page, sheet(page), rest, name);
               const seen = await sheet(page).locator('.ib-cp-foot').boundingBox();
               expect(seen!.height, `${name}: still one row`).toBeLessThanOrEqual(rest.row.height + 0.5);
-              // At 320 px the head and the row together are taller than what this keyboard leaves, dictating or not.
-              if (size.width === 390) expect(seen!.y + seen!.height, `${name}: the row is above the keyboard`).toBeLessThanOrEqual(size.height - (keyboard ? size.keyboard : 0) + 0.5);
+              expect(seen!.y + seen!.height, `${name}: the row is above the keyboard`).toBeLessThanOrEqual(size.height - (keyboard ? size.keyboard : 0) + 0.5);
               await expect(sheet(page).locator('[data-compose-send]')).toBeDisabled();
               await context.close();
             }
@@ -909,15 +918,35 @@ test.describe('New message dictates as the reply box does', () => {
     await page.waitForTimeout(250);
     const rest = await readRow(sheet(page));
     onTheRight(rest, 'New message');
+    const save = sheet(page).locator('[data-compose-save]');
+    const saveAtRest = (await save.boundingBox())!;
     await mic(sheet(page)).click();
     await expect(line(sheet(page), 'tap')).toBeVisible();
     await expect.poll(async () => (await readRow(sheet(page))).mic.left).toBeCloseTo(rest.mic.left, 0);
+    expect((await save.boundingBox())!.x, 'starting to listen moves Save draft nowhere').toBeCloseTo(saveAtRest.x, 0);
     await page.waitForTimeout(1200);
     const live = await readRow(sheet(page));
     expect(live.bars, 'the level has its room').toBeGreaterThanOrEqual(20);
     const send = (await sheet(page).locator('[data-compose-send]').boundingBox())!;
     expect(send.x, 'Send is after the mic').toBeGreaterThanOrEqual(live.mic.right);
+    const bars = (await sheet(page).locator('.ib-vbars').boundingBox())!;
+    expect(bars.x + bars.width, 'the status stops short of Save draft').toBeLessThanOrEqual(saveAtRest.x + 0.5);
     await page.locator('[data-voice-cancel]').click();
+    await expect(line(sheet(page), 'tap')).toHaveCount(0);
+    expect((await save.boundingBox())!.x, 'nor does stopping').toBeCloseTo(saveAtRest.x, 0);
+    await context.close();
+  });
+
+  test('a desktop: a failed microphone’s note sits on the dialog, with no band of its own', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    await page.addInitScript(() => {
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('no', 'NotAllowedError'));
+    });
+    await openCompose(page, w);
+    await mic(sheet(page)).click();
+    await expect(note(sheet(page), 'blocked')).toBeVisible();
+    await expect(note(sheet(page), 'blocked')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await context.close();
   });
 
@@ -959,7 +988,7 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
-  test('a phone: Cancel keeps the words, and neither the draft question nor the To sheet leaves a microphone open', async () => {
+  test('a phone: Cancel keeps the words, and the draft question leaves no microphone open', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     const mics = await watchMic(page);
@@ -986,19 +1015,35 @@ test.describe('New message dictates as the reply box does', () => {
     await sheet(page).getByRole('button', { name: 'Keep writing' }).tap();
     await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
     await expect(text).toHaveValue('Kept words');
-
-    await mic(sheet(page)).tap();
-    await expect(line(sheet(page), 'tap')).toBeVisible();
-    await sheet(page).locator('.ib-cp-tobtn').tap();
-    await expect(page.locator(`[data-compose-session="${SESSION}"]`)).toBeVisible();
-    await expect.poll(mics, { message: 'the To sheet took the status and Cancel: no microphone stays open behind it' }).toBe(0);
     expect(w.upstreamCalls()).toHaveLength(posts);
     await context.close();
   });
 
-  test('a phone: a take on its way when the question opens still lands, and Keep draft keeps the words', async () => {
+  test('a phone: To in the middle of a take stops the microphone and keeps the words', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
+    const mics = await watchMic(page);
+    await openCompose(page, w);
+    await field(page).fill('Before.');
+    await field(page).blur();
+    w.send({ upstream: [{ text: 'After.', hold: true }] });
+    await mic(sheet(page)).tap();
+    await expect(line(sheet(page), 'tap')).toBeVisible();
+    await page.waitForTimeout(1200);
+    await sheet(page).locator('.ib-cp-tobtn').tap();
+    await expect(page.locator(`[data-compose-session="${SESSION}"]`)).toBeVisible();
+    await expect.poll(mics, { message: 'the To sheet took the status and Cancel: no microphone stays open behind it' }).toBe(0);
+    w.send({ release: true });
+    await page.locator(`[data-compose-session="${SESSION}"]`).tap();
+    await expect(field(page)).toHaveValue('Before. After.');
+    await expect(sheet(page).locator('[data-compose-send]')).toBeEnabled();
+    await context.close();
+  });
+
+  const savedDrafts = async (w: World) => ((await (await fetch(new URL('/api/inbox/drafts', w.url))).json()) as { drafts: { body: string }[] }).drafts.map((draft) => draft.body);
+
+  /** Stopped, the answer held: the take is on its way and its words are not in. */
+  async function takeOnItsWay(page: Page, w: World) {
     await openCompose(page, w, { agent: false });
     await field(page).fill('Before.');
     await field(page).blur();
@@ -1008,15 +1053,41 @@ test.describe('New message dictates as the reply box does', () => {
     await page.waitForTimeout(1200);
     await mic(sheet(page)).tap();
     await expect(line(sheet(page), 'sending')).toBeVisible();
+  }
+
+  test('a phone: Keep draft pressed before the answer waits for the words, and keeps them', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w, { phone: true });
+    await takeOnItsWay(page, w);
     await sheet(page).locator('[data-compose-cancel]').tap();
-    await expect(sheet(page).locator('[data-compose-question]')).toBeVisible();
+    const keep = sheet(page).locator('[data-compose-keep]');
+    await expect(keep).toBeVisible();
+    await expect(keep, 'Keep draft waits, as Send does').toBeDisabled();
+    await keep.evaluate((button: HTMLButtonElement) => button.click());
+    await page.waitForTimeout(300);
+    await expect(sheet(page), 'the press before the answer did not leave').toBeVisible();
     w.send({ release: true });
     await expect(field(page)).toHaveValue('Before. After.');
-    await sheet(page).locator('[data-compose-keep]').tap();
+    await keep.tap();
     await expect(sheet(page)).toHaveCount(0);
-    await expect
-      .poll(async () => ((await (await fetch(new URL('/api/inbox/drafts', w.url))).json()) as { drafts: { body: string }[] }).drafts.map((draft) => draft.body))
-      .toContain('Before. After.');
+    await expect.poll(() => savedDrafts(w)).toContain('Before. After.');
+    await context.close();
+  });
+
+  test('a phone: the bar’s Save draft waits for the words too', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w, { phone: true });
+    await takeOnItsWay(page, w);
+    const save = sheet(page).locator('[data-compose-save]');
+    await expect(save, 'Save draft waits, as Send does').toBeDisabled();
+    await save.evaluate((button: HTMLButtonElement) => button.click());
+    await page.waitForTimeout(300);
+    await expect(sheet(page), 'the press before the answer did not leave').toBeVisible();
+    w.send({ release: true });
+    await expect(field(page)).toHaveValue('Before. After.');
+    await save.tap();
+    await expect(sheet(page)).toHaveCount(0);
+    await expect.poll(() => savedDrafts(w)).toContain('Before. After.');
     await context.close();
   });
 
