@@ -2,10 +2,12 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_LIVE_COLUMNS,
   INBOX_CARD_NOTES_MAX,
   INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   type InboxCardColumn,
   type InboxCardHistoryEntry,
@@ -44,7 +46,6 @@ export interface CardPanelProps {
   onClose: () => void;
   onColumn: (column: InboxCardColumn) => void;
   onShip: () => void;
-  onIcebox: () => void;
   onRestore: () => unknown;
   /** `fromMenu`: the reason field was opened by Drop… on the card's right-click menu (and not closed since). */
   onDrop: (reason: string | null, fromMenu: boolean) => void;
@@ -74,9 +75,9 @@ export interface CardPanelProps {
  * agent is working; the "You: …" band; notes; threads (a click opens the
  * thread in the Inbox, with a way back); links (PRs, issues), their live
  * state read when the card opens and never acted on; history, with a quiet
- * "Ask for an update"; and at the foot Ship · Icebox · Drop… (with a reason),
- * Send to an agent for a Backlog card nobody was asked about, Restore in the
- * Icebox or Dropped.
+ * "Ask for an update"; and at the foot Mark done · Cancel… (with a reason),
+ * Send to an agent for a Backlog or Todo card nobody was asked about,
+ * Restore on a Cancelled card.
  */
 export function CardPanel(props: CardPanelProps) {
   const { card, phone } = props;
@@ -116,7 +117,7 @@ export function CardPanel(props: CardPanelProps) {
   // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
   const you = cardYou(card);
   const threadAt = youThread(card, props.rowOf);
-  const live = card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped';
+  const live = card.column !== 'dropped' && card.column !== 'done';
   const askable = (agent !== null || props.canAsk) && live;
   // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
   const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
@@ -207,7 +208,7 @@ export function CardPanel(props: CardPanelProps) {
         )}
         {card.column === 'dropped' && card.dropped && (
           <p className="ib-crdp-dropped">
-            Dropped {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
+            Cancelled {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
         )}
@@ -235,7 +236,7 @@ export function CardPanel(props: CardPanelProps) {
               ))}
             </ul>
           )}
-          <LinkField onLink={props.onLink} />
+          <LinkField onLink={props.onLink} phone={props.phone} />
         </section>
         <section className="ib-crdp-sec" aria-label="History">
           <h3 className="ib-crdp-hhead">
@@ -292,7 +293,7 @@ export function CardPanel(props: CardPanelProps) {
           }}
         >
           <label htmlFor={`${headingId}-reason`} dir="auto">
-            Drop “{card.title}”
+            Cancel “{card.title}”
           </label>
           <input
             id={`${headingId}-reason`}
@@ -315,11 +316,11 @@ export function CardPanel(props: CardPanelProps) {
           />
           <div className="ib-crdp-dropacts">
             <button type="button" className="ib-btn ib-ghost" onClick={stopDropping}>
-              Cancel
+              Keep
             </button>
             <button type="submit" className="ib-btn ib-danger" data-drop-confirm="">
               <Icon name="xCircle" size={15} />
-              Drop
+              Cancel card
             </button>
           </div>
         </form>
@@ -343,7 +344,7 @@ export function CardPanel(props: CardPanelProps) {
           {foot.primary === 'ship' && (
             <button type="button" className="ib-btn ib-soft" onClick={props.onShip} data-card-ship="">
               <Icon name="checkCircle" size={15} />
-              Ship
+              Mark done
             </button>
           )}
           {foot.primary === 'restore' && (
@@ -353,12 +354,6 @@ export function CardPanel(props: CardPanelProps) {
             </OnceButton>
           )}
           <span className="ib-bsp" />
-          {foot.icebox && (
-            <button type="button" className="ib-btn ib-ghost" onClick={props.onIcebox} data-card-icebox="">
-              <Icon name="snowflake" size={15} />
-              Icebox
-            </button>
-          )}
           {foot.drop && (
             <button type="button" className="ib-btn ib-ghost" onClick={() => {
                 // The foot's own Drop…: a move from the opened card, never the menu's (no toast).
@@ -368,7 +363,7 @@ export function CardPanel(props: CardPanelProps) {
               data-card-drop=""
             >
               <Icon name="xCircle" size={15} />
-              Drop…
+              Cancel…
             </button>
           )}
         </div>
@@ -380,14 +375,15 @@ export function CardPanel(props: CardPanelProps) {
   );
 }
 
-/** The card's column, as a Move menu: the five lanes (its own checked), then Shipped and Icebox; Restore when it is aside. */
+/** The card's column, as a Move menu: the live lanes (its own checked), then Done; Restore when it is Cancelled. */
 function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; sent: boolean; onColumn: (column: InboxCardColumn) => void; onRestore: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const choices = columnChoices(card);
-  const aside = card.column === 'icebox' || card.column === 'dropped';
+  const aside = card.column === 'dropped';
+  const lanes = INBOX_CARD_LIVE_COLUMNS.length;
   return (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Menu.Trigger ref={trigger} className="ib-crdp-col" aria-label={`Column: ${INBOX_CARD_COLUMN_LABELS[card.column]}${sent ? ', sent' : ''}. Move`} data-card-column={card.column}>
@@ -410,7 +406,7 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
             )}
             {/* One choice, so radio items: a screen reader hears the card's column as checked. */}
             <Menu.RadioGroup value={card.column} onValueChange={(value: InboxCardColumn) => value !== card.column && onColumn(value)} aria-label="Column">
-              {choices.slice(0, 5).map((choice) => (
+              {choices.slice(0, lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
                   <span className="ib-lane-dot" data-col={choice.column} aria-hidden="true" />
                   {choice.label}
@@ -418,9 +414,9 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
                 </Menu.RadioItem>
               ))}
               <Menu.Separator className="ib-pm-sep" />
-              {choices.slice(5).map((choice) => (
+              {choices.slice(lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
-                  <Icon name={choice.column === 'shipped' ? 'checkCircle' : 'snowflake'} size={15} />
+                  <Icon name="checkCircle" size={15} />
                   {choice.label}
                   {choice.current && <Icon name="check" size={15} className="ib-pmi-check" />}
                 </Menu.RadioItem>
@@ -604,16 +600,26 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
 function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
-  const kind = refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
+  // A link-only source (a Jira issue): the key links, beside the source's mark and its site; no state is read.
+  const linkOnly = inboxCardRefIsLinkOnly(refItem);
+  const kind = refItem.source === 'jira' ? 'Jira issue' : refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
   const number = refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
+  const link = (
+    <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
+      {number}
+    </a>
+  );
   return (
-    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-state={state?.tone ?? (loading ? 'loading' : 'quiet')}>
-      <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
-      <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
-        {number}
-      </a>
+    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-source={refItem.source} data-ref-state={state?.tone ?? (linkOnly ? 'quiet' : loading ? 'loading' : 'quiet')}>
+      {linkOnly ? (
+        refItem.source === 'jira' ? <JiraMark /> : <Icon name="link" size={15} className="ib-refmark ib-crdp-rlink" />
+      ) : (
+        <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
+      )}
+      {/* A link-only ref has no hover card: its tooltip says where the key goes. */}
+      {linkOnly ? <Tip content={<UrlTip url={refItem.url} />}>{link}</Tip> : link}
       <span className="ib-crdp-rt" dir="auto">
-        {data ? data.title : <span className="ib-crdp-rref">{refItem.ref}</span>}
+        {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
       </span>
       {state && (
         <span className="ib-crdp-rs" data-tone={state.tone}>
@@ -626,6 +632,46 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
 }
 
 /**
+ * The Jira mark (Simple Icons `jira`, CC0-1.0), one colour in currentColor as
+ * the forge marks beside it are. Drawn in a 15 px box like them, with a
+ * little room around it: the mark fills its square, an Octicon does not.
+ */
+const JIRA_MARK =
+  'M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z';
+
+function JiraMark() {
+  return (
+    <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="jira" width={15} height={15} viewBox="-1.5 -1.5 27 27" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d={JIRA_MARK} />
+    </svg>
+  );
+}
+
+/** A URL in a tooltip: it may wrap after a `/`, never inside a segment (the key). */
+function UrlTip({ url }: { url: string }) {
+  const parts = url.split('/').map((part, i, all) => (i < all.length - 1 ? `${part}/` : part));
+  return (
+    <span className="ib-tip-url">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** A link's host (`example.atlassian.net`), or the URL as written when it does not parse. */
+function siteOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/**
  * A line of the card's words, through the same inline markdown as a thread
  * message: a bare `#123` links into the card's project's repo, `owner/repo#123`
  * and full URLs link as written. The lane cards keep plain text.
@@ -635,7 +681,7 @@ function CardText({ text, repo }: { text: string; repo: InboxProjectRepo | null 
 }
 
 /** Link an issue or PR from the opened card. */
-function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null> }) {
+function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string | null>; phone: boolean }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
@@ -652,7 +698,12 @@ function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null>
       <label className="ib-sr" htmlFor="ib-card-link">
         Link an issue or PR
       </label>
-      <input id="ib-card-link" type="text" placeholder="Link an issue or PR (owner/repo#123 or its URL)" value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
+      <input
+        id="ib-card-link"
+        type="text"
+        // The sources it reads; a phone's narrow field keeps the short form whole.
+        placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
+        value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
       {error && (
         <p className="ib-error" role="alert">
           {error}

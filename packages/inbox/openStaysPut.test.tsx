@@ -483,8 +483,8 @@ const hoverUnread = (el: HTMLElement, id: string) => el.querySelector<HTMLButton
 /** The row's hover action, by its label (an action label, pinned on purpose), or null when it has none. */
 const hoverLabel = (el: HTMLElement, id: string) => el.querySelector(`.ib-lbody [data-row="${id}"] > .ib-ract`)?.textContent?.trim() ?? null;
 const isBold = (el: HTMLElement, id: string) => rowOf(el, id)?.classList.contains('ib-u') ?? null;
-/** The header's Mark read / Mark unread button, by its label (action labels, pinned on purpose), or null. */
-const headerLabel = (el: HTMLElement) => el.querySelector('section.ib-pane :is([data-mark-read], [data-mark-unread]) .ib-hbtn-l')?.textContent?.trim() ?? null;
+/** The header's Mark read / Mark unread button, by its name (an icon: its aria-label; action labels, pinned on purpose), or null. */
+const headerLabel = (el: HTMLElement) => el.querySelector('section.ib-pane :is([data-mark-read], [data-mark-unread])')?.getAttribute('aria-label') ?? null;
 const quietCount = (el: HTMLElement) => el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent ?? '0';
 const toastEl = () => document.querySelector<HTMLElement>('[data-inbox-toast]');
 const pressKey = (key: string) =>

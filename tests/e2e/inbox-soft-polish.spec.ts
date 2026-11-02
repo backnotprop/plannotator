@@ -156,38 +156,27 @@ test('beside an open thread the two-line rows have no line either', async () => 
   await shot(page, '2-thread');
 });
 
-test("Mark read's E is a keycap inside its button, centred on it; today's look keeps its outlined key", async () => {
+// The read button is an icon since the approval "inbox-thread-header" (2026-11-02): its E moved into its tooltip.
+test("Mark read's E is a keycap in its tooltip; the icon button fills on hover in both looks", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
   const button = page.locator('[data-mark-read]');
   await expect(button).toBeEnabled();
-  const kbd = button.locator('.ib-kbd');
-  const geometry = async () =>
-    button.evaluate((b) => {
-      const k = b.querySelector('.ib-kbd')!;
-      const br = b.getBoundingClientRect();
-      const kr = k.getBoundingClientRect();
-      const cs = getComputedStyle(k);
-      return { inside: kr.left >= br.left && kr.right <= br.right && kr.top >= br.top && kr.bottom <= br.bottom, dy: Math.abs(kr.top + kr.height / 2 - (br.top + br.height / 2)), end: br.right - kr.right, bg: cs.backgroundColor, line: cs.borderTopColor, w: kr.width };
-    });
-  const soft = await geometry();
-  expect(soft.inside).toBe(true);
-  expect(soft.dy).toBeLessThanOrEqual(1);
-  expect(soft.bg).not.toBe('rgba(0, 0, 0, 0)');
-  expect(soft.w).toBeGreaterThanOrEqual(18);
-  // The space after the cap is about the space around its letter: the key ends the control.
-  expect(soft.end).toBeLessThan(8);
+  await expect(button.locator('.ib-kbd')).toHaveCount(0);
   await button.hover();
+  const tip = page.locator('[data-side].bg-popover');
+  await expect(tip).toContainText('Mark read');
+  await expect(tip.locator('kbd')).toHaveText('E');
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-mark-read-hover.png') });
   await page.mouse.move(700, 880);
+  // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
+  // `.ib-hbtn` buttons are gone.
   const back = await todays(page, 'hbtns');
-  const today = await geometry();
+  await button.hover();
+  await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+  await page.mouse.move(700, 880);
   await back();
-  expect(today.line).not.toBe('rgba(0, 0, 0, 0)');
-  // Today: the button's 11 px end padding and its 1 px border.
-  expect(today.end).toBeCloseTo(12, 0);
-  await expect(kbd).toHaveAttribute('data-keycap', 'E');
 });
 
 test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it lies over the tile's end and the name is cut the same either way, left to right and right to left", async () => {

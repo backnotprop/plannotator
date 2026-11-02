@@ -68,7 +68,10 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   const live = view.phase === 'opening' || view.phase === 'listening';
   const tapped = view.phase === 'listening' && view.mode === 'tap';
   const iconSize = phone ? 19 : 16;
-  const label = block ? 'Dictate: not available here' : view.phase === 'sending' ? 'Transcribing' : tapped ? 'Stop dictating' : live ? 'Dictating' : 'Dictate: hold to talk, or tap';
+  // Opening shows from the press itself: lit, with the spinner, so a tap never looks like it did nothing. Its words
+  // follow on the status line a moment later (VOICE_OPENING_SLOW_MS).
+  const opening = view.phase === 'opening';
+  const label = block ? 'Dictate: not available here' : view.phase === 'sending' ? 'Transcribing' : opening ? 'Opening the microphone' : tapped ? 'Stop dictating' : live ? 'Dictating' : 'Dictate: hold to talk, or tap';
   return (
     <button
       type="button"
@@ -79,7 +82,7 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
       data-voice-mic=""
       {...(block ? {} : voicePressProps(session))}
     >
-      {view.phase === 'sending' ? <span className="ib-spin" /> : tapped ? <Icon name="stop" size={iconSize} /> : <Icon name="mic" size={iconSize} />}
+      {view.phase === 'sending' || opening ? <span className="ib-spin" /> : tapped ? <Icon name="stop" size={iconSize} /> : <Icon name="mic" size={iconSize} />}
     </button>
   );
 }

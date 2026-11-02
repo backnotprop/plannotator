@@ -19,6 +19,14 @@
  *  - Smaller thread names: an unread name at the read size (13.5 px beside a thread, 14 px on a phone), still bold,
  *    in its pill too; read rows, Sent rows and the wide one-line row are the same with it on or off; off is today's
  *    bigger unread name (15 px, 16 px on a phone); a reload keeps it.
+ *  - Settings → Rows (approval "inbox-customize-rows"): the ⋮ menu's plain checkboxes (no icons, the boxes where
+ *    Refresh's icon is, every label and "Customize rows…" on one edge, beside a thread and on a phone); a choice in
+ *    one window shows in another browser at once and is saved in config.json `inboxRows`; on 390 and 320 px phones,
+ *    four looks keep every row inside the screen, the time whole and the questions and warnings inside the row, name
+ *    first leads with the name, and the Rows page itself fits; a relative time is heard in words. Unread "Dot": an
+ *    unread row, wide and beside a thread, keeps its whole pill, its keyboard focus ring and its hover pill, and a
+ *    selected unread row its selection pill, with the 6 px dot.
+ *  The look is the person's, kept by this one Inbox: each test starts from every option off.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-options.spec.ts`.
@@ -88,6 +96,11 @@ test.beforeAll(async () => {
   await post(`/api/inbox/threads/${threads.token}/pin`, { pinned: true });
   const model = (await (await fetch(new URL('/api/inbox/projects', url))).json()) as { projects: { id: string; name: string }[] };
   for (const p of model.projects) projectIds[p.name] = p.id;
+});
+
+// The look is the person's, kept by this one Inbox (config.json `inboxRows`): each test starts from every option off.
+test.beforeEach(async () => {
+  await post('/api/inbox/settings', { rows: [] });
 });
 
 test.afterAll(async () => {
@@ -383,7 +396,7 @@ test('smaller thread names: unread names at the read size, still bold; read, Sen
     await page.goto(url);
     await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     const before = await nameFont(page, 'ib-row', threads.ledger);
-    await context.addCookies([{ name: 'plannotator-inbox-list-small-names', value: '1', url }]);
+    await post('/api/inbox/settings', { rows: ['smallNames'] });
     await page.reload();
     await expect(page.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     expect(await lookClasses(page)).toEqual(['ib-lk-small']);
@@ -492,11 +505,10 @@ test('a 320 px phone with the worst rows: compact keeps about ten characters of 
     const page = await context.newPage();
     const looks: [string, string[]][] = [
       ['compact', ['compact']],
-      ['all-three', ['highlight', 'compact', 'hide-agents']],
+      ['all-three', ['highlight', 'compact', 'hideAgents']],
     ];
-    for (const [shot, cookies] of looks) {
-      await context.clearCookies();
-      await context.addCookies(cookies.map((c) => ({ name: `plannotator-inbox-list-${c}`, value: '1', url })));
+    for (const [shot, rows] of looks) {
+      await post('/api/inbox/settings', { rows });
       await page.goto(url);
       await expect(page.locator(`.ib-mrow[data-thread-id="${vendor}"]`)).toBeVisible();
       await expect(page.locator(`.ib-lbody .ib-mrow[data-thread-id="${vendor}"] [data-pin-mark]`)).toBeVisible();
@@ -512,10 +524,238 @@ test('a 320 px phone with the worst rows: compact keeps about ten characters of 
         // The long project still gives way first: it is cut before the title.
         if (name !== 'rate') expect(g.project?.cut, `${shot} ${name}: the project gives way first`).toBe(true);
       }
-      if (cookies.includes('hide-agents')) await agentsAnnounced(page, 'ib-mrow');
+      if (rows.includes('hideAgents')) await agentsAnnounced(page, 'ib-mrow');
       await page.screenshot({ path: join(proofDir, `phone-320-${shot}.png`) });
     }
   } finally {
     await context.close();
+  }
+});
+
+// Settings → Rows (approval "inbox-customize-rows", 2026-11-02).
+
+const phoneContext = (browser: Browser, width: number) =>
+  browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'light', reducedMotion: 'reduce' });
+
+/** Where the ⋮ menu's labels start: each checkbox's, "Customize rows…"'s, and Refresh's icon beside the boxes. */
+async function menuEdges(page: Page) {
+  return page.locator('[data-tidy-menu-popup]').evaluate((popup) => {
+    const left = (el: Element | null) => (el ? Math.round(el.getBoundingClientRect().left * 2) / 2 : null);
+    const items = [...popup.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')];
+    const refresh = popup.querySelector('[data-tidy-refresh] svg');
+    return {
+      labels: [...items, ...popup.querySelectorAll('[data-customize-rows]')].map((i) => left(i.querySelector('.ib-pmi-l'))),
+      boxes: items.map((i) => left(i.querySelector('.ib-pmi-box'))),
+      boxWidths: items.map((i) => Math.round(i.querySelector('.ib-pmi-box')!.getBoundingClientRect().width)),
+      icon: left(refresh),
+      iconWidth: Math.round(refresh!.getBoundingClientRect().width),
+      // Drawings other than a ticked box's ✓: none.
+      icons: items.filter((i) => [...i.querySelectorAll('svg')].some((svg) => !svg.closest('.ib-pmi-box[data-on]'))).length,
+      customizeIcons: popup.querySelectorAll('[data-customize-rows] svg').length,
+    };
+  });
+}
+
+test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which opens Settings → Rows', async ({ browser }) => {
+  for (const shape of ['desktop', 'phone'] as const) {
+    // The desktop's tick is the person's look, so the phone would open with it: start each from every option off.
+    await post('/api/inbox/settings', { rows: [] });
+    const context = shape === 'desktop' ? await desktop(browser) : await phoneContext(browser, 390);
+    try {
+      const page = await context.newPage();
+      await page.goto(shape === 'desktop' ? `${url}#thread=${threads.opened}` : url);
+      await expect(page.locator(`[data-thread-id="${threads.ledger}"]`).first()).toBeVisible();
+      await page.locator('[data-tidy-menu]').click();
+      await option(page, 'compact').click();
+      await expect(option(page, 'compact')).toHaveAttribute('aria-checked', 'true');
+      const edges = await menuEdges(page);
+      expect(edges.icons, `${shape}: no icons`).toBe(0);
+      expect(edges.customizeIcons, `${shape}: "Customize rows…" has no icon`).toBe(0);
+      expect(new Set(edges.labels).size, `${shape}: every label on one edge ${JSON.stringify(edges.labels)}`).toBe(1);
+      expect(new Set([...edges.boxes, edges.icon]).size, `${shape}: the boxes where the icons are`).toBe(1);
+      expect(new Set([...edges.boxWidths, edges.iconWidth]).size, `${shape}: the boxes as wide as the icons ${JSON.stringify([edges.boxWidths, edges.iconWidth])}`).toBe(1);
+      await page.screenshot({ path: join(proofDir, `rows-menu-${shape}.png`) });
+      await page.locator('[data-customize-rows]').click();
+      await expect(page).toHaveURL(/#settings\/rows$/);
+      await expect(page.getByRole('heading', { name: 'Rows', level: 1 })).toBeVisible();
+      await expect(page.locator('[data-rows-control="density"] input[value="compact"]')).toBeChecked();
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('Settings → Rows: a choice shows in another window at once, is saved for the person, and a reload keeps it', async ({ browser }) => {
+  const a = await desktop(browser);
+  const b = await desktop(browser);
+  try {
+    const settings = await a.newPage();
+    await settings.goto(`${url}#settings/rows`);
+    await expect(settings.locator('[data-settings-rows]')).toBeVisible();
+    const list = await b.newPage();
+    await list.goto(url);
+    await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+    expect(await lookClasses(list)).toEqual([]);
+
+    await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
+    await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
+    // Another browser (another cookie jar), no reload: the Detailed look.
+    await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
+    expect(saved.rows).toEqual(['highlight', 'roomy', 'previewTwo']);
+    // A wide row with Roomy is 60 px tall.
+    expect(Math.round((await list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`).boundingBox())!.height)).toBe(60);
+    await list.reload();
+    await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+    expect(await lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    await settings.screenshot({ path: join(proofDir, 'rows-settings-detailed.png') });
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});
+
+/** A row's ::before (the hover and selection pill, the focus ring) and ::after (the Dot), with the row's box. */
+async function rowMarks(page: Page, selector: string) {
+  return page.locator(selector).evaluate((row) => {
+    const mark = (which: string) => {
+      const s = getComputedStyle(row, which);
+      return { content: s.content, w: parseFloat(s.width), h: parseFloat(s.height), bg: s.backgroundColor, shadow: s.boxShadow };
+    };
+    // The pill is placed in the row's padding box (inside its rule).
+    return { pill: mark('::before'), dot: mark('::after'), w: row.clientWidth, h: row.clientHeight, focusVisible: row.matches(':focus-visible') };
+  });
+}
+
+// Review of #2516: the Dot was drawn as the row's ::before, which is also its hover and selection pill and its focus
+// ring, so an unread row lost all three while the Dot was on.
+test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill and selection pill, wide and beside a thread', async ({ browser }) => {
+  await post('/api/inbox/settings', { rows: ['smallNames', 'unreadDot'] });
+  const context = await desktop(browser);
+  try {
+    const page = await context.newPage();
+    for (const [shape, rowClass, hash] of [
+      ['wide', 'ib-row', ''],
+      ['beside a thread', 'ib-nrow', `#thread=${threads.opened}`],
+    ] as const) {
+      await page.goto(`${url}${hash}`);
+      const row = `.ib-lbody .${rowClass}.ib-u[data-thread-id="${threads.ledger}"]`;
+      await expect(page.locator(row)).toBeVisible();
+      expect(await lookClasses(page)).toEqual(['ib-lk-small', 'ib-lk-dot']);
+      const rest = await rowMarks(page, row);
+      expect([rest.dot.w, rest.dot.h], `${shape}: the dot`).toEqual([6, 6]);
+      expect(rest.dot.bg, `${shape}: the dot's accent`).not.toBe('rgba(0, 0, 0, 0)');
+      // The pill is still the whole row, 3 px inside it top and bottom.
+      expect(Math.round(rest.pill.w), `${shape}: the pill's width`).toBe(Math.round(rest.w));
+      expect(Math.round(rest.pill.h), `${shape}: the pill's height`).toBe(Math.round(rest.h - 6));
+
+      // Keyboard focus (a key first, so the focus that follows is `:focus-visible`): the ring on the pill.
+      await page.mouse.move(5, 5);
+      await page.keyboard.press('Shift');
+      await page.locator(row).focus();
+      const focused = await rowMarks(page, row);
+      expect(focused.focusVisible, `${shape}: keyboard focus`).toBe(true);
+      expect(focused.pill.shadow, `${shape}: the focus ring`).toMatch(/inset/);
+      expect(Math.round(focused.pill.w), `${shape}: the ring round the whole row`).toBe(Math.round(focused.w));
+      expect(focused.dot.w, `${shape}: the dot stays`).toBe(6);
+
+      // Hover: the pill.
+      await page.locator(row).hover();
+      await expect.poll(async () => (await rowMarks(page, row)).pill.bg, `${shape}: the hover pill`).not.toBe('rgba(0, 0, 0, 0)');
+      await page.mouse.move(5, 5);
+      await page.locator(row).blur();
+    }
+
+    // Selected and unread (the open thread marked unread): the selection pill and the dot.
+    await post(`/api/inbox/threads/${threads.opened}/mark-unread`, {});
+    const selected = `.ib-lbody .ib-nrow.ib-sel.ib-u[data-thread-id="${threads.opened}"]`;
+    // A read thread waits on no one: its row is in Quiet, folded by default.
+    await openQuiet(page);
+    await expect(page.locator(selected)).toBeVisible();
+    const marks = await rowMarks(page, selected);
+    expect(marks.pill.bg, 'the selection pill').not.toBe('rgba(0, 0, 0, 0)');
+    expect(Math.round(marks.pill.w), 'the selection pill is the whole row').toBe(Math.round(marks.w));
+    expect(marks.dot.w, 'the dot on the selected row').toBe(6);
+  } finally {
+    await context.close();
+    await post(`/api/inbox/threads/${threads.opened}/read`, {});
+  }
+});
+
+/** Each phone row inside the screen, its time whole and its question count and badges inside the row. */
+async function phoneRowsWhole(page: Page, label: string) {
+  const report = await page.evaluate(() => {
+    const vw = document.documentElement.clientWidth;
+    const out: string[] = [];
+    for (const row of document.querySelectorAll<HTMLElement>('.ib-lbody .ib-mrow')) {
+      const id = row.getAttribute('data-thread-id');
+      const r = row.getBoundingClientRect();
+      if (r.left < -0.5 || r.right > vw + 0.5) out.push(`${id}: row outside the screen`);
+      const time = row.querySelector<HTMLElement>('.ib-t')!;
+      const text = time.querySelector<HTMLElement>('.ib-tickt') ?? time;
+      const t = time.getBoundingClientRect();
+      if (!time.textContent?.trim() || t.width < 4) out.push(`${id}: no time`);
+      if (time.scrollWidth > time.clientWidth + 0.5 || text.scrollWidth > text.clientWidth + 0.5) out.push(`${id}: time cut`);
+      if (t.right > r.right + 0.5) out.push(`${id}: time outside`);
+      for (const mark of row.querySelectorAll<HTMLElement>('.ib-qn, .ib-c, [data-badge]')) {
+        const m = mark.getBoundingClientRect();
+        if (m.width < 4 || m.right > r.right + 0.5) out.push(`${id}: ${mark.className} hidden or outside`);
+      }
+    }
+    if (document.scrollingElement!.scrollWidth > vw + 0.5) out.push('the page scrolls sideways');
+    return out;
+  });
+  expect(report, label).toEqual([]);
+}
+
+test('Rows options on 390 and 320 px phones: every row inside the screen, the time, questions and warnings whole; the page fits', async ({ browser }) => {
+  const looks: [string, string[]][] = [
+    ['minimal', ['compact', 'hideAgents', 'smallNames', 'hidePreview', 'unreadDot', 'relativeTime']],
+    ['detailed', ['highlight', 'roomy', 'previewTwo']],
+    ['name-first', ['titleFirst', 'unreadDot', 'smallNames', 'previewTwo', 'relativeTime', 'hideProject']],
+    ['name-first-compact', ['titleFirst', 'compact', 'highlight']],
+  ];
+  for (const width of [390, 320]) {
+    const context = await phoneContext(browser, width);
+    try {
+      const page = await context.newPage();
+      for (const [shot, rows] of looks) {
+        await post('/api/inbox/settings', { rows });
+        await page.goto(url);
+        await expect(page.locator(`.ib-mrow[data-thread-id="${threads.ledger}"]`)).toBeVisible();
+        await openQuiet(page);
+        await page.evaluate(() => document.fonts.ready);
+        await phoneRowsWhole(page, `${width} ${shot}`);
+        // Name first: the name leads line 1, the time ends it.
+        if (rows.includes('titleFirst')) {
+          const g = await geometry(page, 'ib-mrow', threads.ledger);
+          expect(g.title.inL1, `${width} ${shot}: the name on line 1`).toBe(true);
+          const first = await page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"] .ib-m1`).first().evaluate((l1) => l1.firstElementChild!.className);
+          expect(first, `${width} ${shot}: the name first`).toMatch(/ib-m2|ib-rowkey/);
+          if (!rows.includes('compact')) expect((await shownChars(page, threads.ledger)).shown, `${width} ${shot}: a name worth reading`).toBeGreaterThanOrEqual(20);
+        }
+        if (rows.includes('relativeTime')) {
+          // "4m" on screen; a screen reader hears "4 minutes ago" instead, never both.
+          const time = page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"] .ib-t [data-relative-time]`);
+          await expect(time.locator('[aria-hidden="true"]')).toHaveText(/^(now|\d+[mhd])$/);
+          const heard = await page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"]`).ariaSnapshot();
+          expect(heard, `${width} ${shot}: the time in words`).toMatch(/just now|\d+ (minute|hour|day)s? ago/);
+          expect(heard, `${width} ${shot}: not the short form`).not.toMatch(/\b\d+[mhd]\b/);
+        }
+        await page.screenshot({ path: join(proofDir, `rows-phone-${width}-${shot}.png`) });
+      }
+      // The page itself on this phone: one picture, nothing wider than the screen.
+      await page.goto(`${url}#settings/rows`);
+      await expect(page.locator('[data-settings-rows]')).toBeVisible();
+      await expect(page.locator('[data-rows-preview]')).toHaveCount(1);
+      const overflow = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        return [...document.querySelectorAll<HTMLElement>('[data-settings-rows] .ib-seg, [data-settings-rows] .ib-sw, [data-rows-preview]')].filter((el) => el.getBoundingClientRect().right > vw + 0.5).map((el) => el.className);
+      });
+      expect(overflow, `${width}: controls inside the screen`).toEqual([]);
+      await page.screenshot({ path: join(proofDir, `rows-settings-phone-${width}.png`), fullPage: true });
+    } finally {
+      await context.close();
+    }
   }
 });

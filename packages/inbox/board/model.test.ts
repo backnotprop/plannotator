@@ -1,9 +1,9 @@
 /**
- * The Board page's rules (approval "inbox-board", step 2), pure: the lanes'
- * order with a sent card on top of Backlog, the header's counts, a card's
+ * The Board page's rules (approval "inbox-board", step 2; columns v2), pure:
+ * the lanes' order with a sent card on top of Todo, the header's counts, a card's
  * second line, the unread rule for one visit, the opened card's foot and
  * column menu, the age and the live state of a link. What regresses: a lane
- * out of COLUMNS.md order, "You: …" leaking into an agent's column, a card
+ * out of the v2 order, "You: …" leaking out of In review, a card
  * staying bold after the person opened it, a Start offered on a card already
  * sent, or a merged PR shown as open. The project filter: another project's
  * card leaking into the lanes or counts, the menu offering a project with no
@@ -14,7 +14,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread, type CardMenuItem } from './model';
+import { boardCounts, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -45,24 +45,59 @@ function card(id: string, over: Partial<InboxCardWire> = {}): InboxCardWire {
   } as InboxCardWire;
 }
 
-test('the five lanes in order; a card the person sent sits on top of Backlog until it moves', () => {
-  const sent = card('sent', { agent: CLAUDE, sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' }, moved_at: '2026-10-20T10:00:00.000Z' });
-  const lanes = boardLanes([card('a'), card('b', { column: 'building' }), sent, card('c', { column: 'shipped' })]);
-  expect(lanes.map((lane) => lane.column)).toEqual(['backlog', 'designing', 'your_look', 'building', 'your_review']);
-  expect(lanes[0].cards.map((c) => c.id)).toEqual(['sent', 'a']);
+test('the five lanes in order, only In review on the person; a card the person sent sits on top of Todo until it moves', () => {
+  const sent = card('sent', { column: 'todo', agent: CLAUDE, sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' }, moved_at: '2026-10-20T10:00:00.000Z' });
+  const lanes = boardLanes([card('a', { column: 'todo' }), card('b', { column: 'in_progress' }), sent, card('c', { column: 'done' }), card('d')], Date.parse('2026-10-21T10:00:00.000Z'));
+  expect(lanes.map((lane) => lane.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
+  expect(lanes.map((lane) => lane.label)).toEqual(['Backlog', 'Todo', 'In progress', 'In review', 'Done']);
+  expect(lanes.filter((lane) => lane.onYou).map((lane) => lane.column)).toEqual(['in_review']);
+  expect(lanes[1].cards.map((c) => c.id)).toEqual(['sent', 'a']);
+  expect(lanes[0].cards.map((c) => c.id)).toEqual(['d']);
   expect(sentTo(sent)).toBe('Claude Code');
   // Once the agent moves it, it is just a card.
-  expect(sentTo({ ...sent, column: 'designing', moved_at: '2026-10-20T12:00:00.000Z' })).toBeNull();
+  expect(sentTo({ ...sent, column: 'in_progress', moved_at: '2026-10-20T12:00:00.000Z' })).toBeNull();
 });
 
-test('the header counts the live lanes, what is on the person, and the two links', () => {
-  const counts = boardCounts([card('a'), card('b', { column: 'your_look' }), card('c', { column: 'your_review' }), card('d', { column: 'shipped' }), card('e', { column: 'icebox' }), card('f', { column: 'dropped' })]);
-  expect(counts).toEqual({ inFlight: 3, onYou: 2, shipped: 1, icebox: 1, dropped: 1 });
+test('the Done lane holds the last seven days from when a card moved to Done; older ones only on All done', () => {
+  const now = Date.parse('2026-10-30T12:00:00.000Z');
+  const lanes = boardLanes(
+    [
+      card('fresh', { column: 'done', moved_at: '2026-10-30T11:00:00.000Z' }),
+      card('six', { column: 'done', moved_at: '2026-10-24T13:00:00.000Z' }),
+      card('eight', { column: 'done', moved_at: '2026-10-22T11:00:00.000Z' }),
+      // Made long ago, done yesterday: the move counts, not when it was made.
+      card('old-made', { column: 'done', created_at: '2026-09-01T10:00:00.000Z', moved_at: '2026-10-29T12:00:00.000Z' }),
+      card('live', { column: 'in_progress', moved_at: '2026-09-01T10:00:00.000Z' }),
+      card('gone', { column: 'dropped', moved_at: '2026-10-30T11:00:00.000Z' }),
+    ],
+    now,
+  );
+  expect(lanes.find((lane) => lane.column === 'done')!.cards.map((c) => c.id)).toEqual(['fresh', 'six', 'old-made']);
+  expect(lanes.flatMap((lane) => lane.cards).map((c) => c.id)).not.toContain('gone');
+  // Exactly seven days on is out.
+  expect(boardLanes([card('edge', { column: 'done', moved_at: '2026-10-23T12:00:00.000Z' })], now).at(-1)!.cards).toEqual([]);
 });
 
-test('the second line: "You: …" only in Your look and Your review; the agent’s word elsewhere; the person’s notes when nobody spoke', () => {
-  expect(cardLine(card('a', { column: 'your_look', you: 'Pick a dialog', said: 'two options' }))).toEqual({ you: true, text: 'Pick a dialog' });
-  expect(cardLine(card('b', { column: 'building', said: 'PR open' }))).toEqual({ you: false, text: 'PR open' });
+test('"Waiting on you" comes from a linked thread the Inbox lists as waiting on the person, before In review only', () => {
+  const sections: Record<string, string> = { msg_stop: 'stopped', msg_hold: 'holding', msg_wait: 'waiting', msg_new: 'new', msg_quiet: 'quiet' };
+  const rowOf = (id: string) => (sections[id] ? { section: sections[id] } : null);
+  expect(waitingThread(card('a', { column: 'in_progress', threads: ['msg_quiet', 'msg_wait'] }), rowOf)).toBe('msg_wait');
+  expect(waitingThread(card('b', { column: 'todo', threads: ['msg_stop'] }), rowOf)).toBe('msg_stop');
+  expect(waitingThread(card('c', { column: 'backlog', threads: ['msg_hold'] }), rowOf)).toBe('msg_hold');
+  // Nothing waiting, a thread the window has no row for: none.
+  expect(waitingThread(card('d', { column: 'in_progress', threads: ['msg_new', 'msg_quiet', 'msg_gone'] }), rowOf)).toBeNull();
+  // In review has its own "You: …"; Done and Cancelled are over.
+  for (const column of ['in_review', 'done', 'dropped'] as const) expect(waitingThread(card('e', { column, threads: ['msg_wait'] }), rowOf)).toBeNull();
+});
+
+test('the header counts only what its two links hold: Done and Cancelled', () => {
+  const counts = boardCounts([card('a'), card('b', { column: 'in_review' }), card('c', { column: 'in_progress' }), card('d', { column: 'done' }), card('e', { column: 'todo' }), card('f', { column: 'dropped' })]);
+  expect(counts).toEqual({ done: 1, dropped: 1 });
+});
+
+test('the second line: "You: …" only in In review; the agent’s word elsewhere; the person’s notes when nobody spoke', () => {
+  expect(cardLine(card('a', { column: 'in_review', you: 'Pick a dialog', said: 'two options' }))).toEqual({ you: true, text: 'Pick a dialog' });
+  expect(cardLine(card('b', { column: 'in_progress', said: 'PR open' }))).toEqual({ you: false, text: 'PR open' });
   expect(cardLine(card('c', { agent: null, notes: '\nMaybe one page.\nMore later.' }))).toEqual({ you: false, text: 'Maybe one page.' });
   expect(cardLine(card('d'))).toBeNull();
 });
@@ -97,6 +132,9 @@ test('history reads like the mock: short refs, and a Start in the card’s own t
   expect(historyWords({ at: 'x', by: CLAUDE, kind: 'linked_ref', ref: 'acme/widgets#2018', ref_kind: 'pr' })).toMatchObject({ before: 'Linked ', bold: '#2018', after: '' });
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: true }).after).toBe(' in the card’s thread');
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: false }).after).toBe(' in a new thread');
+  // The Inbox's own move to Done says so, naming the PRs that merged.
+  expect(historyWords({ at: 'x', by: PERSON, kind: 'auto_shipped', prs: ['https://github.com/acme/widgets/pull/12'] })).toMatchObject({ before: 'Done automatically: ', bold: '#12', after: ' merged' });
+  expect(historyWords({ at: 'x', by: PERSON, kind: 'auto_shipped', prs: ['https://github.com/acme/widgets/pull/12', 'https://gitlab.com/g/p/-/merge_requests/3'] }).bold).toBe('#12, !3');
 });
 
 test('an agent’s drops show until the person has looked, newest first', () => {
@@ -107,68 +145,60 @@ test('an agent’s drops show until the person has looked, newest first', () => 
   expect(unseenDrops([older, newer, seen, theirs]).map((c) => c.id)).toEqual(['newer', 'older']);
 });
 
-test('the opened card’s foot: Send for a card nobody was asked about, Start for an agent’s card in Backlog, Restore aside, Ship otherwise', () => {
+test('the opened card’s foot: Send for a card nobody was asked about, Start for an agent’s card not started, Restore when cancelled, Mark done otherwise', () => {
   expect(cardFoot(card('mine', { agent: null })).primary).toBe('send');
   expect(cardFoot(card('theirs')).primary).toBe('start');
-  expect(cardFoot(card('sent', { sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' } })).primary).toBe('ship');
-  expect(cardFoot(card('built', { column: 'building' }))).toEqual({ primary: 'ship', icebox: true, drop: true });
-  expect(cardFoot(card('iced', { column: 'icebox' }))).toEqual({ primary: 'restore', icebox: false, drop: true });
-  expect(cardFoot(card('gone', { column: 'dropped' }))).toEqual({ primary: 'restore', icebox: false, drop: false });
-  expect(cardFoot(card('done', { column: 'shipped' })).primary).toBeNull();
-  expect(columnChoices(card('x', { column: 'building' })).filter((c) => c.current).map((c) => c.column)).toEqual(['building']);
-  expect(columnChoices(card('x')).map((c) => c.column)).toEqual(['backlog', 'designing', 'your_look', 'building', 'your_review', 'shipped', 'icebox']);
+  expect(cardFoot(card('asked', { column: 'todo' })).primary).toBe('start');
+  expect(cardFoot(card('sent', { column: 'todo', sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' } })).primary).toBe('ship');
+  expect(cardFoot(card('built', { column: 'in_progress' }))).toEqual({ primary: 'ship', drop: true });
+  expect(cardFoot(card('gone', { column: 'dropped' }))).toEqual({ primary: 'restore', drop: false });
+  expect(cardFoot(card('done', { column: 'done' })).primary).toBeNull();
+  expect(columnChoices(card('x', { column: 'in_progress' })).filter((c) => c.current).map((c) => c.column)).toEqual(['in_progress']);
+  expect(columnChoices(card('x')).map((c) => c.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
 });
 
 /** A card menu as its groups of labels, the card's own column marked with "*". */
 const menuWords = (groups: CardMenuItem[][]) => groups.map((group) => group.map((item) => (item.kind === 'column' && item.current ? `${item.label}*` : item.label)));
 
-test('a card’s right-click menu: Open thread when linked, the Move menu’s words in its order with the card’s column checked, then Drop…', () => {
+test('a card’s right-click menu: Open thread when linked, the Move menu’s words in its order with the card’s column checked, then Cancel…', () => {
   // The words and order are the approved ones (approval "inbox-board-card-menu", layout A), pinned on purpose:
   // the same as the opened card's Move menu, so a drift in either place fails here.
-  expect(menuWords(cardMenuItems(card('x', { column: 'building' }), 'msg_1'))).toEqual([
+  expect(menuWords(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1'))).toEqual([
     ['Open thread'],
-    ['Backlog', 'Designing', 'Your look', 'Building*', 'Your review'],
-    ['Shipped', 'Icebox'],
-    ['Drop…'],
+    ['Backlog', 'Todo', 'In progress*', 'In review'],
+    ['Done'],
+    ['Cancel…'],
   ]);
-  expect(cardMenuItems(card('x', { column: 'building' }), 'msg_1')[0]).toEqual([{ kind: 'thread', threadId: 'msg_1', label: 'Open thread' }]);
+  expect(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1')[0]).toEqual([{ kind: 'thread', threadId: 'msg_1', label: 'Open thread' }]);
   // No linked thread: no Open thread (the click opens the card).
-  expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'Designing', 'Your look', 'Building', 'Your review']);
-  // A shipped card (the Shipped page): the same menu, Shipped checked.
-  expect(menuWords(cardMenuItems(card('x', { column: 'shipped' }), null))[1]).toEqual(['Shipped*', 'Icebox']);
-});
-
-test('an iced card’s menu restores to where it was (else Backlog), then Drop…; a dropped card has no menu', () => {
-  expect(menuWords(cardMenuItems(card('x', { column: 'icebox', aside_from: 'building' }), 'msg_1'))).toEqual([['Open thread'], ['Restore to Building'], ['Drop…']]);
-  expect(menuWords(cardMenuItems(card('x', { column: 'icebox' }), null))).toEqual([['Restore to Backlog'], ['Drop…']]);
-  expect(cardMenuItems(card('x', { column: 'dropped', aside_from: 'building' }), 'msg_1')).toEqual([]);
+  expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'Todo', 'In progress', 'In review']);
+  // A card in Done (the Done page): the same menu, Done checked.
+  expect(menuWords(cardMenuItems(card('x', { column: 'done' }), null))[1]).toEqual(['Done*']);
+  // A cancelled card has no menu (its row has Restore).
+  expect(cardMenuItems(card('x', { column: 'dropped', aside_from: 'in_progress' }), 'msg_1')).toEqual([]);
 });
 
 test('the toast after a menu move: only when the card leaves the lanes, and its Undo puts it back where it was', () => {
-  const building = card('x', { title: 'Slack bridge', column: 'building' });
-  expect(cardMenuToast(building, { ...building, column: 'icebox', aside_from: 'building' })).toEqual({ lead: 'Moved to Icebox', detail: '“Slack bridge”', undo: { op: 'restore' } });
-  // Shipped: Undo moves it back to the lane it came from (a restore is only for the Icebox and Dropped).
-  expect(cardMenuToast(building, { ...building, column: 'shipped' })).toEqual({ lead: 'Shipped', detail: '“Slack bridge”', undo: { op: 'move', column: 'building' } });
-  expect(cardMenuToast(building, { ...building, column: 'dropped', aside_from: 'building' })?.undo).toEqual({ op: 'restore' });
-  // Dropped from the Icebox: Undo puts it back on ice (a restore would skip the Icebox, to its old lane).
-  const iced = card('y', { column: 'icebox', aside_from: 'building' });
-  expect(cardMenuToast(iced, { ...iced, column: 'dropped' })?.undo).toEqual({ op: 'icebox' });
-  // A shipped card iced: Undo restores it to Shipped (the store kept it as where it was).
-  const shipped = card('z', { column: 'shipped' });
-  expect(cardMenuToast(shipped, { ...shipped, column: 'icebox', aside_from: 'shipped' })?.undo).toEqual({ op: 'restore' });
+  const building = card('x', { title: 'Slack bridge', column: 'in_progress' });
+  // Done: Undo moves it back to the lane it came from (a restore is only for a cancelled card).
+  expect(cardMenuToast(building, { ...building, column: 'done' })).toEqual({ lead: 'Done', detail: '“Slack bridge”', undo: { op: 'move', column: 'in_progress' } });
+  expect(cardMenuToast(building, { ...building, column: 'dropped', aside_from: 'in_progress' })).toEqual({ lead: 'Cancelled', detail: '“Slack bridge”', undo: { op: 'restore' } });
+  // A done card cancelled: Undo restores it to Done (the store kept it as where it was).
+  const shipped = card('z', { column: 'done' });
+  expect(cardMenuToast(shipped, { ...shipped, column: 'dropped', aside_from: 'done' })?.undo).toEqual({ op: 'restore' });
   // The card is seen moving: lane to lane, back into a lane, or no move at all, no toast.
-  expect(cardMenuToast(building, { ...building, column: 'your_review' })).toBeNull();
-  expect(cardMenuToast(iced, { ...iced, column: 'building' })).toBeNull();
-  expect(cardMenuToast(shipped, { ...shipped, column: 'designing' })).toBeNull();
+  expect(cardMenuToast(building, { ...building, column: 'in_review' })).toBeNull();
+  expect(cardMenuToast(building, { ...building, column: 'backlog' })).toBeNull();
+  expect(cardMenuToast(shipped, { ...shipped, column: 'in_progress' })).toBeNull();
   expect(cardMenuToast(building, building)).toBeNull();
 });
 
 test('a toast’s Undo runs only while the card is still where the menu put it', () => {
-  const shipped = card('x', { column: 'shipped', moved_at: '2026-10-20T12:00:00.000Z' });
+  const shipped = card('x', { column: 'done', moved_at: '2026-10-20T12:00:00.000Z' });
   // An agent only said something (no move): Undo still applies.
-  expect(cardUndoStillApplies(shipped, card('x', { column: 'shipped', moved_at: shipped.moved_at, heard_at: '2026-10-20T12:05:00.000Z' }))).toBe(true);
-  // An agent moved it on (Shipped to Your review): Undo must not pull it to its old lane.
-  expect(cardUndoStillApplies(shipped, { ...shipped, column: 'your_review', moved_at: '2026-10-20T12:01:00.000Z' })).toBe(false);
+  expect(cardUndoStillApplies(shipped, card('x', { column: 'done', moved_at: shipped.moved_at, heard_at: '2026-10-20T12:05:00.000Z' }))).toBe(true);
+  // An agent moved it on (Done to In review): Undo must not pull it to its old lane.
+  expect(cardUndoStillApplies(shipped, { ...shipped, column: 'in_review', moved_at: '2026-10-20T12:01:00.000Z' })).toBe(false);
   // Moved away and back to the same column since: a move happened, so the toast's move is not the last word.
   expect(cardUndoStillApplies(shipped, { ...shipped, moved_at: '2026-10-20T12:02:00.000Z' })).toBe(false);
   // Gone from the window's cards.
@@ -215,16 +245,16 @@ test('"You: …" goes to the thread where the person makes the call: the sent th
 
 test("the project filter keeps only that project's cards, in every column; none keeps every card", () => {
   const cards = [
-    card('a1', { project_id: 'prj_a', column: 'designing' }),
-    card('b1', { project_id: 'prj_b', column: 'your_look' }),
-    card('a2', { project_id: 'prj_a', column: 'shipped' }),
-    card('a3', { project_id: 'prj_a', column: 'icebox' }),
+    card('a1', { project_id: 'prj_a', column: 'in_progress' }),
+    card('b1', { project_id: 'prj_b', column: 'in_review' }),
+    card('a2', { project_id: 'prj_a', column: 'done' }),
+    card('a3', { project_id: 'prj_a', column: 'backlog' }),
     card('b2', { project_id: 'prj_b', column: 'dropped', dropped: { at: '2026-10-21T10:00:00.000Z', by: CLAUDE, reason: 'x', seen_at: null } }),
   ];
   expect(cardsInProject(cards, null)).toBe(cards);
   expect(cardsInProject(cards, 'prj_a').map((c) => c.id)).toEqual(['a1', 'a2', 'a3']);
   // The counts and the drops read the filtered cards.
-  expect(boardCounts(cardsInProject(cards, 'prj_a'))).toEqual({ inFlight: 1, onYou: 0, shipped: 1, icebox: 1, dropped: 0 });
+  expect(boardCounts(cardsInProject(cards, 'prj_a'))).toEqual({ done: 1, dropped: 0 });
   expect(unseenDrops(cardsInProject(cards, 'prj_a'))).toEqual([]);
   expect(unseenDrops(cardsInProject(cards, 'prj_b')).map((c) => c.id)).toEqual(['b2']);
   expect(cardsInProject(cards, 'prj_gone')).toEqual([]);
@@ -232,7 +262,7 @@ test("the project filter keeps only that project's cards, in every column; none 
 
 test("the Project menu offers the projects with a card, in the sidebar's order, and keeps the picked one", () => {
   const projects = [{ id: 'prj_c' }, { id: 'prj_a' }, { id: 'prj_none' }, { id: 'prj_b' }];
-  const cards = [card('b', { project_id: 'prj_b' }), card('a', { project_id: 'prj_a', column: 'shipped' }), card('c', { project_id: 'prj_c', column: 'icebox' })];
+  const cards = [card('b', { project_id: 'prj_b' }), card('a', { project_id: 'prj_a', column: 'done' }), card('c', { project_id: 'prj_c', column: 'dropped' })];
   expect(boardProjects(cards, projects, null).map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_b']);
   // Picked with no card left: still listed, so the menu shows what is checked.
   expect(boardProjects(cards, projects, 'prj_none').map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_none', 'prj_b']);
@@ -247,4 +277,12 @@ test('New card goes in the filtered project, else the card heard from last, else
   expect(newCardProject('prj_gone', projects, cards)).toBe('prj_b');
   expect(newCardProject(null, projects, [])).toBe('prj_a');
   expect(newCardProject(null, [], [])).toBeNull();
+});
+
+test('an older Board link still opens: #board=icebox is the Cancelled list, #board=shipped the Done list', () => {
+  expect(boardViewOf('cancelled')).toBe('cancelled');
+  expect(boardViewOf('icebox')).toBe('cancelled');
+  expect(boardViewOf('done')).toBe('done');
+  expect(boardViewOf('shipped')).toBe('done');
+  expect(boardViewOf(null)).toBe('lanes');
 });

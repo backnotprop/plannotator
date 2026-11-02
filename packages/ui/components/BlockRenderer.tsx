@@ -251,6 +251,10 @@ export const BlockRenderer: React.FC<{
         <p
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
+          // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
+          // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
+          style={block.blankLinesBefore ? { marginTop: `${block.blankLinesBefore}lh` } : undefined}
+          data-blank-lines={block.blankLinesBefore}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>
