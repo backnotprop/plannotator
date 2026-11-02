@@ -975,7 +975,7 @@ const shownLight = () => document.documentElement.classList.contains('light');
 test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip puts back what the step opened with, Next keeps it, Exit there is finished', async () => {
   const { resetInboxThemeForTests } = await import('./theme');
   const { tourMoreColorSets } = await import('./tour/TourSettings');
-  const { BUILT_IN_THEMES } = await import('@plannotator/ui/utils/themeRegistry');
+  const { BUILT_IN_THEMES, themesForHalf } = await import('@plannotator/ui/utils/themeRegistry');
   const { resetInboxTextSizeForTests } = await import('./textSize');
   try {
     const el = await openOnEntry();
@@ -987,10 +987,17 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     expect($(el, '[data-tour-bar]')!.textContent).toContain('Your settings');
     // The three colour sets, in the owner's order.
     expect([...el.querySelectorAll('[data-tour-palette]')].map((n) => n.getAttribute('data-tour-palette'))).toEqual(['plannotator', 'plannotator-modern', 'catppuccin']);
-    // Under them, how many more Settings has, counted from the palette registry (a new palette changes it).
-    expect(tourMoreColorSets()).toBe(BUILT_IN_THEMES.length - 3);
-    expect(tourMoreColorSets([...BUILT_IN_THEMES, { ...BUILT_IN_THEMES[0], id: 'one-more' }])).toBe(BUILT_IN_THEMES.length - 2);
-    expect($(el, '[data-tour-more-colors]')!.textContent).toBe(`${BUILT_IN_THEMES.length - 3} more in Settings`);
+    // Under them, how many more Settings → General lists for the half on screen (its Colors row lists one half,
+    // the one shown: Settings' own list, themesForHalf, minus the three here), from the registry: a new palette changes it.
+    const light = themesForHalf(BUILT_IN_THEMES, 'light').length - 3;
+    const dark = themesForHalf(BUILT_IN_THEMES, 'dark').length - 3;
+    expect(light).not.toBe(dark);
+    expect(tourMoreColorSets('light')).toBe(light);
+    expect(tourMoreColorSets('dark')).toBe(dark);
+    expect(tourMoreColorSets('dark', [...BUILT_IN_THEMES, { ...BUILT_IN_THEMES[0]!, id: 'one-more' }])).toBe(dark + 1);
+    // A fresh machine here shows light.
+    expect(shownLight()).toBe(true);
+    expect($(el, '[data-tour-more-colors]')!.textContent).toBe(`${light} more in Settings`);
     expect($(el, '[data-tour-more-colors] a[data-tour-settings-link]')!.textContent).toBe('Settings');
     // The Next button says what comes next.
     expect($(el, '[data-tour-next]')!.textContent).toBe('Connect agents next');
@@ -998,6 +1005,8 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     expect(yours(el, '[data-tour-mode="system"]')!.checked).toBe(true);
     expect(htmlClass()).toContain('theme-plannotator');
     await click(yours(el, '[data-tour-mode="dark"]'));
+    // The count follows the half on screen.
+    expect($(el, '[data-tour-more-colors]')!.textContent).toBe(`${dark} more in Settings`);
     await click(yours(el, '[data-tour-palette="catppuccin"]'));
     await click($(el, '[data-tour-coach="10-yours"] input[name="ib-tset-size"][value="15"]'));
     // At once on the window, then in config.json (the same keys Settings writes).
@@ -1063,8 +1072,17 @@ test.skipIf(!hasDom)('"Make it yours": Skip puts back only what the card changed
     const el = await renderApp();
     await until(() => coachKey(el) === '10-yours', 'Make it yours, before the settings read');
     expect(htmlClass()).not.toContain('theme-catppuccin');
+    // Until the read answers the window holds the default look, not the person's: the controls wait, so no pick can
+    // record a "before" that is not theirs (Skip would then write it over config.json).
+    expect($(el, '[data-tour-settings]')!.hasAttribute('data-waiting')).toBe(true);
+    expect([...el.querySelectorAll<HTMLInputElement>('[data-tour-settings] input')].every((i) => i.disabled)).toBe(true);
+    await click($(el, '[data-tour-palette="plannotator-modern"] input'));
+    await wait(400);
+    expect(htmlClass()).not.toContain('theme-plannotator-modern');
     await act(async () => release());
     await until(() => htmlClass().includes('theme-catppuccin') && size() === '15', 'the saved look adopted');
+    await until(() => !$(el, '[data-tour-settings]')!.hasAttribute('data-waiting'), 'the controls ready');
+    expect([...el.querySelectorAll<HTMLInputElement>('[data-tour-settings] input')].some((i) => i.disabled)).toBe(false);
     // Skip with nothing picked writes no theme and no size, and config.json is as it was.
     await click($(el, '[data-tour-skip]'));
     await until(() => window.location.hash === '#tour=11', 'step 11 after Skip');
@@ -1092,6 +1110,22 @@ test.skipIf(!hasDom)('"Make it yours": Skip puts back only what the card changed
     expect(config().inboxTextSize).toBe(15);
     expect(themeWrites().map((p) => p.body)).toEqual([{ theme: { light: 'catppuccin' } }]);
 
+    // Two picks, then Skip: back to the value from before the first pick, not the one in between.
+    // (This window still shows Modern for dark: it does not hear another window's change.)
+    await act(async () => {
+      window.location.replace('#tour=10');
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours, two picks');
+    await click($(el, '[data-tour-palette="plannotator"] input'));
+    await until(() => config().theme?.light === 'plannotator', 'the first pick saved');
+    await click($(el, '[data-tour-palette="plannotator-modern"] input'));
+    await until(() => config().theme?.light === 'plannotator-modern' && config().theme?.dark === 'plannotator-modern', 'the second pick saved');
+    await click($(el, '[data-tour-skip]'));
+    await until(() => window.location.hash === '#tour=11', 'step 11 after the third Skip');
+    await until(() => config().theme?.light === 'catppuccin', 'the light palette from before the first pick');
+    await wait(700);
+    expect(config().theme).toEqual({ mode: 'dark', light: 'catppuccin', dark: 'plannotator-modern' });
+
     // The browser's Back on "Make it yours" (no Exit): the replay is over, so the tour is finished, not skipped.
     await act(async () => {
       window.location.replace('#tour=10');
@@ -1108,3 +1142,18 @@ test.skipIf(!hasDom)('"Make it yours": Skip puts back only what the card changed
     resetInboxTextSizeForTests();
   }
 }, 120_000);
+
+test.skipIf(!hasDom)('a coach title focused after a click shows no ring; a key on it (an arrow to scroll) brings the ring back', async () => {
+  const el = await openOnEntry();
+  // The last input was the pointer.
+  document.dispatchEvent(new Event('pointerdown'));
+  await walkTo(el, 1);
+  const title = () => $(el, '[data-tour-coach="1"] h2');
+  await until(() => title() !== null && document.activeElement === title(), 'the step 1 title focused');
+  expect(title()!.hasAttribute('data-quiet-focus')).toBe(true);
+  await act(async () => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  });
+  expect(document.activeElement).toBe(title());
+  expect(title()!.hasAttribute('data-quiet-focus')).toBe(false);
+}, 90_000);

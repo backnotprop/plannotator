@@ -6221,6 +6221,9 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-tset-lines > .ib-tset-btn { width: 34%; height: 7px; margin-top: auto; border-radius: 4px; }
 .ib-tset-pal { align-items: center; justify-content: center; padding: 10px 6px 8px; }
 .ib-tset-ck { position: absolute; top: 4px; right: 4px; color: var(--primary); }
+/* Until the first settings read answers (a moment), the controls wait: dimmed, not pickable. */
+.ib-tset[data-waiting] .ib-tset-tiles, .ib-tset[data-waiting] .ib-seg { opacity: 0.55; cursor: progress; }
+.ib-tset[data-waiting] label { cursor: progress; }
 .ib-tset-more { margin: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-tset-more a { color: var(--primary); font-weight: 550; text-decoration: underline; text-underline-offset: 2px; }
 /* The card's Next says what comes next ("Connect agents next →"): one line, the arrow after the words. */

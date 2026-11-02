@@ -516,7 +516,10 @@ export function TourCoach({
   nudge = null,
   onSkip,
   onSettings,
+  settingsReady = true,
 }: {
+  /** "Make it yours": the first settings read has answered (the card's controls wait for it). */
+  settingsReady?: boolean;
   /** "Make it yours": Skip, after the card has put back what the step opened with. */
   onSkip?: () => void;
   /** "Make it yours": the Settings link (Settings → General). */
@@ -694,7 +697,7 @@ export function TourCoach({
         </p>
       )}
       {coach.picture === 'orient' && fixture && <OrientPicture fixture={fixture} onNext={onNext} />}
-      {coach.picture === 'settings' && <TourSettings ref={settingsRef} onSettings={() => onSettings?.()} />}
+      {coach.picture === 'settings' && <TourSettings ref={settingsRef} ready={settingsReady} onSettings={() => onSettings?.()} />}
       {coach.items && (
         <ul className="ib-tour-also" data-tour-also="">
           {coach.items.map((item) => (
@@ -736,7 +739,7 @@ export function TourCoach({
         {coach.next ? (
           <button type="button" className="ib-tc-next" onClick={onNext} data-tour-next="">
             {coach.nextLabel ?? 'Next'}
-            {coach.nextArrow && <Icon name="chevR" size={14} />}
+            {coach.nextArrow && <Icon name="arrowRight" size={14} />}
           </button>
         ) : canForward && onForward ? (
           <Tip content="Skip to the end of this step">

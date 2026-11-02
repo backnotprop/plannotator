@@ -642,7 +642,7 @@ export function tourReducer(state: TourState, action: TourAction): TourState {
       if (state.step === 8 && state.filmArrived) return { ...state, step: 9, route: 'list', file: null, replyOpen: false };
       if (state.step === 9 && state.newArrived && !state.also) return { ...state, also: true };
       if (state.step === TOUR_COMPOSE_STEP && state.also) return { ...state, step: TOUR_SETTINGS_STEP, file: null, route: TOUR_THREAD, replyOpen: false, artifactsOpen: false };
-      // Done and Skip on "Make it yours" (Skip has put the person's settings back first, in App).
+      // "Connect agents next" and Skip on "Make it yours" (Skip's putting back runs in TourSettings, after one settings read, as the tour goes on).
       if (state.step === TOUR_SETTINGS_STEP) return { ...state, step: TOUR_STEPS, file: null, route: 'list', replyOpen: false, artifactsOpen: false };
       return state;
     case 'back':
@@ -743,7 +743,7 @@ export interface TourCoach {
   next?: boolean;
   /** The Next button's words (default "Next"). */
   nextLabel?: string;
-  /** A → after the Next button's words (drawn, not read). */
+  /** A → (Heroicons arrow-right) after the Next button's words, drawn, not read. */
   nextArrow?: boolean;
   wait?: boolean;
   target: TourTarget | null;

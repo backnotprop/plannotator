@@ -5221,6 +5221,7 @@ function Inbox() {
             nudge={tourNudge}
             onSkip={() => dispatchTour({ type: 'next' }, { focusCoach: true })}
             onSettings={() => endTour('finish', { page: 'settings', project: null, thread: null, section: 'general' })}
+            settingsReady={settings !== null || settingsReadFailed}
           />
         </div>
       )}

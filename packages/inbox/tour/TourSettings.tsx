@@ -21,7 +21,7 @@
 
 import { forwardRef, useImperativeHandle, useRef } from 'react';
 import { paletteSwatchColors } from '@plannotator/ui/components/ThemeTab';
-import { BUILT_IN_THEMES, type ThemeColors, type ThemeHalf, type ThemeInfo } from '@plannotator/ui/utils/themeRegistry';
+import { BUILT_IN_THEMES, themesForHalf, type ThemeColors, type ThemeHalf, type ThemeInfo } from '@plannotator/ui/utils/themeRegistry';
 import type { Mode } from '@plannotator/ui/theme-modes';
 import { INBOX_TEXT_SIZES, type InboxTextSize } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
@@ -32,9 +32,12 @@ import { chooseTextSize, useInboxTextSize } from '../textSize';
 /** The colour sets offered, in this order (the owner, 2026-11-02). Each draws both halves. */
 export const TOUR_COLOR_SETS = ['plannotator', 'plannotator-modern', 'catppuccin'] as const;
 
-/** How many palettes Settings offers beyond the step's three: every palette in the registry, never a fixed number. */
-export function tourMoreColorSets(themes: readonly ThemeInfo[] = BUILT_IN_THEMES): number {
-  return themes.filter((theme) => !(TOUR_COLOR_SETS as readonly string[]).includes(theme.id)).length;
+/**
+ * How many palettes Settings → General lists beyond the step's three, for the half on screen (its Colors row lists
+ * one half at a time, the one shown): counted from the registry, never a fixed number.
+ */
+export function tourMoreColorSets(half: ThemeHalf, themes: ThemeInfo[] = BUILT_IN_THEMES): number {
+  return themesForHalf(themes, half).filter((theme) => !(TOUR_COLOR_SETS as readonly string[]).includes(theme.id)).length;
 }
 
 const MODES: { id: Mode; label: string; icon: 'sun' | 'moon' | 'system' }[] = [
@@ -111,7 +114,7 @@ export interface TourSettingsHandle {
   restore: () => Promise<void>;
 }
 
-export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => void }>(function TourSettings({ onSettings }, ref) {
+export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => void; ready?: boolean }>(function TourSettings({ onSettings, ready = true }, ref) {
   const theme = useInboxTheme();
   const palettes = useInboxPalettes();
   const size = useInboxTextSize();
@@ -119,7 +122,10 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
   const now = useRef({ theme, palettes, size });
   now.current = { theme, palettes, size };
   /** The card changes `field` from `before` to `to`: the first change keeps `before`, every change keeps `to`. */
+  // Until the first settings read is adopted the window holds the cookie's or the default look, not the person's: the
+  // controls wait (a pick then would record a "before" that is not theirs, and Skip would write it over config.json).
   const note = <K extends Field>(field: K, before: Fields[K], to: Fields[K]) => {
+    if (!ready) return;
     const c = (changed.current[field] ??= { before, wrote: to } as ChangedFields[K]) as Changed<K>;
     c.wrote = to;
   };
@@ -142,10 +148,10 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
     [],
   );
   const shown = theme.shown;
-  const more = tourMoreColorSets();
+  const more = tourMoreColorSets(shown);
   const sets = TOUR_COLOR_SETS.map((id) => BUILT_IN_THEMES.find((t) => t.id === id)).filter((t): t is ThemeInfo => !!t);
   return (
-    <div className="ib-tset" data-tour-settings="">
+    <div className="ib-tset" data-tour-settings="" data-waiting={ready ? undefined : ''} aria-busy={ready ? undefined : true}>
       <div className="ib-tset-grp">
         <span className="ib-tset-l" id="ib-tset-theme">
           Theme
@@ -158,6 +164,7 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
                 <input
                   type="radio"
                   name="ib-tset-mode"
+                  disabled={!ready}
                   value={choice.id}
                   checked={on}
                   onChange={() => {
@@ -196,6 +203,7 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
                 <input
                   type="radio"
                   name="ib-tset-palette"
+                  disabled={!ready}
                   value={set.id}
                   checked={on}
                   aria-label={set.name}
@@ -244,6 +252,7 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
               <input
                 type="radio"
                 name="ib-tset-size"
+                disabled={!ready}
                 value={n}
                 checked={size === n}
                 aria-label={`${n} px`}
