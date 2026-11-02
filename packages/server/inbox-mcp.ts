@@ -869,9 +869,10 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
       if (message.to.session === caller && !message.delivery) unread = true;
       continue;
     }
-    // A plain reply: after the agent-read mark and not delivered (its recipient's read past a reply the mark
-    // waits at, owed to another session, records its delivery).
-    if ((store.messageCursor(message.id) ?? 0) > checked && !message.delivery) unread = true;
+    // A plain reply: after the agent-read mark, not delivered (its recipient's read past a reply the mark
+    // waits at, owed to another session, records its delivery), and one this caller's read settles. A reply
+    // owed to another session is not the caller's to read: it would stay "unread" after every read it makes.
+    if ((store.messageCursor(message.id) ?? 0) > checked && !message.delivery && store.readSettles(message, caller)) unread = true;
   }
   return { unread, last };
 }

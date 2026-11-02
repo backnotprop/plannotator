@@ -2918,18 +2918,23 @@ export class InboxStore {
    * mark settles a plain reply (no `to`, no tags), so it never moves past one
    * still owed to another session, or to no session when a session reads:
    * only a reply's recipient settles it (a second agent in the thread must
-   * not swallow it). Undefined: every reply, for a caller that is not a read.
+   * not swallow it). A reader new to the thread counts as the recipient of a
+   * reply no connection wakes (`owedToAnother`). Undefined: every reply, for
+   * a caller that is not a read.
    */
   markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), reader?: string | null): void {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return;
     const from = root.agent_checked_seq ?? 0;
+    // Worked out once per read, and only when a reply asks for it.
+    let newcomer: boolean | undefined;
+    const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader ?? null));
     let checked = 0;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
       const message = this.messages.get(id);
       if (seq > upToSeq || message?.author.kind !== "person") continue;
-      if (reader !== undefined && seq > from && this.owedToAnother(message, reader)) break;
+      if (reader !== undefined && seq > from && this.owedToAnother(message, reader, isNewcomer)) break;
       checked = Math.max(checked, seq);
     }
     if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
@@ -2942,13 +2947,49 @@ export class InboxStore {
    * message sent without a session), not delivered, and not a Tidy note left
    * to its wake. A 👍's note is not a reply: any agent's read sees it, as
    * `markAcksSeen` does.
+   *
+   * Not owed to another when no connection wakes its recipient and `reader`
+   * is new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
+   * `ses_` id each time the client restarts, and a script may name a session
+   * on send but none on read, so that read is the recipient's own as far as
+   * the Inbox can tell. Without it the reply would wait for a session that
+   * never comes back, with no ended state to offer the route choice. A
+   * waking recipient stays strict (its connection takes the reply, and the
+   * route choice opens when it ended), and so does any reader that wrote,
+   * owns a message or was tagged in the thread.
    */
-  private owedToAnother(message: InboxMessage, reader: string | null): boolean {
+  private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
     if (message.to || hasTags(message) || message.delivery || isAckNote(message)) return false;
     if (message.tidy && !message.tidy.wake) return false;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
-    return (asked.author.session ?? null) !== reader;
+    if ((asked.author.session ?? null) === reader) return false;
+    return asked.wakes === true || !isNewcomer();
+  }
+
+  /**
+   * Whether `reader`'s read of the thread settles this person's message as
+   * far as the agent-read mark goes: the rule `markAgentChecked` applies
+   * (read_thread's `unread` for that reader follows it).
+   */
+  readSettles(message: InboxMessage, reader: string | null): boolean {
+    return !this.owedToAnother(message, reader);
+  }
+
+  /**
+   * Whether `reader` is new to the thread: it never wrote there (null: no
+   * agent message sent without a session), owns none of the person's
+   * messages and is tagged in none.
+   */
+  private newcomerTo(threadId: string, reader: string | null): boolean {
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind === "agent") {
+        if ((message.author.session ?? null) === reader) return false;
+        continue;
+      }
+      if (reader !== null && (this.isOwner(message, reader) || tagOf(message, reader))) return false;
+    }
+    return true;
   }
 
   /**
