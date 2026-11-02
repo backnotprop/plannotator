@@ -308,12 +308,12 @@ test("a filtered visit leaves the other projects' news unread (the look is recor
   // Filtered to workspaces, an agent writes on a plannotator card: not on screen.
   await page.goto('about:blank');
   await page.goto(`${world.url}#board&project=${project.workspaces}`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   await claude.card({ op: 'say', card_id: ids.auto, say: 'Rebased on main', project_path: paths.plannotator });
   await expect.poll(async () => (await boardSeen(page)).cursor).toBeGreaterThan(looked ?? 0);
   // A new filtered visit (a reload) records nothing.
   await page.reload();
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   await page.waitForTimeout(1000);
   expect((await boardSeen(page)).seen).toBe(looked);
   // The next visit showing every project: the plannotator card is still bold.
