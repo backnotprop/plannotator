@@ -34,10 +34,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   INBOX_AGENT_RULES,
+  INBOX_ATTACHMENTS_PICTURES_LINE,
   INBOX_BRIEFING_FROM_NOW_ON,
   INBOX_CHANNEL_RULE,
   INBOX_COMMAND_BRIEFING,
   INBOX_FOLLOW_THROUGH_RULE,
+  INBOX_PICTURES_RULE,
   INBOX_REMINDER_TEXT,
   INBOX_REMINDER_TEXT_NO_WAKE,
   INBOX_REPLY_TO_CHECK,
@@ -252,6 +254,27 @@ describe("Inbox guidance parity across harnesses", () => {
     expect(readFileSync(join(root, "apps/droid-plugin/commands/plannotator-inbox.js"), "utf8")).toContain('runPlannotator(["inbox", "--open"]');
     for (const surface of inboxCommandTurns) {
       expect([surface, INBOX_COMMANDS[surface]!.includes("This command starts no new work and resumes none: do anything else the person asked in the same message, otherwise stop there.")]).toEqual([surface, true]);
+    }
+  });
+
+  test("pictures sit where they are discussed: every body and attachments description says so, and none still sends pictures to attachments", () => {
+    // The owner, 2026-11-02: option pictures sent as attachments sat at the bottom, away from the words about them.
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const mcpFields = send.inputSchema.properties as Record<string, { description?: string }>;
+    const fields: Record<string, { body: string; attachments: string }> = {
+      "tool: Claude Code, Pi, OpenCode": (() => {
+        const fields = (inboxAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties ?? {}) as Record<string, { description?: string }>;
+        return { body: fields.body!.description!, attachments: fields.attachments!.description! };
+      })(),
+      "MCP send_message (Codex, Gemini, Cursor, MCP clients)": { body: mcpFields.body!.description!, attachments: mcpFields.attachments!.description! },
+      "plannotator inbox --help": { body: SURFACES["plannotator inbox --help"]!, attachments: SURFACES["plannotator inbox --help"]! },
+    };
+    for (const [surface, { body, attachments }] of Object.entries(fields)) {
+      expect([surface, body.includes(INBOX_PICTURES_RULE)]).toEqual([surface, true]);
+      expect([surface, attachments.includes(INBOX_ATTACHMENTS_PICTURES_LINE)]).toEqual([surface, true]);
+    }
+    for (const [surface, text] of Object.entries(SURFACES)) {
+      expect([surface, /screenshot or image usually reads fastest|short summary, files in `attachments`|put the files to read in `attachments`/.test(text)]).toEqual([surface, false]);
     }
   });
 

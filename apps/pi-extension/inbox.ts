@@ -311,6 +311,17 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				return null;
 			}
 		},
+		// The session's name, only if someone named it. Asked on every poll, so a later name replaces it.
+		// "" says it has none; null says Pi cannot tell now (a stale ctx, a throw), and the last word stands.
+		label: () => {
+			const current = ctx;
+			if (!current || !isCtxAlive(current)) return null;
+			try {
+				return current.sessionManager.getSessionName() ?? "";
+			} catch {
+				return null;
+			}
+		},
 	};
 
 	pi.on("session_start", (_event, startCtx: ExtensionContext) => {

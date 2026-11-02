@@ -21,9 +21,9 @@ export const LIST_COLUMN_WIDTH_KEY = "plannotator-inbox-list-width";
  * Draws the edge on the list column's right side (render it inside the
  * column: its parent element is the column) and sets the column's width.
  * Drag frames write the width straight to the column's style (no render per
- * frame); the committed width lands there too. Mounted only while a thread is
- * open and the window is not a phone's; unmounting hands the width back to
- * the stylesheet.
+ * frame); the committed width lands there too. Mounted only while a pane is
+ * beside the list (a thread, the thread panel) and the window is not a phone's;
+ * unmounting hands the width back to the stylesheet.
  */
 export function ListColumnEdge({ controls }: { controls?: string }) {
 	// The edge's own element, not a ref from the list: a child's ref is set

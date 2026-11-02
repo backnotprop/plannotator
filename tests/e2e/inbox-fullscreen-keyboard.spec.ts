@@ -275,6 +275,8 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
     test('an HTML page in full screen: its Reply sits on the keyboard', async () => {
       const page = await open();
       await page.goto(fileUrl('checkout.html'));
+      // On a phone the page opens clear, the reply in its pill (approval "inbox-html-attachments-phone").
+      await page.locator('[data-fcomp-pill]').click();
       const card = page.locator('[data-fcomp]');
       await expect(card).toBeVisible();
       const reply = card.locator('[data-fcomp-field] textarea');

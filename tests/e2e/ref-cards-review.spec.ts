@@ -214,19 +214,23 @@ async function start(kind: 'plan' | 'annotate' | 'review'): Promise<Session> {
   }
   await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
   const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
+  /** Resolves when the child has exited, or after `ms`. */
+  const exited = (ms: number) =>
+    new Promise<void>((done) => {
+      if (child.exitCode !== null || child.signalCode !== null) return done();
+      const timer = setTimeout(done, ms);
+      child.once('exit', () => {
+        clearTimeout(timer);
+        done();
+      });
+    });
   const close = async () => {
     await fetch(new URL('/api/exit', url), { method: 'POST' }).catch(() => {});
-    if (child.exitCode === null) {
-      await new Promise((done) => {
-        const timer = setTimeout(done, 5_000);
-        child.once('exit', () => {
-          clearTimeout(timer);
-          done(undefined);
-        });
-      });
-      // inbox-guard: own child (the CLI this test spawned, never an Inbox)
-      if (child.exitCode === null) child.kill('SIGTERM');
-    }
+    await exited(5_000);
+    // inbox-guard: own child (the CLI this test spawned, never an Inbox)
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+    // The folder is removed only once nothing is writing into it (an ENOTEMPTY otherwise).
+    await exited(5_000);
     await removeInboxScratch(root);
   };
   return { url, forge, close };

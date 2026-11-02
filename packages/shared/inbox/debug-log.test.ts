@@ -56,6 +56,14 @@ describe('what may enter the debug log', () => {
     expect(cleanWindowRecord({ t: 1, ev: 'send_press', thread: 'a-0123abcd-2' })).toEqual({ t: 1, side: 'window', ev: 'send_press' });
   });
 
+  test('voice lines keep their fixed words and timings; dictated words, a transcript or a free value are dropped', () => {
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_press', input: 'press', phase: 'opening', mode: 'tap' })).toEqual({ t: 1, side: 'window', ev: 'voice_press', input: 'press', phase: 'opening', mode: 'tap' });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_phase', phase: 'idle', prompting: false, slow: true, trouble: 'micfailed' })).toEqual({ t: 1, side: 'window', ev: 'voice_phase', phase: 'idle', prompting: false, slow: true, trouble: 'micfailed' });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_open', step: 'stream', ok: false, ms: 812, audio: 'interrupted', error: 'NotReadableError' })).toEqual({ t: 1, side: 'window', ev: 'voice_open', step: 'stream', ok: false, ms: 812, audio: 'interrupted', error: 'NotReadableError' });
+    const words = { input: 'the layoffs', phase: 'Rename the build step.', mode: 'hold to talk', trouble: 'the layoffs start', step: 'zebra', audio: 'zebra', ok: 'yes', prompting: 'no', text: 'Rename the build step.', said: 'Text added' };
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_phase', ...words })).toEqual({ t: 1, side: 'window', ev: 'voice_phase' });
+  });
+
   test('a page id and its request ids are digits, and pass their own check', () => {
     const page = debugPageId(1793536686632.4);
     expect(page).toMatch(/^p\d+-\d+$/);

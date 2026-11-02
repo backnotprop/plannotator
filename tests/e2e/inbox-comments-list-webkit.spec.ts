@@ -70,6 +70,8 @@ test('the full-screen card count opens the sheet, not a box held inside the card
   const page = await phone(browser);
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
+  await page.locator('[data-fcomp-pill]').tap();
   await cardChip(page).tap();
   await isTheSheet(page, t.count);
   await page.context().close();

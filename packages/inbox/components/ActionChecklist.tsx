@@ -28,6 +28,7 @@ import { actionCardState, type ActionCardState } from '../actions';
 import { clockTime } from '../format';
 import { Icon } from '../icons';
 import { registerActionFlush, trackActionSave } from '../actionSaves';
+import { registerReloadFlush } from '../stalePage';
 import { inboxApi } from '../api';
 
 /** A Done or Can't do it as the window marks it: always into the reply draft (`staged` on the wire). */
@@ -240,6 +241,11 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   useEffect(() => {
     if (!live) setComposing(null);
   }, [live]);
+  // The stale page notice's Reload (stalePage.ts): a "Can't do it" reason typed and not yet given is kept nowhere,
+  // so it stops the reload (the toast offers Reload anyway).
+  const unsentReason = useRef(false);
+  unsentReason.current = composing !== null && text.trim() !== '';
+  useEffect(() => registerReloadFlush(async () => !unsentReason.current), []);
 
   const mark = async (next: ActionMark | null, from: 'tick' | 'panel') => {
     if (busy) return;
