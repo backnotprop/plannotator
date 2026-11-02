@@ -2696,7 +2696,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
-    // A launched session's permission hook (inbox-launch-permission.ts): guarded like the bridge below
+    // A launched session's permission hook (Claude Code's: inbox-launch-claude-permission.ts): guarded like the bridge below
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.

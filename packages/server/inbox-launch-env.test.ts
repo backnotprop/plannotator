@@ -50,7 +50,14 @@ describe("launchPlainEnv", () => {
 describe("launchSettingsEnv", () => {
   test("copies the shell's own CLAUDE_* values but never a session's, and adds the launch's markers", () => {
     const env = launchSettingsEnv(login, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false, bypassAvailable: false });
-    expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k" });
+    expect(env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", CLAUDE_CONFIG_DIR: "/Users/me/.claude-work", PATH: "/usr/bin:/bin", PLANNOTATOR_LAUNCH: "lch_1", PLANNOTATOR_LAUNCH_KEY: "k" });
+  });
+
+  test("the login PATH reaches the session whoever started its supervisor; the rest of the shell's env never lands in the file", () => {
+    const env = launchSettingsEnv({ PATH: "/opt/login/bin:/usr/bin", GH_TOKEN: "secret", HOME: "/Users/me" }, { launchId: "lch_1", key: "k", dataDir: null, fullPermissions: false, bypassAvailable: false });
+    expect(env.PATH).toBe("/opt/login/bin:/usr/bin");
+    expect(env.GH_TOKEN).toBeUndefined();
+    expect(env.HOME).toBeUndefined();
   });
 
   test("the hook's leave to switch to Full permissions only with the person's consent and not already full; never Claude's export", () => {
@@ -128,6 +135,17 @@ describe("createLoginEnv", () => {
     expect(seeds).toHaveLength(2);
     expect(lines.join("\n")).toContain("CLAUDE_SECRET_THING");
     expect(lines.join("\n")).not.toContain("s3cret-value");
+  });
+
+  test("an Inbox started without SHELL still reads the person's own login shell, never plain sh (which would skip their zshrc)", async () => {
+    const shells: string[] = [];
+    const read = createLoginEnv({
+      run: async (argv) => (shells.push(argv[0]!), { exitCode: 1, stdout: "" }),
+      env: () => ({ HOME: "/Users/me", PATH: "/own" }),
+      accountShell: () => "/bin/zsh",
+    });
+    await read();
+    expect(shells).toEqual(["/bin/zsh"]);
   });
 
   test("what launchd and the session give (SSH_AUTH_SOCK, a launchctl proxy, LC_*) reaches the shell and the --bg env", async () => {

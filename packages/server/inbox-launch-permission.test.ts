@@ -13,8 +13,8 @@ import { join } from "node:path";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { launchPermissionHooks } from "./inbox-launch";
-import { ANSWER_SETTLE_MS, createLaunchPermissions, fileTarget, type PermissionAnswer } from "./inbox-launch-permission";
+import { ANSWER_SETTLE_MS, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
+import { fileTarget, openPermissionSince, type PermissionAnswer } from "./inbox-launch-permission";
 import { readInboxPermissionBody } from "@plannotator/core/inbox-permission";
 
 const roots: string[] = [];
@@ -323,7 +323,7 @@ describe("the lease", () => {
       permissions.sweep();
       const follow = store.message(store.threadMessageIds(store.message(body.message_id!)!.thread_id).at(-1)!)!;
       expect(follow.body).toBe("No longer waiting.");
-      expect(permissions.openSince(store.message(store.message(body.message_id!)!.thread_id)!)).toBeNull();
+      expect(openPermissionSince(store, store.message(store.message(body.message_id!)!.thread_id)!.thread_id)).toBeNull();
     });
   });
 
@@ -383,10 +383,10 @@ describe("the lease", () => {
   test("Stop withdraws at once", async () => {
     const { store, root, permissions, call } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000009", event: EVENT });
-    expect(permissions.openSince(store.message(root.id)!)).not.toBeNull();
+    expect(openPermissionSince(store, store.message(root.id)!.thread_id)).not.toBeNull();
     permissions.withdrawAll(store.message(root.id)!);
     expect(store.questionsOf(body.message_id!)[0]!.state).toBe("superseded");
-    expect(permissions.openSince(store.message(root.id)!)).toBeNull();
+    expect(openPermissionSince(store, store.message(root.id)!.thread_id)).toBeNull();
   });
 
   test("while the hook holds a call, the host saying the session went on never withdraws it (parallel work can read busy)", async () => {

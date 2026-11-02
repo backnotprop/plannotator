@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { resolveInboxLaunch } from "@plannotator/shared/config";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
-import { agentByShort, claudeAttachCommand, createClaudeHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
+import type { LaunchHostContext } from "./inbox-launch-host";
+import { agentByShort, claudeAttachCommand, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
 
 describe("parseBackgrounded", () => {
   test("reads the short id and name from the line Claude Code 2.1.314 prints (bg-test RESULTS)", () => {
@@ -161,6 +164,101 @@ test("a session --bg started but the supervisor never lists is stopped and remov
   const result = await host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "auto", allowBypass: false, environment: env("backgrounded · 4f1c9a2e · Smoke\n") });
   expect(result.ok).toBe(false);
   expect(calls.slice(-2)).toEqual(["stop 4f1c9a2e", "rm 4f1c9a2e"]);
+});
+
+describe("Claude Code as a launch host", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * The real host over a fake `claude` in `bin`, which records each call's env. The plain env always finds it;
+   * `installFolderOnly`: the login PATH does not, as Claude's install folder is searched only by the plain env.
+   */
+  function world(options: { login?: Record<string, string>; installFolderOnly?: boolean } = {}) {
+    const root = mkdtempSync(join(tmpdir(), "launch-claude-host-"));
+    dirs.push(root);
+    const home = join(root, "home");
+    const bin = join(root, "bin");
+    const dataDir = join(root, "data");
+    const calls = join(root, "calls.log");
+    for (const dir of [join(home, ".claude"), bin, dataDir]) mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(bin, "claude"),
+      [
+        "#!/bin/sh",
+        `echo "$1 FROM_LOGIN=$FROM_LOGIN PATH=$PATH" >> ${JSON.stringify(calls)}`,
+        'case "$1" in',
+        '  --version) echo "2.1.316 (Claude Code)" ;;',
+        '  --bg) echo "backgrounded · 844d238d · Inbox" ;;',
+        `  agents) echo '[{"id":"844d238d","sessionId":"844d238d-0000-4000-8000-000000000001"}]' ;;`,
+        "esac",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const login = { PATH: options.installFolderOnly ? "/usr/bin:/bin" : `${bin}:/usr/bin:/bin`, ...options.login };
+    const context: LaunchHostContext = {
+      dataDir,
+      homeDir: home,
+      platform: process.platform,
+      selfCommand: ["plannotator"],
+      ownEnv: () => ({ HOME: home, PATH: "" }),
+      environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `/usr/bin:/bin:${bin}` } }),
+      shell: () => (login.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: login.CLAUDE_CONFIG_DIR } : null),
+      loginEnv: async () => login,
+      config: () => resolveInboxLaunch({}),
+      launchDir: (id) => join(dataDir, "inbox", "launch", id),
+      startLog: () => {},
+      displayFolder: (path) => path,
+      bridge: { runStateOf: () => null },
+      log: () => {},
+    };
+    const launch: InboxLaunchRecord = { id: "lch_1", agent: "claude-code", session_ref: "844d238d", folder: root, scratch: false, started_at: "2026-11-01T00:00:00.000Z" };
+    const pluginOn = (configDir: string) => {
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(join(configDir, "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
+    };
+    return { root, home, bin, dataDir, login, launch, pluginOn, host: createClaudeLaunchHost(context), calls: () => readFileSync(calls, "utf8").trim().split("\n") };
+  }
+
+  test("a computer with the binary but no plugin is refused first, with the reason: a session there could never reach the Inbox", async () => {
+    const w = world();
+    expect(await w.host.available()).toMatchObject({ ok: false, missing: false, reason: expect.stringContaining("plugin") });
+    w.pluginOn(join(w.home, ".claude"));
+    expect(await w.host.available()).toMatchObject({ ok: true, version: "2.1.316" });
+  });
+
+  test("the plugin is looked for in the Claude folder a session will use: CLAUDE_CONFIG_DIR set only in the person's shell", async () => {
+    const other = join(tmpdir(), `launch-claude-work-${process.pid}-${Date.now()}`);
+    dirs.push(other);
+    const onlyInHome = world({ login: { CLAUDE_CONFIG_DIR: other } });
+    onlyInHome.pluginOn(join(onlyInHome.home, ".claude"));
+    expect((await onlyInHome.host.available()).ok).toBe(false);
+    onlyInHome.pluginOn(other);
+    expect((await onlyInHome.host.available()).ok).toBe(true);
+  });
+
+  test("the settings file gives Read on the Inbox's uploads, by an absolute rule, and the login PATH", async () => {
+    const w = world();
+    expect(await w.host.start(w.launch, { name: "Inbox", login: w.login })).toMatchObject({ ok: true, ref: "844d238d" });
+    const settings = JSON.parse(readFileSync(join(w.dataDir, "inbox", "launch", "lch_1", "settings.json"), "utf8")) as { env: Record<string, string>; permissions: { allow: string[] } };
+    expect(settings.permissions.allow).toContain(`Read(//${join(w.dataDir, "inbox", "uploads").replace(/^\//, "")}/**)`);
+    expect(settings.env.PATH).toBe(w.login.PATH);
+  });
+
+  test("a restart runs with the login env, as a start does: it may be the call that starts the supervisor its session inherits", async () => {
+    const w = world({ login: { FROM_LOGIN: "yes" } });
+    const result = await w.host.resume(w.launch);
+    expect(result).toMatchObject({ exitCode: 0, failure: null });
+    expect(w.calls().find((call) => call.startsWith("respawn"))).toContain("FROM_LOGIN=yes");
+  });
+
+  test("a login env that can't reach `claude` (a shell read that failed) still starts it, from Claude's install folders", async () => {
+    const w = world({ installFolderOnly: true, login: { FROM_LOGIN: "yes" } });
+    expect(await w.host.start(w.launch, { name: "Inbox", login: w.login })).toMatchObject({ ok: true });
+    expect(w.calls().find((call) => call.startsWith("--bg"))).toContain("FROM_LOGIN=yes");
+  });
 });
 
 describe("the start's permission mode", () => {

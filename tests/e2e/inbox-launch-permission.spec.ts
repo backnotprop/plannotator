@@ -718,7 +718,7 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     expect(started.settings?.env?.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).toBeUndefined();
     expect(started.settings?.hooks?.PermissionRequest).toBeDefined();
     expect(started.settings?.env?.PLANNOTATOR_LAUNCH_FULL_PERMISSIONS).toBeUndefined();
-    expect(started.settings?.permissions).toEqual({ allow: ['mcp__plannotator__plannotator_inbox'] });
+    expect(started.settings?.permissions).toEqual({ allow: ['mcp__plannotator__plannotator_inbox', expect.stringContaining('/inbox/uploads/**')] });
     expect(await waitFor('the build run', () => fake.permissions()[asked])).toMatchObject({ outcome: 'ran', asked: false });
     // Bypass mode's safety check still asks (the plugin's hook keeps Claude from waiving it): it comes to the card.
     // Claude takes no allow for it from a hook: Deny, Deny with a reason, or Approve in Terminal; no mode switch.
