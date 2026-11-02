@@ -1,0 +1,33 @@
+# Plannotator's daily ping (packages/shared/daily-ping.ts sends it). Owner-
+# deployed from this folder with `wrangler deploy`; never from CI. See README.md.
+name = "plannotator-ping"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Only the custom domain below answers: no *.workers.dev hostname, no preview URLs.
+workers_dev = false
+preview_urls = false
+
+# No request logs, ever: no Workers Logs, no Logpush, no tail consumers. Never
+# run `wrangler tail` against production.
+logpush = false
+
+# Custom domain (top-level: must precede any [table] in TOML).
+routes = [
+  { pattern = "ping.plannotator.ai", custom_domain = true }
+]
+
+[observability]
+enabled = false
+
+[observability.logs]
+enabled = false
+invocation_logs = false
+
+# The totals. Create it with `wrangler d1 create plannotator-ping` and put the
+# id it prints here (the id is not a secret).
+[[d1_databases]]
+binding = "DB"
+database_name = "plannotator-ping"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"

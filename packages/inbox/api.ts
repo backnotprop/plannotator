@@ -249,6 +249,14 @@ export interface UpdateSwitches {
   auto_update: { on: boolean; env: boolean | null };
 }
 
+/** The daily ping (packages/shared/daily-ping.ts): `env` names what in the environment holds it off, or null. */
+export interface TelemetrySwitch {
+  on: boolean;
+  config: boolean;
+  env: string | null;
+  notice_due: boolean;
+}
+
 /** Checking for updates has failed for hours with no success (packages/shared/update-check.ts releaseCheckFailing). */
 export interface UpdateCheckFailing {
   since: string;
@@ -365,6 +373,8 @@ export interface SettingsModel {
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
   updates?: UpdateSwitches;
+  /** Settings → About: the daily ping's switch, and whether its one-time notice waits. Absent from an older Inbox. */
+  telemetry?: TelemetrySwitch;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
   /** Ask AI is on for this reader (PLANNOTATOR_INBOX_ASK_AI). Absent while it is off, for a tailnet guest, and from an older Inbox. */
@@ -1196,6 +1206,9 @@ export const inboxApi = {
   whatsNew: (version: string) => get<WhatsNewModel>(inboxUrl(`/whats-new?version=${encodeURIComponent(version)}`)),
   saveUpdateSwitches: (change: { update_check?: boolean; auto_update?: boolean }) =>
     post<{ updates: UpdateSwitches }>(inboxUrl('/settings'), change),
+  saveTelemetry: (on: boolean) => post<{ telemetry: TelemetrySwitch }>(inboxUrl('/settings'), { telemetry: on }),
+  /** The daily ping's one-time notice: only the first claim ever gets `show: true`. */
+  claimPingNotice: () => post<{ show: boolean; telemetry: TelemetrySwitch }>(inboxUrl('/ping-notice'), {}),
   saveInboxTool: (hosts: Partial<Record<AgentToolHost, boolean>>) =>
     post<{ inbox_tool: SettingsModel['inbox_tool'] }>(inboxUrl('/settings'), { inbox_tool: hosts }),
   saveNotifications: (change: Partial<NotificationSettings>) =>

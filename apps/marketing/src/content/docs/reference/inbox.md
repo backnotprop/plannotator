@@ -435,6 +435,10 @@ Click **Update to X** to see what's new and what will happen, then **Update now*
 
 If the binary was already updated (by auto-update, `plannotator update`, or the install script), the button restarts the Inbox at once; if you are typing a reply, it asks first. If an update you started fails, the button reads **Update failed** and shows the exit code and the log. After an update, **What's new in X** sits above Settings for that run.
 
+### Daily ping
+
+**Settings → About → Send one private daily ping** is the same switch as in plan review, code review and annotate (config.json `telemetry`). The first time you open the Inbox, a short message says what the ping sends, with **Turn off**; nothing is sent until the next day. `NO_ANON_PING=1` in the Inbox's environment turns it off and locks the switch. See the [privacy policy](/privacy/).
+
 A Claude Code window keeps the plugin it started with until you reload it. While any connected Claude Code session runs an older plugin than the one installed, the sidebar shows **Reload Claude Code N** under What's new. It opens **Settings → Agents**, where **Open sessions** lists them: type `/reload-plugins` in each (it keeps the session and interrupts nothing; several sessions in the same folder each need their own, and the list tells them apart by when they started). If one is still listed after that, type `/exit` in it and run the command **Copy restart** gives (it starts the same session again in its folder). The row goes away by itself once they have the new plugin. For Pi the same row says to run `pi update --extensions`, then `/reload`. Only sessions connected to the Inbox (the Inbox tool on) are seen.
 
 A copy of Plannotator that the install script did not install cannot update itself: the dialog shows the command to run instead.

@@ -216,6 +216,14 @@
         "vite": "^6.2.0",
       },
     },
+    "apps/telemetry": {
+      "name": "@plannotator/telemetry",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20241218.0",
+        "wrangler": "^4.151.2",
+      },
+    },
     "apps/vscode-extension": {
       "name": "plannotator-webview",
       "version": "0.17.0",
@@ -1163,6 +1171,8 @@
     "@plannotator/shared": ["@plannotator/shared@workspace:packages/shared"],
 
     "@plannotator/t3-code": ["@plannotator/t3-code@workspace:packages/t3-code"],
+
+    "@plannotator/telemetry": ["@plannotator/telemetry@workspace:apps/telemetry"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
 

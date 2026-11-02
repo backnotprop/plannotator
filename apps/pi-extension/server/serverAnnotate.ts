@@ -1,4 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { annotateDocumentRenderKind } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -346,6 +347,8 @@ export async function startAnnotateServer(options: {
 		annotationCss: string;
 	};
 }): Promise<AnnotateServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	schedulePiDailyPing();
 	// Remote hard-off, defense in depth behind the command-side check: a live
 	// proxy relays the user's authenticated dev app, so it must never coexist
 	// with a beyond-loopback annotate bind. No override env var exists on
@@ -1181,7 +1184,7 @@ export async function startAnnotateServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; telemetry?: unknown; agentTool?: unknown; conventionalComments?: boolean; agentTerminalSide?: unknown; agentTerminalDefaultAgent?: unknown };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -1193,6 +1196,7 @@ export async function startAnnotateServer(options: {
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
 				if (typeof body.updateCheck === "boolean") toSave.updateCheck = body.updateCheck;
+				if (typeof body.telemetry === "boolean") toSave.telemetry = body.telemetry;
 				// The agent tool switch: boolean only; it applies to the next session.
 				if (typeof body.agentTool === "boolean") toSave.agentTool = body.agentTool;
 				if (body.conventionalComments !== undefined) toSave.conventionalComments = body.conventionalComments;

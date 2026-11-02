@@ -241,6 +241,8 @@ export const THREAD_READ_TIMEOUT_MS = 8000;
 const FIRST_LIST_WAIT_MS = 10_000;
 /** How long "Not sent to MacBook: it is no longer linked." stays: long enough to read and go to Settings. */
 const UNSENT_TOAST_MS = 12_000;
+/** The daily ping's one-time notice stays up longer than an Undo toast: it is read, not acted on. */
+const PING_NOTICE_TOAST_MS = 20_000;
 /**
  * How long a 404 waits, after a start, for linked machines whose lists this Inbox has not read yet (one asleep may hold
  * the thread). After that it says the thread is not here; a later list that names its machine opens it there.
@@ -3456,6 +3458,19 @@ function Inbox() {
     }
   };
 
+  /** The daily ping's switch (Settings → About, the notice's Turn off): config.json `telemetry`. */
+  const saveTelemetry = async (on: boolean) => {
+    setSettingsError(null);
+    try {
+      const saved = await inboxApi.saveTelemetry(on);
+      setSettings((current) => (current ? { ...current, telemetry: saved.telemetry } : current));
+      return true;
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      return false;
+    }
+  };
+
   const checkNow = async () => {
     setChecking(true);
     setSettingsError(null);
@@ -3826,6 +3841,49 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
+  // The daily ping's one-time notice (packages/shared/daily-ping.ts): a toast, never a dialog, with Turn off. Only a
+  // page on this computer that someone can see claims it, and only the first claim ever shows it; nothing is sent
+  // until the next UTC day, so there is time to turn it off.
+  const pingNoticeAsked = useRef(false);
+  const pingNoticeDue = settings?.via === 'local' && settings.telemetry?.notice_due === true;
+  useEffect(() => {
+    if (!pingNoticeDue || pingNoticeAsked.current) return;
+    const claim = () => {
+      if (pingNoticeAsked.current || document.visibilityState !== 'visible') return;
+      pingNoticeAsked.current = true;
+      inboxApi
+        .claimPingNotice()
+        .then((answer) => {
+          setSettings((current) => (current ? { ...current, telemetry: answer.telemetry } : current));
+          if (!answer.show) return;
+          showToast(
+            {
+              icon: 'info',
+              lead: 'One private daily ping',
+              detail: 'Once a day: the version and roughly how long Plannotator has been installed. No ID, nothing about you or your work.',
+              action: {
+                label: 'Turn off',
+                onPress: () => {
+                  dismissToast();
+                  void saveTelemetry(false).then((saved) => {
+                    if (saved) showToast({ icon: 'check', lead: 'Daily ping off', detail: 'Settings → About turns it back on.' });
+                  });
+                },
+              },
+            },
+            PING_NOTICE_TOAST_MS,
+          );
+        })
+        .catch(() => {
+          pingNoticeAsked.current = false;
+        });
+    };
+    claim();
+    document.addEventListener('visibilitychange', claim);
+    return () => document.removeEventListener('visibilitychange', claim);
+    // showToast, dismissToast and saveTelemetry read only refs and setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pingNoticeDue]);
   useEffect(() => {
     if (!firstRun || guestPage) return;
     let last = Date.now();
@@ -4609,6 +4667,8 @@ function Inbox() {
             update={pageUpdate}
             updates={pageOffersUpdates(settings)}
             whatsNewRunning={settings?.via === 'tailnet'}
+            telemetry={settings?.via === 'local' ? settings.telemetry : undefined}
+            onTelemetry={(on) => void saveTelemetry(on)}
             onUpdate={pressUpdate}
             onWhatsNew={pageWhatsNew ? openWhatsNew : undefined}
             where={

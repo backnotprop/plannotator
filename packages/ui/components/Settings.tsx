@@ -1,4 +1,5 @@
 import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
+import type { TelemetrySetting } from '../hooks/useTelemetrySetting';
 import { cookieHostDescription, type CookieHostSetting } from '../hooks/useCookieHostSetting';
 import type { PackageChangesSetting } from '../hooks/usePackageChangesSetting';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -171,6 +172,9 @@ interface SettingsProps {
    *  useUpdateCheckSetting); `env` is PLANNOTATOR_UPDATE_CHECK when it overrides the
    *  config file. Hosts that omit it get no row. */
   updateCheckSetting?: UpdateCheckSetting;
+  /** The daily ping switch (serverConfig.telemetry, useTelemetrySetting); `env` names what in
+   *  the environment holds it off. Hosts that omit it get no row. */
+  telemetrySetting?: TelemetrySetting;
   /** "Open Plannotator at plannotator.localhost" (#2184, useCookieHostSetting): present
    *  only when the server reports it (a local session). Hosts that omit it get no row. */
   cookieHostSetting?: CookieHostSetting;
@@ -1302,7 +1306,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, telemetrySetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1852,6 +1856,32 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                 : 'Installs new releases in the background, at most once a day, never while another review is open.'
                           }
                         />
+                      </>
+                    )}
+
+                    {/* The daily ping: writes telemetry to ~/.plannotator/config.json,
+                        the same switch everywhere. Locked while the environment
+                        holds it off (DO_NOT_TRACK, NO_ANON_PING, CI). */}
+                    {telemetrySetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <div data-telemetry-setting={telemetrySetting.env ? 'env' : telemetrySetting.on ? 'on' : 'off'}>
+                          <ToggleSwitch
+                            checked={telemetrySetting.on}
+                            onChange={(v) => telemetrySetting.onChange(v)}
+                            disabled={telemetrySetting.env !== undefined}
+                            label="Send one private daily ping"
+                            description={
+                              telemetrySetting.env === 'NO_ANON_PING'
+                                ? 'Off: NO_ANON_PING is set in your environment.'
+                                : telemetrySetting.env === 'CI'
+                                  ? 'Off: this runs in a CI environment.'
+                                  : telemetrySetting.env !== undefined
+                                    ? 'Off: your environment asks tools not to send usage data.'
+                                : 'Once a day: the version and roughly how long Plannotator has been installed. No ID, nothing about you or your work.'
+                            }
+                          />
+                        </div>
                       </>
                     )}
 

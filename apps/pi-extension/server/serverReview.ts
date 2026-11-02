@@ -1,4 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
@@ -476,6 +477,8 @@ export async function startReviewServer(options: {
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	schedulePiDailyPing();
 	const gitUser = detectGitUser(options.workspace?.root ?? options.gitContext?.cwd);
 	const aiEnabled = resolveAIEnabled();
 	const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;
@@ -3951,7 +3954,7 @@ export async function startReviewServer(options: {
 				return;
 			}
 			try {
-				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
+				const body = (await parseBody(req)) as { agentSwitch?: unknown; displayName?: string; diffOptions?: Record<string, unknown>; reviewDefaults?: Record<string, { defaultDiffType?: string }>; theme?: Record<string, unknown>; favicon?: FaviconStyle; autoUpdate?: unknown; updateCheck?: unknown; telemetry?: unknown; agentTool?: unknown; reviewAnalysis?: Record<string, unknown>; packageChanges?: unknown; conventionalComments?: boolean };
 				const toSave: Record<string, unknown> = {};
 				// OpenCode's agent switch (#1390): a known shape or nothing is saved.
 				const agentSwitch = agentSwitchConfigToSave(body);
@@ -3964,6 +3967,7 @@ export async function startReviewServer(options: {
 				if (isFaviconStyle(body.favicon)) toSave.favicon = body.favicon;
 				if (typeof body.autoUpdate === "boolean") toSave.autoUpdate = body.autoUpdate;
 				if (typeof body.updateCheck === "boolean") toSave.updateCheck = body.updateCheck;
+				if (typeof body.telemetry === "boolean") toSave.telemetry = body.telemetry;
 				// The agent tool switch: boolean only; it applies to the next session.
 				if (typeof body.agentTool === "boolean") toSave.agentTool = body.agentTool;
 				if (body.reviewAnalysis !== undefined) {

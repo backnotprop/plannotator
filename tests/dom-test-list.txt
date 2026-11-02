@@ -479,3 +479,5 @@ packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
+packages/ui/components/Settings.telemetry.test.tsx
+packages/inbox/dailyPingSetting.test.tsx

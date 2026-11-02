@@ -98,6 +98,7 @@ import { runGuideCli } from "@plannotator/server/guide-cli";
 import { runUpdateCommand } from "./update-command";
 import { runUpdatePrepareCommand } from "@plannotator/server/update-prepare";
 import { takeUpdateHint } from "@plannotator/shared/update-check";
+import { claimDailyPingNotice, DAILY_PING_NOTICE, DAILY_PING_PRIVACY_URL, scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -880,6 +881,16 @@ function registerCliSession(info: SessionInfo): void {
     ...(hostReviewId ? { reviewId: hostReviewId } : {}),
   });
   scheduleAutoUpdateCheck(getCliVersion());
+  // The daily ping (packages/shared/daily-ping.ts): its one-time notice goes to
+  // a person at a terminal only (the update hint's rules: never under --json
+  // or --hook, an agent session, or a stderr that is not a TTY); the check
+  // runs in the background and never delays the session.
+  try {
+    if (process.stderr.isTTY && !rawArgs.includes("--json") && !rawArgs.includes("--hook") && !process.env.CLAUDECODE && !process.env.PLANNOTATOR_SESSION_TAG) {
+      if (claimDailyPingNotice({ version: getCliVersion() })) process.stderr.write(`${DAILY_PING_NOTICE} ${DAILY_PING_PRIVACY_URL}\n`);
+    }
+  } catch {}
+  scheduleDailyPing({ version: getCliVersion() });
 }
 
 // Route fatal signals through process.exit() so "exit" handlers run — by
