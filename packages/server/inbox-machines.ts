@@ -115,7 +115,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> };
 
 export interface MachineView {
   id: string;
@@ -139,6 +139,8 @@ export interface MachineView {
    * read the merged list once the far rows changed, not before.
    */
   list_cursor: number | null;
+  /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
+  snoozes: boolean;
 }
 
 export interface OutboxView {
@@ -265,6 +267,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       both_ways: true,
       waiting: 0,
       list_cursor: null,
+      snoozes: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -280,6 +283,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         both_ways: link.device_id !== null,
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
+        snoozes: peer?.list?.snoozes ?? false,
       } satisfies MachineView;
     }),
   ];
@@ -315,6 +319,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       timings: context.timings,
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: machinesChanged,
+      // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
+      onSnoozes: () => emit({ event: "snoozes", data: {} }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);

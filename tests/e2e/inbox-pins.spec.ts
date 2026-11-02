@@ -233,11 +233,12 @@ test("a click opens the thread and keeps the filter; the header ⋯ menu pins an
   await pinned(page, threads.board).click();
   await expect(page).toHaveURL(/#project=prj_.*thread=|thread=.*project=/);
   await expect(pinned(page, threads.board)).toHaveAttribute('aria-current', 'true');
-  // No pin button in the header; the ⋯ menu leads with the pin, and says it is pinned.
+  // No pin button in the header; the ⋯ menu's first group has the pin right after Snooze, and says it is pinned.
   await expect(page.locator('[data-pin-toggle]')).toHaveCount(0);
   const item = await openThreadMenu(page);
   await expect(item).toHaveText('Unpin thread');
-  await expect(page.locator('[data-thread-menu] [role="menuitem"]').first()).toHaveText('Unpin thread');
+  await expect(page.locator('[data-thread-menu] [role="menuitem"]').nth(0)).toHaveText('Snooze');
+  await expect(page.locator('[data-thread-menu] [role="menuitem"]').nth(1)).toHaveText('Unpin thread');
   await shot(page, 'desktop-thread-menu-light.png');
   await page.keyboard.press('Escape');
   await shot(page, 'desktop-thread-light.png');
