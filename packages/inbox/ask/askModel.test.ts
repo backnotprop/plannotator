@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAskChat, InboxAskConversationWire } from '../api';
-import { ASK_RECENT_MAX, askChatGroups, askChatTime, askMessages, askStopped, askUnanswered, askUnseen } from './askModel';
+import { ASK_RECENT_MAX, askChatGroups, askChatTime, askMessages, askRowState, askStopped, askUnanswered, askUnseen } from './askModel';
 
 const NOW = Date.parse('2026-11-02T12:00:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -59,6 +59,13 @@ describe('the chat list', () => {
     expect(groups.recent.length).toBe(ASK_RECENT_MAX);
     expect(groups.recent[0]!.thread_id).toBe('old-0');
     expect(groups.recent.at(-1)!.thread_id).toBe(`old-${ASK_RECENT_MAX - 1}`);
+  });
+
+  test('a row wears one mark: the check, else the spinner, else the dot', () => {
+    expect(askRowState(chat('here', 0, { answering: true, unread: true }), 'here')).toBe('current');
+    expect(askRowState(chat('other', 0, { answering: true, unread: true }), 'here')).toBe('answering');
+    expect(askRowState(chat('other', 0, { unread: true }), 'here')).toBe('unread');
+    expect(askRowState(chat('other', 0), 'here')).toBeNull();
   });
 
   test('a row says how long ago in words that step up with the time', () => {

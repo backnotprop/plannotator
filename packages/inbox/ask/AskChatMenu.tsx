@@ -3,7 +3,7 @@ import { Menu } from '@base-ui/react/menu';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { inboxApi, type InboxAskChat } from '../api';
 import { Icon } from '../icons';
-import { askChatGroups, askChatName, askChatTime } from './askModel';
+import { askChatGroups, askChatName, askChatTime, askRowState } from './askModel';
 
 /**
  * The window's header: the current chat (its agent's real icon, the thread's
@@ -35,8 +35,7 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
   const row = (chat: InboxAskChat) => {
     const name = askChatName(chat.subject);
     const when = askChatTime(chat.at, now);
-    const isCurrent = chat.thread_id === current.thread_id;
-    const state = isCurrent ? 'current' : chat.answering ? 'answering' : chat.unread ? 'unread' : null;
+    const state = askRowState(chat, current.thread_id);
     return (
       <Menu.Item
         key={chat.thread_id}

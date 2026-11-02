@@ -30,6 +30,12 @@ export function askChatGroups(chats: readonly InboxAskChat[], current: InboxAskC
   };
 }
 
+/** A row's one mark: the check on the chat on screen, else a spinner while it answers, else a dot for a new answer. */
+export function askRowState(chat: InboxAskChat, currentId: string): 'current' | 'answering' | 'unread' | null {
+  if (chat.thread_id === currentId) return 'current';
+  return chat.answering ? 'answering' : chat.unread ? 'unread' : null;
+}
+
 /** A chat's time in a row: "4 min ago", "1 h ago", "2 days ago", "last week". */
 export function askChatTime(iso: string, now: number): string {
   const minutes = Math.floor((now - Date.parse(iso)) / 60_000);
