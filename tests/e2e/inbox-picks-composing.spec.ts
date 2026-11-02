@@ -225,7 +225,7 @@ test('a long "Other" answer behind slow saves: a few saves, and Send carries the
   await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
   await page.unroute('**/picks');
   const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
-  expect(reply).toContain(`Answer: ${words}`);
+  expect(reply).toContain(`Answer: Other: ${words}`);
   // One save per key would be about 90, a Send 27 s behind them. A slow runner types slower, so not an exact count.
   expect(saves).toBeLessThan(45);
   expect(world.errors).toEqual([]);
