@@ -2083,6 +2083,9 @@ export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). The window names it too. */
 export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
 
+/** The longest draft body (compose drafts and reply drafts), in characters: the window says so before the server refuses one. */
+export const INBOX_DRAFT_BODY_MAX = 1_000_000;
+
 /**
  * A file the person uploaded from the window for a thread they start, not
  * sent yet (`POST /api/inbox/uploads`). At send it becomes an
