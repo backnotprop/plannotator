@@ -488,7 +488,12 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
           await expect.poll(async () => (await pillLayout(page)).mic, { message: `mic ${withMic} at ${width}` }).toBe(withMic);
           const where = `${c.name}, ${width} px, mic ${withMic}`;
           // The fit runs on a resize: let it settle.
-          await expect.poll(async () => (await pillLayout(page)).lines, { message: where }).toBe(1);
+          await expect
+            .poll(async () => {
+              const now = await pillLayout(page);
+              return now.lines === 1 && now.right <= now.chipsRight + 1 && now.right <= now.next + 1;
+            }, { message: where })
+            .toBe(true);
           const got = await pillLayout(page);
           expect(got.height, where).toBeLessThanOrEqual(24);
           expect(got.right, `${where}: past the row's end (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.chipsRight + 1);
