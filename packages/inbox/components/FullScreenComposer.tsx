@@ -7,7 +7,9 @@
  *
  * - Two tabs on the card's top edge (a radio group): "Comment on this image"
  *   (the file's own comment row, drawn as is) and "Reply to <agent>" (the
- *   thread's reply). HTML is Reply only: its comments go on the page, with the pen.
+ *   thread's reply). HTML is Reply only: its comments go on the page, with the
+ *   pen. On a phone a pin or a selection gives it the Comment tab until the
+ *   comment is saved or dropped (HtmlPageComment.tsx).
  * - The reply is the thread's reply draft, not a copy: the field shows the
  *   thread's words, every keystroke goes through the reply box's own change
  *   (Thread.tsx `changeReply`), and Send is the thread's Send, with its rules
@@ -187,17 +189,23 @@ export function FullScreenComposer({
   value,
   noun,
   comment,
+  foldedByDefault = false,
+  onMinimized,
 }: {
   value: FullScreenComposerValue;
-  /** What a comment is on ("this image", "this video"). */
-  noun: 'image' | 'video' | null;
+  /** What a comment is on ("this image", "this video", "this page"). */
+  noun: 'image' | 'video' | 'page' | null;
   /** The file's own comment row (its field, Mark up, Comment), drawn as is in the Comment tab. Null: Reply only. */
   comment: ReactNode | null;
+  /** The card starts as its pill until the person opens it (an HTML page on a phone). */
+  foldedByDefault?: boolean;
+  /** The person minimized the card (a comment with no words yet drops its draft). */
+  onMinimized?: () => void;
 }) {
   const { reply, phone, threadId } = value;
   const takesComments = comment !== null;
   const hasDraft = reply.value.trim() !== '';
-  const state = useComposerState(threadId, hasDraft, takesComments);
+  const state = useComposerState(threadId, hasDraft, takesComments, foldedByDefault);
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
@@ -229,7 +237,7 @@ export function FullScreenComposer({
     if (replyRef.current) replyRef.current.readOnly = reply.sending;
   });
 
-  const nounText = noun === 'video' ? 'this video' : 'this image';
+  const nounText = noun === 'video' ? 'this video' : noun === 'page' ? 'this page' : 'this image';
   const commentLabel = `Comment on ${nounText}`;
   const replyLabel = `Reply to ${reply.to}`;
   const label = mode === 'comment' ? commentLabel : replyLabel;
@@ -375,6 +383,7 @@ export function FullScreenComposer({
             onClick={() => {
               focusNext.current = 'pill';
               state.setMinimized(true);
+              onMinimized?.();
             }}
             aria-label="Hide the composer"
             aria-expanded={true}

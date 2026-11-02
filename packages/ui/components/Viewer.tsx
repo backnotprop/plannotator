@@ -474,8 +474,10 @@ export interface ViewerHandle {
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
   stepPin?: (direction: 'parent' | 'child') => void;
   /** `HtmlViewer` only: scroll the pinned draft into the middle of the
-   *  frame, for a host whose panel covers part of it. */
-  revealPin?: () => void;
+   *  frame, for a host whose panel covers part of it. `clearBottom`: the
+   *  panel floats over the frame's last pixels instead of shrinking it, so the
+   *  pin goes into the part left, and stays put if it is already there. */
+  revealPin?: (options?: { clearBottom?: number }) => void;
   /** Markdown `Viewer` only, for a host that composes (`onHostDraft`) on a
    *  touch screen: make the page's text selection a draft now (the host's own
    *  Comment action), reported through `onHostDraft` as `'selection'`.

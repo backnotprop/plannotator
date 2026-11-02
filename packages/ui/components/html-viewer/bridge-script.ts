@@ -872,9 +872,19 @@ export const BRIDGE_SCRIPT = `(function() {
     else if (type === PREFIX + 'reveal-pin') {
       // A host whose own panel covers the page's lower part (a phone's comment
       // sheet) shrank the frame: bring the pinned draft back into view.
+      // clearBottom: the panel floats over the frame instead (the Inbox's card).
       if (pendingPinEl && pendingPinEl.isConnected) {
-        try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        var clearBottom = e.data.clearBottom;
+        if (typeof clearBottom === 'number' && isFinite(clearBottom) && clearBottom > 0) {
+          revealAbove(pendingPinEl, Math.min(clearBottom, window.innerHeight));
+        } else {
+          try { pendingPinEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (ex) {}
+        }
       }
+    }
+
+    else if (type === PREFIX + 'set-touch-selection') {
+      setTouchSelection(e.data.active === true);
     }
 
     else if (type === PREFIX + 'scroll-to') {
@@ -4122,6 +4132,67 @@ export const BRIDGE_SCRIPT = `(function() {
       context: pendingPinContext || undefined,
       rect: { top: r.top, left: r.left, width: r.width, height: r.height } });
     return true;
+  }
+
+  // The pinned element in the frame's top part, a host's panel over the last
+  // covered pixels: its middle in the middle of what shows, or its top when it
+  // is taller. Already in sight, nothing moves.
+  function revealAbove(el, covered) {
+    var shown = window.innerHeight - covered;
+    var box = el.getBoundingClientRect();
+    if (box.top >= 0 && box.bottom <= shown) return;
+    var by = box.height > shown ? box.top : box.top + box.height / 2 - shown / 2;
+    var root = document.scrollingElement;
+    for (var node = el.parentElement; node && by; node = node.parentElement) {
+      if (node !== root && !/auto|scroll/.test(getComputedStyle(node).overflowY)) continue;
+      var before = node.scrollTop;
+      node.scrollTop = before + by;
+      by -= node.scrollTop - before;
+    }
+  }
+
+  // --- Touch: a selection made with a finger ---
+  // A long press and its handles send no mouseup, so the capture-phase mouseup
+  // listener above never sees them. Where the host asks for it (HtmlViewer
+  // touchSelection) and the main pointer is a finger, the selection is read
+  // from selectionchange once it rests, as the Markdown viewer does. A collapsed
+  // selection is not taken: moving focus out of the frame can collapse it, and
+  // a tap on the page already closes the draft through mouseup. What the bridge
+  // reported already (a pin's own selection, a draft that did not change) is
+  // not reported again. The query and the wait are utils/touchSelection.ts's
+  // (this file is vendored whole and imports nothing; a test keeps them equal).
+  var touchSelectionOn = false;
+  var touchSelectionTimer = 0;
+  function isReportedRange(range) {
+    if (!pendingRange) return false;
+    try {
+      return pendingRange.compareBoundaryPoints(Range.START_TO_START, range) === 0
+        && pendingRange.compareBoundaryPoints(Range.END_TO_END, range) === 0;
+    } catch (ex) {
+      return false;
+    }
+  }
+  function takeTouchSelection() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    if (isReportedRange(sel.getRangeAt(0))) return;
+    if (!(sel.toString() || '').trim()) return;
+    // New words chosen over a pin: the selection is the draft now.
+    clearMultiTargets();
+    clearPendingPin();
+    handleSelection();
+  }
+  function onTouchSelectionChange() {
+    clearTimeout(touchSelectionTimer);
+    touchSelectionTimer = setTimeout(takeTouchSelection, 400);
+  }
+  function setTouchSelection(active) {
+    var on = active && window.matchMedia('(pointer: coarse)').matches;
+    if (on === touchSelectionOn) return;
+    touchSelectionOn = on;
+    clearTimeout(touchSelectionTimer);
+    if (on) document.addEventListener('selectionchange', onTouchSelectionChange);
+    else document.removeEventListener('selectionchange', onTouchSelectionChange);
   }
 
   // --- Touch: a tap on a link follows it, press-and-hold pins it ---

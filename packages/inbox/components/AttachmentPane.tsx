@@ -62,7 +62,9 @@ import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './Contents
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
-import { pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
+import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
+import { useHtmlPageComment } from './HtmlPageComment';
+import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
@@ -368,9 +370,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
   const [mode, setMode] = useState<EditorMode>('selection');
-  const [armed, setArmed] = useState(true);
+  // The pen. On a phone it starts off, so a tap does what the page says.
+  const [armed, setArmed] = useState(props.phone !== true);
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
+  const htmlViewerRef = useRef<ViewerHandle>(null);
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const source = useInboxFileSource();
   const suggestion = source.suggestion?.(attachment) ?? null;
@@ -673,11 +677,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const stepRef = useRef(step);
   stepRef.current = step;
 
-  // Each file opens armed (Annotate) and without the last file's note; a step is announced once.
+  // Each file opens armed (Annotate; on a phone, in Interact) and without the last file's note; a step is announced once.
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
   useEffect(() => {
-    setArmed(true);
+    setArmed(!phone);
     setEndNote(null);
     setGuard(null);
     setSheet(false);
@@ -1313,12 +1317,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const isCode = kind === 'code';
   const isImage = kind === 'image';
   const isVideo = kind === 'video';
-  const composerValue = useMemo<FullScreenComposerValue | null>(
-    // A phone's Show tools brings the toolbar out (revealed) and the reply back with it; only Hide tucks the reply.
-    // A computer's revealed toolbar is a peek from the corner: the reply waits for the pin.
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: phone ? toolbar === 'tucked' : toolbar !== 'pinned' } : null),
-    [hasComposer, props.composer, toolbar, phone],
-  );
   const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
   const isDownload = kind === 'pdf' || kind === 'file' || tooLarge;
@@ -1462,6 +1460,51 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [attachment.id, annotationVersion, props.onSaved, source],
+  );
+
+  // ── An HTML page on a phone (approval "inbox-html-attachments-phone") ──────
+  const phoneHtml = full && phone && isHtml;
+  const threadId = props.composer?.threadId ?? null;
+  // It opens clear, like Markdown: the reply is the pill in the toolbar's row, whatever the last file left open.
+  useLayoutEffect(() => {
+    if (phoneHtml && threadId) forgetComposerOpened(threadId);
+  }, [phoneHtml, threadId, attachment.id]);
+  const htmlComment = useHtmlPageComment({
+    enabled: phoneHtml && hasComposer && !props.readOnly && !linkedTop,
+    fileKey: `${attachment.id}:${annotationVersion}`,
+    threadId,
+    name: attachment.name,
+    viewer: htmlViewerRef,
+    tags: props.composer?.reply.tags,
+    onSave: save,
+    covered: () => {
+      const frame = sectionRef.current?.querySelector('.ib-htmlframe iframe');
+      const card = sectionRef.current?.querySelector('[data-fcomp]');
+      return frame && card ? Math.max(0, frame.getBoundingClientRect().bottom - card.getBoundingClientRect().top) : 0;
+    },
+    onDone: (saying) => {
+      if (saying) announce(saying);
+      sectionRef.current?.focus({ preventScroll: true });
+    },
+  });
+  // Pinching zooms the whole window (windowPinch.ts): the tools tuck while it is zoomed, unless a comment is open.
+  const pinched = useWindowPinched(phoneHtml);
+  /** The handle was tapped while zoomed: the tools stay out until the next pinch. */
+  const [pinchShown, setPinchShown] = useState(false);
+  useEffect(() => {
+    if (!pinched) setPinchShown(false);
+  }, [pinched]);
+  const pinchTucks = pinched && !pinchShown && !htmlComment.open;
+  const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
+  // A zoom does not follow the person to the next file, where the browser lets go of it.
+  useEffect(() => {
+    if (phoneHtml) return releaseWindowZoom;
+  }, [phoneHtml, attachment.id]);
+  const composerValue = useMemo<FullScreenComposerValue | null>(
+    // A phone's Show tools brings the toolbar out (revealed) and the reply back with it; only Hide tucks the reply.
+    // A computer's revealed toolbar is a peek from the corner: the reply waits for the pin.
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: phone ? shownToolbar === 'tucked' : toolbar !== 'pinned' } : null),
+    [hasComposer, props.composer, toolbar, shownToolbar, phone],
   );
 
   const remove = async (id: string) => {
@@ -1655,15 +1698,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       data-version={effectiveVersion}
       data-full-view={full ? '' : undefined}
       // Hide (») hides what else floats over the file with the toolbar (inbox.css): the size chip, the composer.
-      data-tools={full ? toolbar : undefined}
+      data-tools={full ? shownToolbar : undefined}
     >
       <FullScreenComposerContext.Provider value={composerValue}>
       {full ? (
         <FullViewBar
           ref={barRef}
           phone={phone}
-          state={toolbar}
-          onState={setToolbar}
+          state={shownToolbar}
+          onState={(next) => {
+            // Over a pinch's tuck: only the handle's tap comes here, and the person's own state stays what it was.
+            if (pinchTucks) setPinchShown(true);
+            if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
+          }}
           announce={announce}
           armed={armed}
           // A linked page takes no comments: no pen while it is shown.
@@ -1850,6 +1897,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
             <HtmlViewer
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
+              ref={htmlViewerRef}
+              // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
+              onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
+              touchSelection={phoneHtml && hasComposer}
               rawHtml={view.html}
               title={attachment.name}
               annotations={annotations}
@@ -2279,7 +2330,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       </div>
-      {hasComposer && isHtml && composerValue && <FullScreenComposer value={composerValue} noun={null} comment={null} />}
+      {hasComposer && isHtml && composerValue && (
+        <FullScreenComposer
+          value={composerValue}
+          noun={htmlComment.card ? 'page' : null}
+          comment={htmlComment.card}
+          foldedByDefault={phoneHtml}
+          onMinimized={htmlComment.onMinimized}
+        />
+      )}
       {guard ? (
         <div
           className="ib-stepguard"
