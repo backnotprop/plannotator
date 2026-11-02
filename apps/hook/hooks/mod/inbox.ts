@@ -68,6 +68,7 @@ import {
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
+  INBOX_SESSION_LABEL_INPUT_MAX,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
@@ -327,7 +328,9 @@ export function readSessionNames(value: unknown): InboxSessionNames {
   return out
 }
 
-function withSessionName(record: InboxSessionNames, sessionId: string, name: string, now: number): InboxSessionNames {
+function withSessionName(record: InboxSessionNames, sessionId: string, given: string, now: number): InboxSessionNames {
+  // The server reads no further, so a longer name only grows the store and every poll.
+  const name = Array.from(given.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trimEnd()
   if ((record[sessionId]?.name ?? '') === name) return record
   const { [sessionId]: _old, ...rest } = record
   const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)

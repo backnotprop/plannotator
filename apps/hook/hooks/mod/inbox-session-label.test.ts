@@ -81,6 +81,13 @@ describe('what a command does to the names', () => {
     expect(after(named('s1'), 'rename', 'Docs pass', 's1').s1?.name).toBe('Docs pass')
   })
 
+  test('a very long /rename is kept cut to the 200 characters the server reads, whole characters only', () => {
+    expect(after({}, 'rename', 'a'.repeat(200_000), 's1').s1?.name).toBe('a'.repeat(200))
+    const emoji = after({}, 'rename', '\u{1F600}'.repeat(201), 's1').s1!.name
+    expect(Array.from(emoji)).toHaveLength(200)
+    expect(emoji.isWellFormed()).toBe(true)
+  })
+
   test('a bare /rename reads as unnamed: the model chose a name we are not told, and the old one is wrong now', () => {
     expect(after(named('s1', 's2'), 'rename', '', 's1')).toEqual(named('s2'))
   })

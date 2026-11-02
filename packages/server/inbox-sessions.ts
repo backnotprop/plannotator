@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -194,9 +194,6 @@ export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
 
 /** The longest session label kept, in characters (code points, so a pair is never split). */
 export const INBOX_SESSION_LABEL_MAX = 60;
-
-/** How much of what a client sends is looked at, in the same characters: a name's length is the client's to choose, this work is not. */
-export const INBOX_SESSION_LABEL_INPUT_MAX = 200;
 
 /**
  * A poll's `label` as the window may draw it: control characters, line
