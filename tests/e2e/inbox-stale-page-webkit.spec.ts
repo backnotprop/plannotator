@@ -9,8 +9,9 @@
  *   covers the list;
  * - Reload pressed inside the reply box's 500 ms pause saves the reply draft before the page goes (the save answered
  *   before the reload's request), and the Inbox's own page comes back with the words in the box and no notice;
- * - on a desktop the notice is at the list's top only (the list is beside the thread), its × hides it, and the tab
- *   shown again (`visibilitychange`) asks the Inbox again and brings it back.
+ * - on a desktop the notice is at the list's top only (the list is beside the thread); its × hides it, focus goes to
+ *   the list's first row, and the tab shown again (`visibilitychange`) asks the Inbox again but keeps that release
+ *   hidden (a newer release showing again is proved in packages/inbox/stalePage.test.ts).
  *
  * PNGs (phone and desktop, light and dark) land in .local/proof/stale-page/, or in PLANNOTATOR_STALE_PAGE_SHOTS when
  * it names a folder. Runs in the playwright config's `webkit` project; needs the built apps (`bun run build:hook`).
@@ -151,7 +152,7 @@ test('a phone tab from an older release: the notice, and Reload saves the reply 
   expect(await serverDraft()).toBe(WORDS);
 });
 
-test('a desktop: the notice beside the thread is the list\'s, × hides it, and the tab shown again brings it back', async ({ browser }) => {
+test('a desktop: the notice beside the thread is the list\'s, and × hides it for that release, the tab shown again included', async ({ browser }) => {
   const page = await open(browser, false);
   await serveOlderPageOnce(page);
   await page.goto(`${url}#thread=${thread}`);
@@ -161,11 +162,18 @@ test('a desktop: the notice beside the thread is the list\'s, × hides it, and t
   // One notice: the list is beside the thread.
   await expect(notice).toHaveCount(1);
 
-  await notice.locator('.ib-stale-x').click();
+  // From the keyboard (WebKit does not focus a clicked button, so a click leaves focus where it was).
+  await notice.locator('.ib-stale-x').focus();
+  await page.keyboard.press('Enter');
   await expect(notice).toHaveCount(0);
-  // Shown again (the person comes back to the tab): the Inbox is asked again, and the page is still behind.
+  // Focus goes to the list's first row, not to the page.
+  await expect(page.locator(`.ib-lbody button[data-thread-id="${thread}"]`)).toBeFocused();
+  // Shown again (the person comes back to the tab): the Inbox is asked again, and the dismissed release stays hidden.
+  const asked = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/health');
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await expect(page.locator('.ib-lbody [data-stale-page]')).toBeVisible();
+  await asked;
+  await page.waitForTimeout(200);
+  await expect(notice).toHaveCount(0);
 });
 
 test('the shots: a phone (the list, then a thread) and a desktop, light and dark', async ({ browser }) => {

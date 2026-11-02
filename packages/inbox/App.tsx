@@ -28,7 +28,6 @@ import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
 import {
-  adoptPageSession,
   InboxApiError,
   inboxApi,
   setPageSession,
@@ -110,7 +109,7 @@ import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
-import { flushBeforeReload, useStalePage } from './stalePage';
+import { reloadOntoInbox, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
@@ -895,7 +894,10 @@ function Inbox() {
    * This page is older than the Inbox it talks to (stalePage.ts): "Inbox updated to X · Reload". Checked with the
    * first list, on every (re)connect, and when the tab comes back (useStalePage).
    */
-  const stalePage = useStalePage();
+  /** The person's own Restart is on its way (it reloads the page by itself): the notice neither shows nor reads. */
+  const stalePaused = useRef(false);
+  stalePaused.current = restarting;
+  const stalePage = useStalePage(undefined, () => stalePaused.current);
   const stalePageRef = useRef(stalePage);
   stalePageRef.current = stalePage;
   /** Reload was pressed: what the person wrote is being saved first. */
@@ -2386,7 +2388,7 @@ function Inbox() {
   }, [streamDead]);
   // The stale page notice is said as it shows (again after a dismiss), never as it goes.
   useEffect(() => {
-    if (stalePage.inbox) say(`Inbox updated to ${stalePage.inbox}. Reload the page to use it.`);
+    if (stalePage.inbox && !restarting) say(`Inbox updated to ${stalePage.inbox}. Reload the page to use it.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
   }, [stalePage.inbox]);
   /**
@@ -3286,17 +3288,8 @@ function Inbox() {
   const reloadOntoUpdate = async () => {
     if (staleReloading) return;
     setStaleReloading(true);
-    try {
-      // The Inbox may have restarted under this page (its writes would be refused, 409): the person chose to reload
-      // onto the Inbox running now, so the saves below go to it.
-      adoptPageSession((await inboxApi.health()).serverSession);
-    } catch {
-      // Not reachable: the saves below fail and say so.
-    }
-    if (await flushBeforeReload()) {
-      window.location.reload();
-      return;
-    }
+    // Saves first (the running Inbox's session for them only, when it restarted under this page), then reloads.
+    if (await reloadOntoInbox()) return;
     setStaleReloading(false);
     showToast(
       {
@@ -3627,7 +3620,7 @@ function Inbox() {
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
   const notice = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames).text : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
-  const staleNotice = stalePage.inbox ? (
+  const staleNotice = stalePage.inbox && !restarting ? (
     <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />
   ) : null;
   const firstRun = latest !== null && projects.length === 0;
