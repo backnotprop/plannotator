@@ -208,5 +208,7 @@ describe("New card's links field", () => {
       'https://www.google.com/maps/@37.77,-122.41,14z',
       'https://www.notion.so/acme/Roadmap',
     ]);
+    // Two URLs with only a comma between them (a spreadsheet cell) are two links, not one.
+    expect(splitRefs('https://a.example/x,https://b.example/y,HTTP://c.example/z')).toEqual(['https://a.example/x', 'https://b.example/y', 'HTTP://c.example/z']);
   });
 });

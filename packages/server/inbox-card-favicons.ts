@@ -217,25 +217,60 @@ async function isPublicName(hostname: string, lookup: (hostname: string) => Prom
 /** Whether an IP address is a public unicast one (not loopback, private, link-local, CGNAT, multicast or reserved). */
 export function isPublicAddress(address: string): boolean {
   const version = isIP(address);
-  if (version === 4) return isPublicV4(address);
+  if (version === 4) return isPublicV4(address.split(".").map(Number));
   if (version !== 6) return false;
-  const lower = address.toLowerCase();
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped) return isPublicV4(mapped[1]!);
-  if (lower.startsWith("::ffff:")) return false;
-  if (lower === "::" || lower === "::1") return false;
-  // fc00::/7 unique local, fe80::/10 link-local, ff00::/8 multicast, 64:ff9b::/96 NAT64, 2001:db8::/32 documentation.
-  if (/^f[c-d]/.test(lower) || /^fe[89ab]/.test(lower) || lower.startsWith("ff") || lower.startsWith("64:ff9b:") || lower.startsWith("2001:db8:")) return false;
+  const bytes = ipv6Bytes(address);
+  if (!bytes) return false;
+  const zeros = (from: number, to: number) => bytes.slice(from, to).every((b) => b === 0);
+  const v4At12 = Array.from(bytes.slice(12, 16));
+  // ::/96: the unspecified address, loopback and IPv4-compatible (`::127.0.0.1`, `::7f00:1`), in any spelling.
+  if (zeros(0, 12)) return false;
+  // ::ffff:0:0/96, IPv4-mapped: only as public as the IPv4 address inside.
+  if (zeros(0, 10) && bytes[10] === 0xff && bytes[11] === 0xff) return isPublicV4(v4At12);
+  const word = (i: number) => (bytes[i * 2]! << 8) | bytes[i * 2 + 1]!;
+  // 64:ff9b::/96 and 64:ff9b:1::/48 (NAT64, IPv4 inside).
+  if (word(0) === 0x64 && word(1) === 0xff9b && (word(2) === 0 || word(2) === 1)) return false;
+  // 2002::/16 (6to4) and 2001::/32 (Teredo): IPv4 inside; 2001:db8::/32 documentation.
+  if (word(0) === 0x2002 || (word(0) === 0x2001 && (word(1) === 0 || word(1) === 0xdb8))) return false;
+  // 100::/64 discard, fc00::/7 unique local, fe80::/10 link-local, ff00::/8 multicast.
+  if (word(0) === 0x100 && zeros(2, 8)) return false;
+  if ((bytes[0]! & 0xfe) === 0xfc || (bytes[0] === 0xfe && (bytes[1]! & 0xc0) === 0x80) || bytes[0] === 0xff) return false;
   return true;
 }
 
-function isPublicV4(address: string): boolean {
-  const [a, b] = address.split(".").map(Number) as [number, number];
+/** An IPv6 address (any spelling `isIP` accepts: `::`, a dotted IPv4 tail, a zone) as its 16 bytes, or null. */
+function ipv6Bytes(address: string): Uint8Array | null {
+  let text = address.toLowerCase().replace(/%.*$/, "");
+  const tail = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (tail) {
+    const [a, b, c, d] = tail.slice(1).map(Number) as [number, number, number, number];
+    text = `${text.slice(0, tail.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const missing = 8 - head.length - rest.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array<string>(halves.length === 2 ? missing : 0).fill("0"), ...rest];
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    const value = Number.parseInt(groups[i]!, 16);
+    if (!/^[0-9a-f]{1,4}$/.test(groups[i]!) || Number.isNaN(value)) return null;
+    bytes[i * 2] = value >> 8;
+    bytes[i * 2 + 1] = value & 0xff;
+  }
+  return bytes;
+}
+
+function isPublicV4([a, b, c]: number[]): boolean {
+  if (a === undefined || b === undefined || c === undefined) return false;
   if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
   if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT (Tailscale's addresses among them)
   if (a === 169 && b === 254) return false;
   if (a === 172 && b >= 16 && b <= 31) return false;
-  if (a === 192 && (b === 168 || (b === 0 && address.startsWith("192.0.0.")) || (b === 0 && address.startsWith("192.0.2.")))) return false;
-  if (a === 198 && (b === 18 || b === 19)) return false;
+  if (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)))) return false;
+  if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return false;
+  if (a === 203 && b === 0 && c === 113) return false;
   return true;
 }

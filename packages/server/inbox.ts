@@ -3366,8 +3366,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const faviconMatch = /^\/api\/inbox\/cards\/([A-Za-z0-9_]+)\/favicon$/.exec(path);
       if (faviconMatch) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        // It makes this computer ask another host: never for a tailnet guest (as the marks), never with the Board off.
+        if (!ownerOrLocal(req, via)) return localOnly();
         const refused = crossSiteCardRead(req);
         if (refused) return refused;
+        if (!boardOn()) return json({ error: "The Board is off.", code: "board_off" }, 409);
         const card = store.card(faviconMatch[1]!);
         if (!card) throw new InboxError("card_not_found", `No card ${faviconMatch[1]}.`);
         const href = url.searchParams.get("url") ?? "";

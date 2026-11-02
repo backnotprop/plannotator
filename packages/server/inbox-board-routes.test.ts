@@ -11,12 +11,13 @@
  * forever.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { RefCli, RefCommandResult, RefRunner } from "./ref-cards";
 import type { CardFaviconOptions } from "./inbox-card-favicons";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -85,6 +86,28 @@ async function world(options: { readProjectRepo?: (root: string) => Promise<Inbo
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
   const post = (path: string, body: Record<string, unknown> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return { dataDir, server, base, project, calls, post };
+}
+
+/** A scripted `tailscale` that serves this Inbox over a tailnet `magic` name, `owner` its login (as inbox-card-marks.test.ts). */
+function scriptedTailscale(magic: string, owner: string): TailscaleRunner {
+  const serve = new Map<number, string>();
+  return (args) => {
+    const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${magic}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: owner } } }));
+    if (args[1] === "status") {
+      if (serve.size === 0) return ok("{}");
+      return ok(
+        JSON.stringify({
+          TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])),
+          Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${magic}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])),
+        }),
+      );
+    }
+    const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+    if (args.includes("off")) serve.delete(httpsPort);
+    else serve.set(httpsPort, args.at(-1)!);
+    return ok(`https://${magic}:${httpsPort}/\n`);
+  };
 }
 
 /** An agent's `card` tool call over `/mcp`, as Claude Code makes it. */
@@ -236,6 +259,58 @@ describe("the Board page's routes", () => {
     expect(server.store.card(card.id)!.refs!.find((ref) => ref.url === agentLink)!.by).toBe("person");
     expect((await favicon(agentLink)).status).toBe(200);
     expect(fetched.map((call) => call.url)).toEqual(["https://www.notion.so/favicon.ico", "https://linear.app/favicon.ico"]);
+  });
+
+  test("a favicon is never fetched for a tailnet guest or with the Board off; the owner over the tailnet gets it (review of #2540, P3-2)", async () => {
+    const MAGIC = "macbook-pro.tail0000.ts.net";
+    const OWNER = "ramos@example.com";
+    const GUEST = "guest@example.com";
+    const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    try {
+      const fetched: string[] = [];
+      const ico = new Uint8Array(64);
+      ico.set([0, 0, 1, 0, 1, 0]);
+      const cardFavicons: CardFaviconOptions = {
+        fetch: async (url) => (fetched.push(url), new Response(ico, { headers: { "content-type": "image/x-icon" } })),
+        lookup: async () => ["93.184.216.34"],
+      };
+      const start = async (board: boolean) => {
+        const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-board-favicon-")));
+        roots.push(root);
+        const dataDir = join(root, "data");
+        mkdirSync(dataDir, { recursive: true });
+        process.env.PLANNOTATOR_DATA_DIR = dataDir;
+        writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: board, inboxTailscaleAllow: [GUEST] }));
+        const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, board, cardFavicons, tailscale: scriptedTailscale(MAGIC, OWNER) });
+        servers.push(server);
+        const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
+        const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Links", refs: ["https://linear.app/acme/issue/ENG-1"] });
+        const path = `/api/inbox/cards/${card.id}/favicon?url=${encodeURIComponent("https://linear.app/acme/issue/ENG-1")}`;
+        return { server, path };
+      };
+
+      const on = await start(true);
+      const listener = on.server.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      const through = (login: string) =>
+        fetch(`http://127.0.0.1:${listener}${on.path}`, { headers: { Host: `${MAGIC}:${on.server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${on.server.port}` } });
+      const guest = await through(GUEST);
+      expect(guest.status).toBe(403);
+      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      expect(fetched).toEqual([]);
+      expect((await through(OWNER)).status).toBe(200);
+      expect(fetched).toEqual(["https://linear.app/favicon.ico"]);
+
+      const off = await start(false);
+      const refused = await fetch(`http://127.0.0.1:${off.server.port}${off.path}`);
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe("board_off");
+      expect(fetched).toHaveLength(1);
+    } finally {
+      if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+      else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
+    }
   });
 
   test("a card and its history, newest first", async () => {

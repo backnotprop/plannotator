@@ -75,6 +75,8 @@ const JIRA_KEY = /^([A-Z][A-Z0-9_]{1,49})-([1-9]\d{0,9})$/;
 const JIRA_CLOUD_HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.atlassian\.net$/;
 /** Hosts that are never a self-hosted Jira or YouTrack, though a path on them may look like one. */
 const NOT_TRACKER_HOSTS = new Set(["github.com", "www.github.com", "gitlab.com", "www.gitlab.com", "bitbucket.org", "www.bitbucket.org"]);
+/** A host no self-hosted Jira or YouTrack is on: a forge's, or Atlassian's own (`*.atlassian.net` is Jira Cloud, never a YouTrack). */
+const notTrackerHost = (host: string) => NOT_TRACKER_HOSTS.has(host) || host === "atlassian.net" || host.endsWith(".atlassian.net");
 
 /**
  * Jira issues, link only (user feedback #9): no sign-in, no state, no fetch;
@@ -82,9 +84,9 @@ const NOT_TRACKER_HOSTS = new Set(["github.com", "www.github.com", "gitlab.com",
  * Read last, as the structural match it is:
  * - Jira Cloud, `https://<site>.atlassian.net/browse/KEY-123`, or a board or
  *   list link with `?selectedIssue=KEY-123` under `/jira/`;
- * - a self-hosted Jira, any other host, only when the path is exactly
- *   `/browse/KEY-123` with the key in capitals, so an ordinary link is
- *   never read as an issue.
+ * - a self-hosted Jira, any other host (never a forge's), only when the path
+ *   is exactly `/browse/KEY-123` (a trailing slash allowed) with the key in
+ *   capitals, so an ordinary link is never read as an issue.
  * The ref is the key (`DEMO-123`); the URL is the canonical
  * `<origin>/browse/KEY-123`, its query and fragment dropped.
  */
@@ -105,7 +107,8 @@ const jiraParser: InboxCardRefParser = {
     // Jira Cloud is https on its default port only; a self-hosted Jira keeps the port it was given.
     if (cloud && (url.protocol !== "https:" || url.port)) return null;
     let key: string | null = null;
-    const browse = /^\/browse\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+    // `/browse/KEY-123`, a trailing slash allowed (how a link is sometimes copied).
+    const browse = /^\/browse\/([A-Za-z0-9_-]+)\/?$/.exec(url.pathname);
     if (browse) {
       // Jira Cloud reads a key in any case; a self-hosted link must be written as Jira writes it.
       key = cloud ? browse[1]!.toUpperCase() : browse[1]!;
@@ -113,7 +116,7 @@ const jiraParser: InboxCardRefParser = {
       key = url.searchParams.get("selectedIssue")?.toUpperCase() ?? null;
     }
     if (!key || !JIRA_KEY.test(key)) return null;
-    if (!cloud && NOT_TRACKER_HOSTS.has(host)) return null;
+    if (!cloud && notTrackerHost(host)) return null;
     return { kind: "issue", source: "jira", ref: key, url: `${url.protocol}//${url.host}/browse/${key}` };
   },
 };
@@ -127,8 +130,8 @@ const YOUTRACK_KEY = /^([A-Z][A-Z0-9_]{0,49})-([1-9]\d{0,9})$/;
 const YOUTRACK_CLOUD_HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.youtrack\.cloud$/;
 /** A YouTrack Cloud site from before November 2021, served under `/youtrack`: one name under myjetbrains.com. */
 const YOUTRACK_LEGACY_HOST = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.myjetbrains\.com$/;
-/** `[/youtrack]/issue/KEY-123`, then at most the summary slug YouTrack adds (`/Crash-on-save`). */
-const YOUTRACK_PATH = /^(\/youtrack)?\/issue\/([A-Za-z0-9_]+-[0-9]+)(?:\/[^/]+)?$/;
+/** `[/youtrack]/issue/KEY-123`, then at most the summary slug YouTrack adds (`/Crash-on-save`) and a trailing slash. */
+const YOUTRACK_PATH = /^(\/youtrack)?\/issue\/([A-Za-z0-9_]+-[0-9]+)(?:\/[^/]+)?\/?$/;
 
 /**
  * YouTrack issues, link only (user feedback #10), as Jira: no sign-in, no
@@ -137,8 +140,9 @@ const YOUTRACK_PATH = /^(\/youtrack)?\/issue\/([A-Za-z0-9_]+-[0-9]+)(?:\/[^/]+)?
  * - YouTrack Cloud, `https://<name>.youtrack.cloud/issue/KEY-123[/slug]`;
  * - an older Cloud site, `https://<name>.myjetbrains.com/youtrack/issue/KEY-123[/slug]`;
  * - a self-hosted YouTrack, any other host, only when the path is exactly
- *   `/issue/KEY-123` or `/youtrack/issue/KEY-123` (optionally the slug) with
- *   the key in capitals, never on a forge's host.
+ *   `/issue/KEY-123` or `/youtrack/issue/KEY-123` (optionally the slug, and
+ *   a trailing slash) with the key in capitals, never on a forge's host or
+ *   on `*.atlassian.net`.
  * Cloud reads a key in any case, as YouTrack does, and stores it in capitals.
  * The ref is the key (`PROJ-123`); the URL is the canonical
  * `<origin>[/youtrack]/issue/KEY-123`, its slug, query and fragment dropped.
@@ -166,7 +170,7 @@ const youtrackParser: InboxCardRefParser = {
     if (cloud && (url.protocol !== "https:" || url.port)) return null;
     const key = cloud ? match[2]!.toUpperCase() : match[2]!;
     if (!YOUTRACK_KEY.test(key)) return null;
-    if (!cloud && NOT_TRACKER_HOSTS.has(host)) return null;
+    if (!cloud && notTrackerHost(host)) return null;
     return { kind: "issue", source: "youtrack", ref: key, url: `${url.protocol}//${url.host}${base}/issue/${key}` };
   },
 };

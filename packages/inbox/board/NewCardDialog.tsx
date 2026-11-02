@@ -24,11 +24,12 @@ export interface NewCardInput {
 /**
  * The links in a links field, split on spaces and commas. A URL keeps the
  * commas inside it (a map's `@37.7,-122.4`, a filter's `a,b`); only a comma
- * that ends it is a separator.
+ * that ends it, or one right before another `http(s)://` (`url1,url2` from a
+ * spreadsheet cell), is a separator.
  */
 export function splitRefs(text: string): string[] {
   return text
-    .split(/\s+/)
+    .split(/\s+|,(?=https?:\/\/)/i)
     .flatMap((word) => (/^https?:\/\//i.test(word) ? [word.replace(/,+$/, '')] : word.split(',')))
     .map((word) => word.trim())
     .filter(Boolean);

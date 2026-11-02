@@ -43,12 +43,15 @@ describe("parseInboxCardRef: Jira", () => {
     expect(sourceOf("https://example.atlassian.net/jira/software/projects/DEMO/boards/1")).toBe("web");
   });
 
-  test("a self-hosted Jira, only when the path is exactly /browse/KEY-123", () => {
+  test("a self-hosted Jira, only when the path is exactly /browse/KEY-123 (a trailing slash allowed)", () => {
     expect(parseInboxCardRef("https://jira.acme.corp/browse/OPS-42")).toEqual(jira("OPS-42", "https://jira.acme.corp/browse/OPS-42"));
     expect(parseInboxCardRef("http://jira.internal:8080/browse/OPS-42?focusedCommentId=9")).toEqual(jira("OPS-42", "http://jira.internal:8080/browse/OPS-42"));
+    // A trailing slash is how a link is sometimes copied: the same issue, one link (review of #2540, P3-5).
+    expect(parseInboxCardRef("https://jira.acme.corp/browse/OPS-42/")).toEqual(jira("OPS-42", "https://jira.acme.corp/browse/OPS-42"));
+    expect(parseInboxCardRef("https://example.atlassian.net/browse/DEMO-1/")).toEqual(jira("DEMO-1", "https://example.atlassian.net/browse/DEMO-1"));
     for (const ordinary of [
       "https://jira.acme.corp/jira/browse/OPS-42", // a context path
-      "https://jira.acme.corp/browse/OPS-42/", // not exactly
+      "https://jira.acme.corp/browse/OPS-42//", // not exactly
       "https://blog.example.com/browse/ops-42", // a lowercase slug on an ordinary site
       "https://docs.example.com/browse/HTTP-2-guide",
       "https://example.com/browse/A-1", // a one-letter project key
@@ -123,10 +126,13 @@ describe("parseInboxCardRef: YouTrack (user feedback #10)", () => {
   test("a self-hosted YouTrack, only when the path is exactly [/youtrack]/issue/KEY-123[/slug] with the key in capitals", () => {
     expect(parseInboxCardRef("https://youtrack.jetbrains.com/issue/KT-55555/Some-summary")).toEqual(youtrack("KT-55555", "https://youtrack.jetbrains.com/issue/KT-55555"));
     expect(parseInboxCardRef("http://tracker.internal:8080/youtrack/issue/OPS-42")).toEqual(youtrack("OPS-42", "http://tracker.internal:8080/youtrack/issue/OPS-42"));
+    // A trailing slash, after the key or the slug, is the same issue (review of #2540, P3-5).
+    expect(parseInboxCardRef("https://acme.youtrack.cloud/issue/PROJ-1/")).toEqual(youtrack("PROJ-1", "https://acme.youtrack.cloud/issue/PROJ-1"));
+    expect(parseInboxCardRef("https://youtrack.jetbrains.com/issue/KT-55555/Some-summary/")).toEqual(youtrack("KT-55555", "https://youtrack.jetbrains.com/issue/KT-55555"));
     for (const ordinary of [
       "https://blog.example.com/issue/ops-42", // a lowercase key on an ordinary site
       "https://example.com/issue/OPS-42/comments/7", // more than the slug
-      "https://example.com/issue/OPS-42/", // not exactly
+      "https://example.com/issue/OPS-42//", // not exactly
       "https://example.com/issues/OPS-42",
       "https://example.com/docs/issue/OPS-42",
       "https://example.com/issue/OPS-0",
@@ -140,6 +146,9 @@ describe("parseInboxCardRef: YouTrack (user feedback #10)", () => {
     expect(sourceOf("https://github.com/issue/PROJ-1")).toBe("web");
     expect(sourceOf("https://gitlab.com/issue/PROJ-1/slug")).toBe("web");
     expect(sourceOf("https://bitbucket.org/issue/PROJ-1")).toBe("web");
+    // Atlassian's own hosts serve Jira Cloud, never a YouTrack.
+    expect(sourceOf("https://acme.atlassian.net/issue/ABC-1")).toBe("web");
+    expect(sourceOf("https://atlassian.net/issue/ABC-1")).toBe("web");
   });
 
   test("Cloud is https on its default port only, and a YouTrack issue is never a PR", () => {

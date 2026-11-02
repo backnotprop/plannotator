@@ -111,6 +111,38 @@ describe("card favicons", () => {
     expect(isPublicAddress("::1")).toBe(false);
   });
 
+  test("IPv6 that carries an IPv4 address, or loopback in another spelling, is never public (review of #2540, P3-3)", () => {
+    for (const address of [
+      "::7f00:1", // IPv4-compatible ::127.0.0.1, as dns.lookup writes an AAAA record of it
+      "::127.0.0.1",
+      "::0.0.0.1",
+      "::a00:1", // ::10.0.0.1
+      "::",
+      "0:0:0:0:0:0:0:1",
+      "0000:0000:0000:0000:0000:0000:0000:0001",
+      "::ffff:127.0.0.1",
+      "::ffff:7f00:1",
+      "::ffff:10.1.2.3",
+      "2002:7f00:1::", // 6to4 of 127.0.0.1
+      "2002:5db8:d822::1", // 6to4 of a public address: still IPv4 inside
+      "64:ff9b::7f00:1", // NAT64
+      "64:ff9b::5db8:d822",
+      "64:ff9b:1::1", // local-use NAT64
+      "2001:0:4136:e378::1", // Teredo
+      "2001:db8::1",
+      "fe80::1%en0",
+      "fd12::1",
+      "ff02::1",
+      "100::1",
+    ]) {
+      expect([address, isPublicAddress(address)]).toEqual([address, false]);
+    }
+    for (const address of ["2606:4700:4700::1111", "2a00:1450:4001:80b::200e", "::ffff:93.184.216.34", "93.184.216.34"]) {
+      expect([address, isPublicAddress(address)]).toEqual([address, true]);
+    }
+    for (const address of ["198.51.100.7", "203.0.113.9", "192.0.2.1", "192.0.0.8"]) expect([address, isPublicAddress(address)]).toEqual([address, false]);
+  });
+
   test("a miss is cached too, for an hour, then asked again", async () => {
     let now = 0;
     const { favicons, asked } = scripted(() => new Response("no", { status: 404 }), { now: () => now });
