@@ -74,6 +74,7 @@ packages/inbox/documentContents.test.tsx
 packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
+packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
@@ -469,4 +470,5 @@ packages/inbox/pickSaveReads.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
+packages/inbox/voiceDebugLog.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
