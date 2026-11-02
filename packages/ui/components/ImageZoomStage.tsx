@@ -8,6 +8,7 @@ import {
   DOUBLE_TAP_ZOOM,
   fitScale,
   fitViewport,
+  sameViewport,
   naturalBoxFromPoints,
   overflows,
   paddingInset,
@@ -389,15 +390,18 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [padding, fitAxis, measure, applyMode, apply]);
 
-  // The host's clear rows changed (what floats came or went): Fit eases to the new space, anything else stays where it is on screen, within it.
+  // The host's clear rows changed (what floats came or went): a picture resting at Fit eases to the new space, anything else (zoomed, or panned at Fit) stays where it is on screen, within it.
   const clearShape = useRef({ top: clearTop, bottom: clearBottom });
   useLayoutEffect(() => {
     const movedBy = clearShape.current.top - clearTop;
     if (movedBy === 0 && clearShape.current.bottom === clearBottom) return;
     clearShape.current = { top: clearTop, bottom: clearBottom };
+    // Resting at Fit (not panned or nudged since it was fitted): Fit eases to the new space. A picture panned at Fit stays where it is on screen.
+    const resting =
+      modeRef.current === 'fit' && ready() && !!viewRef.current && sameViewport(viewRef.current, fitViewport(dimsRef.current!, boxRef.current!, insetNow(), axisRef.current));
     measure();
     if (!ready() || !viewRef.current) return;
-    if (modeRef.current === 'fit') return applyMode('fit', true);
+    if (resting) return applyMode('fit', true);
     const kept = clampViewport({ ...viewRef.current, y: viewRef.current.y + movedBy }, dimsRef.current!, boxRef.current!, limits());
     if (modeRef.current === 'zoom') gesture(kept);
     else apply(kept);
