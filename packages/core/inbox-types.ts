@@ -2132,11 +2132,14 @@ export type InboxToolCostHost = "pi" | "opencode";
  * hand-over rule and the automatic ship): the Board-on entry measured
  * through inboxAgentTool on a real Inbox's tools/list, before and after,
  * 11,318 → 11,268 bytes, 2,733 → 2,721 o200k tokens (-50 bytes, -12 tokens);
- * Board off unchanged. So 11,211 with the Board on.
+ * Board off unchanged. Done in place of Shipped, and the ship line saying
+ * the agent ships on a merge it sees (review of #2522): 11,268 → 11,260
+ * bytes, 2,721 → 2,719 tokens. So 11,203 with the Board on (checked within
+ * 5% by inbox-board-switch.test.ts).
  */
 const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11211, tokens: 3038 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11203, tokens: 3036 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

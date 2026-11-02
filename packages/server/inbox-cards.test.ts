@@ -70,7 +70,7 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     expect(props.action!.enum).toContain("card");
     expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list"]);
     // The schema lists the v2 columns only; the ids before v2 are still taken (the next test).
-    expect(props.column!.enum).toEqual(["backlog", "todo", "in_progress", "in_review", "shipped", "dropped"]);
+    expect(props.column!.enum).toEqual(["backlog", "todo", "in_progress", "in_review", "done", "dropped"]);
     // Claude Code passes a tool description up to 2,048 characters.
     expect(tool.description.length).toBeLessThan(2048);
     // The connection fills the session and project, as for every Inbox tool.
@@ -108,21 +108,21 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     // `ref` links an issue (or a PR) from any supported source; the card's refs carry both, prs only the PR.
     const linked = (await card({ op: "link", card_id: id, ref: "plannotator/workspaces#1130" })).structuredContent.card;
     expect(linked.refs).toEqual([
-      { kind: "pr", source: "github", ref: "plannotator/workspaces#1125", url: "https://github.com/plannotator/workspaces/pull/1125" },
-      { kind: "issue", source: "github", ref: "plannotator/workspaces#1130", url: "https://github.com/plannotator/workspaces/issues/1130" },
+      { kind: "pr", source: "github", ref: "plannotator/workspaces#1125", url: "https://github.com/plannotator/workspaces/pull/1125", via: "pr" },
+      { kind: "issue", source: "github", ref: "plannotator/workspaces#1130", url: "https://github.com/plannotator/workspaces/issues/1130", via: "ref" },
     ]);
     expect(linked.prs).toHaveLength(1);
     expect((await card({ op: "link", card_id: id, ref: "https://gitlab.com/g/p/-/issues/4" })).structuredContent.card.refs.at(-1)).toMatchObject({ kind: "issue", source: "gitlab", ref: "g/p#4" });
     expect((await card({ op: "link", card_id: id, ref: "https://github.com-evil.example/o/r/issues/1" })).content[0]!.text).toStartWith("validation_error: ref:");
-    expect((await card({ op: "ship", card_id: id, say: "live on staging" })).structuredContent.card.column).toBe("shipped");
+    expect((await card({ op: "ship", card_id: id, say: "live on staging" })).structuredContent.card.column).toBe("done");
 
     const other = await card({ op: "create", title: "Auto-update for users" });
     const mine = await card({ op: "list" });
-    // Shipped is left out unless asked for.
+    // Done is left out unless asked for.
     expect(mine.structuredContent.cards.map((c: { id: string }) => c.id)).toEqual([other.structuredContent.card.id]);
     const all = await card({ op: "list", include_resolved: true });
     expect(all.structuredContent.cards.map((c: { id: string }) => c.id)).toEqual([other.structuredContent.card.id, id]);
-    expect(inboxToolResultText(all).text).toContain("Shipped");
+    expect(inboxToolResultText(all).text).toContain("Done");
     // Another session's list: its own cards only, unless it asks for anyone's.
     expect((await card({ op: "list", agent_session: "ses_b" })).structuredContent.cards).toEqual([]);
     expect((await card({ op: "list", agent_session: "ses_b", asked_by: "anyone" })).structuredContent.total).toBe(1);
@@ -191,6 +191,9 @@ describe.if(INBOX_CARD_ACTION_ON)("a card call writes no project, and tolerates 
       [{ column: "your_look", you: "pick a face" }, "in_review"],
       [{ column: "To do" }, "todo"],
       [{ column: "your_review", you: "merge it" }, "in_review"],
+      // Done's id before the owner's rename (2026-11-02).
+      [{ column: "shipped" }, "done"],
+      [{ column: "in_progress" }, "in_progress"],
     ];
     for (const [args, column] of moves) {
       const moved = await card({ op: "move", card_id: id, ...args });
@@ -200,6 +203,9 @@ describe.if(INBOX_CARD_ACTION_ON)("a card call writes no project, and tolerates 
     // The old Icebox id is Backlog now; an agent's own card there is still its own.
     expect((await card({ op: "move", card_id: id, column: "icebox" })).structuredContent.card.column).toBe("backlog");
     expect((await card({ op: "create", title: "Asked first", column: "asked" })).structuredContent.card.column).toBe("todo");
+    // The `done` spelling of ship (its column is Done) is taken too, unlisted in the schema.
+    const other = (await card({ op: "create", title: "Done by word", column: "in_progress" })).structuredContent.card.id as string;
+    expect((await card({ op: "done", card_id: other })).structuredContent.card.column).toBe("done");
     // An unknown id is refused naming the v2 columns.
     const bad = await card({ op: "move", card_id: id, column: "later" });
     expect(bad.content[0]!.text).toContain("in_progress");

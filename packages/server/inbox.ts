@@ -51,6 +51,7 @@ import {
   inboxCardAutoShip,
   inboxCardColumnOf,
   inboxCardRefsOf,
+  inboxCardShipPrs,
   inboxCardMarkRef,
   isInboxCardDropUnseen,
   INBOX_CARD_MARKS_MAX,
@@ -1141,7 +1142,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const droppedUnseen = store.listCards({ projectIds: project ? new Set([project]) : null, columns: new Set(["dropped"]) }).filter(isInboxCardDropUnseen).length;
     // `seen_seq` (additive): the person's last look at the Board (a store seq); a card an agent wrote to in a later line is unread (isInboxCardUnread).
     // `threads` (additive): each linked thread's list row, archived ones included (the window's list leaves
-    // them out), so the opened card names a shipped card's thread; a deleted thread is not linked at all.
+    // them out), so the opened card names a done card's thread; a deleted thread is not linked at all.
     const threads: Record<string, ReturnType<typeof store.listRow>> = {};
     for (const card of cards) for (const id of card.threads) if (!(id in threads)) threads[id] = store.listRow(id);
     return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads };
@@ -3217,7 +3218,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       // The lane cards' marks (inbox-card-marks.ts): the state of each card's one marked link, for the
       // cards on screen. Only the owner's window, only while the Board is on; never on the device
-      // door (not on its allowlist). Read only; it runs gh / glab, so another site is refused first.
+      // door (not on its allowlist). It writes only an automatic move to Done (Q3); it runs gh / glab, so
+      // another site is refused first.
       if (path === "/api/inbox/cards/marks") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -3232,14 +3234,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const wanted: { id: string; ref: InboxCardRef }[] = [];
         // Auto-ship (approval "inbox-board-columns-v2", Q3): a card in To do, In progress or In review has
-        // every PR it links read with its mark, in the same queries; all merged ships it (inboxCardAutoShip).
+        // its own PRs (linked through `pr`, inboxCardShipPrs) read with its mark, in the same queries; all
+        // merged, one of them new since it was last in Done, moves it to Done (inboxCardAutoShip).
         const shipping: { id: string; refs: InboxCardRef[] }[] = [];
         for (const id of new Set(ids as string[])) {
           const card = store.card(id);
           const ref = card ? inboxCardMarkRef(card) : null;
           if (ref) wanted.push({ id, ref });
           if (card && INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) {
-            const prs = inboxCardRefsOf(card).filter((r) => r.kind === "pr");
+            const own = new Set(inboxCardShipPrs(card));
+            const prs = inboxCardRefsOf(card).filter((r) => r.kind === "pr" && own.has(r.url));
             if (prs.length > 0) shipping.push({ id, refs: prs });
           }
         }

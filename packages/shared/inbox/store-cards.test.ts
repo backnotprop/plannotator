@@ -150,7 +150,7 @@ describe("cards: who moves a card (columns v2)", () => {
     advance(60_000);
     const review = store.updateCard(card.id, { by: AGENT, column: "in_review", you: "screenshots before merge" });
     expect(review).toMatchObject({ column: "in_review", you: "screenshots before merge", said: "PR open" });
-    const shipped = store.updateCard(card.id, { by: AGENT, column: "shipped" });
+    const shipped = store.updateCard(card.id, { by: AGENT, column: "done" });
     // Leaving the person's columns drops their line: it never follows the card back.
     expect(shipped.you).toBeNull();
     expect(store.updateCard(card.id, { by: OTHER, column: "todo", say: "reported broken again" }).column).toBe("todo");
@@ -339,7 +339,7 @@ describe("cards: on disk", () => {
       [make("building", AGENT), { column: "building" }, "in_progress", AGENT],
       [make("your review", AGENT), { column: "your_review", you: "merge" }, "in_review", AGENT],
       [make("iced", AGENT), { column: "icebox", aside_from: "building" }, "backlog", PERSON],
-      [make("shipped", AGENT), { column: "shipped" }, "shipped", AGENT],
+      [make("shipped", AGENT), { column: "shipped" }, "done", AGENT],
       [make("dropped", AGENT), { column: "dropped", aside_from: "backlog", dropped: { at: "2026-10-20T12:00:00.000Z", by: AGENT, reason: "x", seen_at: null } }, "dropped", AGENT],
     ];
     const lines = readFileSync(file, "utf8").trim().split("\n").map((raw) => JSON.parse(raw));
@@ -376,6 +376,25 @@ describe("cards: on disk", () => {
     expect(InboxStore.open(dir).card(card.id)!.column).toBe("in_progress");
   });
 
+  test("a v2 line from before Done's rename (`shipped`, owner 2026-11-02) reads as Done, with no rewrite; Restore goes back to Done", () => {
+    const { store, project, dir } = world();
+    const shipped = store.createCard({ project_id: project.id, by: AGENT, title: "Shipped before", column: "done" }).card;
+    const cancelled = store.createCard({ project_id: project.id, by: AGENT, title: "Cancelled from shipped", column: "done" }).card;
+    store.updateCard(cancelled.id, { by: PERSON, column: "dropped" });
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const written = readFileSync(file, "utf8").replaceAll('"column":"done"', '"column":"shipped"').replaceAll('"aside_from":"done"', '"aside_from":"shipped"');
+    expect(written).toContain('"shipped"');
+    writeFileSync(file, written);
+    const reopened = InboxStore.open(dir);
+    expect(reopened.card(shipped.id)!.column).toBe("done");
+    expect(reopened.card(cancelled.id)!.aside_from).toBe("done");
+    expect(readFileSync(file, "utf8")).toBe(written);
+    expect(reopened.updateCard(cancelled.id, { by: PERSON, restore: true }).column).toBe("done");
+    // An agent with the old id moves a card to Done.
+    const live = reopened.createCard({ project_id: project.id, by: AGENT, title: "Old agent", column: "in_progress" }).card;
+    expect(reopened.updateCard(live.id, { by: AGENT, column: "shipped" as never }).column).toBe("done");
+  });
+
   test("listCards: the Board's column order, the latest move first, and its filters", () => {
     const { store, project, advance } = world();
     const other = store.ensureProject({ name: "web", root: "/work/web" });
@@ -383,7 +402,7 @@ describe("cards: on disk", () => {
     advance(1000);
     const b = store.createCard({ project_id: project.id, by: OTHER, title: "b", column: "in_progress" }).card;
     const c = store.createCard({ project_id: project.id, by: AGENT, title: "c" }).card;
-    const d = store.createCard({ project_id: other.id, by: AGENT, title: "d", column: "shipped" }).card;
+    const d = store.createCard({ project_id: other.id, by: AGENT, title: "d", column: "done" }).card;
     expect(store.listCards().map((card) => card.id)).toEqual([c.id, b.id, a.id, d.id]);
     expect(store.listCards({ projectIds: new Set([project.id]), columns: new Set(["in_progress"]) }).map((card) => card.id)).toEqual([b.id, a.id]);
     expect(store.listCards({ agentSession: "ses_b" }).map((card) => card.id)).toEqual([b.id]);
@@ -423,7 +442,8 @@ describe("cards: the Board page's fields (step 2)", () => {
     const lines = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     delete lines.at(-1).record.refs;
     writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
-    expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12" }]);
+    // Linked as `prs` then, so each is the card's own PR (`via: "pr"`).
+    expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12", via: "pr" }]);
   });
 
   test("history: every write the card saw, newest first, with who wrote it", () => {
@@ -432,7 +452,7 @@ describe("cards: the Board page's fields (step 2)", () => {
     advance(1000);
     store.updateCard(card.id, { by: AGENT, column: "in_review", you: "Merge #14" });
     advance(1000);
-    store.updateCard(card.id, { by: PERSON, column: "shipped" });
+    store.updateCard(card.id, { by: PERSON, column: "done" });
     const history = store.cardHistory(card.id);
     expect(history[0]).toMatchObject({ kind: "moved", by: PERSON });
     expect(history.at(-1)!.kind).toBe("created");
@@ -509,18 +529,18 @@ describe("cards: the Board page's fields (step 2)", () => {
   });
 });
 
-describe("cards: shipped by itself (v2, Q3)", () => {
+describe("cards: to Done by itself (v2, Q3)", () => {
   const PR1 = "https://github.com/acme/widgets/pull/12";
   const PR2 = "https://github.com/acme/widgets/pull/13";
 
-  test("every linked PR merged: Shipped, once for that PR set; the person moving it back is final for it", () => {
+  test("every linked PR merged: Done, once for that PR set; the person moving it back is final for it", () => {
     const { store, project } = world();
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Forge", column: "in_review", you: "merge", prs: [PR1, PR2] });
     // One PR merged, the other not known merged: nothing.
     expect(store.autoShipCard(card.id, [PR1])).toBeNull();
     expect(store.card(card.id)!.column).toBe("in_review");
     const shipped = store.autoShipCard(card.id, [PR1, PR2])!;
-    expect(shipped).toMatchObject({ column: "shipped", you: null, moved_by: PERSON, heard_by: PERSON, auto_shipped: { prs: [PR1, PR2] } });
+    expect(shipped).toMatchObject({ column: "done", you: null, moved_by: PERSON, heard_by: PERSON, auto_shipped: { prs: [PR1, PR2] } });
     expect(store.cardHistory(card.id)[0]).toMatchObject({ kind: "auto_shipped", prs: [PR1, PR2] });
     // Already shipped: nothing more.
     expect(store.autoShipCard(card.id, [PR1, PR2])).toBeNull();
@@ -531,12 +551,12 @@ describe("cards: shipped by itself (v2, Q3)", () => {
     // A new PR linked and merged is a new set: it ships again.
     const PR3 = "https://github.com/acme/widgets/pull/14";
     store.updateCard(card.id, { by: AGENT, prs: [PR3] });
-    expect(store.autoShipCard(card.id, [PR1, PR2, PR3])!.column).toBe("shipped");
+    expect(store.autoShipCard(card.id, [PR1, PR2, PR3])!.column).toBe("done");
   });
 
   test("only To do, In progress and In review ship; a card with no PR, or one gone, never does", () => {
     const { store, project } = world();
-    const parked = store.createCard({ project_id: project.id, by: PERSON, title: "Idea", refs: [PR1] }).card;
+    const parked = store.createCard({ project_id: project.id, by: PERSON, title: "Idea", prs: [PR1] }).card;
     expect(parked.column).toBe("backlog");
     expect(store.autoShipCard(parked.id, [PR1])).toBeNull();
     const plain = store.createCard({ project_id: project.id, by: AGENT, title: "No PR" }).card;
@@ -546,6 +566,55 @@ describe("cards: shipped by itself (v2, Q3)", () => {
     expect(store.autoShipCard(cancelled.id, [PR1])).toBeNull();
     expect(store.autoShipCard("crd_00000000000000000000000000", [PR1])).toBeNull();
     const todo = store.createCard({ project_id: project.id, by: AGENT, title: "Asked", prs: [PR1] }).card;
-    expect(store.autoShipCard(todo.id, [PR1])!.column).toBe("shipped");
+    expect(store.autoShipCard(todo.id, [PR1])!.column).toBe("done");
+  });
+
+  // Review of #2522, finding 1: what regresses is a card moved out of Done by the person (or "reported
+  // broken again") that moves itself back to Done on the next Board view.
+  test("shipped by hand, then moved back: its PRs never move it to Done again; a PR merged since does", () => {
+    const { store, project } = world();
+    const byAgent = store.createCard({ project_id: project.id, by: AGENT, title: "Agent ship", column: "in_progress", prs: [PR1] }).card;
+    store.updateCard(byAgent.id, { by: AGENT, column: "done" });
+    // Reported broken again: the agent moves it back, as the tool text says.
+    store.updateCard(byAgent.id, { by: AGENT, column: "todo" });
+    expect(store.autoShipCard(byAgent.id, [PR1])).toBeNull();
+    const byPerson = store.createCard({ project_id: project.id, by: AGENT, title: "Person ship", column: "in_review", you: "merge", prs: [PR1] }).card;
+    store.updateCard(byPerson.id, { by: PERSON, column: "done" });
+    store.updateCard(byPerson.id, { by: PERSON, column: "in_progress" });
+    expect(store.autoShipCard(byPerson.id, [PR1])).toBeNull();
+    // Made in Done, moved out: the same.
+    const made = store.createCard({ project_id: project.id, by: AGENT, title: "Made done", column: "done", prs: [PR1] }).card;
+    store.updateCard(made.id, { by: PERSON, column: "in_progress" });
+    expect(store.autoShipCard(made.id, [PR1])).toBeNull();
+    // A fix PR, merged: it moves to Done by itself.
+    store.updateCard(byAgent.id, { by: AGENT, prs: [PR2] });
+    expect(store.autoShipCard(byAgent.id, [PR1, PR2])!.column).toBe("done");
+  });
+
+  test("a line from before done_prs: a card shipped and moved back then stays where it is after the upgrade", () => {
+    const { store, project, dir } = world();
+    const card = store.createCard({ project_id: project.id, by: AGENT, title: "Old ship", column: "in_progress", prs: [PR1] }).card;
+    store.updateCard(card.id, { by: AGENT, column: "done" });
+    store.updateCard(card.id, { by: PERSON, column: "in_progress" });
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const lines = readFileSync(file, "utf8").trim().split("\n").map((raw) => JSON.parse(raw));
+    for (const line of lines) delete line.record.done_prs;
+    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    expect(readFileSync(file, "utf8")).not.toContain("done_prs");
+    expect(InboxStore.open(dir).autoShipCard(card.id, [PR1])).toBeNull();
+  });
+
+  // Review of #2522, finding 2 (the coordinator's call): only the card's own PRs, linked through `pr`, count.
+  test("a PR linked through ref is context: merged, it never moves the card; given as the card's pr, it does", () => {
+    const { store, project } = world();
+    const context = store.createCard({ project_id: project.id, by: AGENT, title: "Follow-up", refs: [PR1] }).card;
+    expect(store.autoShipCard(context.id, [PR1])).toBeNull();
+    const mixed = store.createCard({ project_id: project.id, by: AGENT, title: "Own PR", column: "in_progress", prs: [PR2], refs: [PR1] }).card;
+    // Its own PR not merged yet: the merged context PR does nothing.
+    expect(store.autoShipCard(mixed.id, [PR1])).toBeNull();
+    expect(store.autoShipCard(mixed.id, [PR1, PR2])).toMatchObject({ column: "done", auto_shipped: { prs: [PR2] } });
+    // The context PR given later as the card's own: it counts from then on.
+    store.updateCard(context.id, { by: AGENT, prs: [PR1] });
+    expect(store.autoShipCard(context.id, [PR1])!.column).toBe("done");
   });
 });

@@ -74,7 +74,7 @@ export interface CardPanelProps {
  * agent is working; the "You: …" band; notes; threads (a click opens the
  * thread in the Inbox, with a way back); links (PRs, issues), their live
  * state read when the card opens and never acted on; history, with a quiet
- * "Ask for an update"; and at the foot Ship · Cancel… (with a reason),
+ * "Ask for an update"; and at the foot Mark done · Cancel… (with a reason),
  * Send to an agent for a Backlog or To do card nobody was asked about,
  * Restore on a Cancelled card.
  */
@@ -116,7 +116,7 @@ export function CardPanel(props: CardPanelProps) {
   // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
   const you = cardYou(card);
   const threadAt = youThread(card, props.rowOf);
-  const live = card.column !== 'dropped' && card.column !== 'shipped';
+  const live = card.column !== 'dropped' && card.column !== 'done';
   const askable = (agent !== null || props.canAsk) && live;
   // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
   const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
@@ -343,7 +343,7 @@ export function CardPanel(props: CardPanelProps) {
           {foot.primary === 'ship' && (
             <button type="button" className="ib-btn ib-soft" onClick={props.onShip} data-card-ship="">
               <Icon name="checkCircle" size={15} />
-              Ship
+              Mark done
             </button>
           )}
           {foot.primary === 'restore' && (
@@ -374,7 +374,7 @@ export function CardPanel(props: CardPanelProps) {
   );
 }
 
-/** The card's column, as a Move menu: the live lanes (its own checked), then Shipped; Restore when it is Cancelled. */
+/** The card's column, as a Move menu: the live lanes (its own checked), then Done; Restore when it is Cancelled. */
 function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; sent: boolean; onColumn: (column: InboxCardColumn) => void; onRestore: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);

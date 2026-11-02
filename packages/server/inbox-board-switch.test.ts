@@ -28,6 +28,7 @@ import { INBOX_AGENT_RULES, INBOX_TOOL_BOARD_OFF_NOTE, inboxAgentTool, inboxTool
 import { inboxAgentTool as modAgentTool } from "../../apps/hook/hooks/mod/inbox-contract";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
+import { INBOX_TOOL_COST_WITH_BOARD } from "@plannotator/core/inbox-types";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
 
 const roots: string[] = [];
@@ -177,4 +178,16 @@ test("the switch is a boolean, and only from this computer's page", async () => 
   });
   expect(cross.status).toBe(403);
   expect((await w.settings()).board).toEqual({ on: false });
+});
+
+// Review of #2522, finding 7: the window states the tool's size with the Board on (INBOX_TOOL_COST_WITH_BOARD);
+// what regresses is card text that grows the entry every request carries while that number goes stale.
+test("the agent tool's entry with the Board on stays within 5% of the size the window states", async () => {
+  const w = await world();
+  await w.setBoard(true);
+  const tool = inboxAgentTool(parseInboxToolList((await w.rpc("tools/list", {})).result))!;
+  expect(tool.description).toContain("Board card");
+  // Pi's request shape: name, description, parameters.
+  const bytes = Buffer.byteLength(JSON.stringify({ name: tool.name, description: tool.description, parameters: tool.inputSchema }));
+  expect(Math.abs(bytes - INBOX_TOOL_COST_WITH_BOARD.bytes) / INBOX_TOOL_COST_WITH_BOARD.bytes).toBeLessThanOrEqual(0.05);
 });

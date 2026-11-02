@@ -31,7 +31,7 @@ import {
   boardLanes,
   boardProjects,
   cardsInProject,
-  inShippedLane,
+  inDoneLane,
   BOARD_FILTER_ROW_BELOW,
   cardAge,
   cardLabel,
@@ -97,7 +97,7 @@ export interface BoardPageProps {
   tidy?: TidyController;
   /**
    * The project the Board shows (`#board&project=prj_…`, the list's own key), or null for every card.
-   * Lanes, counts, Shipped, Cancelled and the agents' drops all follow it.
+   * Lanes, counts, Done, Cancelled and the agents' drops all follow it.
    */
   project?: string | null;
   onProject?: (project: string | null) => void;
@@ -110,11 +110,11 @@ export interface BoardPageProps {
 
 /**
  * The Board (approval "inbox-board", step 2; columns v2): five lanes, Backlog,
- * To do, In progress, In review and Shipped (its last seven days), cards in
- * variant C "Lean", All shipped and Cancelled as links to their own lists, the
+ * To do, In progress, In review and Done (its last seven days), cards in
+ * variant C "Lean", All done and Cancelled as links to their own lists, the
  * agents' unseen drops above the lanes. A card opens in
  * a panel beside the Board (the lanes narrow and scroll, so the card's lane
- * stays in view); on a phone the lanes are one stacked list (Shipped and
+ * stays in view); on a phone the lanes are one stacked list (Done and
  * Cancelled folded at the end) and an opened card is a full screen. Every move
  * is on the opened card's column menu (the keyboard's way), and on a desktop
  * a card can be dragged to another lane.
@@ -131,8 +131,7 @@ export function BoardPage(props: BoardPageProps) {
   const names = useMemo(() => projectNames(props.projects), [props.projects]);
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
-  // "On you": In review, and a card whose linked thread waits on the person ("Waiting on you", display only).
-  const counts = boardCounts(cards, props.rowOf);
+  const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
   const [creating, setCreating] = useState<null | 'backlog' | 'send'>(null);
   const [intro, setIntro] = useState(false);
@@ -154,8 +153,8 @@ export function BoardPage(props: BoardPageProps) {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  // Cards on the lanes (Backlog, and Shipped's last week, too): none is the empty Board's line. "In flight" in the header leaves Backlog out.
-  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inShippedLane(card, now)).length;
+  // Cards on the lanes (Backlog, and Done's last week, too): none is the empty Board's line.
+  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inDoneLane(card, now)).length;
   const { model: sessions } = useComposeSessions(true);
   const live = sessions ? sessions.projects.flatMap((g) => g.sessions) : null;
   const open = props.openCard ? (allCards.find((c) => c.id === props.openCard) ?? null) : null;
@@ -385,7 +384,7 @@ export function BoardPage(props: BoardPageProps) {
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
-  // header, as on a phone, so neither it nor the counts are cut to a few letters.
+  // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
   useLayoutEffect(() => {
     const el = pageRef.current;
@@ -454,12 +453,12 @@ export function BoardPage(props: BoardPageProps) {
       </div>
     );
   else if (phone) body = <PhoneBoard cards={cards} counts={counts} {...common} onRestore={(card) => move(card, { op: 'restore' })} />;
-  else if (view === 'shipped')
+  else if (view === 'done')
     body = (
       <CardList
-        title="Shipped"
-        empty={project ? <>Nothing shipped in {inProject} yet.</> : 'Nothing shipped yet. A card goes here when its work is merged or live.'}
-        cards={cards.filter((c) => c.column === 'shipped')}
+        title="Done"
+        empty={project ? <>Nothing done in {inProject} yet.</> : 'Nothing done yet. A card goes here when its work is merged, live or finished.'}
+        cards={cards.filter((c) => c.column === 'done')}
         {...common}
       />
     );
@@ -510,7 +509,7 @@ export function BoardPage(props: BoardPageProps) {
               Board
             </button>
             <h1 id={titleId} tabIndex={-1}>
-              {view === 'shipped' ? 'Shipped' : 'Cancelled'}
+              {view === 'done' ? 'Done' : 'Cancelled'}
             </h1>
             {!narrowHead && filter}
           </>
@@ -519,22 +518,11 @@ export function BoardPage(props: BoardPageProps) {
             <h1 id={titleId} tabIndex={-1}>
               Board
             </h1>
-            {model && (
-              <span className="ib-bsum" data-board-summary="">
-                {counts.inFlight === 0 ? (
-                  'Nothing in flight'
-                ) : (
-                  <>
-                    {phone ? formatCount(counts.inFlight) : `${formatCount(counts.inFlight)} in flight`} · <b>{formatCount(counts.onYou)} on you</b>
-                  </>
-                )}
-              </span>
-            )}
             {!phone && !narrowHead && filter}
           </>
         )}
         <span className="ib-bsp" />
-        {/* The "?" sits left of Shipped and Cancelled (the intro mock). */}
+        {/* The "?" sits left of Done and Cancelled (the intro mock). */}
         {(view === 'lanes' || phone) && (
           <Tip content="About the Board">
             <button type="button" className="ib-iconbtn ib-babout" aria-label="About the Board" aria-haspopup="dialog" onClick={() => setIntro(true)} data-board-about="">
@@ -544,8 +532,8 @@ export function BoardPage(props: BoardPageProps) {
         )}
         {!phone && view === 'lanes' && model && (
           <nav className="ib-blinks" aria-label="Cards out of the lanes">
-            <a href="#board=shipped" data-board-link="shipped" onClick={(event) => (event.preventDefault(), props.onView('shipped'))}>
-              All shipped
+            <a href="#board=done" data-board-link="done" onClick={(event) => (event.preventDefault(), props.onView('done'))}>
+              All done
             </a>
             <span aria-hidden="true">·</span>
             <a href="#board=cancelled" data-board-link="cancelled" onClick={(event) => (event.preventDefault(), props.onView('cancelled'))}>
@@ -553,7 +541,7 @@ export function BoardPage(props: BoardPageProps) {
             </a>
           </nav>
         )}
-        {(view === 'lanes' || phone) && <NewCardButton disabled={props.projects.length === 0 && !(live && live.length > 0)} phone={phone} compact={phone || narrowHead} onOpen={() => openCreate('backlog')} />}
+        {(view === 'lanes' || phone) && <NewCardButton disabled={props.projects.length === 0 && !(live && live.length > 0)} phone={phone} onOpen={() => openCreate('backlog')} />}
         {props.tidy && (view === 'lanes' || phone) && (
           <TidyMenu tidy={props.tidy} phone={phone} className="ib-bhead-more" onRefresh={() => props.onChanged()} />
         )}
@@ -670,16 +658,14 @@ interface CardCommon {
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
 }
 
-/** New card; `compact` (a phone, or a narrow header): the + alone, its name in the label and the tip. */
-function NewCardButton({ disabled, phone, compact, onOpen }: { disabled: boolean; phone: boolean; compact: boolean; onOpen: () => void }) {
+function NewCardButton({ disabled, phone, onOpen }: { disabled: boolean; phone: boolean; onOpen: () => void }) {
   const button = (
-    <button type="button" className="ib-btn ib-sm ib-bnew" data-board-new="" disabled={disabled} aria-haspopup="dialog" onClick={onOpen} aria-label={compact ? 'New card' : undefined}>
+    <button type="button" className="ib-btn ib-sm ib-bnew" data-board-new="" disabled={disabled} aria-haspopup="dialog" onClick={onOpen} aria-label={phone ? 'New card' : undefined}>
       <Icon name="plus" size={15} />
-      {!compact && 'New card'}
+      {!phone && 'New card'}
     </button>
   );
-  if (disabled) return <Tip content="A card needs a project: an agent's first message makes one.">{button}</Tip>;
-  return compact && !phone ? <Tip content="New card">{button}</Tip> : button;
+  return disabled ? <Tip content="A card needs a project: an agent's first message makes one.">{button}</Tip> : button;
 }
 
 function Lanes({
@@ -793,7 +779,7 @@ const LANE_EMPTY: Partial<Record<InboxCardColumn, string>> = {
   todo: 'Nothing asked and waiting to start.',
   in_progress: 'No agent is working on anything.',
   in_review: 'Nothing waits on your review.',
-  shipped: 'Nothing shipped in the last 7 days.',
+  done: 'Nothing done in the last 7 days.',
 };
 
 /** A lane card's title is cut (clamped at three lines, or a word cut at the edge): its button overflows. */
@@ -974,7 +960,7 @@ function DroppedNotice({
   );
 }
 
-/** A list of cards (Shipped), newest move first. */
+/** A list of cards (Done), newest move first. */
 function CardList({ title, empty, cards, ...common }: CardCommon & { title: string; empty: ReactNode; cards: readonly InboxCardWire[] }) {
   const id = useId();
   return (
@@ -1083,9 +1069,9 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
 
 /**
  * A phone: the lanes as one stacked list in column order, each foldable
- * (Shipped, its last seven days, and Cancelled folded at the end), Shipped
- * ending in "All shipped" when older cards shipped. No drag: a card opens
- * full screen, where its column menu moves it.
+ * (Done, its last seven days, and Cancelled folded at the end), Done ending
+ * in "All done" when older cards are done. No drag: a card opens full
+ * screen, where its column menu moves it.
  */
 function PhoneBoard({
   cards,
@@ -1093,8 +1079,8 @@ function PhoneBoard({
   onRestore,
   ...common
 }: CardCommon & { cards: readonly InboxCardWire[]; counts: ReturnType<typeof boardCounts>; onRestore: (card: InboxCardWire) => unknown }) {
-  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(['shipped', 'dropped']));
-  const [allShipped, setAllShipped] = useState(false);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(['done', 'dropped']));
+  const [allDone, setAllDone] = useState(false);
   const toggle = (key: string) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -1112,21 +1098,38 @@ function PhoneBoard({
     ) : (
       <p className="ib-lane-empty">{empty}</p>
     );
-  const shipped = cards.filter((c) => c.column === 'shipped');
+  const done = cards.filter((c) => c.column === 'done');
+  const stackRef = useRef<HTMLDivElement | null>(null);
+  // "All done" leaves the page when tapped: focus goes to the first card it shows, never to the body.
+  const [focusCard, setFocusCard] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusCard) return;
+    setFocusCard(null);
+    stackRef.current?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(focusCard)}"] [data-card-open]`)?.focus();
+  }, [focusCard]);
   const groups: { key: string; label: string; count: number; body: ReactNode }[] = boardLanes(cards, common.now).map((lane) => {
-    if (lane.column !== 'shipped') return { key: lane.column, label: lane.label, count: lane.cards.length, body: list(lane.cards, LANE_EMPTY[lane.column] ?? '') };
-    const older = shipped.length - lane.cards.length;
-    const showAll = allShipped && older > 0;
+    if (lane.column !== 'done') return { key: lane.column, label: lane.label, count: lane.cards.length, body: list(lane.cards, LANE_EMPTY[lane.column] ?? '') };
+    const recent = new Set(lane.cards.map((card) => card.id));
+    const older = done.filter((card) => !recent.has(card.id));
+    const showAll = allDone && older.length > 0;
     return {
-      key: 'shipped',
+      key: 'done',
       label: lane.label,
-      count: showAll ? shipped.length : lane.cards.length,
+      count: showAll ? done.length : lane.cards.length,
       body: (
         <>
-          {showAll ? list(shipped, '') : list(lane.cards, LANE_EMPTY.shipped ?? '')}
-          {older > 0 && !showAll && (
-            <button type="button" className="ib-lnk ib-bshipall" data-board-shipped-all="" onClick={() => setAllShipped(true)}>
-              All shipped ({formatCount(shipped.length)})
+          {showAll ? list(done, '') : list(lane.cards, LANE_EMPTY.done ?? '')}
+          {older.length > 0 && !showAll && (
+            <button
+              type="button"
+              className="ib-lnk ib-bdoneall"
+              data-board-done-all=""
+              onClick={() => {
+                setAllDone(true);
+                setFocusCard(older[0]!.id);
+              }}
+            >
+              All done ({formatCount(done.length)})
             </button>
           )}
         </>
@@ -1141,7 +1144,7 @@ function PhoneBoard({
     body: dropped.length > 0 ? <DroppedList cards={dropped} onRestore={onRestore} /> : <p className="ib-lane-empty">Nothing cancelled.</p>,
   });
   return (
-    <div className="ib-bstack">
+    <div ref={stackRef} className="ib-bstack">
       {groups.map((group) => {
         const opened = !folded.has(group.key);
         const bodyId = `ib-bstack-${group.key}`;
@@ -1291,7 +1294,7 @@ function OpenedCard({
       now={now}
       onClose={onClose}
       onColumn={(column) => onMove({ op: 'move', column })}
-      onShip={() => onMove({ op: 'move', column: 'shipped' })}
+      onShip={() => onMove({ op: 'move', column: 'done' })}
       onRestore={() => onMove({ op: 'restore' })}
       onDrop={(reason, fromMenu) => onMove({ op: 'drop', reason }, fromMenu)}
       dropAsk={dropAsk}

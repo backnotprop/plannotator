@@ -153,6 +153,7 @@ import {
   normalizeInboxCardNotes,
   inboxCardHistory,
   inboxCardRefsOf,
+  inboxCardShipPrs,
   type InboxCardRef,
   type InboxCardHistoryEntry,
   isInboxCardDropUnseen,
@@ -780,8 +781,14 @@ export class InboxStore {
         // Cards are their own records: nothing here touches routing or the list.
         // A card stored before columns v2 reads in the v2 columns (readInboxCard: the migration table, never a rewrite).
         {
-          const card = readInboxCard(line.record);
+          let card = readInboxCard(line.record);
           const prev = this.cards.get(card.id);
+          // A line from before `done_prs`: a card in Done then had these PRs (anyone's ship), and a later line
+          // keeps what the card had, so a card shipped and moved back before the upgrade is not moved to Done again.
+          if (card.done_prs === undefined) {
+            const done = card.column === "done" ? inboxCardShipPrs(card) : prev?.done_prs;
+            if (done) card = { ...card, done_prs: done };
+          }
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -5731,7 +5738,11 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      if (!out.some((k) => k.url === ref.url || k.ref === ref.ref)) out.push(ref);
+      const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
+      const at = out.findIndex((k) => k.url === ref.url || k.ref === ref.ref);
+      if (at < 0) out.push(linked);
+      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs).
+      else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
@@ -5762,7 +5773,7 @@ export class InboxStore {
    * A new card in `project_id`. From a thread (`threads`), the title defaults
    * to the thread's subject. Unless a column is given it starts in To do when
    * an agent makes it (it took an ask) and in Backlog when the person does; a
-   * live column, or Shipped for work already done; Dropped never. An agent
+   * live column, or Done for work already finished; Dropped never. An agent
    * that puts it in In review says what the person owes (`you`). The agent
    * that makes a card is the session it belongs to. Idempotent on
    * `idempotency_key` per project.
@@ -5819,7 +5830,7 @@ export class InboxStore {
     }
     // Sent to an agent: To do (the person asked for it). Otherwise an agent's card is work it took on (To do), the person's an idea (Backlog).
     const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
-    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or shipped), never dropped.", { field: "column" });
+    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
     if (target && column !== "backlog" && column !== "todo") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in To do.", { field: "thread_id" });
     const said = input.say === undefined || input.say === null ? null : this.cardText(input.say, "say", INBOX_CARD_LINE_MAX);
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
@@ -5852,6 +5863,7 @@ export class InboxStore {
       notes: this.cardNotes(input.notes),
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
+      ...(column === "done" && !target ? { done_prs: inboxCardShipPrs({ refs, prs }) } : {}),
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -5953,10 +5965,10 @@ export class InboxStore {
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
-    // Leaving a live column (or Shipped) for Dropped remembers it, so restoring goes back there.
+    // Leaving a live column (or Done) for Dropped remembers it, so restoring goes back there.
     const asideFrom =
       moves && column === "dropped"
-        ? isInboxCardLiveColumn(card.column) || card.column === "shipped"
+        ? isInboxCardLiveColumn(card.column) || card.column === "done"
           ? card.column
           : card.aside_from
         : moves
@@ -5978,6 +5990,8 @@ export class InboxStore {
       dropped,
       aside_from: asideFrom,
       notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
+      // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
+      ...(moves && column === "done" ? { done_prs: inboxCardShipPrs({ refs, prs }) } : {}),
     };
     this.appendCard(next, at);
     return next;
@@ -6080,9 +6094,9 @@ export class InboxStore {
    * The Inbox ships a card by itself (v2, Q3): every PR it links has merged
    * and none is open (`prs`, the URLs inboxCardAutoShip answered). Rechecked
    * here against the card as it stands, so a card that moved since the
-   * states were read, or was already shipped for these PRs, is left alone.
+   * states were read, or was already moved to Done for these PRs, is left alone.
    * Not an agent's write: `heard_by` is the person's side (no unread bold),
-   * and the history says "Shipped automatically". Answers the card, or null
+   * and the history says "Done automatically". Answers the card, or null
    * when nothing was done.
    */
   autoShipCard(id: string, prs: readonly string[]): InboxCard | null {
@@ -6095,7 +6109,7 @@ export class InboxStore {
     const by: InboxAuthor = { kind: "person" };
     const next: InboxCard = {
       ...card,
-      column: "shipped",
+      column: "done",
       you: null,
       moved_at: at,
       moved_by: by,
@@ -6104,6 +6118,7 @@ export class InboxStore {
       dropped: null,
       aside_from: null,
       auto_shipped: { at, prs: urls },
+      done_prs: urls,
     };
     this.appendCard(next, at);
     return next;
