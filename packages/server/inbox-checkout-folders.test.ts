@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { foldCheckoutFolderProjects, INBOX_CHECKOUT_FOLDS_FILE } from "./inbox-checkout-folders";
+import { foldCheckoutFolderProjects, INBOX_CHECKOUT_FOLDS_FILE, INBOX_CHECKOUT_FOLDS_MAX_STARTS } from "./inbox-checkout-folders";
 import type { InboxGitRunner } from "./inbox-project-root";
 
 const scratch: string[] = [];
@@ -150,7 +150,7 @@ test("no repository project yet: the folder project is left as it is and the nex
   const store = InboxStore.open(dataDir);
   const old = store.ensureProject({ name: "appnotes", root: folder });
   expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: false });
-  expect(existsSync(join(store.dir, INBOX_CHECKOUT_FOLDS_FILE))).toBe(false);
+  expect(stateOf(store)).toMatchObject({ starts: 1, done: false });
   // A session in a checkout makes the repository's project; the next pass folds the folder into it.
   const repo = store.ensureProject({ name: "main", root: main });
   expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [{ project: old.id, into: repo.id }], done: true });
@@ -234,4 +234,116 @@ test("projects already combined either way are left as they are, and a git that 
   const slow: InboxGitRunner = async (args, cwd) => (cwd === second.main ? null : real(args, cwd));
   expect(await foldCheckoutFolderProjects({ store: other, git: slow })).toEqual({ folded: [], done: false });
   expect(other.canonicalProjectId(plain.id)).toBe(plain.id);
+});
+
+const stateOf = (store: InboxStore) => JSON.parse(readFileSync(join(store.dir, INBOX_CHECKOUT_FOLDS_FILE), "utf8")) as { since: string; starts: number; done: boolean };
+
+test("an Undo of a combine the other way (the repository into the folder) is not redone", async () => {
+  const { folder, main, dataDir } = appnotes(tempRoot());
+  const store = InboxStore.open(dataDir);
+  const repo = store.ensureProject({ name: "main", root: main });
+  const old = store.ensureProject({ name: "appnotes", root: folder });
+  store.combineProject(repo.id, old.id);
+  store.combineProject(repo.id, null);
+  expect(store.project(old.id)?.separated_from).toBeUndefined();
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(old.id)).toBe(old.id);
+  expect(store.canonicalProjectId(repo.id)).toBe(repo.id);
+});
+
+test("~/work holding web/ right in it, client-docs/2024 and worktrees/api with api-feat: neither folder project folds; the owner's appnotes still does", async () => {
+  const root = tempRoot();
+  const work = join(root, "work");
+  const notes = join(work, "client-docs", "2024");
+  mkdirSync(notes, { recursive: true });
+  mkdirSync(join(work, "worktrees"));
+  const api = repository(join(work, "worktrees", "api"));
+  git(api, "worktree", "add", "-q", join(work, "worktrees", "api-feat"), "-b", "api-feat");
+  repository(join(work, "web"));
+  const store = InboxStore.open(join(root, "data"));
+  store.ensureProject({ name: "api", root: api });
+  const workProject = store.ensureProject({ name: "work", root: realpathSync(work) });
+  const notesProject = store.ensureProject({ name: "2024", root: realpathSync(notes) });
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  for (const project of [workProject, notesProject]) expect(store.canonicalProjectId(project.id)).toBe(project.id);
+  // The appnotes layout (no checkout right in the folder) folds as before.
+  const owner = appnotes(tempRoot());
+  const other = InboxStore.open(owner.dataDir);
+  const repo = other.ensureProject({ name: "main", root: owner.main });
+  const old = other.ensureProject({ name: "appnotes", root: owner.folder });
+  expect((await foldCheckoutFolderProjects({ store: other })).folded).toEqual([{ project: old.id, into: repo.id }]);
+});
+
+test("a folder project the person renamed stays apart", async () => {
+  const { folder, main, dataDir } = appnotes(tempRoot());
+  const store = InboxStore.open(dataDir);
+  store.ensureProject({ name: "main", root: main });
+  const old = store.ensureProject({ name: "appnotes", root: folder });
+  store.renameProject(old.id, "Appnotes notes");
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(old.id)).toBe(old.id);
+});
+
+test("this user's home (injected) with a worktrees folder of one repository is never folded", async () => {
+  const root = tempRoot();
+  const home = join(root, "me");
+  mkdirSync(join(home, "worktrees"), { recursive: true });
+  const main = repository(join(home, "worktrees", "main"));
+  const store = InboxStore.open(join(root, "data"));
+  store.ensureProject({ name: "main", root: main });
+  const homeProject = store.ensureProject({ name: "me", root: realpathSync(home) });
+  expect(await foldCheckoutFolderProjects({ store, home: realpathSync(home) })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(homeProject.id)).toBe(homeProject.id);
+  // Not this user's home: the same folder folds, so the home is what kept it apart.
+  rmSync(join(store.dir, INBOX_CHECKOUT_FOLDS_FILE));
+  expect((await foldCheckoutFolderProjects({ store, home: null })).folded).toHaveLength(1);
+});
+
+test("a done pass is final: a folder that becomes foldable later is not folded by a later start", async () => {
+  const root = tempRoot();
+  const folder = join(root, "appnotes");
+  mkdirSync(folder);
+  const store = InboxStore.open(join(root, "data"));
+  const old = store.ensureProject({ name: "appnotes", root: realpathSync(folder) });
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  mkdirSync(join(folder, "worktrees"));
+  const main = repository(join(folder, "worktrees", "main"));
+  store.ensureProject({ name: "main", root: main });
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(old.id)).toBe(old.id);
+  // Without the state file the same store folds: the file is what stopped it.
+  rmSync(join(store.dir, INBOX_CHECKOUT_FOLDS_FILE));
+  expect((await foldCheckoutFolderProjects({ store })).folded).toEqual([{ project: old.id, into: store.projectByRoot(main)!.id }]);
+});
+
+test("pending ends: only projects older than the first pass count, and the pass gives up after its last start", async () => {
+  const { folder, dataDir } = appnotes(tempRoot());
+  const store = InboxStore.open(dataDir);
+  store.ensureProject({ name: "appnotes", root: folder });
+  const first = new Date(Date.now() + 1_000);
+  for (let start = 1; start < INBOX_CHECKOUT_FOLDS_MAX_STARTS; start += 1) {
+    expect(await foldCheckoutFolderProjects({ store, now: () => first })).toEqual({ folded: [], done: false });
+    expect(stateOf(store)).toMatchObject({ since: first.toISOString(), starts: start, done: false });
+  }
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  // A folder project made after the first pass is not an old duplicate (rule 4 files new sessions right): not a candidate.
+  const second = appnotes(tempRoot());
+  const other = InboxStore.open(second.dataDir);
+  other.ensureProject({ name: "main", root: second.main });
+  const newer = other.ensureProject({ name: "appnotes", root: second.folder });
+  const past = new Date(Date.parse(newer.created_at) - 60_000).toISOString();
+  writeFileSync(join(other.dir, INBOX_CHECKOUT_FOLDS_FILE), JSON.stringify({ v: 1, since: past, starts: 1, done: false, folded: [] }));
+  expect(await foldCheckoutFolderProjects({ store: other })).toEqual({ folded: [], done: true });
+  expect(other.canonicalProjectId(newer.id)).toBe(newer.id);
+});
+
+test("a folder project the person combined into another project stays there", async () => {
+  const { folder, main, dataDir } = appnotes(tempRoot());
+  const store = InboxStore.open(dataDir);
+  store.ensureProject({ name: "main", root: main });
+  const old = store.ensureProject({ name: "appnotes", root: folder });
+  const elsewhere = store.ensureProject({ name: "notes", root: tempRoot() });
+  store.combineProject(old.id, elsewhere.id);
+  expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(old.id)).toBe(elsewhere.id);
 });

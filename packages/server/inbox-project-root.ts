@@ -23,9 +23,10 @@
  *     `INBOX_PROJECT_CONTAINER_SCAN_MAX`, and each one's `.git`. Only
  *     checkouts in such a folder count (a `~/code` holding `api` and
  *     `api-wt` side by side is a folder of projects, not a repository);
- *     they must be of one repository, or a clear majority of them (at
- *     least three and four in five: a stray clone does not split the folder
- *     off), whose root git confirms and which lies in the folder. A plain
+ *     they must be of one repository, or four in five of them (a stray
+ *     clone does not split the folder off), whose root git confirms and
+ *     which lies in the folder (or its checkouts folder); a folder that also
+ *     holds a checkout right in it is a folder of repositories. A plain
  *     subfolder (`<repo>/notes`) is asked of the nearest such parent, at
  *     most three up. A home folder or a filesystem root is never folded.
  *
@@ -68,7 +69,7 @@
  */
 
 import { realpathSync, statSync } from "node:fs";
-import { lstat, opendir, readFile, realpath } from "node:fs/promises";
+import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { labelPath } from "@plannotator/core/inbox-project-labels";
@@ -83,8 +84,6 @@ export const INBOX_PROJECT_ROOT_TTL_MS = 60_000;
 export const INBOX_PROJECT_ROOT_CACHE_MAX = 512;
 /** How many parents up a folder outside any work tree looks for a checkouts holder (rule 4: `appnotes/notes` is `appnotes`'s). */
 export const INBOX_PROJECT_CONTAINER_WALK_MAX = 3;
-/** The fewest checkouts a repository needs to speak for a checkouts folder that also holds another repository's (rule 4). */
-export const INBOX_PROJECT_CONTAINER_MAJORITY_MIN = 3;
 /** A `worktrees` folder with more entries than this is not read for checkouts (rule 4): its folder stays its own project. */
 export const INBOX_PROJECT_CONTAINER_SCAN_MAX = 256;
 
@@ -372,15 +371,25 @@ export function isHomeOrRootShape(folder: string): boolean {
   return (top.length === 2 && ["users", "home"].includes(top[0]!.toLowerCase())) || (top.length === 1 && top[0] === "root");
 }
 
-/** `isHomeOrRootShape`, or this user's home folder wherever it is. */
-function isHomeOrRoot(folder: string): boolean {
-  if (folder === parse(folder).root || isHomeOrRootShape(folder)) return true;
+/** This user's home folder as a realpath, or null when there is none on record. */
+export function inboxProjectRootHome(): string | null {
   try {
-    return folder === realpathSync(homedir());
+    return realpathSync(homedir());
   } catch {
-    return false;
+    return null;
   }
 }
+
+/**
+ * The one home-or-root check rule 4 uses (#2528 reuses it): a filesystem root, a home folder by its shape
+ * (`isHomeOrRootShape`), or `home` (this user's home as a realpath, injectable for tests; null: none).
+ */
+export function isHomeOrRootFolder(folder: string, home: string | null): boolean {
+  return folder === parse(folder).root || isHomeOrRootShape(folder) || (home !== null && folder === home);
+}
+
+/** What rule 4 runs with: the git runner, and the home folder it never folds or walks up to. */
+type Rule4 = { git: InboxGitRunner; home: string | null };
 
 /** Whether `folder` has a `worktrees` or `.worktrees` folder (no symlink followed). */
 async function hasCheckoutsFolder(folder: string): Promise<boolean> {
@@ -399,10 +408,10 @@ async function hasCheckoutsFolder(folder: string): Promise<boolean> {
  * `INBOX_PROJECT_CONTAINER_WALK_MAX` up, that has a checkouts folder (so `appnotes/notes` and
  * `appnotes/worktrees` ask `appnotes`), never a home folder or a filesystem root or above. Null: none. No git.
  */
-export async function checkoutsHolderOf(folder: string): Promise<string | null> {
+export async function checkoutsHolderOf(folder: string, home: string | null = inboxProjectRootHome()): Promise<string | null> {
   let at = folder;
   for (let up = 0; up <= INBOX_PROJECT_CONTAINER_WALK_MAX; up += 1) {
-    if (isHomeOrRoot(at)) return null;
+    if (isHomeOrRootFolder(at, home)) return null;
     if (await hasCheckoutsFolder(at)) return at;
     const parent = dirname(at);
     if (parent === at) return null;
@@ -412,10 +421,10 @@ export async function checkoutsHolderOf(folder: string): Promise<string | null> 
 }
 
 /**
- * The repository whose checkouts a checkouts folder holds: all of them, or a clear majority (at least
- * `INBOX_PROJECT_CONTAINER_MAJORITY_MIN` of them and four in five), so one stray clone of another repository
- * dropped among the owner's 39 checkouts does not split the folder off again; with fewer, or a closer count
- * (two of one and one of another), no repository speaks for the folder. Null: none.
+ * The repository whose checkouts a checkouts folder holds: all of them, or four in five of them (so with
+ * another repository there, at least four), so one stray clone of another repository dropped among the
+ * owner's 39 checkouts does not split the folder off again; with a closer count (two of one and one of
+ * another, four of six), no repository speaks for the folder. Null: none.
  */
 function leadingRepository<T extends { common: string }>(checkouts: readonly T[]): T[] | null {
   const groups = new Map<string, T[]>();
@@ -423,7 +432,7 @@ function leadingRepository<T extends { common: string }>(checkouts: readonly T[]
   if (groups.size === 0) return null;
   const [lead] = [...groups.values()].sort((a, b) => b.length - a.length);
   if (groups.size === 1) return lead!;
-  return lead!.length >= INBOX_PROJECT_CONTAINER_MAJORITY_MIN && lead!.length * 5 >= checkouts.length * 4 ? lead! : null;
+  return lead!.length * 5 >= checkouts.length * 4 ? lead! : null;
 }
 
 /** Whether `root` is `folder` itself or lies in one of its checkouts folders: a repository the folder holds, not one beside them. */
@@ -440,13 +449,26 @@ function inCheckouts(root: string, folder: string): boolean {
  * folder (`inCheckouts`: `~/work` holding the repositories `api` and `web` beside `worktrees/api-feat` is a
  * folder of repositories, not `api`'s). Null: the folder stays its own project.
  *
+ * A folder that also holds a checkout right in it, outside its checkouts folders (`~/work/web` beside
+ * `~/work/worktrees/api`), is a folder of repositories: no repository speaks for it (#2526 delta review, D2).
+ *
  * A git that does not answer for the checkout does not fail the session (it would have no project to file
- * into): the main checkout read from disk stands for the repository (its `.git` folder, or the folder
- * holding the common `.git` the linked ones name), when it lies in the checkouts folder; else the folder is
- * its own project, as before rule 4.
+ * into): the repository's main checkout in the checkouts folder, read from disk, stands for it; with none
+ * there (only linked ones), the folder is its own project, as before rule 4.
  */
-async function repositoryHeldBy(folder: string, git: InboxGitRunner): Promise<Resolved | null> {
-  if (isHomeOrRoot(folder)) return null;
+async function repositoryHeldBy(folder: string, { git, home }: Rule4): Promise<Resolved | null> {
+  if (isHomeOrRootFolder(folder, home)) return null;
+  const direct = await childFolders(folder);
+  if (direct === null) return null;
+  for (const name of direct) {
+    if (CHECKOUT_FOLDERS.includes(name)) continue;
+    try {
+      await lstat(join(folder, name, ".git"));
+      return null;
+    } catch {
+      // Not a checkout.
+    }
+  }
   const checkouts: { path: string; common: string; main: boolean }[] = [];
   for (const name of CHECKOUT_FOLDERS) {
     try {
@@ -466,10 +488,8 @@ async function repositoryHeldBy(folder: string, git: InboxGitRunner): Promise<Re
   const checkout = lead.find((one) => one.main) ?? lead[0]!;
   const resolved = await resolveWorkTree(checkout.path, git);
   if (resolved === null) return null;
-  if (!resolved.settled) {
-    const onDisk = checkout.main ? checkout.path : basename(checkout.common) === ".git" ? dirname(checkout.common) : null;
-    return onDisk !== null && inCheckouts(onDisk, folder) ? { root: onDisk, worktree: folder, settled: true, fromDisk: true } : null;
-  }
+  // The main checkout is a child of a checkouts folder, so it is the repository the folder holds.
+  if (!resolved.settled) return checkout.main ? { root: checkout.path, worktree: folder, settled: true, fromDisk: true } : null;
   const confirmed = resolved.worktree !== null || (checkout.main && resolved.root === checkout.path);
   if (!confirmed || !inCheckouts(resolved.root, folder)) return null;
   return { root: resolved.root, worktree: resolved.root === folder ? null : folder, settled: true };
@@ -480,20 +500,20 @@ async function repositoryHeldBy(folder: string, git: InboxGitRunner): Promise<Re
  * (`checkoutsHolderOf`). `worktree` is the folder itself (the root an earlier Inbox filed it under), unless
  * that is the repository's root. Null: no holder, or the holder holds no one repository.
  */
-async function heldRepositoryOf(folder: string, git: InboxGitRunner): Promise<Resolved | null> {
-  const holder = await checkoutsHolderOf(folder);
+async function heldRepositoryOf(folder: string, rule4: Rule4): Promise<Resolved | null> {
+  const holder = await checkoutsHolderOf(folder, rule4.home);
   if (holder === null) return null;
-  const held = await repositoryHeldBy(holder, git);
+  const held = await repositoryHeldBy(holder, rule4);
   if (!held) return null;
   return { root: held.root, worktree: held.root === folder ? null : folder, settled: held.settled, ...(held.fromDisk ? { fromDisk: true as const } : {}) };
 }
 
 /** The project root of a folder (a realpath). Never throws. */
-async function resolveFolder(folder: string, git: InboxGitRunner): Promise<Resolved> {
-  const inWorkTree = await resolveWorkTree(folder, git);
+async function resolveFolder(folder: string, rule4: Rule4): Promise<Resolved> {
+  const inWorkTree = await resolveWorkTree(folder, rule4.git);
   if (inWorkTree !== null) return inWorkTree;
   // Not a work tree (or a repository git cannot open): the folder is the project, unless it is (or is in) a folder that holds one repository's checkouts.
-  return (await heldRepositoryOf(folder, git)) ?? { root: folder, worktree: null, settled: true };
+  return (await heldRepositoryOf(folder, rule4)) ?? { root: folder, worktree: null, settled: true };
 }
 
 /** The project root of a folder in a git work tree (rules 3), or null when git says it is in none. Never throws. */
@@ -516,13 +536,18 @@ async function resolveWorkTree(folder: string, git: InboxGitRunner): Promise<Res
  * checkouts make it, or null when the folder is in a work tree, holds no one repository's checkouts, or is that
  * root itself. `settled` false: a git did not answer, so nothing can be said this time.
  */
-export async function resolveCheckoutsFolder(path: string, options: { git?: InboxGitRunner } = {}): Promise<{ root: string | null; settled: boolean }> {
+export async function resolveCheckoutsFolder(path: string, options: { git?: InboxGitRunner; home?: string | null } = {}): Promise<{ root: string | null; settled: boolean }> {
   const git = options.git ?? inboxGitRunner();
-  const folder = realFolder(path);
-  if (!folder) return { root: null, settled: true };
+  let folder: string;
+  try {
+    folder = await realpath(path);
+    if (!(await stat(folder)).isDirectory()) return { root: null, settled: true };
+  } catch {
+    return { root: null, settled: true };
+  }
   const inWorkTree = await resolveWorkTree(folder, git);
   if (inWorkTree !== null) return { root: null, settled: inWorkTree.settled };
-  const held = await heldRepositoryOf(folder, git);
+  const held = await heldRepositoryOf(folder, { git, home: options.home === undefined ? inboxProjectRootHome() : options.home });
   if (!held) return { root: null, settled: true };
   // A timed-out git (the answer read from disk) is never acted on: the next start asks again.
   if (held.fromDisk) return { root: null, settled: false };
@@ -541,9 +566,9 @@ function rootFor(folder: string, resolved: Resolved): InboxProjectRoot {
  * The project root for a path an agent named, asked of git now (no cache).
  * Throws `validation_error` for a path that is not an existing folder.
  */
-export async function resolveInboxProjectRoot(path: string, options: { git?: InboxGitRunner } = {}): Promise<InboxProjectRoot> {
+export async function resolveInboxProjectRoot(path: string, options: { git?: InboxGitRunner; home?: string | null } = {}): Promise<InboxProjectRoot> {
   const folder = inboxProjectFolder(path);
-  return rootFor(folder, await resolveFolder(folder, options.git ?? inboxGitRunner()));
+  return rootFor(folder, await resolveFolder(folder, { git: options.git ?? inboxGitRunner(), home: options.home === undefined ? inboxProjectRootHome() : options.home }));
 }
 
 export interface InboxProjectRoots {
@@ -557,8 +582,9 @@ export interface InboxProjectRoots {
 }
 
 /** Project roots cached per folder (realpath), shared by sends, live sessions and the image route. */
-export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?: number; now?: () => number; max?: number } = {}): InboxProjectRoots {
+export function createInboxProjectRoots(options: { git?: InboxGitRunner; home?: string | null; ttlMs?: number; now?: () => number; max?: number } = {}): InboxProjectRoots {
   const git = options.git ?? inboxGitRunner();
+  const rule4: Rule4 = { git, home: options.home === undefined ? inboxProjectRootHome() : options.home };
   const ttlMs = options.ttlMs ?? INBOX_PROJECT_ROOT_TTL_MS;
   const now = options.now ?? Date.now;
   const max = Math.max(1, options.max ?? INBOX_PROJECT_ROOT_CACHE_MAX);
@@ -574,7 +600,7 @@ export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?:
   const run = (folder: string): Promise<InboxProjectRoot> => {
     const inFlight = pending.get(folder);
     if (inFlight) return inFlight;
-    const job = resolveFolder(folder, git)
+    const job = resolveFolder(folder, rule4)
       .then((resolved) => {
         const value = rootFor(folder, resolved);
         // Unsettled (git could not answer): used this once; a stale entry stays.

@@ -14,6 +14,8 @@ import {
   createInboxProjectRoots,
   INBOX_PROJECT_CONTAINER_SCAN_MAX,
   inboxGitRunner,
+  checkoutsHolderOf,
+  isHomeOrRootFolder,
   isHomeOrRootShape,
   inboxProjectRootGitEnv,
   nearestProjectHolding,
@@ -336,6 +338,59 @@ describe("a plain folder that holds one repository's checkouts", () => {
     expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: work, worktree: null, settled: true });
     // The same when the repository lies anywhere else in the folder (`proj/main` beside `proj/worktrees/x`).
     expect(await resolveInboxProjectRoot(join(work, "worktrees"))).toMatchObject({ root: join(work, "worktrees"), worktree: null });
+  });
+
+  test("~/work holding a repository right in it beside worktrees/api and worktrees/api-feat is a folder of repositories; without it, api's", async () => {
+    const root = tempRoot();
+    const work = join(root, "work");
+    mkdirSync(join(work, "worktrees"), { recursive: true });
+    const notes = join(work, "client-docs", "2024");
+    mkdirSync(notes, { recursive: true });
+    const api = join(work, "worktrees", "api");
+    git(root, "init", "-q", api);
+    writeFileSync(join(api, "a.txt"), "a\n");
+    git(api, "add", ".");
+    git(api, "commit", "-qm", "a");
+    git(api, "worktree", "add", "-q", join(work, "worktrees", "api-feat"), "-b", "api-feat");
+    git(root, "init", "-q", join(work, "web"));
+    for (const folder of [work, notes]) expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null, settled: true });
+    expect(await resolveInboxProjectRoot(join(work, "web"))).toMatchObject({ root: join(work, "web") });
+    expect(await resolveInboxProjectRoot(join(work, "worktrees", "api-feat"))).toMatchObject({ root: api });
+    // The repository right in the folder is what refuses it: moved out, `work` holds api's checkouts only.
+    renameSync(join(work, "web"), join(root, "web"));
+    expect(await resolveInboxProjectRoot(work)).toMatchObject({ root: api, worktree: work });
+    expect(await resolveInboxProjectRoot(notes)).toMatchObject({ root: api, worktree: notes });
+  });
+
+  test("this user's home (injected) holding a worktrees folder is never a checkouts folder, nor walked up to", async () => {
+    const root = tempRoot();
+    const home = join(root, "me");
+    mkdirSync(join(home, "worktrees"), { recursive: true });
+    const notes = join(home, "notes");
+    mkdirSync(notes);
+    const main = join(home, "worktrees", "main");
+    git(root, "init", "-q", main);
+    expect(isHomeOrRootFolder(home, home)).toBe(true);
+    expect(isHomeOrRootFolder(home, null)).toBe(false);
+    for (const folder of [home, notes]) {
+      expect(await checkoutsHolderOf(folder, home)).toBeNull();
+      expect(await resolveInboxProjectRoot(folder, { home })).toMatchObject({ root: folder, worktree: null, settled: true });
+    }
+    await expect(createInboxProjectRoots({ home }).resolve(notes)).resolves.toMatchObject({ root: notes, worktree: null });
+    // Any other folder of that shape is a checkouts folder: the home check is what refuses it.
+    expect(await checkoutsHolderOf(notes, null)).toBe(home);
+    expect(await resolveInboxProjectRoot(notes, { home: null })).toMatchObject({ root: main, worktree: notes });
+  });
+
+  test("a git that does not answer for linked checkouts whose main checkout lies outside leaves the folder its own; only a main checkout is read from disk", async () => {
+    const root = tempRoot();
+    const { main } = repoWithWorktree(root, "api");
+    const folder = join(root, "holder");
+    mkdirSync(join(folder, "worktrees"), { recursive: true });
+    git(main, "worktree", "add", "-q", join(folder, "worktrees", "x"), "-b", "x");
+    const real = createRealRunnerFor();
+    const slow: InboxGitRunner = async (args, cwd) => (cwd.startsWith(join(folder, "worktrees")) || cwd === main ? null : real(args, cwd));
+    expect(await resolveInboxProjectRoot(folder, { git: slow })).toMatchObject({ root: folder, worktree: null, settled: true });
   });
 
   test("a checkout git does not confirm as the repository (a separate git dir), or a main checkout moved out, leaves the folder its own", async () => {
