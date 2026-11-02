@@ -28,8 +28,15 @@ const BAR_MS = 70;
 /** The newest of the level's history; a phone shows the last few. */
 export const VOICE_BARS = 32;
 const QUIET_BAR = 0.08;
-/** No line in the instant a mic opens: only a mic that hasn't by now gets one. */
-export const VOICE_OPENING_SLOW_MS = 1000;
+/**
+ * The button shows it is opening from the press itself (lit, with the spinner). Its words wait this long, so a mic
+ * that opens at once doesn't flash a line; any longer and a tap looks like it did nothing.
+ */
+export const VOICE_OPENING_SLOW_MS = 150;
+/** A mic that hasn't opened by now, with no browser prompt up, is a mic that didn't start: the next tap tries again. */
+export const VOICE_OPENING_GIVE_UP_MS = 10_000;
+/** While the browser asks, the person is answering it: a longer wait before giving up. */
+export const VOICE_ASKING_GIVE_UP_MS = 30_000;
 const WASH_FADES_MS = 1300;
 const WASH_ENDS_MS = 2300;
 
@@ -301,6 +308,16 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     deps.after(VOICE_OPENING_SLOW_MS, () => {
       if (mine === run && view.phase === 'opening') set({ slow: true, said: 'Opening the microphone' });
     });
+    // A microphone that never answers (seen on iOS) ends with the "didn't start" note, so the box is never left
+    // waiting on it with Send off. A late mic is closed at once (`mine !== run` below).
+    const giveUp = (unlessAsking: boolean) => {
+      if (mine !== run || view.phase !== 'opening' || (unlessAsking && view.prompting)) return;
+      run++;
+      release();
+      set({ ...IDLE, trouble: 'micfailed', said: 'The microphone did not start' });
+    };
+    deps.after(VOICE_OPENING_GIVE_UP_MS, () => giveUp(true));
+    deps.after(VOICE_ASKING_GIVE_UP_MS, () => giveUp(false));
     opening.then(
       (opened) => {
         if (mine !== run) {
@@ -427,12 +444,9 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
         secondPress = true;
         return;
       }
-      // Another tap while the microphone is still opening means stop, and with nothing recorded yet that is a cancel.
-      // It also frees a mic that never opens: a tap there is never one that does nothing.
-      if (view.phase === 'opening' && !pressed) {
-        cancel();
-        return;
-      }
+      // Opening or sending: the button already shows it is busy (lit with the spinner), so another tap changes nothing
+      // and the take goes on. Cancel on the bar is the way out (owner's call, 2026-11-02: a tap that cancels unseen is
+      // worse than a tap that waits in sight).
       if (view.phase !== 'idle') return;
       pressed = true;
       pressedAt = deps.now();

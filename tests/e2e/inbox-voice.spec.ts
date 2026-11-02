@@ -956,7 +956,7 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
-  test('a phone: no tap does nothing. A mic that throws as it opens, or one still opening, goes back to rest', async () => {
+  test('a phone: no tap does nothing. A mic that throws as it opens goes back to rest; one still opening shows it, and waits', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
     await page.addInitScript(() => {
@@ -971,9 +971,14 @@ test.describe('New message dictates as the reply box does', () => {
           super(...args);
         }
       };
+      // A slow mic answers when the test says so (`openMic`); until then it is a mic that hasn't opened.
       const media = navigator.mediaDevices;
       const real = media.getUserMedia.bind(media);
-      media.getUserMedia = (constraints) => (faults.slowMic ? new Promise(() => {}) : real(constraints));
+      const w = window as unknown as { openMic?: () => void };
+      media.getUserMedia = (constraints) => {
+        if (!faults.slowMic) return real(constraints);
+        return new Promise((resolve, reject) => (w.openMic = () => real(constraints).then(resolve, reject)));
+      };
     });
     await openCompose(page, w, { pick: true });
     const send = sheet(page).locator('[data-compose-send]');
@@ -990,11 +995,28 @@ test.describe('New message dictates as the reply box does', () => {
     await page.locator('[data-voice-cancel]').click();
     await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
 
-    // A mic that never opens: the second tap takes it back to rest at once, before any line is drawn.
+    // A slow mic: the tap shows at once (lit, spinning, then "Opening the mic…" with Cancel). A second tap cancels
+    // nothing and keeps that look, and the take listens once the mic opens.
     await page.evaluate(() => ((window as unknown as { slowMic: boolean }).slowMic = true));
     await mic(sheet(page)).tap();
     await expect(mic(sheet(page))).toHaveAttribute('data-state', 'live');
+    await expect(mic(sheet(page)).locator('.ib-spin')).toBeVisible();
+    await expect(line(sheet(page), 'opening')).toBeVisible();
     await mic(sheet(page)).tap();
+    await page.waitForTimeout(300);
+    await expect(mic(sheet(page)).locator('.ib-spin')).toBeVisible();
+    await expect(line(sheet(page), 'opening')).toBeVisible();
+    await page.evaluate(() => (window as unknown as { openMic: () => void }).openMic());
+    await expect(line(sheet(page), 'tap')).toBeVisible();
+    await expect(mic(sheet(page)).locator('.ib-spin')).toHaveCount(0);
+    await page.locator('[data-voice-cancel]').click();
+    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
+
+    // One that never opens: Cancel on the bar is the way out (and on its own it gives up after 10 s: voiceSession.test.ts).
+    await mic(sheet(page)).tap();
+    await expect(line(sheet(page), 'opening')).toBeVisible();
+    await expect(send).toBeDisabled();
+    await page.locator('[data-voice-cancel]').click();
     await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
     await expect(send).toBeEnabled();
     await page.evaluate(() => ((window as unknown as { slowMic: boolean }).slowMic = false));
