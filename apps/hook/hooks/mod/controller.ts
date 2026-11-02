@@ -561,6 +561,19 @@ export class PlannotatorMod {
     return this.disposed
   }
 
+  /**
+   * The process moved here from `previous`'s session (`/clear`, an in-process
+   * resume): question prompts still waiting in the engine run as turns of
+   * THIS session, so this instance aborts them when they start
+   * (`TurnTracker.queuedPrompts`). `previous` is usually disposed already
+   * (`session.end`): reading its tracker then is intended, and stays safe
+   * only while `dispose()` leaves `turns` alone. register.ts `currentMod` and
+   * `ClaudeSession.clear` both call this.
+   */
+  carryQueued(previous: PlannotatorMod | null): void {
+    if (previous && previous !== this) this.turns.dropQueued(previous.turns.queuedPrompts())
+  }
+
   private adopt(record: LaunchRecord, touchedAt = 0): LiveLaunch {
     const live: LiveLaunch = {
       ...record,
