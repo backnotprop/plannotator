@@ -27,7 +27,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 // This browser's cookies (Plannotator's storage); a map stands in for them here.
@@ -266,6 +266,18 @@ describe('the saved look', () => {
     await answer();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, unreadDot: true, smallNames: true });
     expect(saves).toEqual([['unreadDot'], ['smallNames', 'unreadDot']]);
+  });
+
+  // Found in Chromium: the page's first settings read, sent before a click, answered after the click's save.
+  test('a settings read sent before a change, answered after its save, does not undo it', async () => {
+    const mark = listLookReadMark();
+    void writeListLookOption('compact', true);
+    await answer();
+    adoptSavedRows([], mark);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    // A read sent after it is taken.
+    adoptSavedRows(['roomy'], listLookReadMark());
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
   });
 
   test('an older Inbox (no `rows`) or a list naming something else changes nothing', () => {

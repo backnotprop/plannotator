@@ -6669,9 +6669,8 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-pmi-box[data-on] { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
 .ib-pmi .ib-pmi-box .ib-ic { width: 11px; height: 11px; color: inherit; }
 .ib-pmi.ib-pmi-noicon { padding-left: 31px; }
-.ib-pm-pos[data-phone] .ib-pmi-box { width: 18px; height: 18px; border-radius: 5px; }
-.ib-pm-pos[data-phone] .ib-pmi .ib-pmi-box .ib-ic { width: 13px; height: 13px; }
-.ib-pm-pos[data-phone] .ib-pmi.ib-pmi-noicon { padding-left: 42px; }
+/* A phone's sheet: its icons stay 15 px (Icon's own size), its items 12 px apart. */
+.ib-pm-pos[data-phone] .ib-pmi.ib-pmi-noicon { padding-left: 39px; }
 /* The presets beside the lede ("Start from"), and "Custom" when the look matches none. The control rows sit 10 px
    tighter than other Settings rows, so eight of them fit beside the narrow picture. */
 .ib-rws-head { flex-wrap: wrap; }

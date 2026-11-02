@@ -120,6 +120,8 @@ const sameLook = (a: ListLook, b: ListLook) => LIST_LOOK_KEYS.every((key) => a[k
 let current: ListLook | null = null;
 /** Saves on their way: a settings read or `event: rows` meanwhile may predate them, so it is not taken. */
 let saving = 0;
+/** Changes made on this page: a settings read sent before the latest one answers a look older than it. */
+let changes = 0;
 /** This page already offered the server its browser's look (the one adoption). */
 let offered = false;
 const listeners = new Set<() => void>();
@@ -159,10 +161,16 @@ export function readListLook(): ListLook {
 }
 
 /** The person changed some options (a ⋮ checkbox, a Settings → Rows choice or preset): shown at once, then saved. */
-export function writeListLookOptions(changes: Partial<ListLook>): Promise<void> {
-  const next = { ...shown(), ...changes };
+export function writeListLookOptions(change: Partial<ListLook>): Promise<void> {
+  const next = { ...shown(), ...change };
+  changes += 1;
   show(next);
   return save(next);
+}
+
+/** Taken when a settings read is sent, and given back with its `rows` (`adoptSavedRows`). */
+export function listLookReadMark(): number {
+  return changes;
 }
 
 export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void> {
@@ -177,10 +185,11 @@ export function writeListLook(look: ListLook): Promise<void> {
 /**
  * The server's look, from a settings read (`rows`) or another window's save (`event: rows`). Absent (an older
  * Inbox): this browser's stays. Null (never saved): this browser's old look is saved once, if it is not the
- * defaults, and the server's wins from then on. Ignored while a save from this page is on its way.
+ * defaults, and the server's wins from then on. Ignored while a save from this page is on its way, and from a
+ * settings read sent before this page's latest change (`mark`, from `listLookReadMark`), which answers an older look.
  */
-export function adoptSavedRows(rows: unknown): void {
-  if (rows === undefined || saving > 0) return;
+export function adoptSavedRows(rows: unknown, mark?: number): void {
+  if (rows === undefined || saving > 0 || (mark !== undefined && mark !== changes)) return;
   if (rows === null) {
     if (offered) return;
     offered = true;
@@ -220,6 +229,7 @@ export function useListLook(remember = true): [ListLook, (changes: Partial<ListL
 export function resetListLookForTests(): void {
   current = null;
   saving = 0;
+  changes = 0;
   offered = false;
   for (const listener of listeners) listener();
 }

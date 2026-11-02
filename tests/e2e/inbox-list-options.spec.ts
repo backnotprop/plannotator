@@ -556,6 +556,8 @@ async function menuEdges(page: Page) {
 
 test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which opens Settings → Rows', async ({ browser }) => {
   for (const shape of ['desktop', 'phone'] as const) {
+    // The desktop's tick is the person's look, so the phone would open with it: start each from every option off.
+    await post('/api/inbox/settings', { rows: [] });
     const context = shape === 'desktop' ? await desktop(browser) : await phoneContext(browser, 390);
     try {
       const page = await context.newPage();
@@ -569,7 +571,7 @@ test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which
       expect(edges.customizeIcons, `${shape}: "Customize rows…" has no icon`).toBe(0);
       expect(new Set(edges.labels).size, `${shape}: every label on one edge ${JSON.stringify(edges.labels)}`).toBe(1);
       expect(new Set([...edges.boxes, edges.icon]).size, `${shape}: the boxes where the icons are`).toBe(1);
-      expect(new Set([...edges.boxWidths, edges.iconWidth]).size, `${shape}: the boxes as wide as the icons`).toBe(1);
+      expect(new Set([...edges.boxWidths, edges.iconWidth]).size, `${shape}: the boxes as wide as the icons ${JSON.stringify([edges.boxWidths, edges.iconWidth])}`).toBe(1);
       await page.screenshot({ path: join(proofDir, `rows-menu-${shape}.png`) });
       await page.locator('[data-customize-rows]').click();
       await expect(page).toHaveURL(/#settings\/rows$/);
