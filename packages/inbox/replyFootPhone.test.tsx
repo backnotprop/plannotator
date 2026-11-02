@@ -49,6 +49,8 @@ const CARD = [
 const PROSE = 'The worker drains in order, and the dead-letter path is wired.';
 
 type Tweak = (q: InboxQuestion) => InboxQuestion;
+/** The first choice picked. */
+const answerOf = (q: InboxQuestion) => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]!.label] }) as InboxQuestion['answer'];
 function questionsOf(messageId: string, body: string, tweak: Tweak): InboxQuestion[] {
   return parseInboxQuestionBlocks(body).map((q) =>
     tweak({
@@ -261,7 +263,7 @@ test.skipIf(!hasDom)('Escape and × close the sheet, focus back on the line', as
 });
 
 test.skipIf(!hasDom)('no "2 picks" chip: the answers list above already says it', async () => {
-  const picked: Tweak = (q) => (q.position < 2 ? { ...q, state: 'picked', answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]!.label] } } : q);
+  const picked: Tweak = (q) => (q.position < 2 ? { ...q, state: 'picked', answer: answerOf(q) } : q);
   const el = await open({ questions: true, tweak: picked });
   expect(!!(el.querySelector('.ib-rbox .ib-ranswers'))).toBe(true);
   expect(!!(el.querySelector('[data-picks-chip]'))).toBe(false);
@@ -269,7 +271,7 @@ test.skipIf(!hasDom)('no "2 picks" chip: the answers list above already says it'
 });
 
 test.skipIf(!hasDom)('picks on a replaced question that will not be sent are in the sheet', async () => {
-  const replaced: Tweak = (q) => (q.position === 0 ? { ...q, state: 'superseded', answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]!.label] } } : q);
+  const replaced: Tweak = (q) => (q.position === 0 ? { ...q, state: 'superseded', answer: answerOf(q) } : q);
   const el = await open({ questions: true, tweak: replaced });
   expect(!!(el.querySelector('[data-dropped-picks-chip]'))).toBe(false);
   await press(line(el));
