@@ -87,8 +87,13 @@ let unsaved = 0;
 const conflictWords = new Map<string, string>();
 /** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
 const tooLongThreads = new Set<string>();
+/**
+ * Threads whose last save was refused for another reason (`validation_error` not about the body's
+ * length): their words are not saved until a later save lands (the restart guard asks meanwhile).
+ */
+const refusedThreads = new Set<string>();
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || conflictWords.size > 0 || tooLongThreads.size > 0;
+  return unsaved > 0 || conflictWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0;
 }
 
 /** Told when replyDraftUnsaved() may have changed (unsent.ts keeps the page's beforeunload question in step). */
@@ -171,6 +176,13 @@ export function useReplyDraft(threadId: string) {
     unsavedChanged();
     if (target === current.current) setState((s) => ({ ...s, tooLong: on }));
   };
+  /** The thread's words were refused for another reason (on), or a save of them landed or they went (off). */
+  const markRefused = (target: string, on: boolean) => {
+    if (on === refusedThreads.has(target)) return;
+    if (on) refusedThreads.add(target);
+    else refusedThreads.delete(target);
+    unsavedChanged();
+  };
   const show = (target: string, draft: InboxReplyDraft | null) => {
     if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target) });
   };
@@ -223,9 +235,12 @@ export function useReplyDraft(threadId: string) {
         } catch (cause) {
           if (cause instanceof InboxApiError && cause.code === 'validation_error') {
             // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
-            // says so; any other refusal is not "too long", and the next pause in typing tries again.
+            // says so; any other refusal is not "too long": the words stay unsaved (the restart guard asks) until
+            // the next pause in typing saves them.
             unsend();
-            if (generation === generationOf(target) && cause.message.startsWith('body:')) markTooLong(target, true);
+            if (generation !== generationOf(target)) return;
+            if (cause.message.startsWith('body:')) markTooLong(target, true);
+            else markRefused(target, true);
             return;
           }
           if (cause instanceof InboxApiError && cause.code === 'upload_not_found' && files.length > 0) {
@@ -263,6 +278,7 @@ export function useReplyDraft(threadId: string) {
           return;
         }
         if (generation !== generationOf(target)) return;
+        markRefused(target, false);
         learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
       } catch {
@@ -314,18 +330,18 @@ export function useReplyDraft(threadId: string) {
       if (timer.current) clearTimeout(timer.current);
       if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
       const session = pageServerSession();
+      // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
+      const full = {
+        body: next.text,
+        base: baseOf(next.threadId),
+        ...(next.files.length > 0 ? { files: next.files } : {}),
+        ...(lastWords.current !== null ? { base_body: lastWords.current, base_files: lastFiles.current.map((file) => file.upload_id) } : {}),
+        ...(session ? { serverSession: session } : {}),
+      };
       void fetch(inboxUrl(`/threads/${encodeURIComponent(next.threadId)}/draft`), {
         method: 'POST',
-        keepalive: true,
         headers: { 'Content-Type': 'application/json' },
-        // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
-        body: JSON.stringify({
-          body: next.text,
-          base: baseOf(next.threadId),
-          ...(next.files.length > 0 ? { files: next.files } : {}),
-          ...(lastWords.current !== null ? { base_body: lastWords.current, base_files: lastFiles.current.map((file) => file.upload_id) } : {}),
-          ...(session ? { serverSession: session } : {}),
-        }),
+        ...keepaliveBody(full),
       }).catch(() => {});
       sentWords.current.set(next.threadId, next.text);
       sentFiles.current.set(next.threadId, next.files);
@@ -392,6 +408,7 @@ export function useReplyDraft(threadId: string) {
     sentFiles.current.delete(target);
     learn(target, null);
     tooLongThreads.delete(target);
+    refusedThreads.delete(target);
     unsavedChanged();
     setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
     if (machineOf(target)) return;
@@ -435,6 +452,7 @@ export function useReplyDraft(threadId: string) {
     sentWords.current.delete(target);
     sentFiles.current.delete(target);
     tooLongThreads.delete(target);
+    refusedThreads.delete(target);
     unsavedChanged();
     setState((s) => (s.tooLong ? { ...s, tooLong: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
@@ -546,4 +564,25 @@ async function readDraft(threadId: string): Promise<InboxReplyDraft | null | und
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A browser takes at most 64 KiB of keepalive bodies in flight (more is refused at once), so the save sent as the
+ * page goes stays under it, with room for another small keepalive.
+ */
+export const KEEPALIVE_BODY_MAX = 60 * 1024;
+
+/**
+ * The page's last save as a fetch's `body` and `keepalive`. Whole when it fits a keepalive. Larger (a long draft
+ * whose last save's words, `base_body`, double it), it goes without `base_body` and `base_files`: the words alone,
+ * compared on `base` only. Still larger (the words themselves over the limit), it goes as an ordinary fetch: sent
+ * as the page goes, it lands only if the page lives long enough to send it.
+ */
+export function keepaliveBody(full: Record<string, unknown>): { body: string; keepalive: boolean } {
+  const fits = (text: string) => new TextEncoder().encode(text).length <= KEEPALIVE_BODY_MAX;
+  const whole = JSON.stringify(full);
+  if (fits(whole)) return { body: whole, keepalive: true };
+  const { base_body: _baseBody, base_files: _baseFiles, ...words } = full;
+  const lean = JSON.stringify(words);
+  return { body: lean, keepalive: fits(lean) };
 }

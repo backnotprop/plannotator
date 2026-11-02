@@ -35,6 +35,8 @@ import { NO_BROWSER } from '../../tests/helpers/no-browser';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { ComposeFileTiles } = (hasDom ? await import('./compose/ComposeFiles') : {}) as typeof import('./compose/ComposeFiles');
+/** The update control's restart guard: what a restart would lose (null: nothing). */
+const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 const PASTED = /^pasted-text-\d{4}-\d\d-\d\d-\d{4}(-\d+)?\.txt$/;
@@ -395,7 +397,7 @@ test.skipIf(!hasDom)('a paste of a named file beside 32 KB of text: the file att
   expect(text.selectionStart).toBe((BEFORE + LOG).length);
 }, 30_000);
 
-test.skipIf(!hasDom)('a reply draft refused for anything but its length never says "too long"', async () => {
+test.skipIf(!hasDom)('a reply draft refused for anything but its length never says "too long", and the restart guard asks until a save lands', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   refuseDraft = { code: 'validation_error', error: 'base_body: a string.', field: 'base_body' };
@@ -403,11 +405,16 @@ test.skipIf(!hasDom)('a reply draft refused for anything but its length never sa
   await until(() => refuseDraft === null, 'the refused save');
   await wait(300);
   const saidTooLong = el.querySelector('[data-draft-too-long]') !== null;
+  // The words are not saved: the restart guard asks, with no further typing.
+  const guardAsked = unsentReply() !== null;
   // The next pause in typing saves (and leaves no "too long" behind for the next test, whatever was said).
   type(text, 'Ship it today.');
   await until(() => posted.some((p) => p.path.endsWith('/draft') && p.body.body === 'Ship it today.'), 'the save');
   expect(saidTooLong).toBe(false);
+  expect(guardAsked).toBe(true);
   expect(el.querySelector('[data-draft-too-long]')).toBeNull();
+  // Saved: the guard is quiet again.
+  await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);
 
 test.skipIf(!hasDom)("the browser's undo puts the paste back as the very next edit, stands down after another edit, and Send carries the file", async () => {
