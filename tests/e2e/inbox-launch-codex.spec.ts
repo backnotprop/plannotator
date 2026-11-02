@@ -4,8 +4,8 @@
  * Inbox is mocked. The only fakes are the programs launch runs, on a PATH of
  * their own: `codex` and its app-server daemon (tests/helpers/fake-codex/:
  * JSON-RPC over a WebSocket on the control socket, threads, turns, approval
- * requests, and a turn's reply through the Inbox's MCP), `osascript`
- * (recorded, nothing opens) and a stand-in login shell. The real Codex, the
+ * requests, and a turn's reply through the Inbox's MCP) and a stand-in login
+ * shell. The real Codex, the
  * real home and the person's Inbox are never touched: temp HOME and
  * PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, PLANNOTATOR_UPDATE_CHECK=0,
  * NO_BROWSER.
@@ -17,7 +17,7 @@
  * brings an approval request: the permission card, as Codex (no Auto mode or
  * Full permissions), Allow once goes back as `accept`. Stop interrupts the
  * running turn; a reply after Stop rejoins the thread and starts a turn.
- * Open in Terminal runs `codex resume <id>`; Delete deletes the thread.
+ * The attach command is `codex resume <id>`; Delete deletes the thread.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-codex.spec.ts`.
@@ -115,8 +115,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     // Their threads can write their folder (workspace-write), so Codex would record a new folder's trust: the Inbox passes it in memory instead.
     configToml: `model = "gpt-5"\nsandbox_mode = "workspace-write"\n# the person's own comment\n[projects."${join(home, 'elsewhere')}"]\ntrust_level = "untrusted"\n`,
   });
-  // Open in Terminal: what it would have run, recorded; nothing opens.
-  writeFileSync(join(bin, 'osascript'), `#!/bin/sh\nfor a in "$@"; do printf '%s\\037' "$a"; done >> ${q(join(root, 'osascript.log'))}\nprintf '\\n' >> ${q(join(root, 'osascript.log'))}\n`, { mode: 0o755 });
   // `$SHELL -ilc <command>`: the command, with the fakes first on PATH (the person's .zshrc would).
   const shell = join(bin, 'login-shell');
   writeFileSync(shell, `#!/bin/sh\nPATH=${q(bin)}:"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`, { mode: 0o755 });
@@ -249,12 +247,10 @@ test('the journey: To offers Codex; Send starts a thread (config.toml untouched)
   expect(fake.turns().filter((t) => t.how === 'turn/start')).toHaveLength(4);
   expect(fake.calls().some((c) => c.argv[0] === 'queue')).toBe(false);
 
-  // Open in Terminal: `codex resume <id>` in the folder.
+  // Copy attach command: `codex resume <id>` in the folder.
   const threadIdInCodex = first.threadId;
-  await p.locator('[data-thread-more]').click();
-  await page.locator('[data-launch-item="open"]').click();
-  const ran = await waitFor('osascript', () => (existsSync(join(world.root, 'osascript.log')) ? readFileSync(join(world.root, 'osascript.log'), 'utf8').split('\n').filter(Boolean)[0] : null));
-  expect(ran.split('\u001f').filter(Boolean).at(-1)).toBe(`cd '${world.project}' && codex resume ${threadIdInCodex}`);
+  const read = await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId) as { attach_command?: string };
+  expect(read.attach_command).toBe(`cd '${world.project}' && codex resume ${threadIdInCodex}`);
 
   // Delete: the thread goes in Codex; the Inbox thread stays.
   await p.locator('[data-thread-more]').click();
