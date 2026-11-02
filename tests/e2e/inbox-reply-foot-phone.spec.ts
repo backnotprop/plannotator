@@ -63,11 +63,20 @@ test.afterAll(async () => {
   await stopWorld(world);
 });
 
+/**
+ * This computer's voice is ready (no Codex sign-in in the scratch world), and a clip comes back as no words. The page
+ * answers both, never the Inbox: its status read and its transcribe each run `codex app-server`, an agent CLI, which
+ * the run's stub fails. A tap on the mic that a slow runner holds past HOLD_MS is a hold, and its release transcribes.
+ */
+async function voiceReady(page: Page): Promise<void> {
+  await page.route('**/api/inbox/voice/status**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'ready', plan: null }) }));
+  await page.route('**/api/inbox/voice/transcribe**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ text: '' }) }));
+}
+
 async function phone(browser: Browser, width: number): Promise<Page> {
   const context = await browser.newContext({ viewport: { width, height: 760 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: 'light', permissions: ['microphone'] });
   const page = await context.newPage();
-  // This computer's voice is ready (no Codex sign-in in the scratch world).
-  await page.route('**/api/inbox/voice/status**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ state: 'ready', plan: null }) }));
+  await voiceReady(page);
   return page;
 }
 
@@ -202,6 +211,7 @@ test('dictating, the row stays one row and its Cancel is 44 px to press', async 
 test('a desktop window keeps its chips', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'light' });
   const page = await context.newPage();
+  await voiceReady(page);
   await page.goto(`${world.url}#thread=${thread}`);
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
   const foot = pane(page).locator('.ib-rbox .ib-rfoot');
