@@ -1,0 +1,69 @@
+/* Plannotator Modern. The neutrals and blue of BoardUI's free theme tokens (boardui.com,
+   MIT), set on our tokens: BoardUI's secondary surface is the ground, its full surface
+   the card, its tertiary surface muted. Values are BoardUI's unless a comment says not.
+
+   Neutrals stay hex on purpose: a hex grey has no hue, so color-mix(in oklch) with the
+   blue keeps the blue's hue. `oklch(1 0 0)` has hue 0 and turns those mixes pink. */
+.theme-plannotator-modern {
+  --background: #171717;
+  --foreground: #fafafa;
+  --card: #121212;
+  --card-foreground: #fafafa;
+  --popover: #262626;
+  --popover-foreground: #fafafa;
+  /* BoardUI's blue-400. Its button blues under a white label cannot also be read as link text on these surfaces. */
+  --primary: #3392ff;
+  --primary-foreground: #0a0a0a;
+  --secondary: oklch(0.789 0.154 211.53);
+  --secondary-foreground: #0a0a0a;
+  --muted: #262626;
+  /* Not BoardUI's: its #737373 is 3.2:1 on --muted. Raised only as far as 4.5:1 there. */
+  --muted-foreground: #8f8f8f;
+  --accent: oklch(0.705 0.213 47.604);
+  --accent-foreground: #0a0a0a;
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: #0a0a0a;
+  --border: #404040;
+  --input: #262626;
+  --ring: oklch(0.623 0.214 259.815);
+  --success: oklch(0.768 0.233 130.85);
+  --success-foreground: #0a0a0a;
+  --warning: oklch(0.795 0.184 86.047);
+  --warning-foreground: #0a0a0a;
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #171717;
+  --focus-highlight: #3392ff;
+}
+
+.theme-plannotator-modern.light {
+  --background: #f7f7f7;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: oklch(0.546 0.245 262.881);
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.45 0.085 224.283);
+  --secondary-foreground: #ffffff;
+  --muted: #ebebeb;
+  /* Not BoardUI's: its #737373 is 3.98:1 on --muted. Lowered only as far as 4.5:1 there. */
+  --muted-foreground: #6a6a6a;
+  --accent: oklch(0.47 0.157 37.304);
+  --accent-foreground: #ffffff;
+  --destructive: oklch(0.505 0.213 27.518);
+  --destructive-foreground: #ffffff;
+  --border: #ebebeb;
+  --input: #ebebeb;
+  --ring: oklch(0.623 0.214 259.815);
+  --success: oklch(0.453 0.124 130.933);
+  --success-foreground: #ffffff;
+  --warning: oklch(0.476 0.114 61.907);
+  --warning-foreground: #ffffff;
+
+  --code-bg: #f7f7f7;
+}
