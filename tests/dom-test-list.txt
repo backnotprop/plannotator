@@ -157,6 +157,7 @@ packages/inbox/projectMenu.test.tsx
 packages/inbox/projectRenameWarning.test.tsx
 packages/inbox/rowMenu.test.tsx
 packages/inbox/copyMessage.test.tsx
+packages/inbox/guideRequest.test.tsx
 packages/inbox/pinnedThreads.test.tsx
 packages/inbox/pinnedRowLabel.test.tsx
 packages/inbox/fileBack.test.tsx
@@ -474,3 +475,4 @@ packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
+packages/inbox/personLineBreaks.test.tsx

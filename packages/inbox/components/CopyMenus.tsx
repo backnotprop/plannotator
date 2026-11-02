@@ -141,9 +141,10 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
  * archived one), which used to be an icon in the header (the owner, 2026-11-01: move it into the ⋯). It has no key.
  * Snooze leads the first group (a phone's only way to it, approval "inbox-snooze"): the menu swaps in place for its
  * times, and a snoozed thread also offers Unsnooze.
+ * Request guided review (`requestGuide`, guideRequest.ts) has its own group above Archive, only where the thread offers it.
  */
-export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void }; snooze?: { snoozed: boolean; onPick: (until: string) => void; onUnsnooze: () => void } }) {
-  const { thread, phone, pin, markUnread, archive, snooze } = props;
+export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void }; snooze?: { snoozed: boolean; onPick: (until: string) => void; onUnsnooze: () => void }; requestGuide?: () => void }) {
+  const { thread, phone, pin, markUnread, archive, snooze, requestGuide } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -229,6 +230,15 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
+                {requestGuide && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.Item className="ib-pmi" label="Request guided review" onClick={requestGuide} data-thread-guide-request-item="">
+                      <Icon name="book" size={15} />
+                      Request guided review
+                    </Menu.Item>
+                  </>
+                )}
                 {archive && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
