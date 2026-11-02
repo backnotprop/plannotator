@@ -6,17 +6,20 @@
  * `serverSession`; another site's read refused):
  *
  *   GET  /api/inbox/threads/:id/draft          `{ draft }` (null when none)
- *   POST /api/inbox/threads/:id/draft          `{ body, base, files? }`: save (a compare-and-set on
+ *   POST /api/inbox/threads/:id/draft          `{ body, base, files?, all_files? }`: save (a compare-and-set on
  *                                              `updated_at`; 409 `draft_conflict` with the newer
  *                                              draft); an empty body with no files deletes it
  *   POST /api/inbox/threads/:id/draft/delete   Discard
  *
- * `files`: the box's long pastes (approval "inbox-paste-attachment"), each a
- * pending upload with where it goes back in the words (`pasted`).
- * The Send that carries the words deletes the draft (`clear_draft: <updated_at>`
- * on the reply route: only while the draft is still the one those words were
- * saved as, or holds exactly the reply's words and only pastes the reply
- * carried). A save may name `base_body` and `base_files` (the words and paste
+ * `files`: every file in the box (paperclip, drop, paste), each a pending
+ * upload, a long paste (approval "inbox-paste-attachment") with where it goes
+ * back in the words (`pasted`). `all_files: true` says the list is all of them;
+ * without it (an older page, which knew long pastes only) the draft's other
+ * files stay. The Send that carries the draft settles it (`clear_draft:
+ * <updated_at>` on the reply route): the words and the files it carried go, a
+ * file it did not carry stays; with an older `updated_at`, only a draft holding
+ * exactly the reply's words and only files the reply carried goes. A save may
+ * name `base_body` and `base_files` (the words and file
  * ids the window saved last), which the page's save as it goes uses when its
  * `base` is a step behind. Drafts are files under `inbox/reply-drafts/`, outside the
  * event log (shared/inbox/reply-drafts.ts): agents, the MCP and search never

@@ -112,7 +112,7 @@ export interface CardsModel {
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
-export type DraftFileInput = string | { upload_id: string; pasted: InboxDraftPasted };
+export type DraftFileInput = string | { upload_id: string; pasted?: InboxDraftPasted };
 
 /**
  * A machine as the merged list and its `machines` frames name it (linked machines,
@@ -728,6 +728,24 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
   };
 }
 
+/** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
+export function replyDraftSaveBody(
+  body: string,
+  base: string | null,
+  baseBody: string | null,
+  files: readonly DraftFileInput[],
+  baseFiles: readonly string[] | null,
+): Record<string, unknown> {
+  return {
+    body,
+    base,
+    ...(baseBody !== null ? { base_body: baseBody } : {}),
+    ...(files.length > 0 ? { files } : {}),
+    all_files: true,
+    ...(baseBody !== null && baseFiles !== null ? { base_files: baseFiles } : {}),
+  };
+}
+
 /** The serverSession every POST carries; set from the first list read. */
 let pageSession: string | null = null;
 
@@ -1250,8 +1268,9 @@ export const inboxApi = {
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
-   * `files`: the long pastes kept beside the words (approval "inbox-paste-attachment"); `baseFiles`: the upload
-   * ids this window saved last, which `base_body`'s shortcut must also match.
+   * `files`: every finished file in the box, a long paste with its place (`all_files: true` says so; an older
+   * page sent long pastes only); `baseFiles`: the upload ids this window saved last, which `base_body`'s
+   * shortcut must also match.
    */
   saveReplyDraft: (
     threadId: string,
@@ -1260,14 +1279,7 @@ export const inboxApi = {
     baseBody: string | null = null,
     files: readonly DraftFileInput[] = [],
     baseFiles: readonly string[] | null = null,
-  ) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), {
-      body,
-      base,
-      ...(baseBody !== null ? { base_body: baseBody } : {}),
-      ...(files.length > 0 ? { files } : {}),
-      ...(baseBody !== null && baseFiles !== null ? { base_files: baseFiles } : {}),
-    }),
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, baseFiles)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),

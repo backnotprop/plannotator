@@ -173,9 +173,9 @@ function checkPasted(value: unknown, index: number, bodyLength: number): InboxDr
  * A draft's files: upload ids (or `{ upload_id, pasted? }`), each an upload
  * still pending; the draft keeps the upload's facts, and for a long paste where
  * it goes back in the words (`pasted`, approval "inbox-paste-attachment").
- * `onlyPasted`: a reply draft keeps long pastes only.
+ * New message's drafts and reply drafts check their files alike.
  */
-export function checkInboxDraftFiles(inboxDirPath: string, input: unknown, bodyLength: number, options: { onlyPasted?: boolean } = {}): InboxDraftFile[] {
+export function checkInboxDraftFiles(inboxDirPath: string, input: unknown, bodyLength: number): InboxDraftFile[] {
   const files: InboxDraftFile[] = [];
   const listed = input === undefined || input === null ? [] : input;
   if (!Array.isArray(listed)) throw new InboxError("validation_error", "files: a list of upload ids.", { field: "files" });
@@ -183,7 +183,6 @@ export function checkInboxDraftFiles(inboxDirPath: string, input: unknown, bodyL
     const object = entry && typeof entry === "object" ? (entry as { upload_id?: unknown; pasted?: unknown }) : null;
     const uploadId = typeof entry === "string" ? entry : object ? object.upload_id : null;
     const pasted = checkPasted(object?.pasted, index, bodyLength);
-    if (options.onlyPasted && !pasted) throw new InboxError("validation_error", `files[${index}]: a reply draft keeps long pastes only.`, { field: `files[${index}]` });
     const upload = readInboxUpload(inboxDirPath, uploadId);
     if (!upload) throw new InboxError("upload_not_found", `files[${index}]: that file is no longer here; attach it again.`, { field: `files[${index}]` });
     if (!files.some((file) => file.upload_id === upload.upload_id)) files.push(pasted ? { ...upload, pasted } : upload);

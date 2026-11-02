@@ -388,12 +388,11 @@ describe("reply drafts keep long pastes", () => {
     expect(server.store.replyDraft(thread_id)?.body).toBe("Log: see the file");
   });
 
-  test("refusals write nothing: a place past the words, a file that is not a long paste, a lead that is not space, an upload that is gone", async () => {
+  test("refusals write nothing: a place past the words, a lead that is not space, an upload that is gone", async () => {
     const { server, send } = await setup();
     const { thread_id } = await send("The nightly import failed.", "ses_r");
     const file = await upload(server, "pasted-text-c.txt", LOG);
     expect((await save(server, thread_id, { body: "Log:", base: null, files: [pasted(file.upload_id, 5)] })).status).toBe(422);
-    expect((await save(server, thread_id, { body: "Log:", base: null, files: [file.upload_id] })).status).toBe(422);
     expect((await save(server, thread_id, { body: "Log:", base: null, files: [{ upload_id: file.upload_id, pasted: { at: 1, lead: "ab", preview: "x" } }] })).status).toBe(422);
     const gone = await save(server, thread_id, { body: "Log:", base: null, files: [pasted("upl_01K70000000000000000000099", 0)] });
     expect(gone.status).toBe(404);
@@ -524,5 +523,176 @@ describe("reply drafts keep long pastes", () => {
     expect(await textOf(again.server, kept.upload_id)).toEqual({ status: 200, body: { text: LOG } });
     expect((await textOf(again.server, loose.upload_id)).status).toBe(404);
     expect(again.server.store.replyDraft(thread_id)?.files?.map((f) => f.upload_id)).toEqual([kept.upload_id]);
+  });
+});
+
+/**
+ * Every file attached to a reply box (paperclip, drop, paste) is part of the
+ * draft, beside its words, so it syncs to every window and the phone and goes
+ * with whichever device sends. An older page that knew long pastes only never
+ * drops one; a Send that did not carry one leaves it behind, never loses it.
+ */
+describe("reply drafts keep every attached file", () => {
+  const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+  const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
+  const upload = async (server: InboxServer, name: string, bytes: string | Uint8Array): Promise<InboxUpload> => {
+    const response = await fetch(url(server, `/api/inbox/uploads?name=${encodeURIComponent(name)}&serverSession=${server.serverSession}`), { method: "POST", body: bytes });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { upload: InboxUpload }).upload;
+  };
+  const save = (server: InboxServer, threadId: string, body: Record<string, unknown>) => post(server, `/api/inbox/threads/${threadId}/draft`, body);
+  const draftOf = async (response: Response) => ((await response.json()) as { draft: InboxReplyDraft | null }).draft;
+  const ids = (draft: InboxReplyDraft | null | undefined) => (draft?.files ?? []).map((file) => file.upload_id);
+  const pending = (server: InboxServer, id: string) => existsSync(join(server.store.dir, "uploads", "pending", `${id}.json`));
+
+  test("saved beside the words and read back whole (as a phone's 7.62 read gets it); files alone keep the draft; the Drafts page names the file", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the dashboard.", "ses_f1");
+    const shot = await upload(server, "dashboard.png", PNG);
+    const notes = await upload(server, "notes.md", "# Notes\n");
+    const first = await save(server, thread_id, { body: "See the shot", base: null, files: [shot.upload_id, { upload_id: notes.upload_id }], all_files: true });
+    expect(first.status).toBe(200);
+    const draft = (await draftOf(first))!;
+    expect(draft.files).toEqual([shot, notes]);
+    const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
+    expect(read.draft).toEqual(draft);
+
+    // The words gone, the files kept: a draft of files only, unsent on its row, named on the Drafts page.
+    const filesOnly = (await draftOf(await save(server, thread_id, { body: "", base: draft.updated_at, files: [shot.upload_id], all_files: true })))!;
+    expect(ids(filesOnly)).toEqual([shot.upload_id]);
+    expect((await rowOf(server, thread_id)).unsent?.reply_at).toBe(filesOnly.updated_at);
+    const page = (await (await fetch(url(server, "/api/inbox/drafts"))).json()) as { replies: { thread_id: string; reply_preview: string | null }[] };
+    expect(page.replies.find((row) => row.thread_id === thread_id)?.reply_preview).toBe("dashboard.png");
+  });
+
+  test("the compare-and-set covers every file, and base_files names them: a save a step behind holds only while the draft holds what it saved last", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the dashboard.", "ses_f2");
+    const a = await upload(server, "a.png", PNG);
+    const b = await upload(server, "b.png", Uint8Array.from([...PNG, 1]));
+    const mine = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files: [a.upload_id], all_files: true })))!;
+    // Another window adds B beside the same words.
+    const theirs = (await draftOf(await save(server, thread_id, { body: "Shots", base: mine.updated_at, files: [a.upload_id, b.upload_id], all_files: true })))!;
+    // This window's next save is a step behind and names only A as what it saved last: refused, nothing written over.
+    const refused = await save(server, thread_id, { body: "Shots, see A", base: mine.updated_at, base_body: "Shots", base_files: [a.upload_id], files: [a.upload_id], all_files: true });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ code: "draft_conflict", draft: theirs });
+    // A stale base alone is refused too.
+    expect((await save(server, thread_id, { body: "x", base: mine.updated_at, files: [], all_files: true })).status).toBe(409);
+    expect(server.store.replyDraft(thread_id)).toEqual(theirs);
+    // With all_files, a list without A removes it.
+    const removed = (await draftOf(await save(server, thread_id, { body: "Shots", base: theirs.updated_at, files: [b.upload_id], all_files: true })))!;
+    expect(ids(removed)).toEqual([b.upload_id]);
+  });
+
+  test("an older page (long pastes only, no all_files) never drops a file it does not know, and keeps the words it saves", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("The nightly import failed.", "ses_f3");
+    const shot = await upload(server, "error.png", PNG);
+    const paste = await upload(server, "pasted-text-o.txt", LOG);
+    const mine = (await draftOf(await save(server, thread_id, { body: "Log:", base: null, files: [shot.upload_id, { upload_id: paste.upload_id, pasted: { at: 4, preview: "log" } }], all_files: true })))!;
+    // The older page saves its words and the paste it knows; the picture stays.
+    const older = (await draftOf(await save(server, thread_id, { body: "Log: retry 2", base: mine.updated_at, files: [{ upload_id: paste.upload_id, pasted: { at: 4, preview: "log" } }] })))!;
+    expect(older.body).toBe("Log: retry 2");
+    expect(ids(older)).toEqual([shot.upload_id, paste.upload_id]);
+    // It drops the paste and every word: the picture still stays, as a draft of files only.
+    const emptied = (await draftOf(await save(server, thread_id, { body: "", base: older.updated_at })))!;
+    expect(emptied.body).toBe("");
+    expect(ids(emptied)).toEqual([shot.upload_id]);
+    // Its save a step behind compares only the pastes it can name (none here), so it is still its own.
+    const behind = await save(server, thread_id, { body: "Again", base: older.updated_at, base_body: "", base_files: [] });
+    expect(behind.status).toBe(200);
+    expect(ids(await draftOf(behind))).toEqual([shot.upload_id]);
+  });
+
+  test("Send: the draft's own version takes words and carried files; a Send of the words alone leaves the file as a draft of files only, and says so to every window", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("Here is the dashboard.", "ses_f4");
+    const shot = await upload(server, "chart.png", PNG);
+    const other = await upload(server, "table.csv", "a,b\n1,2\n");
+    // Carried: the draft is done, the upload is now the reply's attachment.
+    const draft = (await draftOf(await save(server, thread_id, { body: "Ship it", base: null, files: [shot.upload_id], all_files: true })))!;
+    const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-1", words: "Ship it", uploads: [shot.upload_id], clear_draft: draft.updated_at });
+    expect(sent.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+    expect(pending(server, shot.upload_id)).toBe(false);
+    expect(server.store.thread(thread_id)!.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual(["chart.png"]);
+
+    const controller = new AbortController();
+    const stream = await fetch(url(server, `/api/inbox/events?cursor=${server.store.cursor()}&window=window-test-f4&permission=granted`), { signal: controller.signal });
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+    // A phone (or an older page) sends the words alone, naming the draft's version: the words go, the file stays.
+    const next = (await draftOf(await save(server, thread_id, { body: "And the table", base: null, files: [other.upload_id], all_files: true })))!;
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-2", words: "And the table", clear_draft: next.updated_at })).status).toBe(200);
+    const left = server.store.replyDraft(thread_id)!;
+    expect(left.body).toBe("");
+    expect(ids(left)).toEqual([other.upload_id]);
+    expect(left.updated_at > next.updated_at).toBe(true);
+    expect(pending(server, other.upload_id)).toBe(true);
+    expect((await rowOf(server, thread_id)).unsent?.reply_at).toBe(left.updated_at);
+    const deadline = Date.now() + 3000;
+    const heard = `event: drafts\ndata: {"thread_id":"${thread_id}"}`;
+    while (!text.includes(heard) && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
+    controller.abort();
+    expect(text).toContain(heard);
+
+    // A stale version with the same words, not carrying the file: another window's work, kept whole.
+    const words = (await draftOf(await save(server, thread_id, { body: "Table attached", base: left.updated_at, files: [other.upload_id], all_files: true })))!;
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f4-3", words: "Table attached", clear_draft: left.updated_at })).status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toEqual(words);
+  });
+
+  test("the sweep keeps a reply draft's file at any age; after Discard it goes once a day old, while a blob a sent message shares stays", async () => {
+    const { dataDir, server, send } = await setup();
+    const { thread_id, message_id } = await send("Here is the dashboard.", "ses_f5");
+    const kept = await upload(server, "kept.png", PNG);
+    expect((await save(server, thread_id, { body: "", base: null, files: [kept.upload_id], all_files: true })).status).toBe(200);
+    /** Two days old, as the sweep sees it. */
+    const age = (dir: string, id: string) => {
+      const path = join(dir, "uploads", "pending", `${id}.json`);
+      const record = JSON.parse(readFileSync(path, "utf8")) as InboxUpload;
+      writeFileSync(path, JSON.stringify({ ...record, created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }));
+    };
+    age(server.store.dir, kept.upload_id);
+    server.stop();
+    servers.splice(servers.indexOf(server), 1);
+    // The Inbox sweeps as it starts: the draft's file is still there.
+    let again = await start(dataDir);
+    expect(pending(again.server, kept.upload_id)).toBe(true);
+    expect(ids(again.server.store.replyDraft(thread_id))).toEqual([kept.upload_id]);
+
+    // Discard: no draft names it, so the next sweep forgets it.
+    expect((await post(again.server, `/api/inbox/threads/${thread_id}/draft/delete`, {})).status).toBe(200);
+    // A sent reply holds the same bytes as another pending upload: their blob stays when that upload goes.
+    const sharedBytes = Uint8Array.from([...PNG, 9]);
+    const shared = await upload(again.server, "shared.png", sharedBytes);
+    const twin = await upload(again.server, "twin.png", sharedBytes);
+    expect(twin.sha256).toBe(shared.sha256);
+    expect((await post(again.server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "f5-1", words: "Shared", uploads: [shared.upload_id] })).status).toBe(200);
+    age(again.server.store.dir, twin.upload_id);
+    again.server.stop();
+    servers.splice(servers.indexOf(again.server), 1);
+    again = await start(dataDir);
+    expect(pending(again.server, kept.upload_id)).toBe(false);
+    expect(pending(again.server, twin.upload_id)).toBe(false);
+    const sentFile = again.server.store.thread(thread_id)!.messages.at(-1)!.attachments![0]!;
+    expect(existsSync(sentFile.path)).toBe(true);
+  });
+
+  test("an agent never sees a draft's file: not in the event log, read_thread or search", async () => {
+    const { server, client, send } = await setup();
+    const { thread_id } = await send("Here is the dashboard.", "ses_f6");
+    const secret = await upload(server, "SECRET-DRAFT-FILE.png", PNG);
+    const cursor = server.store.cursor();
+    expect((await save(server, thread_id, { body: "", base: null, files: [secret.upload_id], all_files: true })).status).toBe(200);
+    expect(server.store.changesSince(cursor)).toEqual([]);
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id, agent_session: "ses_f6" } });
+    expect(JSON.stringify(read)).not.toContain("SECRET-DRAFT-FILE");
+    const search = await (await fetch(url(server, "/api/inbox/search?q=SECRET"))).json();
+    expect(JSON.stringify(search)).not.toContain("SECRET-DRAFT-FILE");
   });
 });
