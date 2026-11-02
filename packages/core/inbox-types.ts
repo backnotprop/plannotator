@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxTidyMark } from "./inbox-tidy";
+import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 
@@ -1377,6 +1378,18 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Additive: absent from an older Inbox.
    */
   pinned_at?: string | null;
+  /**
+   * The thread is snoozed (approval "inbox-snooze"; the rules are core's
+   * inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the
+   * window and the phone read, never on anything an agent reads. Additive:
+   * absent from an older Inbox.
+   */
+  snoozed?: InboxRowSnooze | null;
+  /**
+   * The thread came back from a snooze at this time and has not been read
+   * since: the row's small clock. Only on the list model, like `snoozed`.
+   */
+  snooze_back?: string | null;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1510,8 +1523,11 @@ export const INBOX_ROW_WAIT_TEXT_MAX = 200;
 export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
 export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
+/** A group the list draws: a section, or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`), which no row is placed in. */
+export type InboxListGroupId = InboxSectionId | "snoozed";
+
 export interface InboxListSection {
-  id: InboxSectionId;
+  id: InboxListGroupId;
   label: string;
   threads: InboxListRow[];
 }
@@ -1731,6 +1747,45 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
 }
 
 /**
+ * How the Inbox list's rows look (config.json `inboxRows`, through GET and
+ * POST /api/inbox/settings `rows` and the windows' `event: rows`; approval
+ * "inbox-customize-rows"): the names of the options that are on, every other
+ * one off. The list's ⋮ menu has the first four, Settings → Rows has them all.
+ * Kept for the person, not per browser (the owner, 2026-11-02: "Whatever they
+ * set goes wherever they're using the app"). GET answers null until a window
+ * first saves it.
+ */
+export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
+export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
+
+/**
+ * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
+ * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ */
+export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
+  const on = new Set(rows);
+  if (on.has("compact")) on.delete("roomy");
+  if (on.has("hidePreview")) on.delete("previewTwo");
+  if (on.has("unreadDot")) on.add("smallNames");
+  return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
+}
+
+/** A save's list (POST): every name known, in their order, each once, rivals settled; null otherwise (a `422`). */
+export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
+  if (!Array.isArray(value) || value.some((name) => !(INBOX_ROWS_OPTIONS as readonly unknown[]).includes(name))) return null;
+  return inboxRowsCanonical(value as InboxRowsOption[]);
+}
+
+/**
+ * A kept list (config.json, a read, an event): the names this build knows, the others dropped (a newer build's
+ * option after a downgrade, a typo), so a look is never read as "never saved". Null only for a non-list.
+ */
+export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
+  if (!Array.isArray(value)) return null;
+  return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
+}
+
+/**
  * The agents the Inbox connects itself to on `plannotator inbox` (the
  * approved "inbox-agent-awareness" design; packages/server/inbox-agents.ts).
  * Terminal agents and the Claude desktop app; editors keep their one-click
@@ -1907,6 +1962,60 @@ export interface InboxAgentRow {
    */
   wakes?: boolean;
 }
+
+/** One usage limit of a Claude account, as `cswap list --json` reports it. A window it does not report is null, never 0. */
+export interface InboxUsageWindow {
+  pct: number;
+  resetsAt: string | null;
+  countdown: string | null;
+  clock: string | null;
+}
+
+/** A limit on one model family; `name` is what the window calls it ("Fable"). */
+export interface InboxScopedUsageWindow extends InboxUsageWindow {
+  name: string;
+}
+
+export interface InboxAccountUsage {
+  fiveHour: InboxUsageWindow | null;
+  sevenDay: InboxUsageWindow | null;
+  scoped: InboxScopedUsageWindow[];
+}
+
+/** One Claude account on this computer. Field names are `cswap`'s; nothing else of its row reaches the window. */
+export interface InboxAccount {
+  number: number;
+  alias: string | null;
+  /** Null for an API-key account: its placeholder address is never passed on. */
+  email: string | null;
+  organizationName: string | null;
+  isOrganization: boolean;
+  active: boolean;
+  usageStatus: string | null;
+  usageError: string | null;
+  usageRetryAt: string | null;
+  /** Null: no reading. */
+  usage: InboxAccountUsage | null;
+  /** How old `cswap` says the reading is. It serves the last good one when a fetch fails. */
+  usageAgeSeconds: number | null;
+}
+
+/** Why a read of the accounts failed: a fixed code, never `cswap`'s own words. */
+export type InboxAccountsFailure = "timed_out" | "run_failed" | "bad_output" | "unknown_schema";
+
+/** `GET /api/inbox/accounts` (Settings → Accounts). */
+export type InboxAccountsRead =
+  | { state: "not_installed" }
+  | { state: "failed"; reason: InboxAccountsFailure }
+  | { state: "accounts"; accounts: InboxAccount[] };
+
+/**
+ * `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is
+ * none: `offline`, no answer at all; `needs_update`, a version apart;
+ * `unreachable`, it answered something else (a 500, a refused token). None is
+ * an error.
+ */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
@@ -2140,10 +2249,26 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
  * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
  * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
+ * Measured again before the next change (the generated entry plus Pi's fixed
+ * 45-byte wrapper, which the cost test matches exactly): main was 9,946
+ * bytes, not the 9,842 estimated above.
+ * Then pictures inline (the owner, 2026-11-02: INBOX_PICTURES_RULE on
+ * `body`, the attachments line, the lead's "with its pictures inline"):
+ * measured on Pi with the cost test, 10,096 bytes (+150; tokens scaled from
+ * 2,650 and stated high). With the Board on, measured the same way from a
+ * real Inbox's Board-on tool list: 11,514 bytes.
+ * Board columns v2 (the card action's `column` lists the v2 ids, the
+ * hand-over rule and the automatic ship; Done in place of Shipped, and the
+ * ship line saying the agent ships on a merge it sees, review of #2522):
+ * the Board-on entry before this change 11,318 → 11,260 bytes, 2,733 →
+ * 2,719 o200k tokens (-58 bytes, -14 tokens); Board off unchanged. On top of
+ * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
+ * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
+ * inbox-board-switch.test.ts).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
+const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -2164,6 +2289,9 @@ export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
 
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). The window names it too. */
 export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+/** The longest draft body (compose drafts and reply drafts), in characters: the window says so before the server refuses one. */
+export const INBOX_DRAFT_BODY_MAX = 1_000_000;
 
 /**
  * A file the person uploaded from the window for a thread they start, not
@@ -2238,7 +2366,30 @@ export interface InboxReplyDraft {
   body: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Long pastes kept as files beside the words (approval "inbox-paste-attachment"), each an upload not sent
+   * yet with where it goes back in `body`. Absent: none (and on a draft an older Inbox wrote).
+   */
+  files?: InboxDraftFile[];
 }
+
+/**
+ * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
+ * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's
+ * space), `preview` the tile's name line (the paste's first words). The text itself is the upload's bytes.
+ */
+export interface InboxDraftPasted {
+  at: number;
+  lead?: string;
+  preview: string;
+}
+
+/** A draft's file: an upload not sent yet, and, for a long paste, where it goes back. */
+export type InboxDraftFile = InboxUpload & { pasted?: InboxDraftPasted };
+
+/** The longest pasted-text preview a draft keeps, and the longest `lead`. */
+export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
+export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
@@ -2267,7 +2418,7 @@ export interface InboxDraft {
   to: InboxDraftTo | null;
   /** The project it was written in (the chosen session's, or the one open in the list). */
   project: { id: string | null; root: string; name: string } | null;
-  files: InboxUpload[];
+  files: InboxDraftFile[];
   /**
    * The thread's name the person typed in compose (the chip), as typed.
    * Absent while the chip follows the message (compose's suggestion, worked
@@ -2299,6 +2450,8 @@ export interface InboxComposeSession {
   last_thread: { id: string; subject: string | null; at: string } | null;
   /** Where it works, when that is another folder of a combined project than the group's `root`. */
   root?: string;
+  /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
+  label?: string;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */

@@ -8,7 +8,7 @@ import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
-import { cutText } from '@plannotator/core/inbox-questions';
+import { cutText, sliceText } from '@plannotator/core/inbox-questions';
 import {
   formatInboxVideoTime,
   INBOX_VIDEO_BLOCK_ID,
@@ -121,6 +121,14 @@ export function annotationTag(annotation: Annotation): string | null {
   if (diagram) return diagram.kind === 'diagram' ? 'diagram' : `${diagram.kind}${'id' in diagram && diagram.id ? ` ${diagram.id}` : ''}`;
   const tag = annotation.elementContext?.tag ?? annotation.htmlAnchor?.tagName;
   return tag ? tag.toLowerCase() : null;
+}
+
+/** A quote as a sheet's title or a comment card names it: one line, cut at a word. */
+export function shortLabel(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (line.length <= 60) return line;
+  const cut = line.slice(0, 60);
+  return `${cut.lastIndexOf(' ') > 30 ? cut.slice(0, cut.lastIndexOf(' ')) : sliceText(line, 60)}…`;
 }
 
 /** The quoted text a row shows: the selection, or the element or part it names. */

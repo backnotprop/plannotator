@@ -47,8 +47,11 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
   INBOX_CARD_COLUMNS,
+  INBOX_CARD_AUTO_SHIP_COLUMNS,
+  inboxCardAutoShip,
   inboxCardColumnOf,
   inboxCardRefsOf,
+  inboxCardShipPrs,
   inboxCardMarkRef,
   isInboxCardDropUnseen,
   INBOX_CARD_MARKS_MAX,
@@ -57,6 +60,7 @@ import {
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
   INBOX_TEXT_SIZE_DEFAULT,
+  INBOX_ROWS_OPTIONS,
   INBOX_TOUR_VERSION,
   type InboxTourChange,
   type InboxTourState,
@@ -73,6 +77,9 @@ import {
   isInboxSoundVolume,
   isInboxTextSize,
   type InboxTextSize,
+  inboxRowsList,
+  inboxRowsRead,
+  type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
   type InboxListRow,
@@ -114,6 +121,7 @@ import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
@@ -158,6 +166,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -183,6 +192,8 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxSnoozes } from "./inbox-snooze";
+import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -191,9 +202,8 @@ import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plann
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
-import { createInboxMachines, type InboxMachines, type MachineFrame } from "./inbox-machines";
+import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
-import type { PeerLinkTimings } from "./inbox-peer-link";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -373,7 +383,7 @@ export interface InboxServerOptions {
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
-  machineLinkTimings?: Partial<PeerLinkTimings>;
+  machineLinkTimings?: MachineLinkTimings;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
   windowHeartbeatMs?: number;
   /** The Board, decided here instead of config.json `inboxBoard` (tests). Absent: config.json decides on every request. */
@@ -425,6 +435,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
+  /** Tests: where a read of `cswap list --json` looks, how long it waits, when a stuck run is killed, and how long an answer serves (packages/server/inbox-accounts.ts). */
+  accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -538,6 +550,9 @@ const ERROR_STATUS: Record<string, number> = {
   config_not_saved: 500,
   // pins.json from a newer Plannotator: kept as it is (packages/shared/inbox/pins.ts).
   pins_newer: 409,
+  // Snoozes (packages/shared/inbox/snoozes.ts): a time gone by, and a file from a newer Plannotator.
+  snooze_past: 409,
+  snoozes_newer: 409,
   // Attachments and annotations (step 2).
   attachment_not_found: 404,
   attachment_missing: 404,
@@ -593,8 +608,7 @@ const ERROR_STATUS: Record<string, number> = {
   card_not_found: 404,
   card_no_project: 404,
   card_other_project: 422,
-  card_icebox_person_only: 403,
-  card_iceboxed: 409,
+  card_backlog_person_only: 409,
   card_dropped_by_person: 409,
   card_person_only: 403,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
@@ -847,6 +861,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
+  /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
+  const snoozeListeners = new Set<() => void>();
+  /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -984,19 +1002,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     machine_links: 1,
   });
 
+  const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
+  /**
+   * A row as the window and the phone read it (approval "inbox-snooze"): its
+   * `snoozed`, and a return drawn by the clock now (core inbox-snooze.ts). Only
+   * here, never in `store.listRow`, which agents read through.
+   */
+  const withSnooze = (row: InboxListRow, byThread = snoozesById(), now = new Date()): InboxListRow => {
+    const snooze = byThread.get(row.thread_id);
+    return snooze ? inboxRowAsOf({ ...row, snoozed: { until: snooze.until, at: snooze.at } }, now) : row;
+  };
+
   /**
    * The sidebar's folders: every project, with its thread and unread counts,
    * and (additive) `listed`, the threads the window's list holds, and
    * `archived`, the rest. The window leaves out a project with nothing listed
    * (the project menu's automatic hiding); an older window ignores both.
    */
-  const projectFolders = (rows: readonly InboxListRow[] = store.listRows()) => {
+  const projectFolders = (rows?: readonly InboxListRow[]) => {
+    const byThread = snoozesById();
+    const counted = rows ?? store.listRows().map((row) => withSnooze(row, byThread));
     return store.listProjects().map((project) => {
-      const mine = rows.filter((row) => row.project.id === project.id);
+      const mine = counted.filter((row) => row.project.id === project.id);
       const archived = mine.filter((row) => inboxRowArchived(row)).length;
       // The projects combined into this one: a link to one opens this project. Additive, and only when there are any.
       const combined = store.combinedInto(project.id).map(({ id, name, root }) => ({ id, name, root }));
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread: mine.filter((row) => row.unread).length, listed: mine.length - archived, archived };
+      // A snoozed thread is listed (its project stays, for the band) and not unread (nothing shows until it is back).
+      const unread = mine.filter((row) => row.unread && !inboxRowSnoozed(row)).length;
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -1039,23 +1072,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * machine): every linked machine's rows join this Inbox's, each row with
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
-  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false) => {
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
     // One pass over the store feeds both the folders' counts and the sections.
-    // `pinned_at` (additive) on the window's and the phone's rows only: never on anything an agent reads.
+    // `pinned_at` and `snoozed` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
     // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
     // Resolved once per list: off, it is the identity and no row costs anything. Only this Inbox's own rows: a linked
     // machine's launches are that machine's to decorate.
     const decorate = launch.rowDecorator();
+    // Snoozes, by this reader's clock now (core inbox-snooze.ts): a row past its time stands as a return, in every mode.
+    // Applied after the launch decoration, so a launched row keeps its run word and section under a snooze.
+    const now = new Date();
+    const byThread = snoozesById();
     const own = store
       .listRows()
-      .map((row) => decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row));
+      .map((row) => withSnooze(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row), byThread, now));
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
-    const rows: InboxListRow[] = merged ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id))] : own;
+    // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
+    const rows: InboxListRow[] = merged
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(row, now))]
+      : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
     const scoped = shownProject ? rows.filter((row) => row.project.id === shownProject) : rows;
     const byId = new Map(rows.map((row) => [row.thread_id, row]));
+    const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
+    const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     return {
       serverSession,
       version,
@@ -1075,7 +1117,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // `?archived=exclude` (the window): archived threads leave every section,
       // Quiet included, and Settings lists them (GET /api/inbox/threads/archived).
       // Without it they stay in Quiet, as an older window and the phone expect.
-      sections: inboxListSections(archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped),
+      // `?snoozed=exclude` (the window): snoozed threads leave every section for `snoozed`, soonest back first.
+      // Without it they stay in their sections, each with its `snoozed` field, as an older window and the phone expect.
+      sections: inboxListSections(listed ? listed.rows : unarchived),
+      ...(listed ? { snoozed: listed.snoozed } : {}),
+      /** This Inbox keeps snoozes: a linked machine offers Snooze on this machine's rows only when its list says so. Additive. */
+      snoozes: true,
       /**
        * The sidebar's pinned threads (approval "inbox-pinned-threads"), in pin
        * order: every pinned thread whatever the project filter or `archived`
@@ -1101,7 +1148,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The Board's cards (`GET /api/inbox/cards`): `?project=prj_…` and
-   * `?column=building,your_review` filter; every card otherwise, in the
+   * `?column=in_progress,in_review` filter; every card otherwise, in the
    * Board's column order, the latest move first.
    */
   const cardsModel = (url: URL) => {
@@ -1121,7 +1168,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const droppedUnseen = store.listCards({ projectIds: project ? new Set([project]) : null, columns: new Set(["dropped"]) }).filter(isInboxCardDropUnseen).length;
     // `seen_seq` (additive): the person's last look at the Board (a store seq); a card an agent wrote to in a later line is unread (isInboxCardUnread).
     // `threads` (additive): each linked thread's list row, archived ones included (the window's list leaves
-    // them out), so the opened card names a shipped card's thread; a deleted thread is not linked at all.
+    // them out), so the opened card names a done card's thread; a deleted thread is not linked at all.
     const threads: Record<string, ReturnType<typeof store.listRow>> = {};
     for (const card of cards) for (const id of card.threads) if (!(id in threads)) threads[id] = store.listRow(id);
     return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads };
@@ -1129,9 +1176,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * The person's moves on a card (`POST /api/inbox/cards/:id`): `op` move
-   * (`column`, any; a move to dropped may carry `reason`), icebox (the pause
-   * only the person makes), drop (`reason` optional), restore (back to the
-   * column the card left for the Icebox or Dropped).
+   * (`column`, any; a move to dropped may carry `reason`), icebox (a window
+   * from before v2: Backlog, where the Icebox folded in), drop (`reason`
+   * optional), restore (back to the column the card left for Dropped).
    */
   const personCardMove = (id: string, body: Record<string, unknown>) => {
     if (!isInboxId("crd", id)) throw new InboxError("validation_error", "A card id (crd_).", { field: "card" });
@@ -1142,7 +1189,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.column === undefined) throw new InboxError("validation_error", "column: where the card goes.", { field: "column" });
         return store.updateCard(id, { by, column: body.column, reason: body.column === "dropped" ? reason : undefined });
       case "icebox":
-        return store.updateCard(id, { by, column: "icebox" });
+        return store.updateCard(id, { by, column: "backlog" });
       case "drop":
         return store.updateCard(id, { by, column: "dropped", reason });
       case "restore":
@@ -1167,6 +1214,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (value === null || value === "" || value === "include") return "include";
     if (value === "exclude") return "exclude";
     throw new InboxError("validation_error", "archived: include or exclude.", { field: "archived" });
+  };
+
+  /** `?snoozed=include|exclude` on the list: where snoozed threads go. Default `include` (in their sections). */
+  const snoozedModeOf = (url: URL): "include" | "exclude" => {
+    const value = url.searchParams.get("snoozed");
+    if (value === null || value === "" || value === "include") return "include";
+    if (value === "exclude") return "exclude";
+    throw new InboxError("validation_error", "snoozed: include or exclude.", { field: "snoozed" });
   };
 
   /** A whole number from a query parameter, within bounds; absent or empty is the default. */
@@ -1576,6 +1631,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
+   * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
+   * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
+   * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
+   * when it is newer than the last it took, whatever order the answers and events arrive in.
+   */
+  const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxRowsRev;
+    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
+
+  const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
+    const rows = inboxRowsList(input);
+    if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
+    const rev = rowsState().rev + 1;
+    if (validateOnly) return { rows, rev };
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    const saved = rowsState();
+    if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    for (const listener of rowsListeners) listener(rows, rev);
+    return { rows, rev };
+  };
+  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev });
+
+  /**
    * The onboarding tour (config.json `inboxTour`, approval
    * "inbox-onboarding-tour"): when it was started, finished or skipped, and
    * whether the first real thread offers notifications once more. Kept per
@@ -1859,6 +1940,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
+    /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
+    ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. */
     diff_style: diffStyleState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
@@ -1874,6 +1957,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
+    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
+    ...(askOn && !guest ? { ask_ai: true } : {}),
+    /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
+    cswap: !guest && accounts.installed(),
   });
 
   /** Save the knob for the hosts named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
@@ -2000,6 +2087,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId) pinListeners.add(onPins);
+        // A snooze changed or ran out: the list is read again. Windows, and a linked machine that asks (`snoozes=1`:
+        // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
+        const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
+        if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
+        // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
+        const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
+        if (windowId) rowsListeners.add(onRows);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
         const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
@@ -2027,6 +2121,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
+          snoozeListeners.delete(onSnoozes);
+          rowsListeners.delete(onRows);
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();
@@ -2549,6 +2645,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
+  const snoozes = createInboxSnoozes({
+    store,
+    serverSession,
+    readBody: (req) => readBody(req),
+    json,
+    tell: () => {
+      for (const listener of snoozeListeners) listener();
+    },
+  });
   // Live HTML embeds (approval "inbox-inline-html"): the documents the window frames for a message's ```html fences (inbox-embeds.ts).
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts).
@@ -2599,6 +2705,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody,
     ...options.voice,
   });
+
+  /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
@@ -2810,7 +2919,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1"));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -2827,7 +2936,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         // Each decision's project carries its repo (as a thread does), so refs on its card link there.
-        const decisions = store.openDecisions({ projectId: projectFilterOf(url) }).map((decision) => {
+        // A snoozed thread's decisions wait with it (approval "inbox-snooze"): they come back with the thread.
+        const snoozedNow = store.snoozedThreads();
+        const open = store.openDecisions({ projectId: projectFilterOf(url) }).filter((decision) => !snoozedNow.has(decision.thread.id));
+        const decisions = open.map((decision) => {
           // The thread's own folder: `thread.project` is the head of a combined project.
           const root = store.thread(decision.thread.id)?.project.root;
           return { ...decision, thread: { ...decision.thread, project: { ...decision.thread.project, repo: root ? repos.get(root) : null } } };
@@ -2983,6 +3095,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tailscale === undefined &&
           body.theme === undefined &&
           body.text_size === undefined &&
+          body.rows === undefined &&
           body.diff_style === undefined &&
           body.experimental === undefined &&
           body.tour === undefined &&
@@ -2992,7 +3105,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -3031,6 +3144,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) saveUpdateSwitches(body, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
+        if (body.rows !== undefined) saveRows(body.rows, true);
         if (body.diff_style !== undefined) saveDiffStyle(body.diff_style, true);
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
@@ -3048,13 +3162,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
+        const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -3064,6 +3179,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ownerOrLocal(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
+      }
+      // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,
+      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. One check for this
+      // computer's read and a linked machine's, which is not forwarded any other way. On the door for a machine only.
+      const machineAccounts = /^\/api\/inbox\/accounts\/(ibx_[0-9A-HJKMNP-TV-Z]{26})$/.exec(path);
+      if (path === "/api/inbox/accounts" || machineAccounts) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
+        const fresh = url.searchParams.get("fresh") === "1";
+        return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
@@ -3121,6 +3249,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;
+      // Snooze and Unsnooze (approval "inbox-snooze").
+      const snoozed = await snoozes.route(req, url);
+      if (snoozed) return snoozed;
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
       const embedded = await embeds.route(req, url);
       if (embedded) return embedded;
@@ -3137,16 +3268,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Cards carry the person's notes: another site's read is refused, as on the other read routes.
         if (req.method === "GET") return crossSiteCardRead(req) ?? json(cardsModel(url));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
-        // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent) or the
-        // Icebox; or sent to an agent: `thread_id` is the thread the window just started for it with
-        // compose's Send (its body the notes), and the card lands in that thread's project, sent.
+        // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent; a window
+        // from before v2 says icebox, which folded into it); or sent to an agent: `thread_id` is the thread
+        // the window just started for it with compose's Send (its body the notes), and the card lands in
+        // that thread's project, sent, in Todo.
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const column = body.column === undefined || body.column === null ? "backlog" : body.column;
-        if (column !== "backlog" && column !== "icebox") throw new InboxError("validation_error", "column: backlog or icebox (a New card).", { field: "column" });
+        const asked = body.column === undefined || body.column === null ? "backlog" : body.column;
+        if (asked !== "backlog" && asked !== "icebox" && asked !== "todo") throw new InboxError("validation_error", "column: backlog or todo (a New card).", { field: "column" });
+        const column = asked === "icebox" ? "backlog" : asked;
         let projectId: unknown = body.project;
         if (body.thread_id !== undefined && body.thread_id !== null) {
-          if (column !== "backlog") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Backlog.", { field: "thread_id" });
           const message = typeof body.thread_id === "string" ? store.message(body.thread_id) : null;
           if (!message) throw new InboxError("thread_not_found", `No thread ${String(body.thread_id)}.`);
           projectId = message.project_id;
@@ -3196,7 +3328,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       // The lane cards' marks (inbox-card-marks.ts): the state of each card's one marked link, for the
       // cards on screen. Only the owner's window, only while the Board is on; never on the device
-      // door (not on its allowlist). Read only; it runs gh / glab, so another site is refused first.
+      // door (not on its allowlist). It writes only an automatic move to Done (Q3); it runs gh / glab, so
+      // another site is refused first.
       if (path === "/api/inbox/cards/marks") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -3210,19 +3343,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw new InboxError("validation_error", `cards: the crd_ ids of the cards on screen (at most ${INBOX_CARD_MARKS_MAX}).`, { field: "cards" });
         }
         const wanted: { id: string; ref: InboxCardRef }[] = [];
+        // Auto-ship (approval "inbox-board-columns-v2", Q3): a card in Todo, In progress or In review has
+        // its own PRs (linked through `pr`, inboxCardShipPrs) read with its mark, in the same queries; all
+        // merged, one of them new since it was last in Done, moves it to Done (inboxCardAutoShip).
+        const shipping: { id: string; refs: InboxCardRef[] }[] = [];
         for (const id of new Set(ids as string[])) {
           const card = store.card(id);
           const ref = card ? inboxCardMarkRef(card) : null;
           if (ref) wanted.push({ id, ref });
+          if (card && INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) {
+            const own = new Set(inboxCardShipPrs(card));
+            const prs = inboxCardRefsOf(card).filter((r) => r.kind === "pr" && own.has(r.url));
+            if (prs.length > 0) shipping.push({ id, refs: prs });
+          }
         }
         const resolved = await cardMarks.marks(
-          wanted.map((w) => w.ref),
+          [...wanted.map((w) => w.ref), ...shipping.flatMap((s) => s.refs)],
           { refresh: body.refresh === true },
         );
         const marks: Record<string, InboxCardMark> = {};
         for (const { id, ref } of wanted) {
           const mark = resolved.get(ref.url);
           if (mark) marks[id] = mark;
+        }
+        // Checked again against the card as it is now (it may have moved while gh ran); an unknown state does nothing.
+        for (const { id } of shipping) {
+          const card = store.card(id);
+          const prs = card ? inboxCardAutoShip(card, (url) => resolved.get(url)?.state) : null;
+          if (prs) store.autoShipCard(id, prs);
         }
         return json({ serverSession, marks });
       }
@@ -3268,7 +3416,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const run = await launch.runOf(thread.thread_id);
         const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -3566,18 +3714,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               throw error;
             }
             // The Send that carried the reply box's words: its draft goes (a replay too, since the first one sent them),
-            // while it is the draft those words were saved as (`updated_at`) or holds exactly those words, so another
-            // window's newer, different draft stays.
+            // while it is the draft those words were saved as (`updated_at`) or holds exactly those words and only
+            // pastes this Send carried, so another window's newer, different draft stays.
             if (typeof body.clear_draft === "string") {
               const threadId = store.message(messageId)?.thread_id;
               const words = typeof body.words === "string" ? body.words : undefined;
-              if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words)) for (const listener of draftListeners) listener(threadId);
+              const sentUploads = uploads.filter((id): id is string => typeof id === "string");
+              if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
             }
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
             if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
-            // Sent: the uploads are the reply's attachments now.
-            else if (attachments.length > 0) removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
+            // Sent: the uploads are the reply's attachments now, so no reply draft names them any more (one that kept
+            // a paste this Send did not carry, or another thread's): each draft that changed is told to its windows.
+            else if (attachments.length > 0) {
+              const sentIds = uploads.filter((id): id is string => typeof id === "string");
+              removeInboxUploads(store.dir, sentIds);
+              for (const threadId of store.dropSentUploadsFromReplyDrafts(sentIds)) for (const listener of draftListeners) listener(threadId);
+            }
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),
@@ -3607,7 +3761,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
-            const thread = store.resolveThread(messageId, body.resolved !== false);
+            // The person's Archive (the window, a phone, a linked machine's forward): it ends a snooze.
+            const thread = store.resolveThread(messageId, body.resolved !== false, "person");
             // Unarchived: a Mark read's set-aside note an archive held back is due again.
             if (body.resolved === false) {
               scheduleSetAside(thread.thread_id);
@@ -3811,6 +3966,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (stopped) return;
     for (const project of store.allProjects()) void repos.refresh(project.root);
     repoReadsBegun = true;
+    // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
+    // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.
+    void foldCheckoutFolderProjects({
+      store,
+      ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+      log: (fold) => debugLog?.note("project_folded", fold),
+    }).catch(() => {});
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
     for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
     for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);
@@ -3842,6 +4004,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     imageCapture.stop();
     clearInterval(uploadSweep);
     stopPinEvents();
+    snoozes.stop();
     clearInterval(restartWatch);
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);

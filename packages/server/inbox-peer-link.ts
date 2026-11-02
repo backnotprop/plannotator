@@ -57,6 +57,8 @@ export interface PeerList {
   cursor: number;
   rows: (InboxListRow & { machine: string })[];
   projects: Record<string, unknown>[];
+  /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
+  snoozes: boolean;
 }
 
 export interface PeerLinkOptions {
@@ -66,12 +68,45 @@ export interface PeerLinkOptions {
   onRecord: (record: PeerRecord) => void;
   /** State, list or anything else the window draws changed. */
   onChange: () => void;
+  /** That machine's snoozes changed and its list was read again: the windows read theirs. */
+  onSnoozes?: () => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
 }
 
 type Json = Record<string, any>;
+
+/** No refusal is longer: a far side that answers 401 with more is not read past this. */
+const REFUSAL_MAX_BYTES = 64 * 1024;
+
+/** A far answer's body as text, reading no further than `maxBytes`: past that it cancels the stream and answers null. */
+export async function readCapped(response: Response, maxBytes: number): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks).toString("utf8");
+    size += value.length;
+    if (size > maxBytes) {
+      // Not awaited: a clone's cancel settles only once its twin is cancelled too.
+      void reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+}
+
+/** The `code` of a door's refusal, if it reads as one. */
+async function refusalCode(response: Response): Promise<unknown> {
+  try {
+    return (JSON.parse((await readCapped(response, REFUSAL_MAX_BYTES)) ?? "null") as Json | null)?.code;
+  } catch {
+    return undefined;
+  }
+}
 
 export class PeerLink {
   readonly id: string;
@@ -190,7 +225,8 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      response = await this.options.transport.events(headers, this.cursor === null ? "" : `?cursor=${this.cursor}`, abort.signal);
+      // `snoozes=1`: a snooze writes no record, so the stream tells this machine when to read the list again.
+      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1" : `?cursor=${this.cursor}&snoozes=1`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -239,6 +275,9 @@ export class PeerLink {
             this.cursor = Math.max(this.cursor ?? 0, seq);
             this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
             this.refreshList();
+          } else if (parsed.event === "snoozes") {
+            // The list's cursor does not move, so the windows are told apart from a list that changes it.
+            void this.refreshList().then(() => this.options.onSnoozes?.());
           }
         }
       }
@@ -287,6 +326,7 @@ export class PeerLink {
       cursor,
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
+      snoozes: list.snoozes === true,
     };
     this.options.onChange();
     return true;
@@ -318,8 +358,8 @@ export class PeerLink {
       clearTimeout(timer);
     }
     if (response.status === 401) {
-      const copy = (await response.clone().json().catch(() => ({}))) as Json;
-      if (copy.code === "device_revoked" || copy.code === "device_token_invalid") this.stream?.abort();
+      const code = await refusalCode(response.clone());
+      if (code === "device_revoked" || code === "device_token_invalid") this.stream?.abort();
     } else if (this.state !== "online") {
       this.poke();
     } else {

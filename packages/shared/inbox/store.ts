@@ -130,15 +130,19 @@ import {
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
+import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
+import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
+import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_COLS_VERSION,
+  inboxCardAutoShip,
   INBOX_CARD_KEY_MAX,
   INBOX_CARD_LINE_MAX,
   INBOX_CARD_LINKS_MAX,
@@ -151,7 +155,9 @@ import {
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
+  inboxCardDonePrs,
   type InboxCardRef,
   type InboxCardHistoryEntry,
   isInboxCardDropUnseen,
@@ -620,6 +626,14 @@ export class InboxStore {
   private pinList: InboxPin[] = [];
   /** Told when the pins change (no store line is written for them). */
   private readonly pinListeners = new Set<() => void>();
+  /**
+   * The snoozed threads (snoozes.ts, approval "inbox-snooze"): a file outside
+   * the event log, read at load. Read by nothing that routes, lists or answers
+   * an agent; `listRow` never carries it (the server's list model does).
+   */
+  private snoozeList: InboxSnooze[] = [];
+  /** Told when the snoozes change (no store line is written for them). */
+  private readonly snoozeListeners = new Set<() => void>();
   private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
@@ -662,6 +676,7 @@ export class InboxStore {
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) {
       this.loadPins();
+      this.loadSnoozes();
       return;
     }
     const lines: InboxLine[] = [];
@@ -690,6 +705,7 @@ export class InboxStore {
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
+    this.loadSnoozes();
   }
 
   /**
@@ -776,10 +792,15 @@ export class InboxStore {
         break;
       case "card":
         // Cards are their own records: nothing here touches routing or the list.
-        // A card stored before Asked became Backlog reads as Backlog (inboxCardColumnOf).
+        // A card stored before columns v2 reads in the v2 columns (readInboxCard: the migration table, never a rewrite).
         {
-          const card = readInboxCard(line.record);
+          let card = readInboxCard(line.record);
           const prev = this.cards.get(card.id);
+          // A card in Done holds every PR it links (marked or not: a released Inbox wrote no `via`), with any
+          // list it had; a later line without the field keeps what the card had. So a card shipped and moved back
+          // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
+          if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
+          else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -1003,6 +1024,96 @@ export class InboxStore {
     const next = [...this.pinList];
     next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at });
     return this.commitPins(next);
+  }
+
+  /** The snoozes changed (set, ended, or a deleted thread left them): no store line is written. */
+  onSnoozesChange(listener: () => void): () => void {
+    this.snoozeListeners.add(listener);
+    return () => this.snoozeListeners.delete(listener);
+  }
+
+  private snoozesChanged(): void {
+    for (const listener of this.snoozeListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /** Read snoozes.json and keep the snoozes of threads that exist (the same load-time pruning as `loadPins`). */
+  private loadSnoozes(): void {
+    const before = this.snoozeList;
+    const read = readInboxSnoozes(this.dir);
+    const kept = read.filter((snooze) => this.isThreadRoot(snooze.thread_id));
+    this.snoozeList = kept;
+    if (kept.length !== read.length) {
+      try {
+        writeInboxSnoozes(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    if (before.some((snooze) => !kept.some((k) => k.thread_id === snooze.thread_id))) this.snoozesChanged();
+  }
+
+  /** Every snooze on this Inbox, a return not read yet included. */
+  snoozes(): readonly InboxSnooze[] {
+    return this.snoozeList;
+  }
+
+  /** The threads snoozed now, by this store's clock (a return is not one). */
+  snoozedThreads(): Set<string> {
+    const now = this.now();
+    return new Set(this.snoozeList.filter((entry) => inboxSnoozeRunning(entry.until, now)).map((entry) => entry.thread_id));
+  }
+
+  private commitSnoozes(next: InboxSnooze[]): void {
+    writeInboxSnoozes(this.dir, next);
+    this.snoozeList = next;
+    this.snoozesChanged();
+  }
+
+  /**
+   * Snooze a thread until `until`, or move a snooze it has. `at` keeps an
+   * earlier snooze's own time (Undo). An archived thread refuses: it has
+   * nowhere to come back to. Writes no store line.
+   */
+  setSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    const refusal = inboxSnoozeRefusal(until, this.now());
+    if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
+    if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
+    const now = this.now();
+    // `at` (Undo's earlier snooze) is a real ISO time, not after now; stored normalized like `until`.
+    if (at !== undefined && (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime())) {
+      throw new InboxError("validation_error", "at: an ISO time, not after now.", { field: "at" });
+    }
+    const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: at === undefined ? now.toISOString() : new Date(at as string).toISOString() };
+    this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
+    return snooze;
+  }
+
+  /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */
+  clearSnooze(threadId: string): void {
+    if (!this.snoozeList.some((entry) => entry.thread_id === threadId)) return;
+    this.commitSnoozes(this.snoozeList.filter((entry) => entry.thread_id !== threadId));
+  }
+
+  /**
+   * The person acted on the thread, so its snooze is over: their reply, Mark
+   * read, Archive. The act already stands, so a file that cannot be written
+   * never fails it; the snooze then runs out by itself.
+   */
+  endSnooze(threadId: string): void {
+    try {
+      this.clearSnooze(threadId);
+    } catch {
+      // See above.
+    }
   }
 
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
@@ -1332,7 +1443,7 @@ export class InboxStore {
 
   /**
    * Whether `message` reaches `session` as the person's own reply in a thread
-   * that session already has. Not one: a root or a New message (no `reply_to`);
+   * that session already has. Not one: a root, or a New message to a session new to the thread (a New message to one that has it counts, Board Ask too);
    * the Inbox's own notes and a Re-ask, which are not an answer from the
    * person; and a wake that is the session's first sight of the thread
    * (tagged, added, handed the thread, a reply sent on from an ended session,
@@ -1342,7 +1453,10 @@ export class InboxStore {
    * An action report is a reply: it reaches the agent as one, in the same words.
    */
   private plainReplyFor(message: InboxMessage, session: string | null): boolean {
-    if (message.author.kind !== "person" || !message.reply_to) return false;
+    if (message.author.kind !== "person") return false;
+    // A New message (the window's, or a Board card's Ask) into a thread the session already has is as plain as a reply:
+    // its subject is just as stale. A session new to the thread has not seen the subject, so it keeps it.
+    if (!message.reply_to && !this.newMessageInKnownThread(message)) return false;
     if (isInboxNote(message) || (message.reask?.length ?? 0) > 0) return false;
     const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
     if (tag) {
@@ -1351,6 +1465,15 @@ export class InboxStore {
       return added?.id !== message.id;
     }
     return !handoffActive(message) && !this.redirectedFrom(message) && !this.continuesThread(message);
+  }
+
+  /** A New message (no `reply_to`) to a session that already has the thread: it started or answered in it, or was sent its first message. */
+  private newMessageInKnownThread(message: InboxMessage): boolean {
+    const session = message.to?.session;
+    if (!session || message.thread_id === message.id) return false;
+    const root = this.messages.get(message.thread_id);
+    if (root?.delivery?.session === session || root?.to?.session === session) return true;
+    return this.threadMessages(message.thread_id).some((m) => m.id !== message.id && m.author.kind === "agent" && m.author.session === session);
   }
 
   /**
@@ -2106,6 +2229,7 @@ export class InboxStore {
         }
       }
     }
+    if (read) this.endSnooze(threadId);
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
@@ -2781,6 +2905,9 @@ export class InboxStore {
       const at = this.stamp();
       this.appendMessage({ ...root, person_seen_seq: latestAgent }, at);
     }
+    // A look reads a thread back from its snooze (its small clock goes); before the snooze's time it does nothing to it.
+    const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
+    if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
@@ -3932,6 +4059,7 @@ export class InboxStore {
       for (const record of carried) this.restoreAnnotation(record);
       throw error;
     }
+    this.endSnooze(message.thread_id);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -4064,6 +4192,7 @@ export class InboxStore {
       for (const record of picked) this.restoreQuestion(record);
       throw error;
     }
+    this.endSnooze(message.thread_id);
     return { reply: note, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -4201,8 +4330,13 @@ export class InboxStore {
     return next;
   }
 
-  /** Resolve (or reopen) the thread a message belongs to. */
-  resolveThread(messageId: string, resolved: boolean): InboxThreadSummary {
+  /**
+   * Resolve (or reopen) the thread a message belongs to. `by`: whose Archive
+   * it is. Only the person's ends a snooze (approval "inbox-snooze": nothing an
+   * agent writes ends it); an agent's `resolve_message` leaves the snooze, so
+   * a thread the agent archives and then writes in again stays snoozed.
+   */
+  resolveThread(messageId: string, resolved: boolean, by: "person" | "agent" = "agent"): InboxThreadSummary {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const root = this.messages.get(message.thread_id);
@@ -4225,6 +4359,7 @@ export class InboxStore {
         at,
       );
     }
+    if (resolved && by === "person") this.endSnooze(root.id);
     return this.threadSummary(root.id)!;
   }
 
@@ -4630,14 +4765,26 @@ export class InboxStore {
    * body (whitespace only) deletes the draft and answers null. Never a line in
    * the event log: agents, the MCP and search never see it.
    */
-  saveReplyDraft(threadId: string, input: { body?: unknown; base?: unknown; base_body?: unknown }): InboxReplyDraft | null {
+  saveReplyDraft(threadId: string, input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown }): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody } = checkInboxReplyDraftInput(input);
+    const { body, base, baseBody, files, baseFiles } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
     // before that write's answer came back; the draft still holding those words is the window's own.
-    const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
+    // With `base_files` (the long pastes it wrote last), the draft must hold those too: the compare covers both.
+    // A paste a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
+    // the window that still names it is not told apart by it.
+    const existingIds = inboxReplyDraftFileIds(existing);
+    const ownWords =
+      baseBody !== null &&
+      existing !== null &&
+      existing.body === baseBody &&
+      (baseFiles === null ||
+        sameInboxUploadIds(
+          existingIds,
+          baseFiles.filter((id) => existingIds.includes(id) || readInboxUpload(this.dir, id) !== null),
+        ));
     if ((existing?.updated_at ?? null) !== base && !ownWords) {
       throw new InboxError(
         "draft_conflict",
@@ -4645,14 +4792,22 @@ export class InboxStore {
         { draft: existing },
       );
     }
-    if (body.trim() === "") {
+    // Nothing left: no words and no long paste kept beside them.
+    if (body.trim() === "" && files.length === 0) {
       this.deleteReplyDraft(threadId);
       return null;
     }
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
-    const draft: InboxReplyDraft = { v: 1, thread_id: threadId, body, created_at: existing?.created_at ?? at, updated_at: updatedAt };
+    const draft: InboxReplyDraft = {
+      v: 1,
+      thread_id: threadId,
+      body,
+      created_at: existing?.created_at ?? at,
+      updated_at: updatedAt,
+      ...(files.length > 0 ? { files } : {}),
+    };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.replyDraftChanged(threadId);
@@ -4662,16 +4817,52 @@ export class InboxStore {
   /**
    * The Send that carried the reply box's words: drop the draft while it is
    * still the one those words were saved as (`updated_at`), or while it holds
-   * exactly those words (`words`: the window may not know the `updated_at` of a
-   * save whose answer it never read). A newer, different draft another window
-   * saved meanwhile stays. True when it went.
+   * exactly what the Send carried (the window may not know the `updated_at` of
+   * a save whose answer it never read): those `words`, and only long pastes
+   * among the Send's `uploads`. A paste alone counts when the words are empty.
+   * A newer, different draft another window saved meanwhile (other words, or a
+   * paste this Send did not carry) stays. True when it went.
    */
-  clearSentReplyDraft(threadId: string, updatedAt: string, words?: string): boolean {
+  clearSentReplyDraft(threadId: string, updatedAt: string, words?: string, uploads: readonly string[] = []): boolean {
     const existing = this.replyDrafts.get(threadId);
     if (!existing) return false;
-    const sameWords = words !== undefined && words.trim() !== "" && existing.body.trim() === words.trim();
-    if (existing.updated_at !== updatedAt && !sameWords) return false;
+    if (existing.updated_at === updatedAt) return this.deleteReplyDraft(threadId);
+    const fileIds = inboxReplyDraftFileIds(existing);
+    const sent = new Set(uploads);
+    const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== "" || fileIds.length > 0);
+    if (!sameWords || !fileIds.every((id) => sent.has(id))) return false;
     return this.deleteReplyDraft(threadId);
+  }
+
+  /**
+   * A reply sent these uploads, so they are attachments now and no longer
+   * uploads: every reply draft naming one (a draft that kept other pastes the
+   * Send did not carry, or another thread's) drops it, with a new
+   * `updated_at`; a draft left with no words and no paste goes. The ids of the
+   * threads whose draft changed.
+   */
+  dropSentUploadsFromReplyDrafts(uploads: readonly string[]): string[] {
+    const sent = new Set(uploads);
+    if (sent.size === 0) return [];
+    const changed: string[] = [];
+    for (const draft of [...this.replyDrafts.values()]) {
+      const files = draft.files ?? [];
+      const kept = files.filter((file) => !sent.has(file.upload_id));
+      if (kept.length === files.length) continue;
+      changed.push(draft.thread_id);
+      if (draft.body.trim() === "" && kept.length === 0) {
+        this.deleteReplyDraft(draft.thread_id);
+        continue;
+      }
+      const at = this.stamp();
+      const updatedAt = at <= draft.updated_at ? new Date(Date.parse(draft.updated_at) + 1).toISOString() : at;
+      const { files: _files, ...rest } = draft;
+      const next: InboxReplyDraft = { ...rest, updated_at: updatedAt, ...(kept.length > 0 ? { files: kept } : {}) };
+      writeInboxReplyDraft(this.dir, next);
+      this.replyDrafts.set(draft.thread_id, next);
+      this.replyDraftChanged(draft.thread_id);
+    }
+    return changed;
   }
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
@@ -4680,6 +4871,13 @@ export class InboxStore {
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
+  }
+
+  /** The uploads every reply draft keeps (its long pastes): the upload sweep keeps them. */
+  replyDraftUploadIds(): Set<string> {
+    const out = new Set<string>();
+    for (const draft of this.replyDrafts.values()) for (const id of inboxReplyDraftFileIds(draft)) out.add(id);
+    return out;
   }
 
   /** Bytes the reply drafts take on disk (Settings → Storage). */
@@ -5256,6 +5454,7 @@ export class InboxStore {
       to: { host: input.to.host, session: input.to.session },
     };
     this.appendMessage(message, at);
+    this.endSnooze(threadId);
     return { message, replayed: false };
   }
   // ──────────── Tidy ────────────
@@ -5365,7 +5564,8 @@ export class InboxStore {
     if (!input.to) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
-    if (!body) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    // Words or files: a message of attached files alone (a long paste) is the person's too, as a reply of files is.
+    if (!body && !(input.attachments && input.attachments.length > 0)) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     if (threadName && auto && this.threadNameTaken(input.project_id, threadName, null)) threadName = null;
     if (threadName && this.threadNameTaken(input.project_id, threadName, null)) {
@@ -5530,11 +5730,12 @@ export class InboxStore {
   // Approval "inbox-board" (2026-10-20). A card is its own record in its
   // project's cards.jsonl: append-only snapshots on the store's one seq
   // counter, so the event stream carries them, and read by nothing that
-  // routes or lists threads. Who may move a card (COLUMNS.md, set d): an agent
-  // moves its work through the live columns, ships it and may drop it with a
-  // reason; only the person puts a card in the Icebox or brings one back from
-  // it, and only the person restores a card they dropped. Nothing moves a card
-  // by guessing: a linked PR that merges is shown, never acted on.
+  // routes or lists threads. Who may move a card (approval
+  // "inbox-board-columns-v2"): an agent moves its work through the live
+  // columns, ships it and may drop it with a reason; an agent never moves out
+  // of Backlog a card the person put there (`moved_by`), and only the person
+  // restores a card they dropped. One rule moves a card by itself: every PR it
+  // links merged (autoShipCard); nothing else is guessed.
 
   card(id: string): InboxCard | null {
     return this.cards.get(id) ?? null;
@@ -5599,7 +5800,8 @@ export class InboxStore {
       at,
       kind: "card",
       id: card.id,
-      record: card,
+      // Every line since v2 says so: a line without it is read through the pre-v2 map (readInboxCardColumns).
+      record: { ...card, cols: INBOX_CARD_COLS_VERSION },
     });
     // An older Inbox never reads cards.jsonl: the floor keeps it from handing out a card's seq again.
     try {
@@ -5631,7 +5833,10 @@ export class InboxStore {
   /**
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
-   * (card-refs.ts), added to `known` each once (by URL).
+   * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
+   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
+   * Jira sites are two issues.
    */
   private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
     const out = [...known];
@@ -5642,7 +5847,12 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      if (!out.some((k) => k.url === ref.url || k.ref === ref.ref)) out.push(ref);
+      const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
+      const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
+      const at = out.findIndex(same);
+      if (at < 0) out.push(linked);
+      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
+      else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
@@ -5661,7 +5871,7 @@ export class InboxStore {
   }
 
   private cardColumn(value: unknown): InboxCardColumn {
-    // `asked` (the old name of Backlog) is still read, so a caller from before the rename keeps working.
+    // The ids before v2 (asked, designing, your_look, icebox, …) are still read, so an older agent keeps working.
     const column = inboxCardColumnOf(value);
     if (column === null) {
       throw new InboxError("validation_error", `column: one of ${Object.keys(INBOX_CARD_COLUMN_LABELS).join(", ")}.`, { field: "column" });
@@ -5671,11 +5881,12 @@ export class InboxStore {
 
   /**
    * A new card in `project_id`. From a thread (`threads`), the title defaults
-   * to the thread's subject. It starts in Backlog unless a column is given: a
-   * live column, or Shipped for work already done; the Icebox only by the
-   * person, Dropped never. An agent that puts it in Your look or Your review
-   * says what the person owes (`you`). The agent that makes a card is the
-   * session it belongs to. Idempotent on `idempotency_key` per project.
+   * to the thread's subject. Unless a column is given it starts in Todo when
+   * an agent makes it (it took an ask) and in Backlog when the person does; a
+   * live column, or Done for work already finished; Dropped never. An agent
+   * that puts it in In review says what the person owes (`you`). The agent
+   * that makes a card is the session it belongs to. Idempotent on
+   * `idempotency_key` per project.
    */
   createCard(input: {
     project_id: string;
@@ -5727,10 +5938,10 @@ export class InboxStore {
         return { card: known, replayed: true };
       }
     }
-    const column = input.column === undefined || input.column === null ? "backlog" : this.cardColumn(input.column);
-    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or shipped), never dropped.", { field: "column" });
-    if (column === "icebox" && byAgent) throw this.iceboxRefusal();
-    if (target && column !== "backlog") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Backlog.", { field: "thread_id" });
+    // Sent to an agent: Todo (the person asked for it). Otherwise an agent's card is work it took on (Todo), the person's an idea (Backlog).
+    const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
+    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
+    if (target && column !== "backlog" && column !== "todo") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Todo.", { field: "thread_id" });
     const said = input.say === undefined || input.say === null ? null : this.cardText(input.say, "say", INBOX_CARD_LINE_MAX);
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
@@ -5743,7 +5954,8 @@ export class InboxStore {
       id: inboxId("crd"),
       project_id: owner,
       title,
-      column,
+      // A sent card goes to Todo: the send asks the agent to do it.
+      column: target ? "todo" : column,
       you,
       said,
       threads,
@@ -5752,6 +5964,7 @@ export class InboxStore {
       created_at: at,
       created_by: input.by,
       moved_at: at,
+      moved_by: input.by,
       heard_at: at,
       heard_by: input.by,
       dropped: null,
@@ -5760,6 +5973,7 @@ export class InboxStore {
       notes: this.cardNotes(input.notes),
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
+      ...(column === "done" && !target ? { done_prs: inboxCardDonePrs({ refs, prs }) } : {}),
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -5769,12 +5983,13 @@ export class InboxStore {
    * One write to a card: any of a move (`column`), the agent's last word
    * (`say`), the person's line (`you`), a rename, more threads or PRs, and a
    * drop's `reason`. Every write counts as hearing from the card (`heard_at`).
-   * `restore` (the person) puts a card in the Icebox or Dropped back where it
-   * was. The rules are the column rules (COLUMNS.md, set d):
-   *  - only the person puts a card in the Icebox, or moves one out of it;
+   * `restore` (the person) puts a card in Dropped back where it was. The
+   * rules (approval "inbox-board-columns-v2"):
+   *  - an agent may put a card in Backlog, but moves one out of it only when
+   *    an agent put it there (`moved_by`): what the person parked stays;
    *  - an agent drops with a reason; only the person restores what they dropped;
-   *  - an agent that moves a card into Your look or Your review says what the
-   *    person owes (`you`), and `you` is kept only in those columns.
+   *  - an agent that moves a card into In review says what the person owes
+   *    (`you`), and `you` is kept only there.
    */
   updateCard(
     id: string,
@@ -5811,9 +6026,9 @@ export class InboxStore {
     }
     let column = card.column;
     if (input.restore) {
-      if (byAgent) throw new InboxError("card_person_only", "Only the person restores a card from the Icebox or Dropped.");
-      if (card.column !== "icebox" && card.column !== "dropped") {
-        throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}, not the Icebox or Dropped: nothing to restore.`);
+      if (byAgent) throw new InboxError("card_person_only", "Only the person restores a cancelled card.");
+      if (card.column !== "dropped") {
+        throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}, not Cancelled: nothing to restore.`);
       }
       column = card.aside_from ?? "backlog";
     } else if (given(input.column)) {
@@ -5821,12 +6036,15 @@ export class InboxStore {
     }
     const moves = column !== card.column;
     if (moves && byAgent) {
-      if (column === "icebox") throw this.iceboxRefusal();
-      if (card.column === "icebox") {
-        throw new InboxError("card_iceboxed", "The person put this card in the Icebox (paused); only they bring it back. You can still say or link.");
+      if (card.column === "backlog" && card.moved_by?.kind === "person") {
+        throw new InboxError(
+          "card_backlog_person_only",
+          "The person put this card in Backlog; only they move it out (they send it to an agent when it is to be done). You can still say or link.",
+          { field: "column" },
+        );
       }
       if (card.column === "dropped" && card.dropped?.by.kind === "person") {
-        throw new InboxError("card_dropped_by_person", "The person dropped this card; only they restore it. You can still say or link.");
+        throw new InboxError("card_dropped_by_person", "The person cancelled this card; only they restore it. You can still say or link.");
       }
     }
     let dropped = card.dropped;
@@ -5857,10 +6075,10 @@ export class InboxStore {
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
-    // Leaving a live column (or Shipped) for the Icebox or Dropped remembers it, so restoring goes back there.
+    // Leaving a live column (or Done) for Dropped remembers it, so restoring goes back there.
     const asideFrom =
-      moves && (column === "icebox" || column === "dropped")
-        ? isInboxCardLiveColumn(card.column) || card.column === "shipped"
+      moves && column === "dropped"
+        ? isInboxCardLiveColumn(card.column) || card.column === "done"
           ? card.column
           : card.aside_from
         : moves
@@ -5876,11 +6094,14 @@ export class InboxStore {
       prs,
       refs,
       moved_at: moves ? at : card.moved_at,
+      moved_by: moves ? input.by : (card.moved_by ?? null),
       heard_at: at,
       heard_by: input.by,
       dropped,
       aside_from: asideFrom,
       notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
+      // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
+      ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
     return next;
@@ -5922,7 +6143,8 @@ export class InboxStore {
    * addressed to one session. The card links the thread and becomes that
    * agent's (`agent`, so the agent's `card list` shows it as its own), and
    * keeps `sent` so the Board says "Sent to <agent>" until the card moves.
-   * Only the person sends, only a card in Backlog, only into a thread of the
+   * Only the person sends, only a Backlog or Todo card (it lands in Todo,
+   * as the person's move), only into a thread of the
    * card's own project that the person started.
    */
   sendCard(id: string, input: { thread_id: unknown }): InboxCard {
@@ -5933,12 +6155,17 @@ export class InboxStore {
     if (isInboxCardSentWaiting(card) && card.sent!.thread_id === thread && card.sent!.to.kind === "agent" && to.kind === "agent" && card.sent!.to.session === to.session) {
       return card;
     }
-    if (card.column !== "backlog") {
-      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog card is sent to an agent.`, { field: "op" });
+    if (card.column !== "backlog" && card.column !== "todo") {
+      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog or Todo card is sent to an agent.`, { field: "op" });
     }
     const at = this.stamp();
+    // A send asks the agent to do it: the card is in Todo from now (the person moved it).
+    const moves = card.column !== "todo";
     const next: InboxCard = {
       ...card,
+      column: "todo",
+      moved_at: moves ? at : card.moved_at,
+      moved_by: moves ? { kind: "person" } : (card.moved_by ?? null),
       threads: card.threads.includes(thread) ? card.threads : [...card.threads, thread],
       agent: to,
       heard_at: at,
@@ -5973,18 +6200,44 @@ export class InboxStore {
     }
   }
 
-  private iceboxRefusal(): InboxError {
-    return new InboxError(
-      "card_icebox_person_only",
-      "Only the person puts a card in the Icebox (a pause is their call). Keep it in its column and say where it stands, or drop it with a reason.",
-      { field: "column" },
-    );
+  /**
+   * The Inbox ships a card by itself (v2, Q3): every PR it links has merged
+   * and none is open (`prs`, the URLs inboxCardAutoShip answered). Rechecked
+   * here against the card as it stands, so a card that moved since the
+   * states were read, or was already moved to Done for these PRs, is left alone.
+   * Not an agent's write: `heard_by` is the person's side (no unread bold),
+   * and the history says "Done automatically". Answers the card, or null
+   * when nothing was done.
+   */
+  autoShipCard(id: string, prs: readonly string[]): InboxCard | null {
+    const card = this.cards.get(id);
+    if (!card) return null;
+    const merged = new Set(prs);
+    const urls = inboxCardAutoShip(card, (url) => (merged.has(url) ? "merged" : undefined));
+    if (!urls) return null;
+    const at = this.stamp();
+    const by: InboxAuthor = { kind: "person" };
+    const next: InboxCard = {
+      ...card,
+      column: "done",
+      you: null,
+      moved_at: at,
+      moved_by: by,
+      heard_at: at,
+      heard_by: by,
+      dropped: null,
+      aside_from: null,
+      auto_shipped: { at, prs: urls },
+      done_prs: inboxCardDonePrs(card, card.done_prs),
+    };
+    this.appendCard(next, at);
+    return next;
   }
 
   private youRefusal(): InboxError {
     return new InboxError(
       "validation_error",
-      "you: what the person owes shows only in Your look and Your review. Move the card there with it, or use say for your own last word.",
+      "you: what the person owes shows only in In review. Move the card there with it, or use say for your own last word.",
       { field: "you" },
     );
   }

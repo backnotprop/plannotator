@@ -149,7 +149,8 @@ const cardOpArb: fc.Arbitrary<CardOp> = fc.oneof(
   fc.record({
     kind: fc.constant("move" as const),
     n: fc.nat(),
-    column: fc.constantFrom("backlog", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"),
+    // The v2 columns, and two ids from before v2 an older agent still sends (read through the aliases).
+    column: fc.constantFrom("backlog", "todo", "in_progress", "in_review", "shipped", "dropped", "building", "icebox"),
     person: fc.boolean(),
     you: fc.boolean(),
     reason: fc.boolean(),

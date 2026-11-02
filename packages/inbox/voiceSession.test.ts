@@ -7,17 +7,19 @@
  * posted; a recording running past 2:00; two recordings at once.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createVoiceSession, VOICE_CAP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
-import type { VoiceRecorder } from './voiceRecorder';
+import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
+import { openVoiceRecorder, type VoiceRecorder } from './voiceRecorder';
 
 const LOUD = -20;
 const ROOM = -70;
 const TICK = 33;
 
-function script(options: { prompts?: boolean; refuseMic?: string } = {}) {
+function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: number; failStop?: boolean; open?: VoiceDeps['open'] } = {}) {
+  let throwMic = options.throwMic ?? 0;
   const log: string[] = [];
   const posted: Blob[] = [];
   const signals: AbortSignal[] = [];
+  const opens: AbortSignal[] = [];
   let clock = 1000;
   let db = LOUD;
   let ticker: (() => void) | null = null;
@@ -31,6 +33,7 @@ function script(options: { prompts?: boolean; refuseMic?: string } = {}) {
     db: () => db,
     stop: async () => {
       log.push('mic stopped');
+      if (options.failStop) throw new Error('no samples');
       return [new Float32Array(2400).fill(0.2)];
     },
     abort: () => {
@@ -41,8 +44,15 @@ function script(options: { prompts?: boolean; refuseMic?: string } = {}) {
     },
   });
   const deps: VoiceDeps = {
-    open: () => {
+    open: (signal) => {
+      opens.push(signal);
+      if (options.open) return options.open(signal);
       log.push('mic opened');
+      // `new AudioContext()` throws before any promise exists.
+      if (throwMic > 0) {
+        throwMic--;
+        throw Object.assign(new Error('refused'), { name: 'InvalidStateError' });
+      }
       if (options.refuseMic) return Promise.reject(Object.assign(new Error('no'), { name: options.refuseMic }));
       if (holdMic) return new Promise((resolve) => pending.push({ resolve }));
       return Promise.resolve(recorder());
@@ -66,7 +76,11 @@ function script(options: { prompts?: boolean; refuseMic?: string } = {}) {
     after: (ms, run) => {
       const timer = { at: clock + ms, run };
       timers.push(timer);
-      return () => timers.splice(timers.indexOf(timer), 1);
+      // As clearTimeout: a timer that already ran, or was cleared, is left alone.
+      return () => {
+        const at = timers.indexOf(timer);
+        if (at >= 0) timers.splice(at, 1);
+      };
     },
   };
   let value = 'Draft ';
@@ -99,6 +113,8 @@ function script(options: { prompts?: boolean; refuseMic?: string } = {}) {
     log,
     posted,
     signals,
+    /** The signal each open was given. */
+    opens,
     session,
     detach: session.attach(field),
     value: () => value,
@@ -271,6 +287,20 @@ describe('hold and tap', () => {
     w.session.toggle();
     expect(w.session.view().phase).toBe('sending');
   });
+
+  test('from the keyboard while the microphone opens: busy as a tap is, nothing cancelled, and it listens once it opens', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.toggle();
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(300);
+    w.session.toggle();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+    expect(w.opens[0]!.aborted).toBe(false);
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
 });
 
 describe('limits', () => {
@@ -432,6 +462,197 @@ describe('cancel', () => {
     expect(w.session.view().phase).toBe('idle');
     expect(w.log).toContain('mic aborted');
     expect(w.ticking()).toBe(false);
+  });
+});
+
+describe('every path returns to rest, and no press does nothing', () => {
+  test('a microphone that throws as it opens: at rest with its line, Send free, and the next press opens again', async () => {
+    const w = world({ throwMic: 1 });
+    w.session.press();
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    w.session.press();
+    w.session.release();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap', trouble: null });
+  });
+
+  test('a second tap while the microphone opens is not a cancel: the take waits, in sight, and listens once it opens', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(300);
+    w.session.press();
+    w.session.release();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+    expect(w.log).not.toContain('mic aborted');
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('the first moment of opening has no line, and the line follows within a blink', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: false });
+    w.pass(VOICE_OPENING_SLOW_MS);
+    expect(VOICE_OPENING_SLOW_MS).toBeLessThanOrEqual(150);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', slow: true });
+  });
+
+  test('a mic that never opens gives up after 10 s with the "didn\'t start" note; the next tap opens again', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    await settle();
+    w.pass(VOICE_OPENING_GIVE_UP_MS - 100);
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(200);
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    // The mic that answers late is closed at once, never recorded from.
+    w.openMic();
+    await settle();
+    expect(w.session.view().phase).toBe('idle');
+    expect(w.log).toContain('mic aborted');
+    w.session.press();
+    w.session.release();
+    expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
+  });
+
+  test('ending a take before the microphone opens aborts the open: Cancel, the box closing, and giving up', async () => {
+    const cancelled = world();
+    cancelled.holdMic();
+    cancelled.session.press();
+    cancelled.session.cancel();
+    expect(cancelled.opens[0]!.aborted).toBe(true);
+    const closed = world();
+    closed.holdMic();
+    closed.session.press();
+    closed.detach();
+    expect(closed.opens[0]!.aborted).toBe(true);
+    const gaveUp = world();
+    gaveUp.holdMic();
+    gaveUp.session.press();
+    gaveUp.session.release();
+    await settle();
+    gaveUp.pass(VOICE_OPENING_GIVE_UP_MS - 100);
+    expect(gaveUp.opens[0]!.aborted).toBe(false);
+    gaveUp.pass(200);
+    expect(gaveUp.opens[0]!.aborted).toBe(true);
+  });
+
+  test('with the real recorder, a mic that answers after the give-up holds nothing: its context closed at once, its tracks stopped', async () => {
+    const contexts: { state: string; worklets: number }[] = [];
+    const tracks: { stopped: boolean }[] = [];
+    let answer: (stream: unknown) => void = () => {};
+    const audioBefore = Object.getOwnPropertyDescriptor(globalThis, 'AudioContext');
+    const devicesBefore = Object.getOwnPropertyDescriptor(globalThis.navigator, 'mediaDevices');
+    Object.defineProperty(globalThis, 'AudioContext', {
+      configurable: true,
+      writable: true,
+      value: class {
+        state = 'suspended';
+        worklets = 0;
+        audioWorklet = { addModule: async () => void this.worklets++ };
+        constructor() {
+          contexts.push(this);
+        }
+        resume = async () => {
+          if (this.state !== 'closed') this.state = 'running';
+        };
+        close = async () => {
+          this.state = 'closed';
+        };
+      },
+    });
+    Object.defineProperty(globalThis.navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: () => new Promise((resolve) => (answer = resolve)) },
+    });
+    try {
+      const w = world({ open: (signal) => openVoiceRecorder(signal, () => {}) });
+      w.session.press();
+      w.session.release();
+      await settle();
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0]!.state).not.toBe('closed');
+      w.pass(VOICE_OPENING_GIVE_UP_MS + 100);
+      expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+      // At once: getUserMedia has not settled, and may never.
+      expect(contexts[0]!.state).toBe('closed');
+      const track = { stopped: false, stop: () => void (track.stopped = true) };
+      tracks.push(track);
+      answer({ getTracks: () => tracks, getAudioTracks: () => tracks });
+      await settle();
+      expect(tracks.every((t) => t.stopped)).toBe(true);
+      expect(contexts[0]!.worklets).toBe(0);
+      expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+    } finally {
+      if (audioBefore) Object.defineProperty(globalThis, 'AudioContext', audioBefore);
+      else delete (globalThis as { AudioContext?: unknown }).AudioContext;
+      if (devicesBefore) Object.defineProperty(globalThis.navigator, 'mediaDevices', devicesBefore);
+      else delete (globalThis.navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+  });
+
+  test("a cancelled take's give-up never reaches the next take, still opening", async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.release();
+    await settle();
+    w.pass(1000);
+    w.session.cancel();
+    w.session.press();
+    w.session.release();
+    await settle();
+    // Past the first take's 10 s, short of the second's.
+    w.pass(VOICE_OPENING_GIVE_UP_MS - 500);
+    expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
+    expect(w.opens[1]!.aborted).toBe(false);
+    w.openMic();
+    w.openMic();
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
+  });
+
+  test('while the browser asks for the microphone, it waits longer before giving up', async () => {
+    const w = world({ prompts: true });
+    w.holdMic();
+    w.session.press();
+    await settle();
+    expect(w.session.view().prompting).toBe(true);
+    w.pass(VOICE_OPENING_GIVE_UP_MS + 1000);
+    expect(w.session.view().phase).toBe('opening');
+    w.pass(VOICE_ASKING_GIVE_UP_MS - VOICE_OPENING_GIVE_UP_MS);
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
+  });
+
+  test('a finger still down while the microphone opens is the same press, not a second tap', async () => {
+    const w = world();
+    w.holdMic();
+    w.session.press();
+    w.session.press();
+    expect(w.session.view().phase).toBe('opening');
+  });
+
+  test('a recorder that hands over no samples: at rest with its line, nothing posted, no spinner left', async () => {
+    const w = world({ failStop: true });
+    await tapped(w);
+    w.pass(800);
+    w.session.press();
+    w.session.release();
+    expect(w.session.view().phase).toBe('sending');
+    await settle();
+    expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'badclip', kept: false });
+    expect(w.posted).toHaveLength(0);
+    expect(w.log).toContain('mic aborted');
   });
 });
 

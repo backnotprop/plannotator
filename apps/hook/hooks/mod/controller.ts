@@ -319,6 +319,8 @@ export interface SessionInfo {
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
+  /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
+  label?: () => string | Promise<string>
 }
 
 export class PlannotatorMod {
@@ -380,6 +382,7 @@ export class PlannotatorMod {
           },
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
+          ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
           turns: this.turns,
         })
@@ -556,6 +559,19 @@ export class PlannotatorMod {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /**
+   * The process moved here from `previous`'s session (`/clear`, an in-process
+   * resume): question prompts still waiting in the engine run as turns of
+   * THIS session, so this instance aborts them when they start
+   * (`TurnTracker.queuedPrompts`). `previous` is usually disposed already
+   * (`session.end`): reading its tracker then is intended, and stays safe
+   * only while `dispose()` leaves `turns` alone. register.ts `currentMod` and
+   * `ClaudeSession.clear` both call this.
+   */
+  carryQueued(previous: PlannotatorMod | null): void {
+    if (previous && previous !== this) this.turns.dropQueued(previous.turns.queuedPrompts())
   }
 
   private adopt(record: LaunchRecord, touchedAt = 0): LiveLaunch {

@@ -23,7 +23,7 @@ name: Inbox window e2e
 # listed: these specs drive only the compiled Bun binary, and test.yml runs the
 # Pi mirrors of the same scenarios.
 #
-# The specs run as 8 parallel shards of whole spec files, balanced by
+# The specs run as 16 parallel shards of whole spec files, balanced by
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
 
 on:
@@ -200,14 +200,14 @@ jobs:
   # (scripts/ci-e2e-shard.ts). Each shard is its own runner with one worker,
   # as the single job was.
   inbox-window-e2e:
-    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/8)
+    name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

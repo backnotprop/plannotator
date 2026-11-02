@@ -25,14 +25,15 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu } from './FolderMenu';
-import { ThreadNameChip } from './ThreadNameChip';
+import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
+import { isLongPaste } from './pastedText';
 import { useComposeSessions } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { VoiceFoot } from '../components/VoiceMic';
@@ -41,7 +42,9 @@ import { Tip } from '../components/Tip';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { registerReloadFlush } from '../stalePage';
 import {
+  DRAFT_TOO_LONG,
   NOTHING_SENT_NO_AGENT,
   composeGroups,
   composeTargets,
@@ -63,6 +66,7 @@ import {
   type ComposeTarget,
   type ComposeStart,
 } from './model';
+import { newUuid } from '../uuid';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -179,11 +183,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
+  const say = (words: string) => {
+    setPasteSaid('');
+    setTimeout(() => setPasteSaid(words), 30);
+  };
+  // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
-    onPasted: (names) => {
-      setPasteSaid('');
-      setTimeout(() => setPasteSaid(attachedAnnouncement(names)), 30);
-    },
+    onPasted: (names) => say(attachedAnnouncement(names)),
+    onPutBack: () => say('The pasted text is back in your message.'),
+    text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
@@ -245,7 +253,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [footCovered, question, voice.session]);
 
   // The idempotency key of one Send: new whenever what would be sent changes.
-  const sendKey = useRef(crypto.randomUUID());
+  const sendKey = useRef(newUuid());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
   // The chip's suggestion, worked out a moment after typing stops; the same name again changes nothing on screen.
   const fileNames = files.files.map((file) => file.name).join('\n');
@@ -256,7 +264,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [body, fileNames]);
   const threadName = draftThreadName(nameState);
   useEffect(() => {
-    sendKey.current = crypto.randomUUID();
+    sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
@@ -326,7 +334,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (!body.trim()) {
+    // Words or files, as a reply takes: a message of a pasted text tile alone goes.
+    if (!body.trim() && !files.files.some((file) => file.state !== 'refused')) {
       setError('Write a message first.');
       textRef.current?.focus();
       return;
@@ -391,6 +400,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Wait for the files to finish uploading.');
       return null;
     }
+    // Said plainly, before the Inbox refuses it with its own field words.
+    if (body.length > INBOX_DRAFT_BODY_MAX) {
+      setError(DRAFT_TOO_LONG);
+      return null;
+    }
     setBusy('save');
     setError(null);
     try {
@@ -401,7 +415,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
         : start
           ? { id: start.project.id, root: start.project.root, name: start.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
+      const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
+      const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
@@ -414,7 +431,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         } catch {
           setError('This draft changed in another window.');
         }
-      } else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
+      } else if (cause instanceof InboxApiError && cause.code === 'validation_error' && cause.message.startsWith('body:')) setError(DRAFT_TOO_LONG);
+      else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
       return null;
     } finally {
       setBusy(null);
@@ -428,6 +446,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (result) props.onSaved(result);
     else setQuestion(false);
   };
+
+  // The stale page notice's Reload (stalePage.ts): what is written here is kept as a draft first, as Close's Save draft
+  // keeps it. A draft another window changed, a file still uploading or a running take stops the reload instead.
+  const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
+  reloadFlush.current = async () => {
+    if (!keepsDrafts || empty || !dirty) return true;
+    if (voice.busy || conflict) return false;
+    return (await save()) !== null;
+  };
+  useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
 
   const deleteDraft = async () => {
     if (!draft) return;
@@ -517,7 +545,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           aria-expanded={picker}
           aria-label={
             target
-              ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change`
+              ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
               : start
                 ? `To: a new ${start.name} session. Change`
                 : endedNote
@@ -541,7 +569,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
-              <SessionDetail name={target.project.name} root={target.project.root} />
+              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
             </>
           ) : endedNote ? (
             <>
@@ -703,8 +731,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }}
           onDone={() => textRef.current?.focus()}
           onOverflow={(text) => {
-            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             setError(null);
+            const lead = body.trim() ? (/[\r\n]/.test(text) ? '\n' : ' ') : '';
+            if (takesFiles && isLongPaste(text)) {
+              // 32 KB or more goes to the message as a pasted text tile, at its end, as the words would have
+              // (never where the dialog takes no files, the tour: the words go to the message as before).
+              files.takeText(text, body.trim() ? body.replace(/\s+$/, '').length : body.length, { field: textRef.current, lead });
+              requestAnimationFrame(() => {
+                const area = textRef.current;
+                if (!area) return;
+                area.focus();
+                area.setSelectionRange(area.value.length, area.value.length);
+              });
+              return THREAD_NAME_ATTACHED_NOTE;
+            }
+            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             // Dictation goes on in the message from here.
             requestAnimationFrame(() => {
               const area = textRef.current;
@@ -793,6 +834,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // The × goes with its tile: focus stays in the dialog, in the message.
             textRef.current?.focus();
           }}
+          onPutBack={(key) => files.putBack(key, textRef.current)}
         />
       </div>
       {error && (
