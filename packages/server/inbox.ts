@@ -75,6 +75,7 @@ import {
   isInboxTextSize,
   type InboxTextSize,
   inboxRowsList,
+  inboxRowsRead,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -848,7 +849,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
-  const rowsListeners = new Set<(rows: readonly InboxRowsOption[]) => void>();
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -1609,20 +1610,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /**
    * How the list's rows look (config.json `inboxRows`, approval "inbox-customize-rows"): the options that are on.
-   * Null until a window first saves it, so the first window adopts its browser's old cookies; a hand-edited value
-   * with a name no build knows reads as null too. Every window open hears a save (`event: rows`).
+   * Null until a window first saves it, so the first window adopts its browser's old cookies. Lenient on read (a name
+   * this build does not know is dropped, so a downgrade or a typo never reads as "never saved"), strict on write (a
+   * `422`). `inboxRowsRev` counts the saves: every answer and `event: rows` carries it, so a window takes a look only
+   * when it is newer than the last it took, whatever order the answers and events arrive in.
    */
-  const rowsState = (): InboxRowsOption[] | null => inboxRowsList(loadConfig().inboxRows);
+  const rowsState = (): { rows: InboxRowsOption[] | null; rev: number } => {
+    const config = loadConfig();
+    const rev = config.inboxRowsRev;
+    return { rows: inboxRowsRead(config.inboxRows), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
+  };
 
-  const saveRows = (input: unknown, validateOnly = false): InboxRowsOption[] => {
+  const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
     const rows = inboxRowsList(input);
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
-    if (validateOnly) return rows;
-    saveConfig({ inboxRows: rows });
-    if (rowsState()?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    for (const listener of rowsListeners) listener(rows);
-    return rows;
+    const rev = rowsState().rev + 1;
+    if (validateOnly) return { rows, rev };
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev });
+    const saved = rowsState();
+    if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    for (const listener of rowsListeners) listener(rows, rev);
+    return { rows, rev };
   };
+  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev });
 
   /**
    * The onboarding tour (config.json `inboxTour`, approval
@@ -1908,8 +1918,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
-    /** How the list's rows look (config.json `inboxRows`): the options that are on; null until first saved. */
-    rows: rowsState(),
+    /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
+    ...rowsWire(rowsState()),
     /** The guided review's diff layout (config.json `diffOptions.diffStyle`), shared with code review; null when never chosen. */
     diff_style: diffStyleState(),
     /** Experimental features, each off unless switched on (Settings → Capabilities → Experimental). */
@@ -2058,7 +2068,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
-        const onRows = (rows: readonly InboxRowsOption[]) => send(`event: rows\ndata: ${JSON.stringify({ rows })}\n\n`);
+        const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
@@ -3084,14 +3094,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (updateSwitches) updates.refresh();
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
-        const rows = body.rows === undefined ? rowsState() : saveRows(body.rows);
+        const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
         const diffStyle = body.diff_style === undefined ? diffStyleState() : saveDiffStyle(body.diff_style);
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {

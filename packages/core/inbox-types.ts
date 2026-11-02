@@ -1676,10 +1676,31 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
 export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
-/** A list of row options in their order, each once; null when `value` is not a list or names something else. */
+/**
+ * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
+ * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ */
+export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
+  const on = new Set(rows);
+  if (on.has("compact")) on.delete("roomy");
+  if (on.has("hidePreview")) on.delete("previewTwo");
+  if (on.has("unreadDot")) on.add("smallNames");
+  return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
+}
+
+/** A save's list (POST): every name known, in their order, each once, rivals settled; null otherwise (a `422`). */
 export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
   if (!Array.isArray(value) || value.some((name) => !(INBOX_ROWS_OPTIONS as readonly unknown[]).includes(name))) return null;
-  return INBOX_ROWS_OPTIONS.filter((name) => value.includes(name));
+  return inboxRowsCanonical(value as InboxRowsOption[]);
+}
+
+/**
+ * A kept list (config.json, a read, an event): the names this build knows, the others dropped (a newer build's
+ * option after a downgrade, a typo), so a look is never read as "never saved". Null only for a non-list.
+ */
+export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
+  if (!Array.isArray(value)) return null;
+  return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
 }
 
 /**

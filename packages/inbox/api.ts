@@ -382,6 +382,8 @@ export interface SettingsModel {
    * (this browser's old cookies are adopted then); absent from an older Inbox.
    */
   rows?: InboxRowsOption[] | null;
+  /** How many times `rows` was saved (config.json `inboxRowsRev`): a window takes a look only when it is newer. */
+  rows_rev?: number;
   /**
    * The diff layout guided reviews draw (config.json `diffOptions.diffStyle`),
    * shared with code review: null when never chosen. Absent from an older Inbox.
@@ -1214,7 +1216,7 @@ export const inboxApi = {
   /** The window's text size, written to config.json `inboxTextSize`. */
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
-  saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[] }>(inboxUrl('/settings'), { rows }),
+  saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
   /** The diff layout, written to config.json `diffOptions.diffStyle` (shared with code review). */
   saveDiffStyle: (diffStyle: InboxDiffStyle) => post<{ diff_style: InboxDiffStyle | null }>(inboxUrl('/settings'), { diff_style: diffStyle }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
@@ -1545,7 +1547,7 @@ export interface InboxEventHandlers {
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  onRows?: (rows: unknown) => void;
+  onRows?: (rows: unknown, rev: unknown) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1658,7 +1660,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'rows':
       try {
-        handlers.onRows?.((JSON.parse(frame.data) as { rows?: unknown }).rows);
+        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
+        handlers.onRows?.(data.rows, data.rev);
       } catch {
         // A malformed frame changes nothing.
       }

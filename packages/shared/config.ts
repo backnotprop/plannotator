@@ -400,9 +400,12 @@ export interface PlannotatorConfig {
    * How the Inbox list's rows look: the names of the row options that are on
    * (core `INBOX_ROWS_OPTIONS`), every other one off. Unset: none written yet
    * (a window adopts its browser's old cookies once). Written by the Inbox's ⋮
-   * menu and Settings → Rows through POST /api/inbox/settings `{ rows }`.
+   * menu and Settings → Rows through POST /api/inbox/settings `{ rows }`. A
+   * name this build does not know is dropped on read.
    */
   inboxRows?: string[];
+  /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
+  inboxRowsRev?: number;
   /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread

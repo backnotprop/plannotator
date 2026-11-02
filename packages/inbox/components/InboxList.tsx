@@ -5,7 +5,7 @@ import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { agentName, formatCount, fullTime, shortTime, waitCount } from '../format';
+import { agentName, formatCount, fullTime, shortTime, waitCount, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
@@ -28,7 +28,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
-import { relativeTime, useRelativeClock } from '../relativeTime';
+import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listMoveIndex, listStops, LIST_STOPS, type ListMove } from '../listKeys';
@@ -216,6 +216,15 @@ function RowTime({ row, relative = false }: { row: InboxListRow; relative?: bool
   // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
   const now = useRelativeClock(relative);
   const iso = rowTimeIso(row);
+  // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
+  const time = relative ? (
+    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
+      <span aria-hidden="true">{relativeTime(iso, now)}</span>
+      <span className="ib-sr">{relativeWords(iso, now)}</span>
+    </span>
+  ) : (
+    shortTime(iso)
+  );
   return (
     <>
       {row.snooze_back && (
@@ -223,7 +232,7 @@ function RowTime({ row, relative = false }: { row: InboxListRow; relative?: bool
           <Icon name="clock" size={13} />
         </span>
       )}
-      <TimeWithTick delivery={row.delivery} time={relative ? relativeTime(iso, now) : shortTime(iso)} />
+      <TimeWithTick delivery={row.delivery} time={time} />
     </>
   );
 }

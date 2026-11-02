@@ -3,7 +3,8 @@
  * "Highlight thread subject", "Compact rows", "Hide agent icons" and "Smaller thread names", off by default, and
  * since "inbox-customize-rows" the person's look wherever they use the Inbox (config.json `inboxRows`).
  * What this catches: an option on in a browser that never chose it (today's list must stay today's); a change that
- * waits for the server, is not saved, or is undone by a read that predates it; another window's save not reaching an
+ * waits for the server, is not saved, or is undone by a read that predates it; saves that land out of order leaving a
+ * page on an older look, or more than one on its way; rival options both on; another window's save not reaching an
  * open list; a browser's old cookies not adopted once (or adopted over the server's look, or written again); a menu
  * item a screen reader does not hear as a checkbox (role and aria-checked), that draws an icon, or that closes the
  * menu; "Customize rows…" missing from the Rows group; a compact row that keeps the title on its
@@ -21,21 +22,26 @@ import { join } from 'node:path';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { TidyController } from './components/Tidy';
+import { whenTime } from './format';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 // This browser's cookies (Plannotator's storage); a map stands in for them here.
 const stored = new Map<string, string>();
-// The server (POST /api/inbox/settings `{ rows }`): each save is recorded and answered with what it saved, at once
-// or when the test lets it (`hold`). The round trip through a real Inbox is packages/server/inbox.test.ts's.
+// The server (POST /api/inbox/settings `{ rows }`): each save is recorded, counted (`rows_rev`) when it arrives, and
+// answered with what it saved (or `answerRows`), at once or when the test lets it (`held`); `offline` refuses it.
+// The round trip through a real Inbox is packages/server/inbox.test.ts's.
 const saves: unknown[][] = [];
 let held: (() => void)[] | null = null;
+let serverRev = 0;
+let answerRows: unknown[] | null = null;
+let offline = false;
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -44,6 +50,9 @@ beforeEach(() => {
   stored.clear();
   saves.length = 0;
   held = null;
+  serverRev = 0;
+  answerRows = null;
+  offline = false;
   setStorageBackend({
     getItem: (key) => stored.get(key) ?? null,
     setItem: (key, value) => void stored.set(key, value),
@@ -52,8 +61,10 @@ beforeEach(() => {
   globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
     const rows = (JSON.parse(init?.body ?? '{}') as { rows: unknown[] }).rows;
     saves.push(rows);
+    if (offline) throw new TypeError('Failed to fetch');
+    const rev = ++serverRev;
     if (held) await new Promise<void>((go) => held!.push(go));
-    return new Response(JSON.stringify({ rows }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ rows: answerRows ?? rows, rows_rev: rev }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   // A fresh page: nothing read yet, nothing saving.
   resetListLookForTests();
@@ -204,14 +215,14 @@ describe('the saved look', () => {
 
   test('a change shows at once, then is saved; this browser keeps only the look it showed, never the old cookies', async () => {
     held = [];
-    void writeListLookOptions({ roomy: true, compact: true });
+    void writeListLookOptions({ roomy: true, highlight: true });
     // Before the server answers: on screen, and sent as the whole look in the options' order.
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true, compact: true });
-    expect(saves).toEqual([['compact', 'roomy']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true, highlight: true });
+    expect(saves).toEqual([['highlight', 'roomy']]);
     await answer();
-    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'compact,roomy' });
+    expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'highlight,roomy' });
     void writeListLookOption('roomy', false);
-    void writeListLookOption('compact', false);
+    void writeListLookOption('highlight', false);
     await answer();
     expect(saves.at(-1)).toEqual([]);
     expect(Object.fromEntries(stored)).toEqual({ [ROWS_COOKIE]: 'none' });
@@ -221,9 +232,9 @@ describe('the saved look', () => {
   });
 
   test("the server's look is taken from a settings read and from another window's save, and paints the next reload", async () => {
-    adoptSavedRows(['titleFirst', 'relativeTime']);
+    adoptSavedRows(['titleFirst', 'relativeTime'], 1);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true, relativeTime: true });
-    adoptSavedRows(['previewTwo']);
+    adoptSavedRows(['previewTwo'], 2);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
     reload();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
@@ -236,56 +247,147 @@ describe('the saved look', () => {
     stored.set(LIST_LOOK_COOKIES.highlight, 'true'); // anything but "1" is off
     reload();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true, hideAgents: true });
-    adoptSavedRows(null);
-    adoptSavedRows(null);
+    held = [];
+    adoptSavedRows(null, 0);
+    // A second read while the adoption is on its way, and one sent before it that answers after it: never again.
+    adoptSavedRows(null, 0);
+    await answer();
+    adoptSavedRows(null, 0);
     await answer();
     expect(saves).toEqual([['compact', 'hideAgents']]);
     // Another browser's look, saved later: it wins here. The old cookies are left as they were, never written.
-    adoptSavedRows(['roomy']);
+    adoptSavedRows(['roomy'], 2);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
     expect(stored.get(LIST_LOOK_COOKIES.compact)).toBe('1');
     reload();
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
   });
 
+  test('upgrading offline: the adoption that failed is offered again by the next read, and the look stays meanwhile', async () => {
+    stored.set(LIST_LOOK_COOKIES.smallNames, '1');
+    reload();
+    offline = true;
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, smallNames: true });
+    offline = false;
+    adoptSavedRows(null, 0);
+    await answer();
+    expect(saves).toEqual([['smallNames'], ['smallNames']]);
+    expect(serverRev).toBe(1);
+  });
+
   test("a browser whose old cookies differ from the server's look takes the server's and saves nothing", async () => {
     stored.set(LIST_LOOK_COOKIES.smallNames, '1');
     reload();
-    adoptSavedRows([]);
+    adoptSavedRows([], 3);
     await answer();
     expect(readListLook()).toEqual(LIST_LOOK_OFF);
     expect(saves).toEqual([]);
   });
 
-  test('a read or another window\'s save that arrives while this page saves is not taken: the last answer is', async () => {
+  test('one save on its way at a time: changes meanwhile wait, and only the latest is sent next', async () => {
+    held = [];
+    void writeListLookOption('highlight', true);
+    void writeListLookOption('compact', true);
+    void writeListLookOption('hideAgents', true);
+    // On screen at once, every change; one request.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
+    expect(saves).toEqual([['highlight']]);
+    await answer();
+    expect(saves).toEqual([['highlight'], ['highlight', 'compact', 'hideAgents']]);
+    // The first answer (only highlight) never showed over the changes after it.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, hideAgents: true });
+  });
+
+  test("a read that arrives while this page saves waits, and an older one is dropped: the page ends on the server's newest", async () => {
+    adoptSavedRows(['relativeTime'], 4);
+    serverRev = 4;
     held = [];
     void writeListLookOption('unreadDot', true);
-    void writeListLookOption('smallNames', true);
-    adoptSavedRows([]);
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, unreadDot: true, smallNames: true });
+    // A read sent before the change answers while it saves: not shown over it, not even after it.
+    adoptSavedRows(['relativeTime'], 4);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
     await answer();
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, unreadDot: true, smallNames: true });
-    expect(saves).toEqual([['unreadDot'], ['smallNames', 'unreadDot']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
+    adoptSavedRows([], 4);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, relativeTime: true, unreadDot: true, smallNames: true });
   });
 
-  // Found in Chromium: the page's first settings read, sent before a click, answered after the click's save.
-  test('a settings read sent before a change, answered after its save, does not undo it', async () => {
-    const mark = listLookReadMark();
+  // Saves land out of order: another window's save, made after this page's, is heard before this page's answer.
+  test("another window's newer save, heard while this page saves, wins once this page's older answer arrives", async () => {
+    held = [];
+    void writeListLookOption('compact', true);
+    adoptSavedRows(['roomy'], 2);
+    // This page's save is still on its way: its change stays on screen meanwhile.
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    expect(stored.get(ROWS_COOKIE)).toBe('roomy');
+  });
+
+  test("this page's save made after another window's: its answer is the newest and wins over the event heard before it", async () => {
+    held = [];
+    serverRev = 1;
+    void writeListLookOption('compact', true);
+    adoptSavedRows(['roomy'], 1);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
+  });
+
+  test("the last save's answer is the server's look: shown when it differs from what this page sent", async () => {
+    answerRows = ['titleFirst'];
     void writeListLookOption('compact', true);
     await answer();
-    adoptSavedRows([], mark);
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
-    // A read sent after it is taken.
-    adoptSavedRows(['roomy'], listLookReadMark());
-    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true });
   });
 
-  test('an older Inbox (no `rows`) or a list naming something else changes nothing', () => {
-    adoptSavedRows(['hidePreview']);
+  test('a save that fails keeps the look on this page', async () => {
+    adoptSavedRows(['highlight'], 1);
+    offline = true;
+    void writeListLookOption('compact', true);
+    await answer();
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+  });
+
+  test('rivals never both on: the option turned on wins, and the Dot keeps the smaller names', async () => {
+    adoptSavedRows(['highlight', 'roomy', 'previewTwo'], 1);
+    void writeListLookOption('compact', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true });
+    void writeListLookOption('roomy', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    void writeListLookOption('hidePreview', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, hidePreview: true });
+    void writeListLookOption('previewTwo', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    void writeListLookOption('unreadDot', true);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true, unreadDot: true, smallNames: true });
+    void writeListLookOption('smallNames', false);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, roomy: true, previewTwo: true });
+    await answer();
+    expect(saves.at(-1)).toEqual(['highlight', 'roomy', 'previewTwo']);
+    // A hand-edited or older look with both: Compact, no "2 lines" under no preview, the Dot with its names.
+    adoptSavedRows(['compact', 'roomy', 'hidePreview', 'previewTwo', 'unreadDot'], 9);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true, hidePreview: true, unreadDot: true, smallNames: true });
+  });
+
+  // Review of #2516: the one-time list dialog's Done saved all eleven options from the look it opened with.
+  test("the list dialog's Done saves its four options only: the others keep what was saved while it was open", async () => {
+    const opened = readListLook();
+    adoptSavedRows(['previewTwo', 'relativeTime', 'titleFirst'], 1);
+    void writeMenuLook({ ...opened, compact: true, highlight: true });
+    await answer();
+    expect(saves).toEqual([['highlight', 'compact', 'previewTwo', 'relativeTime', 'titleFirst']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true, relativeTime: true, titleFirst: true });
+  });
+
+  test('an older Inbox (no `rows`) or not a list changes nothing; a name no build knows is dropped', () => {
+    adoptSavedRows(['hidePreview'], 1);
     adoptSavedRows(undefined);
-    adoptSavedRows(['hidePreview', 'sparkles']);
-    adoptSavedRows('hidePreview');
+    adoptSavedRows('hidePreview', 2);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, hidePreview: true });
+    adoptSavedRows(['previewTwo', 'sparkles'], 3);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, previewTwo: true });
   });
 });
 
@@ -342,8 +444,28 @@ describe.if(hasDom)('the ⋮ menu', () => {
 
   test("another window's save reaches an open list at once", () => {
     const el = render('narrow');
-    act(() => adoptSavedRows(['compact', 'roomy']));
-    expect(lookClasses(el)).toEqual(['ib-lk-compact', 'ib-lk-roomy']);
+    act(() => adoptSavedRows(['compact', 'unreadDot'], 1));
+    expect(lookClasses(el)).toEqual(['ib-lk-compact', 'ib-lk-small', 'ib-lk-dot']);
+  });
+
+  // Review of #2516: the menu's Compact over Settings → Rows' Roomy left both on (a Custom look no control shows).
+  test('from Detailed, ticking Compact turns Roomy off, on screen and in the save; unticking smaller names turns the Dot off', async () => {
+    adoptSavedRows(['highlight', 'roomy', 'previewTwo'], 1);
+    const el = render('narrow');
+    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    await openMenu(el);
+    act(() => item('compact').click());
+    await settle();
+    expect(lookClasses(el)).toEqual(['ib-lk-pill', 'ib-lk-compact', 'ib-lk-pv2']);
+    expect(saves.at(-1)).toEqual(['highlight', 'compact', 'previewTwo']);
+
+    serverRev = 5;
+    act(() => adoptSavedRows(['unreadDot', 'smallNames'], 5));
+    expect(item('smallNames').getAttribute('aria-checked')).toBe('true');
+    act(() => item('smallNames').click());
+    await settle();
+    expect(lookClasses(el)).toEqual([]);
+    expect(saves.at(-1)).toEqual([]);
   });
 
   // The owner, 2026-11-02: "those could all just be check boxes anyways. They don't look right as icons."
@@ -437,6 +559,10 @@ describe.if(hasDom)('the rows in each mode', () => {
       const el = remount(shape);
       const r = el.querySelector<HTMLElement>(`[data-thread-id="msg_unread"]`)!;
       expect(r.querySelector('.ib-t')!.textContent, `${shape}: time`).toBeTruthy();
+      // Relative: the short form is hidden from a screen reader, which hears the words; the tooltip is the clock time.
+      const rel = r.querySelector<HTMLElement>('.ib-t [data-relative-time]')!;
+      expect(rel.title, `${shape}: tooltip`).toBe(whenTime('2026-10-10T10:00:00.000Z'));
+      expect([...rel.children].map((c) => c.getAttribute('aria-hidden') ?? c.className), `${shape}: spoken once`).toEqual(['true', 'ib-sr']);
       expect(r.querySelector('.ib-qn'), `${shape}: question count`).not.toBeNull();
       expect(r.querySelector('.ib-pv'), `${shape}: no preview`).toBeNull();
     }

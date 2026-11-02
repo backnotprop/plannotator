@@ -21,6 +21,18 @@ export function relativeTime(iso: string, now: number): string {
   return days < 7 ? `${days}d` : shortTime(iso);
 }
 
+/** The same time for a screen reader, which would read "4m" as "4 meters": "4 minutes ago", then the date. */
+export function relativeWords(iso: string, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(iso)) / 60_000));
+  if (minutes < 1) return 'just now';
+  const ago = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (minutes < 60) return ago(minutes, 'minute');
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return ago(hours, 'hour');
+  const days = Math.floor(hours / 24);
+  return days < 7 ? ago(days, 'day') : shortTime(iso);
+}
+
 const listeners = new Set<() => void>();
 let now = Date.now();
 let timer: ReturnType<typeof setInterval> | null = null;

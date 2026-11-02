@@ -6651,11 +6651,9 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-rws-frame .ib-lbody > .ib-group > .ib-rw, .ib-rws-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
 .ib-rws-head { display: flex; align-items: center; gap: 16px; }
 .ib-rws-head > .ib-lede { flex: 1; min-width: 0; margin: 0; }
-.ib-rws-head > .ib-btn { flex: none; }
 .ib-rws-note { margin-top: 12px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-spg[data-settings-section="rows"] { margin-right: 0; }
-  .pn-inbox .ib-rws-reset { display: flex; min-height: 44px; width: 100%; margin-top: 18px; justify-content: center; }
   .ib-rws-top { margin-top: 14px; }
   .ib-rws-fig-narrow, .ib-rws-ctl { flex: 1 1 100%; width: auto; }
   .ib-rws-ctl > .ib-sgroup-first { margin-top: 4px; }
@@ -6676,6 +6674,8 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-rws-head { flex-wrap: wrap; }
 .ib-rws-presets { display: flex; align-items: center; gap: 10px; flex: none; }
 .ib-rws-presets > .ib-l { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+/* The presets are buttons (pressed: the look's), so a key moves through them without choosing one. */
+.pn-inbox .ib-rws-presets .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-rws-custom { padding: 3px 8px; border: 1px dashed var(--ib-line); border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rws-ctl .ib-prow { min-height: 48px; padding-top: 7px; padding-bottom: 7px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
@@ -6692,13 +6692,27 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw { contain-intrinsic-size: auto none auto 60px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 88px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 70px; }
-/* Unread "Dot": an accent dot in the row's left gutter, on line 1 (a wide row: its middle). */
-.ib-lk-dot :is(.ib-nrow, .ib-row, .ib-mrow) { position: relative; }
-.ib-lk-dot :is(.ib-nrow, .ib-row, .ib-mrow).ib-u::before { content: ""; position: absolute; left: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
-.ib-lk-dot .ib-nrow.ib-u::before { top: 17px; }
-.ib-lk-roomy.ib-lk-dot .ib-nrow.ib-u::before { top: 21px; }
-.ib-lk-dot .ib-row.ib-u::before { top: calc(50% - 3px); }
-.ib-lk-dot .ib-mrow.ib-u::before { left: 6px; top: 20px; }
+/* The same for Subject preview "2 lines" (a second preview line: 18 px beside a thread, 19 px on a phone, each at
+   line-height 1.35) and First line "Thread name" (2 px more beside a thread; a phone's row keeps its height; compact
+   rows keep theirs). Each density with each. */
+.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 102px; }
+.ib-lk-tfirst:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 86px; }
+.ib-lk-pv2.ib-lk-tfirst:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
+.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 61px; }
+.ib-lk-roomy.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 106px; }
+.ib-lk-roomy.ib-lk-tfirst .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 90px; }
+.ib-lk-roomy.ib-lk-pv2.ib-lk-tfirst .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 108px; }
+.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 85px; }
+.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 66px; }
+.ib-lk-roomy.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 89px; }
+/* Unread "Dot": an accent dot in the row's left gutter, on line 1 (a wide row: its middle). Its own ::after: a
+   three-line or wide row's ::before is its hover and selection pill and its focus ring, which the dot keeps. */
+.ib-lk-dot .ib-mrow { position: relative; }
+.ib-lk-dot :is(.ib-nrow, .ib-row, .ib-mrow).ib-u::after { content: ""; position: absolute; left: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); pointer-events: none; }
+.ib-lk-dot .ib-nrow.ib-u::after { top: 17px; }
+.ib-lk-roomy.ib-lk-dot .ib-nrow.ib-u::after { top: 21px; }
+.ib-lk-dot .ib-row.ib-u::after { top: calc(50% - 3px); }
+.ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
 /* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
 .ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
 /* First line "Thread name": the name on line 1, one line cut with "…", the time after it; the agents and the

@@ -815,10 +815,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       mkdirSync(dataDir, { recursive: true });
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
       const server = await start(dataDir);
-      const read = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).rows;
+      const settings = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { rows: unknown; rows_rev: unknown };
+      const read = async () => (await settings()).rows;
       const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxRows?: unknown; inboxTextSize?: unknown };
       // Never saved: null, so the first window adopts its browser's old cookies.
-      expect(await read()).toBeNull();
+      expect(await settings()).toMatchObject({ rows: null, rows_rev: 0 });
       for (const bad of ["compact", ["compact", "sparkles"], [1], null, { compact: true }]) {
         const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: bad });
         expect(refused.status).toBe(422);
@@ -836,12 +837,12 @@ describe("the window's routes: settings, restart, favicon", () => {
       let text = "";
       while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
 
-      // Saved in the options' order, each once; the other settings stay.
-      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["roomy", "compact", "roomy"] });
+      // Saved in the options' order, each once, a rival off (Compact wins over Roomy); the other settings stay. Each save counts.
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
-      expect((await saved.json()).rows).toEqual(["compact", "roomy"]);
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "roomy"] });
-      expect(await read()).toEqual(["compact", "roomy"]);
+      expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1 });
+      expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
       while (!text.includes("event: rows") && Date.now() < deadline) {
@@ -849,18 +850,25 @@ describe("the window's routes: settings, restart, favicon", () => {
         if (chunk && chunk.value) text += decoder.decode(chunk.value);
       }
       controller.abort();
-      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "roomy"] })}`);
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1 })}`);
 
       // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
       const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });
-      expect((await none.json()).rows).toEqual([]);
+      expect(await none.json()).toMatchObject({ rows: [], rows_rev: 2 });
       expect(await read()).toEqual([]);
-      // Another setting's save keeps the look and answers it.
+      // Another setting's save keeps the look and its count, and answers both.
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 15 });
-      expect((await other.json()).rows).toEqual([]);
-      // A hand-edited name no build knows reads as never saved.
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["compact", "sparkles"] }));
-      expect(await read()).toBeNull();
+      expect(await other.json()).toMatchObject({ rows: [], rows_rev: 2 });
+      // A hand-edited name no build knows (a downgrade, a typo) is dropped on read, never "never saved": the synced
+      // look stays, so no window adopts its old cookies over it. Writing that name is still refused (above).
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles", "unreadDot"], inboxRowsRev: 7 }));
+      expect(await settings()).toMatchObject({ rows: ["smallNames", "unreadDot"], rows_rev: 7 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"] }));
+      expect(await settings()).toMatchObject({ rows: [], rows_rev: 0 });
+      // The next save counts on from the file's.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
+      const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
+      expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

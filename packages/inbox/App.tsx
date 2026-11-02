@@ -105,7 +105,7 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
 import { VoiceIntro } from './components/VoiceIntro';
 import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
-import { adoptSavedRows, listLookReadMark, readListLook, writeListLook } from './listLook';
+import { adoptSavedRows, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -1308,11 +1308,10 @@ function Inbox() {
 
   const refreshSettings = useCallback(async () => {
     try {
-      const mark = listLookReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
-      adoptSavedRows(next.rows, mark);
+      adoptSavedRows(next.rows, next.rows_rev);
       adoptSavedDiffStyle(next.diff_style);
       adoptVoiceSettings(next.voice);
       setSettings(next);
@@ -5058,7 +5057,7 @@ function Inbox() {
           projectNames={projectNames}
           phone={phone}
           onDone={(look) => {
-            writeListLook(look);
+            void writeMenuLook(look);
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}

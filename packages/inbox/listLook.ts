@@ -12,13 +12,14 @@
  *
  * The look is the person's, wherever they use the Inbox (the owner, 2026-11-02: "Whatever they set goes wherever
  * they're using the app. That's the point."): config.json `inboxRows` through POST /api/inbox/settings `{ rows }`,
- * and every window open takes a save at once (`event: rows`). A change shows here first, then is saved. A cookie
+ * and every window open takes a save at once (`event: rows`). A change shows here first, then is saved, one save on
+ * its way at a time; the server counts its saves (`rows_rev`), so a page always ends on its newest look. A cookie
  * (`ROWS_COOKIE`) keeps the last look this browser showed, so a reload paints it before the settings read answers.
  * The four per-option cookies of "inbox-list-options" are read, never written: the first window to find no
  * `inboxRows` saves them once (`adoptSavedRows`), and from then on the server's look wins.
  */
 import { useSyncExternalStore } from 'react';
-import { INBOX_ROWS_OPTIONS, inboxRowsList, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -87,10 +88,28 @@ export const LIST_LOOK_OPTIONS: ReadonlyArray<{ key: MenuLookKey; label: string 
   { key: 'smallNames', label: 'Smaller thread names' },
 ];
 
+/** The look a list of option names makes: names no build knows are dropped, and a rival pair never both on (core `inboxRowsCanonical`). */
 export function lookFromRows(rows: readonly string[]): ListLook {
+  const on = inboxRowsRead(rows) ?? [];
   const look = { ...LIST_LOOK_OFF };
-  for (const key of LIST_LOOK_KEYS) look[key] = rows.includes(key);
+  for (const key of on) look[key] = true;
   return look;
+}
+
+/**
+ * A change on top of a look, with its rivals made to agree: the option just turned on wins (Compact turns Roomy
+ * off and Roomy turns Compact off; "2 lines" turns "Hide subject preview" off and back; the Dot needs the smaller
+ * names, so it turns them on, and turning them off turns the Dot off).
+ */
+export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListLook {
+  const next = { ...look, ...change };
+  if (change.compact) next.roomy = false;
+  if (change.roomy) next.compact = false;
+  if (change.hidePreview) next.previewTwo = false;
+  if (change.previewTwo) next.hidePreview = false;
+  if (change.unreadDot) next.smallNames = true;
+  if (change.smallNames === false) next.unreadDot = false;
+  return lookFromRows(rowsFromLook(next));
 }
 
 export function rowsFromLook(look: ListLook): InboxRowsOption[] {
@@ -118,12 +137,17 @@ export function isDefaultListLook(look: ListLook): boolean {
 const sameLook = (a: ListLook, b: ListLook) => LIST_LOOK_KEYS.every((key) => a[key] === b[key]);
 
 let current: ListLook | null = null;
-/** Saves on their way: a settings read or `event: rows` meanwhile may predate them, so it is not taken. */
-let saving = 0;
-/** Changes made on this page: a settings read sent before the latest one answers a look older than it. */
-let changes = 0;
-/** This page already offered the server its browser's look (the one adoption). */
-let offered = false;
+/**
+ * The newest look the server has told this page of, and its save count (`rows_rev`). A settings read, a save's
+ * answer and `event: rows` each carry the count, so one older than this (an answer that arrives late) is dropped,
+ * whatever order they arrive in.
+ */
+let serverRev = -1;
+let serverLook: ListLook | null = null;
+/** One save on its way at a time; a change meanwhile waits as `queued` (only the latest one), sent when it answers. */
+let inFlight = false;
+let queued: ListLook | null = null;
+let drained: Promise<void> = Promise.resolve();
 const listeners = new Set<() => void>();
 
 const shown = (): ListLook => (current ??= readBrowserLook());
@@ -139,20 +163,42 @@ function show(look: ListLook): void {
   for (const listener of listeners) listener();
 }
 
+/** The server's look, if newer than the last this page heard: shown at once unless this page has a save to make. */
+function hear(rows: readonly InboxRowsOption[], rev: unknown): void {
+  const count = typeof rev === 'number' && Number.isFinite(rev) ? rev : Math.max(serverRev, 0);
+  if (count < serverRev) return;
+  serverRev = count;
+  serverLook = lookFromRows(rows);
+  if (!inFlight && !queued) show(serverLook);
+}
+
+async function sendQueued(): Promise<void> {
+  inFlight = true;
+  let heard = false;
+  while (queued) {
+    const look = queued;
+    queued = null;
+    const before = serverRev;
+    try {
+      const answer = await inboxApi.saveRows(rowsFromLook(look));
+      const rows = inboxRowsRead(answer.rows);
+      if (rows) hear(rows, answer.rows_rev);
+      heard = true;
+    } catch {
+      // Not saved (offline, an older Inbox): the look stays on this page and in its cookie until the next read,
+      // unless another window's save arrived meanwhile.
+      heard = serverRev > before;
+    }
+  }
+  inFlight = false;
+  // Every save answered: the page shows the server's newest look, whichever window made it.
+  if (heard && serverLook) show(serverLook);
+}
+
 function save(look: ListLook): Promise<void> {
-  saving += 1;
-  return inboxApi.saveRows(rowsFromLook(look)).then(
-    (answer) => {
-      saving -= 1;
-      // The last save's answer is the server's look: a window that changed it meanwhile wins, as its event would.
-      const rows = inboxRowsList(answer.rows);
-      if (saving === 0 && rows) show(lookFromRows(rows));
-    },
-    () => {
-      // Not saved (offline, an older Inbox): the look stays on this page and in its cookie until the next read.
-      saving -= 1;
-    },
-  );
+  queued = look;
+  if (!inFlight) drained = sendQueued();
+  return drained;
 }
 
 /** The look on screen now. */
@@ -162,43 +208,42 @@ export function readListLook(): ListLook {
 
 /** The person changed some options (a ⋮ checkbox, a Settings → Rows choice or preset): shown at once, then saved. */
 export function writeListLookOptions(change: Partial<ListLook>): Promise<void> {
-  const next = { ...shown(), ...change };
-  changes += 1;
+  const next = lookWithChange(shown(), change);
   show(next);
   return save(next);
-}
-
-/** Taken when a settings read is sent, and given back with its `rows` (`adoptSavedRows`). */
-export function listLookReadMark(): number {
-  return changes;
 }
 
 export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void> {
   return writeListLookOptions({ [key]: on });
 }
 
-/** The whole look at once (the one-time list options dialog's Done, approval "inbox-list-options-intro"). */
-export function writeListLook(look: ListLook): Promise<void> {
-  return writeListLookOptions(look);
+/**
+ * The one-time list options dialog's Done (approval "inbox-list-options-intro"): its four options only, so the
+ * others keep whatever they are now, even when another window changed them while the dialog was open.
+ */
+export function writeMenuLook(look: Pick<ListLook, MenuLookKey>): Promise<void> {
+  return writeListLookOptions(Object.fromEntries(LIST_LOOK_OPTIONS.map(({ key }) => [key, look[key]])));
 }
 
 /**
- * The server's look, from a settings read (`rows`) or another window's save (`event: rows`). Absent (an older
- * Inbox): this browser's stays. Null (never saved): this browser's old look is saved once, if it is not the
- * defaults, and the server's wins from then on. Ignored while a save from this page is on its way, and from a
- * settings read sent before this page's latest change (`mark`, from `listLookReadMark`), which answers an older look.
+ * The server's look and its save count, from a settings read (`rows`, `rows_rev`) or a save in any window
+ * (`event: rows`). Absent (an older Inbox): this browser's stays. Null (never saved): this browser's look (its
+ * old cookies) is saved, if it is not the defaults, and the server's wins from then on. That happens once: not
+ * while a save from this page is on its way (it is the adoption, or a change that saves the look anyway), and
+ * never once the server told this page of a look (a null read sent before it is old). Only a save that failed is
+ * offered again by the next read. One older than the newest this page heard is dropped; while this page has a
+ * save to make, it is kept and shown once every save answered. A name no build knows is dropped.
  */
-export function adoptSavedRows(rows: unknown, mark?: number): void {
-  if (rows === undefined || saving > 0 || (mark !== undefined && mark !== changes)) return;
+export function adoptSavedRows(rows: unknown, rev?: unknown): void {
+  if (rows === undefined) return;
   if (rows === null) {
-    if (offered) return;
-    offered = true;
+    if (serverRev >= 0 || inFlight || queued) return;
     const mine = shown();
     if (!isDefaultListLook(mine)) void save(mine);
     return;
   }
-  const list = inboxRowsList(rows);
-  if (list) show(lookFromRows(list));
+  const list = inboxRowsRead(rows);
+  if (list) hear(list, rev);
 }
 
 /** The list column's classes for the look: none when every option is off. */
@@ -228,8 +273,10 @@ export function useListLook(remember = true): [ListLook, (changes: Partial<ListL
 /** Tests only: a fresh page that has read nothing and saves nothing. */
 export function resetListLookForTests(): void {
   current = null;
-  saving = 0;
-  changes = 0;
-  offered = false;
+  serverRev = -1;
+  serverLook = null;
+  inFlight = false;
+  queued = null;
+  drained = Promise.resolve();
   for (const listener of listeners) listener();
 }

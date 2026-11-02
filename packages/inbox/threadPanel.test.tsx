@@ -16,7 +16,7 @@ import type { TidyController } from './components/Tidy';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { LIST_LOOK_OFF, writeListLook } = await import('./listLook');
+const { LIST_LOOK_OFF, writeListLookOptions } = await import('./listLook');
 const { THREAD_PANEL_COOKIE, readThreadPanel, threadPanelShows, writeThreadPanel } = await import('./threadPanel');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
@@ -89,7 +89,7 @@ describe('the choice', () => {
 
   test('writing the look options leaves it alone', () => {
     writeThreadPanel(true);
-    writeListLook(LIST_LOOK_OFF);
+    void writeListLookOptions(LIST_LOOK_OFF);
     expect(readThreadPanel()).toBe(true);
   });
 

@@ -1,7 +1,7 @@
 /**
  * Settings → Rows' Time "Relative" (relativeTime.ts, approval "inbox-customize-rows").
  * What this catches: a wrong step ("60m" instead of "1h", "24h" instead of "1d", a week shown as "7d" instead of its
- * date), a time in the future read as negative; and a list that starts a timer per row instead of the one shared
+ * date), a time in the future read as negative; a screen reader given "4m" instead of words; and a list that starts a timer per row instead of the one shared
  * minute clock, starts one while every row shows the clock form, or leaves it running once no row needs it.
  *
  * The clock half is DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -10,7 +10,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { shortTime } from './format';
-import { RELATIVE_TICK_MS, relativeTime, useRelativeClock } from './relativeTime';
+import { RELATIVE_TICK_MS, relativeTime, relativeWords, useRelativeClock } from './relativeTime';
 
 const NOW = Date.parse('2026-11-02T12:00:00.000Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -32,6 +32,20 @@ describe('the words', () => {
 
   test('a time a little ahead of this clock (another computer\'s) reads "now"', () => {
     expect(relativeTime(new Date(NOW + 5 * MIN).toISOString(), NOW)).toBe('now');
+    expect(relativeWords(new Date(NOW + 5 * MIN).toISOString(), NOW)).toBe('just now');
+  });
+
+  // Review of #2516: a screen reader read "4m" as "4 meters".
+  test('a screen reader hears the same step in words, singular at one, then the same date', () => {
+    expect(relativeWords(ago(59_999), NOW)).toBe('just now');
+    expect(relativeWords(ago(MIN), NOW)).toBe('1 minute ago');
+    expect(relativeWords(ago(59 * MIN), NOW)).toBe('59 minutes ago');
+    expect(relativeWords(ago(60 * MIN), NOW)).toBe('1 hour ago');
+    expect(relativeWords(ago(23 * 60 * MIN + 59 * MIN), NOW)).toBe('23 hours ago');
+    expect(relativeWords(ago(24 * 60 * MIN), NOW)).toBe('1 day ago');
+    expect(relativeWords(ago(6 * 24 * 60 * MIN), NOW)).toBe('6 days ago');
+    const week = ago(7 * 24 * 60 * MIN);
+    expect(relativeWords(week, NOW)).toBe(shortTime(week));
   });
 });
 

@@ -23,7 +23,9 @@
  *    Refresh's icon is, every label and "Customize rows…" on one edge, beside a thread and on a phone); a choice in
  *    one window shows in another browser at once and is saved in config.json `inboxRows`; on 390 and 320 px phones,
  *    four looks keep every row inside the screen, the time whole and the questions and warnings inside the row, name
- *    first leads with the name, and the Rows page itself fits.
+ *    first leads with the name, and the Rows page itself fits; a relative time is heard in words. Unread "Dot": an
+ *    unread row, wide and beside a thread, keeps its whole pill, its keyboard focus ring and its hover pill, and a
+ *    selected unread row its selection pill, with the 6 px dot.
  *  The look is the person's, kept by this one Inbox: each test starts from every option off.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -596,7 +598,7 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     expect(await lookClasses(list)).toEqual([]);
 
     await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
-    await settings.locator('.ib-rws-presets label', { hasText: 'Detailed' }).click();
+    await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
     // Another browser (another cookie jar), no reload: the Detailed look.
     await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
     const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
@@ -610,6 +612,73 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
   } finally {
     await a.close();
     await b.close();
+  }
+});
+
+/** A row's ::before (the hover and selection pill, the focus ring) and ::after (the Dot), with the row's box. */
+async function rowMarks(page: Page, selector: string) {
+  return page.locator(selector).evaluate((row) => {
+    const mark = (which: string) => {
+      const s = getComputedStyle(row, which);
+      return { content: s.content, w: parseFloat(s.width), h: parseFloat(s.height), bg: s.backgroundColor, shadow: s.boxShadow };
+    };
+    // The pill is placed in the row's padding box (inside its rule).
+    return { pill: mark('::before'), dot: mark('::after'), w: row.clientWidth, h: row.clientHeight, focusVisible: row.matches(':focus-visible') };
+  });
+}
+
+// Review of #2516: the Dot was drawn as the row's ::before, which is also its hover and selection pill and its focus
+// ring, so an unread row lost all three while the Dot was on.
+test('Unread "Dot": its own mark; an unread row keeps its focus ring, hover pill and selection pill, wide and beside a thread', async ({ browser }) => {
+  await post('/api/inbox/settings', { rows: ['smallNames', 'unreadDot'] });
+  const context = await desktop(browser);
+  try {
+    const page = await context.newPage();
+    for (const [shape, rowClass, hash] of [
+      ['wide', 'ib-row', ''],
+      ['beside a thread', 'ib-nrow', `#thread=${threads.opened}`],
+    ] as const) {
+      await page.goto(`${url}${hash}`);
+      const row = `.ib-lbody .${rowClass}.ib-u[data-thread-id="${threads.ledger}"]`;
+      await expect(page.locator(row)).toBeVisible();
+      expect(await lookClasses(page)).toEqual(['ib-lk-small', 'ib-lk-dot']);
+      const rest = await rowMarks(page, row);
+      expect([rest.dot.w, rest.dot.h], `${shape}: the dot`).toEqual([6, 6]);
+      expect(rest.dot.bg, `${shape}: the dot's accent`).not.toBe('rgba(0, 0, 0, 0)');
+      // The pill is still the whole row, 3 px inside it top and bottom.
+      expect(Math.round(rest.pill.w), `${shape}: the pill's width`).toBe(Math.round(rest.w));
+      expect(Math.round(rest.pill.h), `${shape}: the pill's height`).toBe(Math.round(rest.h - 6));
+
+      // Keyboard focus (a key first, so the focus that follows is `:focus-visible`): the ring on the pill.
+      await page.mouse.move(5, 5);
+      await page.keyboard.press('Shift');
+      await page.locator(row).focus();
+      const focused = await rowMarks(page, row);
+      expect(focused.focusVisible, `${shape}: keyboard focus`).toBe(true);
+      expect(focused.pill.shadow, `${shape}: the focus ring`).toMatch(/inset/);
+      expect(Math.round(focused.pill.w), `${shape}: the ring round the whole row`).toBe(Math.round(focused.w));
+      expect(focused.dot.w, `${shape}: the dot stays`).toBe(6);
+
+      // Hover: the pill.
+      await page.locator(row).hover();
+      await expect.poll(async () => (await rowMarks(page, row)).pill.bg, `${shape}: the hover pill`).not.toBe('rgba(0, 0, 0, 0)');
+      await page.mouse.move(5, 5);
+      await page.locator(row).blur();
+    }
+
+    // Selected and unread (the open thread marked unread): the selection pill and the dot.
+    await post(`/api/inbox/threads/${threads.opened}/mark-unread`, {});
+    const selected = `.ib-lbody .ib-nrow.ib-sel.ib-u[data-thread-id="${threads.opened}"]`;
+    // A read thread waits on no one: its row is in Quiet, folded by default.
+    await openQuiet(page);
+    await expect(page.locator(selected)).toBeVisible();
+    const marks = await rowMarks(page, selected);
+    expect(marks.pill.bg, 'the selection pill').not.toBe('rgba(0, 0, 0, 0)');
+    expect(Math.round(marks.pill.w), 'the selection pill is the whole row').toBe(Math.round(marks.w));
+    expect(marks.dot.w, 'the dot on the selected row').toBe(6);
+  } finally {
+    await context.close();
+    await post(`/api/inbox/threads/${threads.opened}/read`, {});
   }
 });
 
@@ -665,7 +734,14 @@ test('Rows options on 390 and 320 px phones: every row inside the screen, the ti
           expect(first, `${width} ${shot}: the name first`).toMatch(/ib-m2|ib-rowkey/);
           if (!rows.includes('compact')) expect((await shownChars(page, threads.ledger)).shown, `${width} ${shot}: a name worth reading`).toBeGreaterThanOrEqual(20);
         }
-        if (rows.includes('relativeTime')) await expect(page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"] .ib-t`)).toHaveText(/^(now|\d+[mhd])$/);
+        if (rows.includes('relativeTime')) {
+          // "4m" on screen; a screen reader hears "4 minutes ago" instead, never both.
+          const time = page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"] .ib-t [data-relative-time]`);
+          await expect(time.locator('[aria-hidden="true"]')).toHaveText(/^(now|\d+[mhd])$/);
+          const heard = await page.locator(`.ib-lbody .ib-mrow[data-thread-id="${threads.ledger}"]`).ariaSnapshot();
+          expect(heard, `${width} ${shot}: the time in words`).toMatch(/just now|\d+ (minute|hour|day)s? ago/);
+          expect(heard, `${width} ${shot}: not the short form`).not.toMatch(/\b\d+[mhd]\b/);
+        }
         await page.screenshot({ path: join(proofDir, `rows-phone-${width}-${shot}.png`) });
       }
       // The page itself on this phone: one picture, nothing wider than the screen.

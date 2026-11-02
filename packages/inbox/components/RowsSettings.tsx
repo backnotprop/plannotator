@@ -215,20 +215,26 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
   // A choice that turns one option on turns its rival off (Compact and Roomy; no preview and two lines), in one write.
   const [look, set] = useListLook();
   const preset = rowsPreset(look);
+  // Buttons, not radios: a radio group's arrow keys choose as they move, so one stray key would wipe a Custom look.
+  // Tab reaches each preset, and only Enter, Space or a click applies one; the pressed one is the look's.
   const presets = (
     <div className="ib-rws-presets" data-rows-preset={preset ?? 'custom'}>
       <span className="ib-l" id="ib-rows-preset">
         Start from
       </span>
-      <Seg
-        name="ib-rows-preset"
-        labelledBy="ib-rows-preset"
-        value={preset ?? ('custom' as RowsPreset)}
-        choices={ROWS_PRESETS}
-        onChange={(next) => set(ROWS_PRESETS.find((p) => p.id === next)!.look)}
-      />
+      <span className="ib-seg" role="group" aria-labelledby="ib-rows-preset" aria-describedby={preset ? undefined : 'ib-rows-custom'}>
+        {ROWS_PRESETS.map((choice) => (
+          <button key={choice.id} type="button" className="ib-seg-o" aria-pressed={preset === choice.id} data-on={preset === choice.id ? '' : undefined} data-preset={choice.id} onClick={() => set(choice.look)}>
+            {choice.label}
+          </button>
+        ))}
+      </span>
       {/* Not a choice: says the look was changed from every preset. Balanced puts the defaults back. */}
-      {!preset && <span className="ib-rws-custom">Custom</span>}
+      {!preset && (
+        <span className="ib-rws-custom" id="ib-rows-custom">
+          Custom
+        </span>
+      )}
     </div>
   );
   const controls = (
@@ -310,10 +316,22 @@ export function RowsSection({ phone, onGeneral }: { phone: boolean; onGeneral?: 
                 <span className="ib-l" id={`ib-rows-${item.key}`}>
                   {item.label}
                 </span>
-                {item.desc && <span className="ib-desc">{item.desc}</span>}
+                {item.desc && (
+                  <span className="ib-desc" id={`ib-rows-${item.key}-desc`}>
+                    {item.desc}
+                  </span>
+                )}
               </span>
               <span className="ib-ctl">
-                <button type="button" role="switch" className="ib-sw" aria-checked={!look[item.key]} aria-labelledby={`ib-rows-${item.key}`} onClick={() => set({ [item.key]: !look[item.key] })} />
+                <button
+                  type="button"
+                  role="switch"
+                  className="ib-sw"
+                  aria-checked={!look[item.key]}
+                  aria-labelledby={`ib-rows-${item.key}`}
+                  aria-describedby={item.desc ? `ib-rows-${item.key}-desc` : undefined}
+                  onClick={() => set({ [item.key]: !look[item.key] })}
+                />
               </span>
             </div>
           ))}

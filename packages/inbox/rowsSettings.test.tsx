@@ -4,7 +4,8 @@
  * packages/server/inbox.test.ts's).
  * What this catches: a three-way choice that leaves its rival on (Compact and Roomy together, no preview and two
  * lines together, Dot without bold) or takes two saves to change; a preset that is not exactly its look, or that is
- * not shown as chosen when the look matches it; "Custom" missing once the look matches none; a Show switch that reads
+ * not shown as chosen when the look matches it, or that an arrow key applies; "Custom" missing once the look matches
+ * none, or not tied to the presets for a screen reader; a Show switch without its words, or that reads
  * backwards; pictures that do not follow the look, or a phone that draws the full-width picture.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -62,7 +63,14 @@ async function settle() {
 
 /** Pick a choice by its words in a control row (`density`, `unread`…) or the presets (`preset`). */
 async function pick(el: HTMLElement, control: string, words: string) {
-  const scope = control === 'preset' ? el.querySelector('.ib-rws-presets')! : el.querySelector(`[data-rows-control="${control}"]`)!;
+  if (control === 'preset') {
+    const button = [...el.querySelectorAll<HTMLButtonElement>('.ib-rws-presets button')].find((b) => b.textContent === words);
+    if (!button) throw new Error(`preset: no "${words}"`);
+    act(() => button.click());
+    await settle();
+    return;
+  }
+  const scope = el.querySelector(`[data-rows-control="${control}"]`)!;
   const label = [...scope.querySelectorAll('label')].find((l) => l.textContent === words);
   if (!label) throw new Error(`${control}: no "${words}"`);
   act(() => label.querySelector('input')!.click());
@@ -70,7 +78,8 @@ async function pick(el: HTMLElement, control: string, words: string) {
 }
 
 const chosen = (el: HTMLElement, control: string) => {
-  const scope = control === 'preset' ? el.querySelector('.ib-rws-presets')! : el.querySelector(`[data-rows-control="${control}"]`)!;
+  if (control === 'preset') return [...el.querySelectorAll('.ib-rws-presets button')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent);
+  const scope = el.querySelector(`[data-rows-control="${control}"]`)!;
   return [...scope.querySelectorAll('label')].filter((l) => l.querySelector('input')!.checked).map((l) => l.textContent);
 };
 
@@ -147,6 +156,38 @@ describe.if(hasDom)('Settings → Rows', () => {
     await pick(el, 'preset', 'Balanced');
     expect(readListLook()).toEqual(LIST_LOOK_OFF);
     expect(el.querySelector('.ib-rws-custom')).toBeNull();
+  });
+
+  // Review of #2516: as radios, an arrow key in the presets chose the next one and wiped a Custom look unseen.
+  test('the presets are buttons a key moves through without choosing; a screen reader hears "Custom" with them', async () => {
+    const el = render();
+    await pick(el, 'preset', 'Minimal');
+    await pick(el, 'time', 'Clock');
+    const custom = readListLook();
+    const group = el.querySelector<HTMLElement>('.ib-rws-presets [role="group"]')!;
+    expect(group.querySelector('input, [role="radio"]')).toBeNull();
+    expect([...group.querySelectorAll('button')].map((b) => [b.type, b.getAttribute('aria-pressed')])).toEqual([
+      ['button', 'false'],
+      ['button', 'false'],
+      ['button', 'false'],
+    ]);
+    const first = group.querySelector<HTMLButtonElement>('button')!;
+    act(() => first.focus());
+    for (const key of ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'Home', 'End']) act(() => void first.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+    await settle();
+    expect(readListLook()).toEqual(custom);
+    // "Custom" describes the group while the look matches no preset.
+    const describedBy = group.getAttribute('aria-describedby')!;
+    expect(el.querySelector(`#${describedBy}`)!.textContent).toBe('Custom');
+    await pick(el, 'preset', 'Balanced');
+    expect(group.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  test("the Project switch's words describe it to a screen reader", () => {
+    const el = render();
+    const project = el.querySelector<HTMLElement>('[data-rows-control="hideProject"] [role="switch"]')!;
+    expect(el.querySelector(`#${project.getAttribute('aria-describedby')}`)!.textContent).toBe('With its machine, when you link machines');
+    expect(el.querySelector('[data-rows-control="hideAgents"] [role="switch"]')!.hasAttribute('aria-describedby')).toBe(false);
   });
 
   test('the pictures follow the look at once; a phone draws only its own rows', async () => {
