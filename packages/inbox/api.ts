@@ -65,6 +65,7 @@ import type {
 } from '@plannotator/core/inbox-types';
 
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
+import { newUuid } from './uuid';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
 
@@ -735,6 +736,11 @@ export function setPageSession(value: string): void {
   if (pageSession === null) pageSession = value;
 }
 
+/** For a DOM test file that runs after another one in the same process (without `--isolate`) against its own server: the first file's session would otherwise stay. */
+export function resetPageSessionForTests(): void {
+  pageSession = null;
+}
+
 /** The page's serverSession (null before the first list read), for a keepalive request built by hand. */
 export function pageServerSession(): string | null {
   return pageSession;
@@ -751,7 +757,7 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
-  const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: crypto.randomUUID() } : body;
+  const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
   const response = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(machine ? threadHeader(path) : {}) },
@@ -818,7 +824,7 @@ function learnMachines(model: ListModel): void {
 /** A file's query: the page session, and for another machine the key its door asks of every write. */
 function fileQuery(machine: string | null | undefined, query = new URLSearchParams()): string | undefined {
   if (pageSession) query.set('serverSession', pageSession);
-  if (machine) query.set('idempotency_key', crypto.randomUUID());
+  if (machine) query.set('idempotency_key', newUuid());
   return query.size > 0 ? query.toString() : undefined;
 }
 
