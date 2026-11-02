@@ -3,6 +3,7 @@ import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
 import { ImageResolverContext, type ImageResolver } from './ImageResolverContext';
+import { SoftLineBreaksContext } from './InlineMarkdown';
 import { buildHeadingSlugMap } from '../utils/slugify';
 
 /**
@@ -38,6 +39,12 @@ export interface RenderedMarkdownProps {
    * host can scroll to `#section` links. Absent/false, headings carry no id.
    */
   headingAnchors?: boolean;
+  /**
+   * Optional: draw every bare newline in inline text as a line break, as
+   * GitHub does for issue, PR and comment text. Absent/false, a bare newline
+   * stays a space. Code blocks and paragraph spacing are not affected.
+   */
+  softLineBreaks?: boolean;
 }
 
 export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
@@ -51,6 +58,7 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   resolveLocalLink,
   resolveImage,
   headingAnchors = false,
+  softLineBreaks = false,
 }) => {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
   const groups = useMemo(() => groupBlocks(blocks), [blocks]);
@@ -82,6 +90,9 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   );
   // Provide only what the caller passed, so an enclosing provider still
   // applies when a prop is absent.
+  if (softLineBreaks) {
+    body = <SoftLineBreaksContext.Provider value={true}>{body}</SoftLineBreaksContext.Provider>;
+  }
   if (resolveImage) {
     body = <ImageResolverContext.Provider value={resolveImage}>{body}</ImageResolverContext.Provider>;
   }

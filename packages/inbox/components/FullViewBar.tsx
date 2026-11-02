@@ -222,7 +222,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (state !== 'revealed') return;
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list]')) return;
+      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap]')) return;
       setRef.current('tucked');
     };
     document.addEventListener('pointerdown', onDown, true);
@@ -306,7 +306,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         // Focus that leaves the revealed toolbar tucks it, without moving focus.
         if (stateRef.current !== 'revealed') return;
         const to = event.relatedTarget as Element | null;
-        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list]')) return;
+        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap]')) return;
         setRef.current('tucked');
       }}
       // Capture: a tooltip open on the focused button would take Escape first, and the count's Escape closes its open drawer.

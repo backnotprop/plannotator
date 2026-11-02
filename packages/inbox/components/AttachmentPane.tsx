@@ -1305,8 +1305,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const isImage = kind === 'image';
   const isVideo = kind === 'video';
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: toolbar !== 'pinned' } : null),
-    [hasComposer, props.composer, toolbar],
+    // A phone's Show tools brings the toolbar out (revealed) and the reply back with it; only Hide tucks the reply.
+    // A computer's revealed toolbar is a peek from the corner: the reply waits for the pin.
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: phone ? toolbar === 'tucked' : toolbar !== 'pinned' } : null),
+    [hasComposer, props.composer, toolbar, phone],
   );
   const videoRef = useRef<VideoAttachmentViewHandle>(null);
   // A PDF, any other file, and a kind this window does not know: offered as a download.
