@@ -4,11 +4,11 @@
  * `~/.codex`, no call to OpenAI.
  *
  * What regresses: Codex started while voice is off, a token or key reaching a page or a log, a browser disguise, any
- * retry past the one token refresh, a 403 retried, a key settable over the tailnet, audio forwarded to a linked
- * machine, the announcement shown to the wrong computer or twice, Codex left running.
+ * retry past the one token refresh, a 403 retried, a key accepted on a plain-http path or from a guest, audio forwarded
+ * to a linked machine, the announcement shown to the wrong computer or twice, Codex left running.
  */
-import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { doorRouteNames } from "./inbox-devices";
@@ -500,12 +500,51 @@ describe("over the tailnet", () => {
     return { ...w, through };
   }
 
-  test("the key route refuses a page, and the key stays unset", async () => {
+  const postKey = (w: Awaited<ReturnType<typeof tailnetWorld>>, key: unknown, headers: Record<string, string>) =>
+    w.through("/api/inbox/voice/key", { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ serverSession: w.session, key }) });
+
+  test("the owner's key over the tailnet's HTTPS: a private file, the last 4 back", async () => {
     const w = await tailnetWorld();
-    const response = await w.through("/api/inbox/voice/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.session, key: KEY }) });
+    const saved = await postKey(w, KEY, { "X-Forwarded-Proto": "https" });
+    const raw = await saved.text();
+    expect(JSON.parse(raw)).toEqual({ key: { source: "saved", last4: "4f2a" } });
+    expect(raw).not.toContain(KEY);
+    const path = join(w.dataDir, "inbox", "voice-key");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect((await w.settings()).voice.key).toEqual({ source: "saved", last4: "4f2a" });
+    expect(await (await postKey(w, null, { "X-Forwarded-Proto": "https" })).json()).toEqual({ key: { source: null, last4: null } });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  test.each([
+    ["no scheme from serve: a mapping that isn't TLS", {}],
+    ["http named outright", { "X-Forwarded-Proto": "http" }],
+  ])("a plain-http path is refused before the key is read: %s", async (_name, headers: Record<string, string>) => {
+    const w = await tailnetWorld();
+    const response = await postKey(w, KEY, headers);
     expect(response.status).toBe(403);
-    expect(((await response.json()) as { code: string }).code).toBe("local_only");
+    expect((await body(response)).code).toBe("https_required");
     expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
+  });
+
+  test("the key is never logged: not when saved, refused, malformed or over plain http, in no stream and no file but its own", async () => {
+    const w = await tailnetWorld();
+    const written: string[] = [];
+    const keep = (...parts: unknown[]) => void written.push(parts.map((part) => (typeof part === "string" ? part : part instanceof Uint8Array ? new TextDecoder().decode(part) : JSON.stringify(part))).join(" "));
+    const streams = (["stdout", "stderr"] as const).map((name) => spyOn(process[name], "write").mockImplementation(((chunk: unknown) => (keep(chunk), true)) as never));
+    const consoles = (["log", "info", "warn", "error", "debug"] as const).map((name) => spyOn(console, name).mockImplementation(keep));
+    try {
+      await postKey(w, `two words ${KEY}`, { "X-Forwarded-Proto": "https" });
+      await postKey(w, KEY, {});
+      await w.through("/api/inbox/voice/key", { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-Proto": "https" }, body: `{"serverSession":"${w.session}","key":"${KEY}` });
+      await w.through("/api/inbox/voice/key", { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-Proto": "https" }, body: JSON.stringify({ serverSession: "0".repeat(32), key: KEY }) });
+      expect((await postKey(w, KEY, { "X-Forwarded-Proto": "https" })).status).toBe(200);
+    } finally {
+      for (const spy of [...streams, ...consoles]) spy.mockRestore();
+    }
+    expect(written.join("\n")).not.toContain(KEY);
+    const files = readdirSync(w.dataDir, { recursive: true, encoding: "utf8" }).map((file) => join(w.dataDir, file)).filter((file) => statSync(file).isFile());
+    expect(files.filter((file) => readFileSync(file).includes(KEY))).toEqual([join(w.dataDir, "inbox", "voice-key")]);
   });
 
   test("a phone's clip goes to its Inbox, which transcribes: words back, no token, and the computer named", async () => {

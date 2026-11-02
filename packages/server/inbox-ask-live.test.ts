@@ -22,6 +22,7 @@ import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-
 import { INBOX_ASK_CUT_NOTE, INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, writeInboxAsk, type InboxAskConversation, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { INBOX_ASK_POLL_FIELD, INBOX_ASK_WAITS_FIELD, INBOX_BRIDGE_POLL_PATH, inboxAskBridgeBase, parseInboxAskWaits } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { aiSession, fromWindow, postAsk, readAsk, runQuery, type AskAnswer } from "../../tests/helpers/inbox-ask-window";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { InboxAskTimes } from "./inbox-ask-live";
 
@@ -210,40 +211,18 @@ async function fakeAgent(
   return agent;
 }
 
-const windowHeaders = (server: InboxServer) => ({ "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json", Origin: `http://127.0.0.1:${server.port}` });
-
-function fromWindow(server: InboxServer, path: string, body?: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
-  return fetch(`http://127.0.0.1:${server.port}${path}`, {
-    method: body ? "POST" : "GET",
-    headers: windowHeaders(server),
-    ...(body ? { body: JSON.stringify({ serverSession: server.serverSession, ...body }) } : {}),
-    ...(signal ? { signal } : {}),
-  });
-}
-
-interface AskAnswer {
-  turn: InboxAskTurn;
-  conversation: InboxAskConversation;
-  provider_id: string | null;
-  reason?: string;
-  running?: boolean;
-}
-
 async function ask(server: InboxServer, threadId: string, turnId: string, question = "Why?"): Promise<AskAnswer> {
-  const response = await fromWindow(server, `/api/inbox/threads/${threadId}/ask`, { turn_id: turnId, question });
+  const response = await postAsk(server, threadId, turnId, question);
   expect(response.status).toBe(200);
   return (await response.json()) as AskAnswer;
 }
 
 async function refused(server: InboxServer, threadId: string, turnId: string): Promise<{ status: number; code: string }> {
-  const response = await fromWindow(server, `/api/inbox/threads/${threadId}/ask`, { turn_id: turnId, question: "Why?" });
+  const response = await postAsk(server, threadId, turnId, "Why?");
   return { status: response.status, code: ((await response.json()) as { code: string }).code };
 }
 
-async function read(server: InboxServer, threadId: string): Promise<{ conversation: InboxAskConversation | null; running: string | null }> {
-  return (await (await fromWindow(server, `/api/inbox/threads/${threadId}/ask`)).json()) as { conversation: InboxAskConversation | null; running: string | null };
-}
-
+const read = readAsk;
 const turnsOf = async (server: InboxServer, threadId: string) => (await read(server, threadId)).conversation?.turns ?? [];
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 4_000): Promise<void> {
@@ -259,36 +238,7 @@ async function query(server: InboxServer, providerId: string, threadId: string, 
   return run(server, await aiSession(server, providerId, threadId), question, busyPolicy);
 }
 
-async function aiSession(server: InboxServer, providerId: string, threadId: string): Promise<string> {
-  const created = await fromWindow(server, "/api/ai/session", { providerId, context: { mode: "annotate", annotate: { filePath: `Inbox thread "Ship it?" (${threadId})`, content: "" } } });
-  expect(created.status).toBe(200);
-  return ((await created.json()) as { sessionId: string }).sessionId;
-}
-
-function run(server: InboxServer, sessionId: string, question = "Why?", busyPolicy?: "wait" | "interrupt") {
-  const browser = new AbortController();
-  const messages: { type: string; code?: string; delta?: string }[] = [];
-  const decoder = new TextDecoder();
-  // Not awaited: the headers go out with the first word, and the agent answers only after this returns.
-  const finished = (async () => {
-    let text = "";
-    try {
-      const response = await fromWindow(server, "/api/ai/query", { sessionId, prompt: question, ...(busyPolicy ? { busyPolicy } : {}) }, browser.signal);
-      const reader = response.body!.getReader();
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) return;
-        text += decoder.decode(value, { stream: true });
-        const lines = text.split("\n");
-        text = lines.pop()!;
-        for (const line of lines) if (line.startsWith("data: {")) messages.push(JSON.parse(line.slice(6)));
-      }
-    } catch {
-      // The browser dropped.
-    }
-  })();
-  return { sessionId, messages, finished, drop: () => browser.abort() };
-}
+const run = (server: InboxServer, sessionId: string, question = "Why?", busyPolicy?: "wait" | "interrupt") => runQuery(server, sessionId, question, busyPolicy);
 
 describe("off, the default", () => {
   test("no question can wait, and the agent's routes and /api/ai are the unknown route", async () => {

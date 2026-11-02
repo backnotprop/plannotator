@@ -10,7 +10,9 @@
  * config.json `inboxTailscale`; inbox-tailscale.ts) publishes the window
  * through `tailscale serve` to a second loopback listener that lets in only
  * the Tailscale login that owns this machine, and hands it no connection
- * route, no `/mcp` and no device door (`via: "tailnet"` below). A
+ * route, no `/mcp` and no device door (`via: "tailnet"` below). The rules
+ * that are about this computer ask `ownerOrLocal`: the owner over the tailnet
+ * has what the computer has, another allowed login does not. A
  * paired phone reaches it through the device door only, over a path the
  * person switched on ("Reach from my tailnet": a door-only listener that
  * `tailscale serve` points at, inbox-devices.ts; "Reach from this Wi-Fi": a
@@ -1815,10 +1817,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Settings → Prompts: the Inbox reminder (config.json `prompts.inbox`) and
    * the plan, review and annotate prompts. `on` per agent is what Settings →
    * Agents shows: the reminder switch, with the Inbox tool (and, for Claude
-   * Code, its mod). Changing it is for this computer only: the text goes to
-   * every agent session here.
+   * Code, its mod). Changing it is for the owner only (`editable`): the text
+   * goes to every agent session here.
    */
-  const promptsState = (via: RequestVia) => {
+  const promptsState = (editable: boolean) => {
     const config = loadConfig();
     const env = agentEnvironment.env as NodeJS.ProcessEnv;
     const modOff = !claudeCodeModOn(agentEnvironment);
@@ -1827,21 +1829,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ) as Record<InboxToolHost, boolean>;
     // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
     const wakes = { "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" };
-    return inboxPromptsModel(config, on, via === "local", wakes);
+    return inboxPromptsModel(config, on, editable, wakes);
   };
 
-  /** What Settings and the connect snippets read. */
-  /** Voice spends the owner's ChatGPT login or key: a tailnet guest's page gets no use of them, as with Feedback. */
-  const voiceGuest = (req: Request, via: RequestVia) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
+  /**
+   * The person at this computer, or the login that owns it over the tailnet: what the rules about this
+   * computer ask. A login config.json `inboxTailscaleAllow` added is neither, and an owner Tailscale never
+   * named is no one. Only `via` lets the login header count: the window's port refuses a request carrying it.
+   */
+  const ownerOrLocal = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
+  /** What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. */
   const settingsModel = (via: RequestVia, guest: boolean) => ({
     serverSession,
-    /** A tailnet login other than the owner's: the window offers it no What's new. */
-    guest,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
     via,
+    /** A tailnet login other than the owner's: what is about this computer stays closed to this page. */
+    guest,
     version,
     port,
     url: baseUrl,
@@ -1862,8 +1868,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
-    /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); only for a page on this computer. */
-    ...(via === "local" ? { cookie_host: cookieHostWire() } : {}),
+    /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); not for a tailnet guest's page. */
+    ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
     theme: themeState(),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
@@ -1878,8 +1884,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(launch.enabled() ? { launch: launch.settingsState() } : {}),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
-    /** Settings → Prompts: the Inbox reminder (editable on this computer) and the plan, review and annotate prompts. */
-    prompts: promptsState(via),
+    /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
+    prompts: promptsState(!guest),
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
@@ -2618,7 +2624,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     otherDialogDue: () => soundState().dialog_due || listIntroState().due,
     json,
     readBody,
-    localOnly,
     ...options.voice,
   });
 
@@ -2922,13 +2927,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ ok: true, restarting: true });
       }
       // What's new and its images (inbox-whats-new-images.ts) only read release
-      // notes, so the computer's owner can read them over the tailnet too; any
+      // notes, so they answer this computer and the owner over the tailnet; any
       // other tailnet login is refused (`owner_only`, as voice and Feedback do).
       // Fetching missing notes by a release's tag is limited to the versions
       // this Inbox knows (inbox-updates.ts fetchableVersion) and stays inside
       // the update-notes folder of the data directory.
       if (path === "/api/inbox/whats-new" || path === INBOX_WHATS_NEW_IMAGE_PATH) {
-        if (via === "tailnet" && !tailscale.isOwnerRequest(req.headers)) {
+        if (!ownerOrLocal(req, via)) {
           throw new InboxError("owner_only", "Only this computer's owner can read What's new from this Inbox.");
         }
         // A stored image of a release's notes: read only, never fetched here.
@@ -2947,9 +2952,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "No release notes for that version.", code: "notes_not_found" }, 404);
       }
       // The update control (packages/server/inbox-updates.ts). Updating changes
-      // this computer, so none of it answers a page that came through the tailnet.
+      // this computer, so it answers the owner only.
       if (path === "/api/inbox/update" || path.startsWith("/api/inbox/update/")) {
-        if (via === "tailnet") return localOnly();
+        if (!ownerOrLocal(req, via)) return localOnly();
         if (path === "/api/inbox/update" && req.method === "GET") return json(updates.details());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -2976,10 +2981,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ error: "Not found", code: "not_found" }, 404);
       }
-      // The agents on this computer: paths in the person's home, so only on this computer.
+      // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
-        // The person's own agent files: only on this computer.
-        if (via === "tailnet") return localOnly();
+        // The person's own agent files: only theirs, never a tailnet guest's.
+        if (!ownerOrLocal(req, via)) return localOnly();
         if (path === "/api/inbox/agents" && req.method === "GET") return json(await agentsModel());
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
@@ -2994,7 +2999,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, voiceGuest(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via)));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -3017,15 +3022,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         ) {
           throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
-        // The Board changes what agents on this computer are offered (the card tool): changed only here.
-        if (body.board !== undefined && via === "tailnet") return localOnly();
-        if (body.voice !== undefined && voiceGuest(req, via)) throw voiceOwnerOnly();
-        // Updating changes this computer: never from a page that came through the tailnet.
-        if (updateSwitches && via === "tailnet") return localOnly();
-        // The reminder goes to every agent session on this computer: changed only here, like Settings → Agents.
-        if (body.prompts !== undefined && via === "tailnet") return localOnly();
-        // The address this computer's browser opens: never from a page that came through the tailnet.
-        if (body.cookie_host !== undefined && via === "tailnet") return localOnly();
+        const owner = ownerOrLocal(req, via);
+        // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
+        if (body.board !== undefined && !owner) return localOnly();
+        if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
+        // Updating changes this computer: the owner's to change.
+        if (updateSwitches && !owner) return localOnly();
+        // The reminder goes to every agent session on this computer: the owner's, like Settings → Agents.
+        if (body.prompts !== undefined && !owner) return localOnly();
+        // The address this computer's browser opens: the owner's to change.
+        if (body.cookie_host !== undefined && !owner) return localOnly();
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;
         if (body.tailscale !== undefined) {
@@ -3076,14 +3082,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, voiceGuest(req, via)), prompts: promptsState(via), ...(via === "local" ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        if (voiceGuest(req, via)) throw voiceOwnerOnly();
+        if (!ownerOrLocal(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
       }
@@ -3148,7 +3154,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (embedded) return embedded;
       // Feedback (the sidebar's Feedback dialog): sent on, never stored here. The owner's only: a
       // tailnet guest's words would go out as this computer's (its version, OS, IP and rate limit).
-      if (path === INBOX_FEEDBACK_PATH && via === "tailnet" && !tailscale.isOwnerRequest(req.headers)) {
+      if (path === INBOX_FEEDBACK_PATH && !ownerOrLocal(req, via)) {
         throw new InboxError("owner_only", "Only this computer's owner can send feedback from this Inbox.");
       }
       const fed = await feedback.route(req, path);
@@ -3217,11 +3223,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ cards: store.markCardDropsSeen(projectIds, new Set(ids as string[])).map((card) => store.cardWire(card)) });
       }
       // The lane cards' marks (inbox-card-marks.ts): the state of each card's one marked link, for the
-      // cards on screen. Only this computer's window, only while the Board is on; never on the device
+      // cards on screen. Only the owner's window, only while the Board is on; never on the device
       // door (not on its allowlist). Read only; it runs gh / glab, so another site is refused first.
       if (path === "/api/inbox/cards/marks") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        if (via === "tailnet") return localOnly();
+        if (!ownerOrLocal(req, via)) return localOnly();
         const refused = crossSiteCardRead(req);
         if (refused) return refused;
         const body = await readBody(req);

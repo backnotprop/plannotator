@@ -114,6 +114,7 @@ describe("a stub", () => {
  */
 const OWN_FAKES = new Set([
   "inbox-first-run.spec.ts",
+  "inbox-tailnet-owner.spec.ts",
   "inbox.spec.ts",
   "voice-inbox.ts",
   "inbox-launch-claude.spec.ts",
