@@ -273,8 +273,14 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     before = { ...selection, text: field.text() };
     if (!fromKeyboard) field.focus();
     set({ ...IDLE, phase: 'opening', caret: selection.start });
-    // In the press, before any wait: see openVoiceRecorder.
-    const opening = deps.open();
+    // In the press, before any wait: see openVoiceRecorder. A throw here (the AudioContext refused) is a mic that did
+    // not start, never a run left opening with no line, no Cancel and Send off.
+    let opening: Promise<VoiceRecorder>;
+    try {
+      opening = deps.open();
+    } catch (cause) {
+      opening = Promise.reject(cause);
+    }
     void deps.prompts().then((prompts) => {
       if (prompts && mine === run && view.phase === 'opening') set({ prompting: true, said: 'Asking for the microphone' });
     });
@@ -318,11 +324,26 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       return;
     }
     set({ phase: 'sending', mode: null, clipMs: meter.elapsedMs, said: 'Transcribing' });
-    void taken.stop().then((chunks) => {
-      if (mine !== run) return;
-      clip = encodeWav(chunks, taken.rate);
-      void send();
-    });
+    void taken
+      .stop()
+      .then((chunks) => {
+        if (mine !== run) return;
+        clip = encodeWav(chunks, taken.rate);
+        void send();
+      })
+      .catch(() => {
+        // No clip came out of the recorder: back at rest with a line, never a spinner that stays.
+        try {
+          taken.abort();
+        } catch {
+          // Already let go of.
+        }
+        if (mine !== run) return;
+        run++;
+        release();
+        clip = null;
+        set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
+      });
   };
 
   const send = async () => {
@@ -386,6 +407,12 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     press: () => {
       if (view.phase === 'listening' && view.mode === 'tap') {
         secondPress = true;
+        return;
+      }
+      // Another tap while the microphone is still opening means stop, and with nothing recorded yet that is a cancel.
+      // It also frees a mic that never opens: a tap there is never one that does nothing.
+      if (view.phase === 'opening' && !pressed) {
+        cancel();
         return;
       }
       if (view.phase !== 'idle') return;

@@ -956,6 +956,55 @@ test.describe('New message dictates as the reply box does', () => {
     await context.close();
   });
 
+  test('a phone: no tap does nothing. A mic that throws as it opens, or one still opening, goes back to rest', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w, { phone: true });
+    await page.addInitScript(() => {
+      const faults = window as unknown as { throwAudio?: number; slowMic?: boolean };
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real {
+        constructor(...args: ConstructorParameters<typeof AudioContext>) {
+          if (faults.throwAudio) {
+            faults.throwAudio -= 1;
+            throw new DOMException('refused', 'InvalidStateError');
+          }
+          super(...args);
+        }
+      };
+      const media = navigator.mediaDevices;
+      const real = media.getUserMedia.bind(media);
+      media.getUserMedia = (constraints) => (faults.slowMic ? new Promise(() => {}) : real(constraints));
+    });
+    await openCompose(page, w, { pick: true });
+    const send = sheet(page).locator('[data-compose-send]');
+    await field(page).fill('Words');
+
+    // The AudioContext refused: a line, Send free, and the next tap records.
+    await page.evaluate(() => ((window as unknown as { throwAudio: number }).throwAudio = 1));
+    await mic(sheet(page)).tap();
+    await expect(note(sheet(page), 'micfailed')).toBeVisible();
+    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
+    await expect(send).toBeEnabled();
+    await mic(sheet(page)).tap();
+    await expect(line(sheet(page), 'tap')).toBeVisible();
+    await page.locator('[data-voice-cancel]').click();
+    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
+
+    // A mic that never opens: the second tap takes it back to rest at once, before any line is drawn.
+    await page.evaluate(() => ((window as unknown as { slowMic: boolean }).slowMic = true));
+    await mic(sheet(page)).tap();
+    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'live');
+    await mic(sheet(page)).tap();
+    await expect(mic(sheet(page))).toHaveAttribute('data-state', 'idle');
+    await expect(send).toBeEnabled();
+    await page.evaluate(() => ((window as unknown as { slowMic: boolean }).slowMic = false));
+    await mic(sheet(page)).tap();
+    await expect(line(sheet(page), 'tap')).toBeVisible();
+    await page.locator('[data-voice-cancel]').click();
+    await expect(field(page)).toHaveValue('Words');
+    await context.close();
+  });
+
   test('a phone: words land at the cursor with the keyboard down, Send waits, then sends them', async () => {
     const w = await mainWorld();
     const { context, page } = await open(speech, w, { phone: true });
