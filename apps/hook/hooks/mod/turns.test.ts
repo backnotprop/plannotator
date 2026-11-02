@@ -133,6 +133,34 @@ describe('TurnTracker: question prompts carried to the next session', () => {
     expect(s.answers).toEqual(['because'])
   })
 
+  // The engine may resolve the submit (idle, prompt taken) before the hook for the turn it waited behind completes.
+  test('a prompt taken before the turn it waited behind completes is still aborted when its turn starts', async () => {
+    // Stopped while queued, in the same session.
+    const turns = new TurnTracker()
+    turns.onTurnStart('person', 'My own work.')
+    turns.beginAsk('a1', 'why?', sink())
+    let taken!: () => void
+    turns.followSubmit('a1', new Promise<void>((resolve) => (taken = resolve)))
+    expect(turns.cancelAsk('a1')).toBeNull()
+    taken()
+    await Bun.sleep(0)
+    turns.onTurnComplete('person', 'Done.', false)
+    expect(turns.onTurnStart('t2', OUR_TURN)).toBe('t2')
+
+    // Carried by a /clear queued in the person's turn: the new session's tracker hears that turn complete, never start.
+    const before = new TurnTracker()
+    before.onTurnStart('person-2', 'My own work.')
+    before.beginAsk('a2', 'why?', sink())
+    let takenToo!: () => void
+    before.followSubmit('a2', new Promise<void>((resolve) => (takenToo = resolve)))
+    const after = new TurnTracker()
+    after.dropQueued(before.queuedPrompts())
+    takenToo()
+    await Bun.sleep(0)
+    after.onTurnComplete('person-2', 'Done.', false)
+    expect(after.onTurnStart('t3', OUR_TURN)).toBe('t3')
+  })
+
   test('a prompt still waiting is dropped before the same words asked again claim their own turn', () => {
     const before = new TurnTracker()
     before.beginAsk('a1', 'why?', sink())

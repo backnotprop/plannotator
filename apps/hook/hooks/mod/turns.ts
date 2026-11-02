@@ -101,16 +101,24 @@ function takeoverTurn(prompt: Omit<EnteredPrompt, 'text'>): string | null {
  * The submit settling bounds it, so a prompt the engine never runs can't
  * shadow the same words asked again: rejected, it never runs and is
  * forgotten at once; resolved, the engine took it, so its turn has started by
- * the next turn's end, and it is forgotten then.
+ * the end of any turn that started after that, and it is forgotten then (never
+ * at the end of the turn it waited behind: the engine may resolve the submit
+ * before that turn's `turn.complete` hook runs). A prompt the engine drops
+ * without ever settling its submit stays armed: the same words asked again
+ * would have their turn aborted (no engine is known to do this).
  */
 export class QueuedPrompt {
   state: 'waiting' | 'taken' | 'failed' = 'waiting'
+  /** `mainTurnStarts` when the submit resolved. */
+  takenAt = 0
   constructor(readonly text: string) {}
 
   follow(submit: Promise<unknown>): void {
     submit.then(
       () => {
-        if (this.state === 'waiting') this.state = 'taken'
+        if (this.state !== 'waiting') return
+        this.state = 'taken'
+        this.takenAt = mainTurnStarts
       },
       () => {
         this.state = 'failed'
@@ -118,6 +126,12 @@ export class QueuedPrompt {
     )
   }
 }
+
+/**
+ * Main-loop turn starts seen by any tracker in this process: orders a prompt's
+ * taking against the turns (one process, so it spans the trackers of every session it moved through).
+ */
+let mainTurnStarts = 0
 
 /** Prompts to drop kept at most (each is a question nobody owns any more). */
 const MAX_DROPS = 16
@@ -155,6 +169,8 @@ export class TurnTracker {
    * is aborted when it starts.
    */
   private drops: QueuedPrompt[] = []
+  /** The running main turns' start numbers (`mainTurnStarts`), as this tracker saw them start. */
+  private startedAt = new Map<string, number>()
   /**
    * Prompts that entered the session from anyone but this plugin (the user's
    * Enter, a notification, another plugin), as `prompt.submit` saw them. The
@@ -331,6 +347,9 @@ export class TurnTracker {
   /** A turn started. Returns the turn to abort at once (a cancelled question's). */
   onTurnStart(turnId: string, text: string): string | null {
     this.runningTurnId = turnId
+    mainTurnStarts += 1
+    this.startedAt.set(turnId, mainTurnStarts)
+    if (this.startedAt.size > MAX_DROPS) this.startedAt.delete(this.startedAt.keys().next().value!)
     const foreign = this.takeForeign(text)
     if (foreign) {
       if (foreign.originKind === OTHER_PLUGIN_ORIGIN) this.otherPluginTurns.add(turnId)
@@ -398,8 +417,12 @@ export class TurnTracker {
     if (this.runningTurnId === turnId) this.runningTurnId = null
     this.takenOverTurns.delete(turnId)
     this.otherPluginTurns.delete(turnId)
-    // A prompt the engine took before this turn ended has had its turn start: one still held never runs.
-    this.prune('failed', 'taken')
+    // A prompt the engine took before this turn STARTED has had its turn start: one still held never runs.
+    // A turn this tracker never saw start (it began before a /clear) proves nothing.
+    const started = this.startedAt.get(turnId)
+    this.startedAt.delete(turnId)
+    this.prune('failed')
+    if (started !== undefined) this.drops = this.drops.filter((prompt) => !(prompt.state === 'taken' && prompt.takenAt < started))
     const ask = this.ask
     if (!ask || ask.finished || ask.turnId !== turnId) return
     ask.finished = true
