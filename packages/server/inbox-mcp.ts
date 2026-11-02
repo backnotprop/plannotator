@@ -25,6 +25,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
@@ -646,7 +647,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -720,6 +721,14 @@ export async function sendAgentMessage(
   } catch {
     attachedOnly = [];
   }
+  // A `:::question {#x}` line: text after the name, so no block opened and the person cannot answer it.
+  // The result names each line; the send and what the person sees are unchanged, and a failure is left out.
+  let openers: QuestionOpenerWithText[] = [];
+  try {
+    openers = questionOpenersWithText(input.body);
+  } catch {
+    openers = [];
+  }
   // A question the agent is stopped or held up on, with no `Stakes:` line:
   // the result nudges (never refuses), so the person can decide in one look.
   const noStakes = (message.questions ?? [])
@@ -731,6 +740,7 @@ export async function sendAgentMessage(
   return {
     imagesNotShown: notShown,
     attachedImagesNotInBody: attachedOnly,
+    questionOpenersWithText: openers,
     noStakes: noStakes.length,
     recommendedInLabel: recommendedInLabel.length,
     superseded: superseded.length,
@@ -767,6 +777,8 @@ export async function sendAgentMessage(
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
       ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
+      /** Lines that start with a question directive and text after it, so they opened no block (a warning; the message was sent). */
+      ...(openers.length > 0 ? { question_openers_with_text: openers } : {}),
       /** Keys of the Stopped / Holds up questions with no `Stakes:` line (a nudge; the message was sent). */
       ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
       /** Keys of the questions that marked their recommendation in a choice label, not a `Recommended:` line (a nudge; the message was sent). */
@@ -961,6 +973,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
         // The hints after the sent line, in this order, each "" when it has nothing to say.
         const hints = [
+          questionOpenersWithTextText(sent.questionOpenersWithText),
           imagesNotShownText(sent.imagesNotShown),
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
