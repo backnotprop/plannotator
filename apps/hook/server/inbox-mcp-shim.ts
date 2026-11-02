@@ -253,7 +253,8 @@ export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: strin
   const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
   if (args.project_path === undefined && args.reply_to === undefined) args.project_path = cwd;
   if (args.agent_session === undefined) {
-    if (hostSession && (args.agent_host === undefined || args.agent_host === hostSession.host)) {
+    // A T3 thread always runs some other agent, so the host that agent names (claude-code, codex) is still this thread.
+    if (hostSession && (args.agent_host === undefined || args.agent_host === hostSession.host || hostSession.host === INBOX_T3_HOST)) {
       args.agent_session = hostSession.session;
       if (AUTHOR_TOOLS.has(name)) {
         if (hostSession.host) args.agent_host = hostSession.host;

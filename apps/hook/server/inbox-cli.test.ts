@@ -569,6 +569,17 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(call("send_message", { body: "hi", agent_name: "Helper" })).toMatchObject({ agent_host: "claude-code", agent_name: "Helper" });
   });
 
+  test("inside a T3 thread, the agent naming its own host (claude-code) still sends as the thread, so the reply wakes it", () => {
+    const thread = "00000000-0000-4000-8000-000000000001";
+    const args = fillInboxToolArguments(
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: { body: "hi", agent_host: "claude-code" } } },
+      "/work",
+      "ses_OWN",
+      { host: "t3", session: thread, name: "T3 Code" },
+    ).params!.arguments;
+    expect(args).toMatchObject({ agent_session: thread, agent_host: "t3" });
+  });
+
   test("a command a Claude Code session runs sends as that session: the tool's author, its thread, and the reply wakes it", async () => {
     const box = sandbox();
     const project = gitProject(box);
