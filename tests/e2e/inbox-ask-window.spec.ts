@@ -51,6 +51,8 @@ interface World {
   target: { port: number; serverSession: string };
   threads: Record<'push' | 'search' | 'invoice' | 'webhook' | 'migration' | 'keys', string>;
   projects: Record<'relay' | 'web' | 'billing', string>;
+  /** The Inbox's token, which a scripted agent's connection reads. */
+  token: string;
   send: (project: string, session: string, host: string, name: string, subject: string, body: string) => Promise<string>;
   agents: ScriptedAskAgent[];
   client: Client;
@@ -178,7 +180,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  world = { root, dataDir, url, target: { port: registry.port, serverSession: registry.serverSession }, threads, projects, send, agents, client, context, page, errors, held };
+  world = { root, dataDir, url, target: { port: registry.port, serverSession: registry.serverSession }, threads, projects, token: registry.token, send, agents, client, context, page, errors, held };
 
   // A window elsewhere is mid-answer on the Search chat.
   await expect(async () => {
@@ -334,29 +336,29 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
     expect(rect.width).toBe(390);
     expect(rect.height).toBeLessThanOrEqual(844);
     await expect(box(phone)).toBeInViewport();
-    const posted: string[] = [];
-    phone.on('request', (request) => {
-      if (request.method() === 'POST' && request.url().endsWith('/ask')) posted.push(request.url());
-    });
     await box(phone).fill('one');
     await box(phone).press('Enter');
-    // A new line in the box, and nothing sent: a box still holding "one" could be a POST on its way.
+    // A send prevents Enter's default, so the new line is there only if Enter did not send.
     await expect(box(phone)).toHaveValue('one\n');
-    await phone.waitForTimeout(200);
-    expect(posted).toEqual([]);
     await phone.screenshot({ path: join(shotsDir, '6-phone-light.png') });
 
-    // After the pictures, so this thread stays out of them. The window fills a phone: it steps aside for the reply.
-    const noted = await world.send(world.projects.web, 'ses-keys', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
-    writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(noted, 'ses-keys', 'claude-code', 5, 'What was the plan?', null, false));
+    // After the pictures, so this thread stays out of them: its own session, so its own thread, with a live agent.
+    world.agents.push(startScriptedAskAgent({ port: world.target.port, token: world.token, session: 'ses-phone', project: world.projects.web, reply: () => 'Scripted answer.' }));
+    const noted = await world.send(world.projects.web, 'ses-phone', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
+    expect(Object.values(threads)).not.toContain(noted);
+    writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(noted, 'ses-phone', 'claude-code', 5, 'What was the plan?', null, false));
     await phone.goto(`${url}#thread=${noted}`);
+    // A draft first: Reply in the thread must join it, never replace it.
+    await phone.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).tap();
+    const reply = phone.locator('section.ib-pane textarea');
+    await reply.fill('A draft from the phone');
     await expect(askIcon(phone)).toBeVisible();
     await askIcon(phone).tap();
+    // The window fills a phone: it steps aside for the reply.
     await frame(phone).getByRole('button', { name: 'Reply in the thread' }).tap();
     await expect(frame(phone)).toHaveCount(0);
-    await expect(phone.locator('section.ib-pane textarea')).toBeVisible();
-    // Joined to whatever draft the thread already held (an agent's second message in a project may land in its open thread).
-    await expect(phone.locator('section.ib-pane textarea')).toHaveValue(/(^|\n\n)What was the plan\?$/);
+    await expect(reply).toBeVisible();
+    await expect(reply).toHaveValue('A draft from the phone\n\nWhat was the plan?');
   } finally {
     await context.close();
   }

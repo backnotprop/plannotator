@@ -70,6 +70,8 @@ let savedMatchMedia: typeof window.matchMedia;
 let requests: { method: string; path: string; body: Record<string, unknown> }[] = [];
 /** While set, the answers to POST /ask wait for it: the server has them, the window does not yet. */
 let postsLand: Promise<void> | null = null;
+/** While set, POST /ask is refused as the Inbox refuses a question it can't take, and nothing reaches the server. */
+let refuseAsks = false;
 
 async function startWorld(setting: 'on' | 'off'): Promise<World> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), `plannotator-inbox-ask-dom-${setting}-`)));
@@ -139,11 +141,15 @@ beforeEach(() => {
   if (!hasDom) return;
   requests = [];
   postsLand = null;
+  refuseAsks = false;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const path = String(input);
     requests.push({ method, path, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {} });
+    if (refuseAsks && method === 'POST' && path.endsWith('/ask')) {
+      return new Response(JSON.stringify({ error: 'Another question is running in this session.', code: 'ask_busy' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+    }
     const answer = await loopback(world.port, path, method, init?.body ? String(init.body) : undefined, init?.signal);
     if (postsLand && method === 'POST' && path.endsWith('/ask')) await postsLand;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
@@ -546,6 +552,37 @@ test('on a touch phone Enter is a new line, and Reply in the thread leaves the r
   press(buttonNamed('Reply in the thread')!);
   await until(() => document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')?.value.includes('What was the plan?') === true, 'the question in the reply');
   expect(askWindow() === null).toBe(true);
+});
+
+test('on a touch phone a note button hands focus to the transcript, so the keyboard stays down', async () => {
+  if (!hasDom) return;
+  world = on;
+  saveUnanswered(on.note, 'session-note', 'What was the plan?');
+  aPhone();
+  await openInbox(on, on.note);
+  await openChat();
+  await until(() => buttonNamed('Ask again') !== undefined, 'the note');
+  press(buttonNamed('Ask again')!);
+  const focused = document.activeElement as HTMLElement | null;
+  expect(focused?.tagName ?? 'none').not.toBe('TEXTAREA');
+  expect(`${focused?.tagName} ${focused?.getAttribute('aria-label') ?? focused?.textContent?.slice(0, 30)}`).toBe('DIV Ask AI conversation');
+});
+
+test('a refused question keeps its words, across a thread switch too', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.second);
+  await openChat();
+  refuseAsks = true;
+  type(askBox()!, 'Refused, then kept');
+  pressEnter(askBox()!);
+  await until(() => askWindow()!.querySelector('[role="alert"]')?.textContent?.includes('Another question') === true, 'the refusal');
+  expect(askBox()!.value).toBe('Refused, then kept');
+  // No typing since: only the restore can bring the words back to the copy a return reads.
+  switchTo(on.first);
+  await until(() => window.location.hash.includes(on.first) && askWindow() === null, 'the other thread');
+  switchTo(on.second);
+  await until(() => askWindow()?.getAttribute('data-ask-window') === on.second, 'the thread again');
+  expect(askBox()!.value).toBe('Refused, then kept');
 });
 
 test('a POST that lands after a thread switch leaves the next thread its icon', async () => {
