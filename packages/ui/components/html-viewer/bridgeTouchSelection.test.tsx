@@ -257,7 +257,7 @@ describe.if(hasDom)('HtmlViewer touchSelection', () => {
     mountedRoots.push(root);
     const handle = React.createRef<ViewerHandle>();
     const element = (value?: boolean) => (
-      <HtmlViewer ref={handle} rawHtml="<html><body><p>Target</p></body></html>" annotations={[]} onAddAnnotation={() => {}} onSelectAnnotation={() => {}} selectedAnnotationId={null} {...(value === undefined ? {} : { touchSelection: value })} />
+      <HtmlViewer ref={handle} rawHtml="<html><body><p>Target</p></body></html>" annotations={[]} onAddAnnotation={() => {}} onSelectAnnotation={() => {}} selectedAnnotationId={null} mode="selection" inputMethod="pinpoint" {...(value === undefined ? {} : { touchSelection: value })} />
     );
     await act(async () => {
       root.render(element(touchSelection));

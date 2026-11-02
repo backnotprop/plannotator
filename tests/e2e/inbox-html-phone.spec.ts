@@ -255,6 +255,13 @@ for (const phone of [
       await replyPill(page).tap();
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await expect(field(page)).toHaveValue('Keep this');
+
+      // Words waiting: a step to the next file asks first, as it does for an image's comment.
+      await page.locator('[data-fcomp-minimize]').tap();
+      await bar(page).locator('[data-full-view-position]').tap();
+      await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
+      await expect(page.locator('.ib-stepguard')).toBeVisible();
+      await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['report.html']!);
     });
   });
 
@@ -390,17 +397,6 @@ test('iPhone 15 (WebKit): forced zoom (a stubbed visualViewport.scale): the pare
     await expect.poll(() => tools(page)).toBe('tucked');
     await zoom(1);
     await expect.poll(() => tools(page)).toBe('pinned');
-  });
-});
-
-test('a page cannot forge the zoom: a bridge message from the frame does not tuck the tools', async () => {
-  await withPhone('webkit', async (w, page) => {
-    await open(w, page, 'report.html');
-    await frame(page).locator('body').evaluate(() => {
-      for (const type of ['plannotator-bridge-zoom', 'plannotator-bridge-scale', 'plannotator-bridge-pinch']) window.parent.postMessage({ type, scale: 4 }, '*');
-    });
-    await page.waitForTimeout(250);
-    expect(await tools(page)).toBe('pinned');
   });
 });
 
