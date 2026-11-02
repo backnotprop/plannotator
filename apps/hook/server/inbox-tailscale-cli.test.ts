@@ -9,7 +9,7 @@
  * `tailscale` never runs and ~/.plannotator is never touched.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isPidAlive } from "@plannotator/shared/inbox/registry";
 import { createInboxWorld, destroyInboxWorld, registry, removeStubbedHtml, signalInbox, stubBuiltHtml, waitFor, worldEnv, type InboxWorld } from "../../../tests/helpers/inbox-world";
@@ -139,6 +139,66 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
 
     await stop("route");
     expect(mappings()).toEqual({});
+  });
+
+  /** The window's Restart on the owner's phone: POST through serve, then what its reconnect loop asks until a new run answers. */
+  const restartFromPhone = async () => {
+    const before = registry(w);
+    const page = (await (await throughServe("/api/inbox/health")).json()) as Json;
+    const target = mappings()[String(before.port)];
+    const asked = await throughServe("/api/inbox/restart", {
+      method: "POST",
+      headers: { Origin: `https://${MAGIC}:${before.port}`, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: page.serverSession }),
+    });
+    expect(asked.status).toBe(200);
+    await waitFor("the next Inbox to publish", () => {
+      const next = mappings()[String(before.port)];
+      return next !== undefined && next !== target;
+    });
+    const answer = await throughServe("/api/inbox/health");
+    expect(answer.status).toBe(200);
+    expect(((await answer.json()) as Json).serverSession).not.toBe(page.serverSession);
+    expect(registry(w).port).toBe(before.port);
+    await waitFor("the old run to exit", () => !isPidAlive(before.pid));
+    expect(readFileSync(log, "utf8")).not.toContain("funnel");
+  };
+
+  test("the switch on: Restart from the owner's phone comes back on the same address, and so does a phone's door on 8443", async () => {
+    const config = join(w.dataDir, "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscale: true }));
+    const phones = { PLANNOTATOR_INBOX_PHONES: "1" };
+    expect(run(["--background"], phones).code).toBe(0);
+    const entry = registry(w);
+    expect((await fetch(`http://127.0.0.1:${entry.port}/api/inbox/tailnet`, { method: "POST", body: JSON.stringify({ on: true }) })).status).toBe(200);
+    expect(mappings()["8443"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    const local = (path: string, body: Json) => fetch(`http://127.0.0.1:${entry.port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const offer = (await (await local("/api/inbox/pairing", {})).json()) as Json;
+    const paired = (await (await local("/api/inbox/device/pair", { code: offer.offer.code, name: "iPhone", platform: "ios" })).json()) as Json;
+
+    await restartFromPhone();
+
+    await waitFor("the door to publish again", () => mappings()["8443"] !== undefined);
+    const health = await fetch(`${mappings()["8443"]}/api/inbox/device/health`, { headers: { Host: `${MAGIC}:8443`, "Tailscale-User-Login": OWNER, Authorization: `Bearer ${paired.token}` } });
+    expect(health.status).toBe(200);
+    // Still owner rules on the new run, and still no way in for anyone else.
+    expect((await throughServe("/api/inbox/agents")).status).toBe(200);
+    expect(await codeOf(await throughServe("/api/inbox/agents", { login: "guest@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
+
+    await stop("SIGTERM");
+    expect(mappings()).toEqual({});
+    rmSync(config);
+    rmSync(join(w.dataDir, "inbox", "tailnet-door.json"), { force: true });
+  });
+
+  test("a run published only by --tailscale: Restart from the owner's phone publishes the new run too, and config.json stays as it was", async () => {
+    expect(run(["--background", "--tailscale"]).code).toBe(0);
+    await restartFromPhone();
+    expect((await throughServe("/api/inbox/threads")).status).toBe(200);
+    await stop("SIGTERM");
+    expect(mappings()).toEqual({});
+    const config = join(w.dataDir, "config.json");
+    expect(existsSync(config) ? JSON.parse(readFileSync(config, "utf8")).inboxTailscale : undefined).toBeUndefined();
   });
 
   test("Tailscale missing never stops the Inbox: it starts locally and says why", async () => {

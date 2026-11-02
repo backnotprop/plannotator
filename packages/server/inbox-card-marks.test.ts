@@ -252,17 +252,18 @@ describe("POST /api/inbox/cards/marks", () => {
     expect(on.forge.graphql()).toHaveLength(0);
   });
 
-  // What regresses: a page opened over the tailnet (another device) makes this computer run gh.
-  test("over the tailnet, even the owner is refused 403 local only, and nothing runs", async () => {
+  // What regresses: another login's page makes this computer run gh, or the owner's phone is left without marks.
+  test("over the tailnet the owner gets marks like this computer; a login the owner allowed is refused 403 local only, and nothing runs", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
+    const GUEST = "guest@example.com";
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-card-marks-tailnet-")));
     roots.push(root);
     const dataDir = join(root, "data");
     mkdirSync(dataDir, { recursive: true });
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: true }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: true, inboxTailscaleAllow: [GUEST] }));
     const forge = scriptedGh({ "acme/widgets": { 12: pr("MERGED", "vite 8") } });
     const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: forge.run, phones: false, board: true, tailscale: scriptedTailscale(MAGIC, OWNER) });
     servers.push(server);
@@ -271,14 +272,17 @@ describe("POST /api/inbox/cards/marks", () => {
     const listener = server.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     const body = JSON.stringify({ serverSession: server.serverSession, cards: [card.id] });
-    const owner = { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, Origin: `https://${MAGIC}:${server.port}`, "Content-Type": "application/json" };
-    const over = await fetch(`http://127.0.0.1:${listener}/api/inbox/cards/marks`, { method: "POST", headers: owner, body });
-    expect(over.status).toBe(403);
-    expect(((await over.json()) as { code: string }).code).toBe("local_only");
+    const headers = (login: string) => ({ Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}`, "Content-Type": "application/json" });
+    const guest = await fetch(`http://127.0.0.1:${listener}/api/inbox/cards/marks`, { method: "POST", headers: headers(GUEST), body });
+    expect(guest.status).toBe(403);
+    expect(((await guest.json()) as { code: string }).code).toBe("local_only");
     expect(forge.calls).toEqual([]);
-    // The same request from this computer's window answers.
+    // The owner's phone sees what this computer's window sees.
+    const owner = await fetch(`http://127.0.0.1:${listener}/api/inbox/cards/marks`, { method: "POST", headers: headers(OWNER), body });
+    expect(owner.status).toBe(200);
+    expect(((await owner.json()) as { marks: Record<string, { state: string }> }).marks[card.id]?.state).toBe("merged");
+    expect(forge.graphql()).toHaveLength(1);
     const local = await fetch(`http://127.0.0.1:${server.port}/api/inbox/cards/marks`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
     expect(local.status).toBe(200);
-    expect(forge.graphql()).toHaveLength(1);
   });
 });

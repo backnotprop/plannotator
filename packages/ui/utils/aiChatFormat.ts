@@ -13,8 +13,14 @@ export const CHAT_SANITIZE_CONFIG = {
     'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'a', 'blockquote',
     'table', 'thead', 'tbody', 'tr', 'th', 'td',
   ],
-  // `align` is what marked writes on th/td for aligned GFM columns.
-  ALLOWED_ATTR: ['href', 'rel', 'class', 'align'],
+  // `align` is what marked writes on th/td for aligned GFM columns. No `class`
+  // (an answer's raw HTML could style itself with the app's utility classes;
+  // nothing in `.ai-markdown` reads one) and no `rel` (marked never writes it
+  // and `target` is not allowed).
+  ALLOWED_ATTR: ['href', 'align'],
+  // DOMPurify keeps data-* and aria-* unless told not to.
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
 };
 
 /** The markdown step of {@link renderChatMarkdown}, before sanitizing. */
@@ -22,16 +28,31 @@ export function chatMarkdownToHtml(text: string): string {
   return marked.parse(text, { async: false, breaks: true }) as string;
 }
 
+/**
+ * Never throws: deeply nested input can overflow the stack in marked, and a
+ * throw inside a render would unmount the whole page. On any failure the
+ * answer is shown as plain text, line breaks kept, as a React text child
+ * (React escapes it).
+ */
 export function renderChatMarkdown(text: string): ReactNode {
-  const clean = DOMPurify.sanitize(chatMarkdownToHtml(text), {
-    ALLOWED_TAGS: [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS],
-    ALLOWED_ATTR: [...CHAT_SANITIZE_CONFIG.ALLOWED_ATTR],
-  });
-
-  return createElement('div', {
-    className: 'ai-markdown',
-    dangerouslySetInnerHTML: { __html: clean },
-  });
+  try {
+    const clean = DOMPurify.sanitize(chatMarkdownToHtml(text), {
+      ALLOWED_TAGS: [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS],
+      ALLOWED_ATTR: [...CHAT_SANITIZE_CONFIG.ALLOWED_ATTR],
+      ALLOW_DATA_ATTR: CHAT_SANITIZE_CONFIG.ALLOW_DATA_ATTR,
+      ALLOW_ARIA_ATTR: CHAT_SANITIZE_CONFIG.ALLOW_ARIA_ATTR,
+    });
+    return createElement('div', {
+      className: 'ai-markdown',
+      dangerouslySetInnerHTML: { __html: clean },
+    });
+  } catch {
+    return createElement(
+      'div',
+      { className: 'ai-markdown', style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } },
+      String(text),
+    );
+  }
 }
 
 export function formatRelativeTime(ts: number): string {

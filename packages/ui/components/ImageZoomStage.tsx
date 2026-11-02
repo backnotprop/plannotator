@@ -8,6 +8,7 @@ import {
   DOUBLE_TAP_ZOOM,
   fitScale,
   fitViewport,
+  sameViewport,
   naturalBoxFromPoints,
   overflows,
   paddingInset,
@@ -23,6 +24,7 @@ import {
   zoomLimits,
   type FitAxis,
   type NaturalBox,
+  type ZoomClear,
   type ZoomInset,
   type ZoomSize,
   type ZoomViewport,
@@ -165,7 +167,11 @@ function prefersReducedMotion(): boolean {
  * (Fit fills the width or height, the smallest scale stays the whole
  * image), `padding` (Fit leaves that many pixels on every side), `overlay`
  * (drawn over the image in the same transform, e.g. a marked-up copy, so it
- * stays aligned at any zoom), and `onImageLoad` / `onImageError`.
+ * stays aligned at any zoom), `clear` (rows the host floats things over: Fit
+ * and the pan's limits work between them, the image still slides under them
+ * when zoomed, and those rows still take the fingers), and `onImageLoad` /
+ * `onImageError`. `clear` and Region mode do not go together: `children` and
+ * `onViewChange` speak of the stage without it.
  *
  * Region comments (#2100) add three more, also optional: `drawing` (a
  * primary press and drag draws a box, reported through `onDraw` in the
@@ -188,6 +194,8 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   padding?: number;
   /** Which way Fit fits (default: the whole image). */
   fitAxis?: FitAxis;
+  /** Rows at the stage's top and bottom that the host floats things over (default: none). */
+  clear?: ZoomClear;
   /** Drawn over the image at its own size, in the image's transform. */
   overlay?: React.ReactNode;
   /** The image's own size, once it has loaded. */
@@ -216,7 +224,7 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   children?: React.ReactNode;
   /** The "⌘ + scroll to zoom" hint's gate, shared across the viewer's stages; `false` turns the hint off. Absent: once per stage. */
   wheelHint?: WheelHintGate | false;
-}>(function ImageZoomStage({ src, alt, mode, onModeChange, onScaleChange, inset, padding, fitAxis, overlay, onImageLoad, onImageError, onBackgroundTap, className, imageClassName, radius = 6, stageAttributes, label, description, drawing = false, onDraw, onViewChange, children, wheelHint }, ref) {
+}>(function ImageZoomStage({ src, alt, mode, onModeChange, onScaleChange, inset, padding, fitAxis, clear, overlay, onImageLoad, onImageError, onBackgroundTap, className, imageClassName, radius = 6, stageAttributes, label, description, drawing = false, onDraw, onViewChange, children, wheelHint }, ref) {
   const stageRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const [dims, setDims] = useState<ZoomSize | null>(null);
@@ -230,6 +238,10 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   paddingRef.current = padding;
   const axisRef = useRef<FitAxis>(fitAxis ?? 'contain');
   axisRef.current = fitAxis ?? 'contain';
+  const clearTop = clear?.top ?? 0;
+  const clearBottom = clear?.bottom ?? 0;
+  const clearRef = useRef({ top: clearTop, bottom: clearBottom });
+  clearRef.current = { top: clearTop, bottom: clearBottom };
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const dimsRef = useRef<ZoomSize | null>(null);
   const boxRef = useRef<StageBox | null>(null);
@@ -291,7 +303,9 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     const stage = stageRef.current;
     if (!stage) return null;
     const r = stage.getBoundingClientRect();
-    boxRef.current = { width: r.width, height: r.height, left: r.left, top: r.top };
+    // The box every viewport is worked out in: the stage between the clear rows, its corner where the viewport's 0, 0 is drawn (`paint`).
+    const { top, bottom } = clearRef.current;
+    boxRef.current = { width: r.width, height: r.height - top - bottom, left: r.left, top: r.top + top };
     return boxRef.current;
   }, []);
 
@@ -304,7 +318,7 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
   const paint = useCallback(
     (el: HTMLElement, view: ZoomViewport, animate: boolean) => {
       el.style.transition = animate && !prefersReducedMotion() ? 'transform 180ms cubic-bezier(0.2, 0, 0, 1)' : 'none';
-      el.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+      el.style.transform = `translate(${view.x}px, ${view.y + clearRef.current.top}px) scale(${view.scale})`;
       el.style.borderRadius = `${radius / view.scale}px`;
     },
     [radius],
@@ -375,6 +389,24 @@ export const ImageZoomStage = forwardRef<ImageZoomStageHandle, {
     else apply(clampViewport(viewRef.current, dimsRef.current!, boxRef.current!, limits()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [padding, fitAxis, measure, applyMode, apply]);
+
+  // The host's clear rows changed (what floats came or went): a picture resting at Fit eases to the new space, anything else (zoomed, or panned at Fit) stays where it is on screen, within it.
+  const clearShape = useRef({ top: clearTop, bottom: clearBottom });
+  useLayoutEffect(() => {
+    const movedBy = clearShape.current.top - clearTop;
+    if (movedBy === 0 && clearShape.current.bottom === clearBottom) return;
+    clearShape.current = { top: clearTop, bottom: clearBottom };
+    // Resting at Fit (not panned or nudged since it was fitted): Fit eases to the new space. A picture panned at Fit stays where it is on screen.
+    const resting =
+      modeRef.current === 'fit' && ready() && !!viewRef.current && sameViewport(viewRef.current, fitViewport(dimsRef.current!, boxRef.current!, insetNow(), axisRef.current));
+    measure();
+    if (!ready() || !viewRef.current) return;
+    if (resting) return applyMode('fit', true);
+    const kept = clampViewport({ ...viewRef.current, y: viewRef.current.y + movedBy }, dimsRef.current!, boxRef.current!, limits());
+    if (modeRef.current === 'zoom') gesture(kept);
+    else apply(kept);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearTop, clearBottom, measure, applyMode, apply]);
 
   // The image's own size, once it has loaded (or at once when it was cached).
   useEffect(() => {

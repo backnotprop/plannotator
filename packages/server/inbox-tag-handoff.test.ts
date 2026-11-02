@@ -199,26 +199,6 @@ describe("Hand off", () => {
     expect(inboxWakeText(ownerCommand).split("\n")[1]).toBe(INBOX_WAKE_INSTRUCTION);
   });
 
-  test("wait_for_reply as the former owner after the window: the stop notice alone, never the person's words", async () => {
-    const { server, client, project, asked } = await world(100);
-    const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "SECRET-WORDS for herdr only.", tags: [{ ...HERDR_TAG, mode: "handoff" }] });
-    const id = (sent.json.reply as InboxMessageWire).id;
-    await until(async () => !!(await thread(server, asked.thread_id)).messages.find((m) => m.id === id)?.handoff?.settled_at, "the hand-off to settle");
-    // The normal agent loop: no cursor, the thread it asked in.
-    const result = await client.callTool({
-      name: "wait_for_reply",
-      arguments: { thread_id: asked.thread_id, project_path: project, agent_session: OWNER, timeout_seconds: 1 },
-    });
-    const text = (result.content as { type: string; text: string }[]).map((c) => c.text).join("\n");
-    const structured = result.structuredContent as { reply?: { message_id: string; body: string }; handed_away?: { to: string } };
-    expect(structured.reply?.message_id).toBe(id);
-    expect(structured.reply?.body).toBe(inboxHandedAwayLine("Claude Code"));
-    expect(structured.handed_away).toEqual({ to: "Claude Code" });
-    expect(text).toContain(inboxHandedAwayLine("Claude Code"));
-    expect(text).not.toContain("SECRET-WORDS");
-    expect(JSON.stringify(result)).not.toContain("SECRET-WORDS");
-  });
-
   test("read_thread as the former owner: the hand-off reply is not one that tagged it, and its list does not say it was tagged", async () => {
     const { server, client, project, asked } = await world(100);
     const sent = await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours now.", tags: [{ ...HERDR_TAG, mode: "handoff" }] });

@@ -80,7 +80,7 @@ export interface SidebarProps {
   /**
    * Checking for updates has failed for hours (and no Update button shows):
    * the quiet "Can't check for updates" row, opening Settings → About.
-   * Null on a page opened over the tailnet.
+   * Null on a tailnet guest's page.
    */
   checkFailing?: UpdateCheckFailing | null;
   onCheckFailing?: () => void;

@@ -4,7 +4,7 @@
  *   inbox/drafts/<drf_id>.json   one draft, 0600, written whole (temp, then rename)
  *
  * Files, not the store's JSONL: a draft changes often, and it must never
- * enter the event log, which is what the window's stream, wait_for_reply's
+ * enter the event log, which is what the window's stream, read_thread's
  * cursor, the phone relay and search read. So a draft is invisible to agents,
  * phones and search by construction.
  *

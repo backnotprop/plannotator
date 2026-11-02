@@ -90,6 +90,7 @@ import {
   inboxActionInDraft,
   inboxAgentName,
   INBOX_HOST_NAMES,
+  INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
   type InboxParticipant,
   type InboxSentRecipient,
@@ -108,6 +109,7 @@ import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { sanitizeTag } from "@plannotator/core/project";
+import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
   INBOX_MESSAGE_COMMENT_QUOTE_MAX,
@@ -127,6 +129,7 @@ import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachm
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
+import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { INBOX_CARD_PR_HINT } from "./cards";
@@ -606,6 +609,7 @@ export class InboxStore {
   private pinList: InboxPin[] = [];
   /** Told when the pins change (no store line is written for them). */
   private readonly pinListeners = new Set<() => void>();
+  private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
   /** The seq of the line that last wrote to each card (a drop's seen mark is not a write): the Board's unread rule. */
@@ -882,6 +886,12 @@ export class InboxStore {
   onPinsChange(listener: () => void): () => void {
     this.pinListeners.add(listener);
     return () => this.pinListeners.delete(listener);
+  }
+
+  /** A thread or project was deleted: whatever runs for a thread that is gone can stop. */
+  onDeletion(listener: () => void): () => void {
+    this.deletionListeners.add(listener);
+    return () => this.deletionListeners.delete(listener);
   }
 
   private pinsChanged(): void {
@@ -1287,6 +1297,78 @@ export class InboxStore {
   }
 
   /**
+   * A thread's short name as it stands now (a name given later counts), or
+   * null when it has none. Served like a subject: it goes into an agent's
+   * prompt, and a name stored earlier is not checked again.
+   */
+  threadShortName(threadId: string): string | null {
+    return displayInboxSubject(this.messages.get(threadId)?.thread_name);
+  }
+
+  /**
+   * The title a person's message shows the agent it reaches, the one place
+   * this is decided (#2464, approval "inbox-reply-title"): the wake's first
+   * line (the bridge command's `subject`, so Codex and Qwen too). A subject
+   * can carry status that goes stale, and a plain reply repeated it every
+   * time, so a plain reply takes the thread's short name, or null with none
+   * (the connection then says `a reply`).
+   * Everything else keeps the thread's subject (`plainReplyFor` says why).
+   */
+  agentTitle(message: InboxMessage, session: string | null): string | null {
+    return this.plainReplyFor(message, session) ? this.threadShortName(message.thread_id) : this.threadSubject(message.thread_id);
+  }
+
+  /**
+   * Whether `message` reaches `session` as the person's own reply in a thread
+   * that session already has. Not one: a root or a New message (no `reply_to`);
+   * the Inbox's own notes and a Re-ask, which are not an answer from the
+   * person; and a wake that is the session's first sight of the thread
+   * (tagged, added, handed the thread, a reply sent on from an ended session,
+   * words moved from another session), where the subject is what places it.
+   * A session added to the thread gets the person's later replies as tags too:
+   * those are plain replies, only the one that added it is a first sight.
+   * An action report is a reply: it reaches the agent as one, in the same words.
+   */
+  private plainReplyFor(message: InboxMessage, session: string | null): boolean {
+    if (message.author.kind !== "person" || !message.reply_to) return false;
+    if (isInboxNote(message) || (message.reask?.length ?? 0) > 0) return false;
+    const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
+    if (tag) {
+      if (!tag.joined) return false;
+      const added = this.threadMessages(message.thread_id).find((m) => m.author.kind === "person" && tagOf(m, session!)?.joined);
+      return added?.id !== message.id;
+    }
+    return !handoffActive(message) && !this.redirectedFrom(message) && !this.continuesThread(message);
+  }
+
+  /**
+   * The agent that asked, when the person sent this reply to another session
+   * because the session that asked had ended; else null.
+   */
+  redirectedFrom(reply: InboxMessage) {
+    const asked = reply.to && reply.reply_to ? this.messages.get(reply.reply_to) : null;
+    return asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? asked.author : null;
+  }
+
+  /**
+   * More words in a thread the person started, handed to a session that has
+   * seen nothing of it (the person moved them there): it reads the thread
+   * first. The root going to that session too (not taken yet, maybe in the
+   * same poll) opens the thread, so that is not this.
+   */
+  continuesThread(reply: InboxMessage): boolean {
+    const root = this.messages.get(reply.thread_id);
+    return (
+      !!reply.to &&
+      reply.thread_id !== reply.id &&
+      !!root?.started_by_person &&
+      root.delivery?.session !== reply.to.session &&
+      root.to?.session !== reply.to.session &&
+      !this.threadMessages(reply.thread_id).some((m) => m.author.kind === "agent" && m.author.session === reply.to!.session)
+    );
+  }
+
+  /**
    * The agent sessions that may still name a thread the person started
    * (approval "inbox-agent-names-own-thread"): the session it is addressed to
    * and, once the address moved, also the first agent that replied in it.
@@ -1469,7 +1551,7 @@ export class InboxStore {
     const taggedChecked = (list: InboxSentRecipient[]): string | null => {
       const awaited = list.filter((r) => r.wakes || r.owner);
       // No owner and nothing that wakes (only agents that read the Inbox through MCP):
-      // Sent until one of them takes it (its wait_for_reply) or reads the thread.
+      // Sent until one of them reads the thread.
       if (awaited.length === 0) {
         const taken = (lastReal.tags ?? [])
           .map((t) => t.delivery?.at ?? t.read_at ?? null)
@@ -2105,7 +2187,7 @@ export class InboxStore {
    * asking agent once"): once the Undo window (`afterMs`) has passed and the
    * questions are still closed, one person note per asking message, a reply
    * to it ("Set aside for now; don't wait on these:" and the questions),
-   * delivered like any reply (the wake, wait_for_reply). Each question is
+   * delivered like any reply (the wake). Each question is
    * named once, across Mark reads. Returns the notes written.
    */
   tellSetAside(threadId: string, afterMs: number): InboxMessage[] {
@@ -2217,8 +2299,8 @@ export class InboxStore {
    * are sent to the agent (amended 2026-10-16: "send looks good through"):
    * first the ack's line with `settled_seq` (the seq of that line) and
    * `note_id`, then the note it names, a person's reply to the message whose
-   * body is `inboxAckLine` (`ack_of`), delivered like any reply (the wake,
-   * wait_for_reply's `acknowledged`). The note's line is the one a held
+   * body is `inboxAckLine` (`ack_of`), delivered like any reply (the wake).
+   * The note's line is the one a held
    * bridge poll wakes on. From then on agents see it in read_thread too.
    * `ackMessage`'s conditions are checked again here: when the person wrote
    * back after the message inside the window, or the agent wrote again, the
@@ -2310,13 +2392,6 @@ export class InboxStore {
       wait_started_at: note.wait_started_at ?? null,
       delivered_into_turn: note.delivery?.into_turn ?? null,
     };
-  }
-
-  /** The note carrying a message's 👍 to the agent, while it stands. */
-  ackNote(messageId: string): InboxMessage | null {
-    const noteId = this.messages.get(messageId)?.ack?.note_id;
-    const note = noteId ? this.messages.get(noteId) : undefined;
-    return note && this.ackNoteLive(note) ? note : null;
   }
 
   /**
@@ -2444,7 +2519,7 @@ export class InboxStore {
    * Send what the person marked once the Undo window passed: one reply per
    * asking message ("Did 1 action item." and the "Action items you asked for"
    * section), the person's reply like any Send's (delivered by the reply
-   * machinery: the wake, wait_for_reply, Send now), the action items marked sent
+   * machinery: the wake, Send now), the action items marked sent
    * with it first. Returns the replies written.
    */
   settleActions(afterMs: number): InboxMessage[] {
@@ -2524,11 +2599,6 @@ export class InboxStore {
       }
     }
     return out;
-  }
-
-  /** Whether a person's message is a hand-off still inside its Undo window. */
-  handoffHeld(message: InboxMessage): boolean {
-    return handoffHeld(message);
   }
 
   /** Hand-offs still inside their Undo window (or that a stop interrupted). */
@@ -2656,17 +2726,17 @@ export class InboxStore {
   }
 
   /**
-   * An agent read the thread's settled acks (read_thread, or wait_for_reply's
-   * `acknowledged`): each gets `seen_at`, so the window's pill says "<agent>
-   * saw it". `upToSeq` limits it to acks settled at or before that seq. An
-   * ack that was not sent (`not_sent`) is never seen. `only` limits it to
-   * those messages (a windowed read marks only the acks it showed).
+   * An agent read the thread's settled acks (read_thread): each gets
+   * `seen_at`, so the window's pill says "<agent>
+   * saw it". An ack that was not sent (`not_sent`) is never seen. `only`
+   * limits it to those messages (a windowed read marks only the acks it showed).
    */
-  markAcksSeen(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), only?: ReadonlySet<string>): void {
+  markAcksSeen(threadId: string, only?: ReadonlySet<string>): void {
+    const at = this.stamp();
     for (const message of this.threadMessages(threadId)) {
       const ack = message.ack;
       if (only && !only.has(message.id)) continue;
-      if (!ack || ack.settled_seq == null || ack.not_sent || ack.settled_seq > upToSeq || ack.seen_at) continue;
+      if (!ack || ack.settled_seq == null || ack.not_sent || ack.seen_at) continue;
       this.appendMessage({ ...message, ack: { ...ack, seen_at: at } }, at);
     }
   }
@@ -2706,8 +2776,8 @@ export class InboxStore {
 
   /**
    * An agent read the person's replies in a thread: read_thread read the
-   * whole thread, or wait_for_reply returned one reply (`upToSeq`, that
-   * reply's seq, so a later reply it was not given still reads as unread).
+   * thread, up to `upToSeq` (a later reply it was not given still reads as
+   * unread), or a connection delivered one reply.
    * A Sent row moves to Quiet once its last reply is checked. No write when
    * there is no person reply it has not read.
    */
@@ -4000,7 +4070,7 @@ export class InboxStore {
       // `live`: only while that session is still there (the sessions route's grace). A note to a session that ended
       // waits on nobody who will ask again. Only a session that wakes can be told ended (the thread's rule): the note
       // went `to` a live session, or the asking message came through a connection that wakes its session. An agent
-      // that reads the Inbox through MCP may be blocked in wait_for_reply right now, so its note always waits.
+      // that reads the Inbox through MCP may read the thread at any time, so its note always waits.
       const wakes = note.to ? true : asked?.wakes === true;
       if (options.live && presence && by.session && wakes && !presence.askerLive(by.session)) return;
       for (const id of note.reask!) listed.add(id);
@@ -4312,8 +4382,10 @@ export class InboxStore {
    * Save a comment on the text of an agent's message (a new one, or an edit
    * of one still waiting; approval "inbox-message-comments", 2026-10-19):
    * Plannotator's text-selection annotation, `originalText` the exact words
-   * the person selected. Only an agent's message takes one, and only while it
-   * can be answered (an archive closes the messages before its line). The
+   * the person selected, or a comment on a rendered diagram part, with
+   * `diagramAnchor` and the part's label as `originalText`. Only an agent's
+   * message takes one, and only while it can be answered (an archive closes
+   * the messages before its line). The
    * record's key is the message: `path` is its id, `version` "current", and
    * `message` names it. Sent with the reply like an attachment's annotation.
    */
@@ -4345,6 +4417,10 @@ export class InboxStore {
       const value = fields[field];
       if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) throw new InboxError("validation_error", `annotation.${field}: a comment on a message's text takes none.`, { field: `annotation.${field}` });
     }
+    // A comment on a part of a diagram in the message: the part's label is its "words", and the anchor names the part.
+    // The same fail-closed parser as the external-annotations route: what the window and the export read is what is stored.
+    const diagramAnchor = fields.diagramAnchor === undefined ? undefined : parseDiagramAnchor(fields.diagramAnchor);
+    if (diagramAnchor === null) throw new InboxError("validation_error", "annotation.diagramAnchor: { v: 1, family, kind, id | from + to, label, sourceLine }.", { field: "annotation.diagramAnchor" });
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.message || existing.message_id !== message.id)) {
@@ -4363,7 +4439,7 @@ export class InboxStore {
       path: message.id,
       version: INBOX_ANNOTATION_CURRENT,
       message: { at: message.created_at },
-      annotation: withoutExportLocation(fields),
+      annotation: { ...withoutExportLocation(fields), ...(diagramAnchor ? { diagramAnchor } : {}) },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -4657,10 +4733,19 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
     }
+    // So does its Ask AI conversation.
+    pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
     // A person's sent uploads are files under inbox/uploads/<att_id>/: they go with their message.
     removeUnusedInboxUploadFiles(this.dir, attachmentIds);
     const stillNamed = this.markupsOf(() => true);
     removeInboxMarkups(this.dir, [...deletedMarkups].filter((name) => !stillNamed.has(name)));
+    for (const listener of this.deletionListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the deletion.
+      }
+    }
   }
 
   /**
@@ -4689,7 +4774,7 @@ export class InboxStore {
    * The person's replies waiting for an agent connection's `session`: replies
    * to a message that session sent, and New messages and replies addressed to
    * it (`to`; settled only by their delivery), not yet delivered, and not yet read by an
-   * agent (wait_for_reply or read_thread; any agent's read counts, as for the
+   * agent (read_thread; any agent's read counts, as for the
    * Sent band). Derived from the log, so a reply waits for its session across
    * Inbox restarts and is handed out again until it is delivered. Oldest first.
    *
@@ -4751,9 +4836,8 @@ export class InboxStore {
     if (isAckNote(message) && !this.ackNoteLive(message)) return false;
     const seq = this.messageSeq.get(message.id) ?? 0;
     // A New message, or a reply the person sent to another session, is
-    // settled only by its delivery to the session it names (its own
-    // wait_for_reply records one), never by another agent's read; so is a
-    // reply that tags agents.
+    // settled only by its delivery to the session it names, never by another
+    // agent's read; so is a reply that tags agents.
     if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
   }
@@ -4789,23 +4873,41 @@ export class InboxStore {
     const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at);
-    // A 👍 that reached the agent was seen: a later wait on every thread is not answered by it again.
+    // A 👍 that reached the agent was seen.
     if (isAckNote(reply) && reply.ack_of) this.markAckSeen(reply.ack_of, at);
     return delivered;
   }
 
   /**
-   * A session that is not woken (MCP) read a thread it was tagged in with
-   * read_thread: its tags there record the read (`read_at`), so the window
-   * can say it saw it. Its own read only; nothing changes for the owner or
-   * any other recipient, and it is not a delivery. No write when nothing is new.
+   * `session` read a thread with read_thread: what it was owed among the
+   * messages the read showed (`shown`; all of them without it) is settled, for
+   * it alone, and only where no wake is left to do it. A tag that does not
+   * wake records the read (`read_at`, the window says it saw it). A reply it
+   * owns that tags others, when nothing wakes it, is delivered. So is what
+   * only a delivery settles on Codex and Qwen, whose wake the Inbox sends once
+   * and never again when it is lost: a message addressed to it, a reply it
+   * owns that tags others, a waking tag. A connection that polls hands its
+   * items until they are delivered, so its session keeps "only the wake
+   * delivers". A Tidy note is left to its wake: a read shows it as one line.
+   * No write when nothing is new.
    */
-  recordTagRead(threadId: string, session: string): void {
+  recordOwnRead(threadId: string, session: string, shown?: ReadonlySet<string>): void {
     for (const message of this.threadMessages(threadId)) {
-      const tag = message.author.kind === "person" && !this.isOwner(message, session) ? tagOf(message, session) : null;
-      if (!tag || tag.wakes || tag.delivery || tag.read_at) continue;
-      const at = this.stamp();
-      this.appendMessage({ ...message, tags: message.tags!.map((t) => (t.session === session ? { ...t, read_at: at } : t)) }, at);
+      if (message.author.kind !== "person" || message.tidy || (shown && !shown.has(message.id))) continue;
+      const owner = this.isOwner(message, session);
+      const tag = owner ? null : tagOf(message, session);
+      if (!owner && !tag) continue;
+      if (tag && !tag.wakes) {
+        if (tag.delivery || tag.read_at) continue;
+        const at = this.stamp();
+        this.appendMessage({ ...message, tags: message.tags!.map((t) => (t.session === session ? { ...t, read_at: at } : t)) }, at);
+        continue;
+      }
+      if (!this.pendingFor(message, session, {})) continue;
+      const host = tag ? tag.host : this.recipientOf(message)?.host;
+      const wakes = tag ? true : this.wakesRecipient(message);
+      if (wakes && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
+      this.recordDelivery(message.id, { host: host ?? "agent", session });
     }
   }
 
@@ -4833,8 +4935,8 @@ export class InboxStore {
 
   /**
    * The threads a person's reply tagged `session` in and that session has not
-   * taken yet (no delivery): wait_for_reply without a thread waits on them
-   * too, and read_thread lists them, wherever their project is.
+   * taken yet (no delivery, and for a session not woken no read): read_thread
+   * lists them, wherever their project is.
    */
   taggedThreadsOf(session: string): string[] {
     const out = new Set<string>();
@@ -4842,7 +4944,20 @@ export class InboxStore {
       if (message.author.kind !== "person" || this.isOwner(message, session)) continue;
       const tag = tagOf(message, session);
       // A hand-off's stop notice is not a tag: the former owner was not tagged here.
-      if (tag && !tag.delivery && !tag.handed_away) out.add(message.thread_id);
+      if (tag && !tag.delivery && !tag.read_at && !tag.handed_away) out.add(message.thread_id);
+    }
+    return [...out];
+  }
+
+  /**
+   * The threads holding a message addressed to `session` (`to`) that it has
+   * not taken: read_thread lists them, also when it never wrote there (a New
+   * message), wherever their project is.
+   */
+  addressedThreadsOf(session: string): string[] {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "person" && message.to?.session === session && this.pendingFor(message, session, {})) out.add(message.thread_id);
     }
     return [...out];
   }
@@ -5287,6 +5402,15 @@ export class InboxStore {
       }
       if (message.to?.host === host) out.add(message.to.session);
       for (const tag of message.tags ?? []) if (tag.host === host && tag.wakes) out.add(tag.session);
+    }
+    return out;
+  }
+
+  /** The sessions of `host` with a message of their own that wakes. A person's message or tag only names a session, however it runs. */
+  sessionsThatWoke(host: string): Set<string> {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent" && message.wakes === true && message.author.host === host && message.author.session) out.add(message.author.session);
     }
     return out;
   }

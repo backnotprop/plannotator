@@ -9,6 +9,7 @@ import { InboxApiError } from '../api';
 import { imageCommentAnnotation, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
+import { useClearRows } from '../imageClear';
 import { PHONE_QUERY } from '../phone';
 import { Tip } from './Tip';
 import { useConfigValue } from '@plannotator/ui/config';
@@ -75,7 +76,9 @@ export function zoomPercent(scale: number): string {
  * A horizontal swipe on the image shown at Fit steps (`onSwipe`), nowhere else;
  * on a phone in full screen the pane's follow swipe does instead, asking the
  * image whether it pans first (`edgesRef`) and hearing when it is shown
- * (`onShown`).
+ * (`onShown`). On a phone standing up, Fit and the pan's limits work between
+ * the floating bars and the option card (`useClearRows`), so the image is never
+ * left under them; zoomed in it still slides under them.
  */
 export function ImageAttachmentView({
   attachment,
@@ -206,6 +209,7 @@ export function ImageAttachmentView({
   // The stage's own padding (28 px, 12 on a phone) is what Fit leaves around the image.
   const stageRef = useRef<HTMLDivElement>(null);
   const [pad, setPad] = useState<number | null>(null);
+  const { probe: clearProbe, clear } = useClearRows();
   // Read again when the phone breakpoint is crossed (the padding changes with it).
   useLayoutEffect(() => {
     const stage = stageRef.current;
@@ -431,6 +435,7 @@ export function ImageAttachmentView({
             : undefined
         }
       >
+        <div className="ib-imgclear" ref={clearProbe} aria-hidden="true" data-image-clear="" />
         {showingMarkup && (
           <div className="ib-imgshowing" data-showing-markup="">
             <Icon name="pen" size={13} />
@@ -479,6 +484,7 @@ export function ImageAttachmentView({
               onScaleChange={setScale}
               padding={pad}
               fitAxis={fitAxis}
+              clear={clear}
               radius={4}
               className="ib-zoomstage"
               imageClassName="ib-zoomimg"

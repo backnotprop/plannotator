@@ -247,6 +247,13 @@ export function DiagramCanvas({
       pressRef.current = null;
       return;
     }
+    // A second finger makes it a pinch: neither finger is a tap on a part or
+    // a pan any more, so the press ends here.
+    if (event.pointerType === 'touch' && !event.isPrimary) {
+      if (pressRef.current?.panning) setPanning(false);
+      pressRef.current = null;
+      return;
+    }
     pressRef.current = {
       id: event.pointerId,
       x: event.clientX,

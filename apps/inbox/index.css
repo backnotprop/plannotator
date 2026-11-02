@@ -7,6 +7,8 @@
 /* Tell Tailwind where to scan for classes */
 @source "../../packages/ui/components/**/*.tsx";
 @source "../../packages/ui/hooks/**/*.ts";
+/* The shared chat window has no host here yet. The first one in the Inbox removes this line. */
+@source not "../../packages/ui/components/chat/**";
 @source "../../packages/inbox/**/*.tsx";
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
@@ -18,3 +20,20 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/inbox/inbox.css";
+
+/* The shared chat window (@plannotator/ui/components/chat) keeps its own class names; these are what they mean in
+   the Inbox's theme. Here and not in theme.css, which other apps import, nor in inbox.css, which also ships as a
+   plain sheet and has no @theme. chatClasses.test.ts fails on a class left without a rule. Each --ib-*-s falls back
+   to the value its Soft switch turns off, the way inbox.css does. */
+@theme inline {
+  --color-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--card));
+  --color-surface-hover: var(--ib-hover-s, color-mix(in oklch, var(--muted) 80%, transparent));
+  --color-ring-soft: color-mix(in oklch, var(--ring) 50%, transparent);
+  --color-border-subtle: color-mix(in oklch, var(--border) 60%, transparent);
+  --color-soft-quiet-fill: var(--ib-bt-bg-s, var(--muted));
+  --color-soft-quiet-fill-hover: var(--ib-bt-hover-s, var(--muted));
+  --radius-dialog: var(--ib-r10-s, 10px);
+  --shadow-dialog: var(--ib-float-s, 0 8px 24px rgba(0, 0, 0, 0.12));
+  --text-2xs: var(--ib-fs-11, 11px);
+  --text-2xs--line-height: 1.4;
+}
