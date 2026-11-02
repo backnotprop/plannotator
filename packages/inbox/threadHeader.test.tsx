@@ -5,7 +5,10 @@
  * words are in their tooltips (E with Mark read). On a phone the bar is
  * ‹ Inbox, subject, Artifacts, Expand, ⋯, and the ⋯ sheet leads with the read
  * action, then Snooze (which swaps the sheet for "‹ Snooze until"), a
- * divider, and the rest. The subject has room on a phone at 320 and 390 px.
+ * divider, and the rest. The title has room on a phone at 320 and 390 px.
+ * The title is the thread's name by the list's rule, else its subject (the
+ * owner, 2026-11-02), with the whole subject in the name's tooltip and no
+ * name chip on the meta line.
  *
  * The failures this catches: the read button or the clock drifting to the
  * right (or after the subject), either one showing in a phone's bar, the
@@ -21,7 +24,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import { fitPhoneHead, SUBJECT_FLOOR } from './headFit';
 import { PHONE_QUERY } from './phone';
-import { tooltipOf, unhover } from './testing/tooltip';
+import { sized, tooltipOf, unhover } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -126,7 +129,7 @@ async function settle() {
   }
 }
 
-async function render(state: InboxListRow, phone = false) {
+async function render(state: InboxListRow, phone = false, thread: InboxThread = THREAD) {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     if (String(input).includes('/attachments')) return Response.json({ serverSession: 's', attachments: ATTACHMENTS, annotations: [] });
@@ -143,7 +146,7 @@ async function render(state: InboxListRow, phone = false) {
   act(() => {
     root!.render(
       <ThreadPane
-        thread={THREAD}
+        thread={thread}
         sent={null}
         onQuestions={() => {}}
         onChanged={async () => {}}
@@ -220,7 +223,7 @@ async function openMore() {
 test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before the subject; Artifacts, Expand, ⋯ and × stay at the right', async () => {
   await render(OPENED);
   expect(bar()).toEqual(['Hide the sidebar and the list', '|', 'Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
-  expect(head().querySelector('h2')!.textContent).toBe(SUBJECT);
+  expect(head().querySelector('h2')!.firstChild!.textContent).toBe('customize row look');
   // The read button is an icon: its words are its name, never drawn text.
   for (const button of head().querySelectorAll('[data-mark-unread], [data-thread-snooze]')) expect(button.textContent).toBe('');
   // The other states take the same slot.
@@ -368,13 +371,59 @@ function layOutPhoneBar(width: number) {
 }
 
 for (const width of [320, 390]) {
-  test.skipIf(!hasDom)(`a phone at ${width} px: the subject is drawn with room to read it, "Inbox" whole and the count kept`, async () => {
-    await render(OPENED, true);
-    layOutPhoneBar(width);
-    expect(fitPhoneHead(head())).toEqual([]);
-    expect(head().hasAttribute('data-subject-off')).toBe(false);
-    const subject = head().querySelector<HTMLElement>('h2.ib-phsubj')!;
-    expect(subject.textContent).toBe(SUBJECT);
-    expect(subject.getBoundingClientRect().width).toBeGreaterThanOrEqual(SUBJECT_FLOOR);
+  test.skipIf(!hasDom)(`a phone at ${width} px: the title (name or subject) is drawn with room to read it, "Inbox" whole and the count kept`, async () => {
+    for (const [thread, shown] of [[THREAD, 'customize row look'], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
+      await render(OPENED, true, thread);
+      layOutPhoneBar(width);
+      expect(fitPhoneHead(head())).toEqual([]);
+      expect(head().hasAttribute('data-subject-off')).toBe(false);
+      const title = head().querySelector<HTMLElement>('h2.ib-phsubj')!;
+      expect(title.firstChild!.textContent).toBe(shown);
+      expect(title.getBoundingClientRect().width).toBeGreaterThanOrEqual(SUBJECT_FLOOR);
+      act(() => root?.unmount());
+      host?.remove();
+      for (const undo of restore.splice(0).reverse()) undo();
+    }
   });
 }
+
+/** The bar's title: the thread's name by the list's rule (`threadChipName`), else its subject (the owner, 2026-11-02). */
+const title = () => host!.querySelector<HTMLElement>('.ib-phead h2.ib-subject')!;
+const shownTitle = () => title().firstChild!.textContent;
+const metaChip = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
+
+test.skipIf(!hasDom)('a named thread: the bar shows the name, its tooltip the whole subject (cut or not), and the meta line has no chip', async () => {
+  await render(OPENED);
+  expect(shownTitle()).toBe('customize row look');
+  expect(title().hasAttribute('data-header-name')).toBe(true);
+  // A screen reader hears the subject after the name: the heading still says what the thread is about.
+  expect(title().querySelector('.ib-sr')!.textContent).toBe(`: ${SUBJECT}`);
+  expect(await tooltipOf(title())).toBe(SUBJECT);
+  expect(metaChip()).toBeNull();
+  expect(host!.querySelector('.ib-pbody [data-thread-meta]')!.textContent).toMatch(/^3 messages/);
+  expect(host!.textContent!.split('customize row look').length - 1).toBe(1);
+});
+
+test.skipIf(!hasDom)('no name: the bar shows the subject, with a tooltip only when it is cut, and no chip', async () => {
+  await render(OPENED, false, { ...THREAD, thread_name: null });
+  expect(shownTitle()).toBe(SUBJECT);
+  expect(title().textContent).toBe(SUBJECT);
+  expect(title().hasAttribute('data-header-name')).toBe(false);
+  expect(await tooltipOf(title())).toBeNull();
+  unhover(title());
+  sized(title(), 900, 120);
+  expect(await tooltipOf(title())).toBe(SUBJECT);
+  expect(metaChip()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a name the subject already starts with (or equals): the subject, once, as the list shows it', async () => {
+  for (const [name, subject] of [['Fix login', 'Fix login'], ['fix login', 'Fix login: the token refresh races the logout']] as const) {
+    await render(OPENED, false, { ...THREAD, thread_name: name, subject, messages: THREAD.messages.map((m) => (m.id === ROOT ? { ...m, subject } : m)) });
+    expect(title().textContent).toBe(subject);
+    expect(title().hasAttribute('data-header-name')).toBe(false);
+    expect(metaChip()).toBeNull();
+    act(() => root?.unmount());
+    host?.remove();
+    for (const undo of restore.splice(0).reverse()) undo();
+  }
+});

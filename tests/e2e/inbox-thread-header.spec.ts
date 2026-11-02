@@ -173,9 +173,15 @@ test('desktop beside the list: full screen, then Mark read and Snooze lead befor
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
   expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'snooze', 'artifacts', 'expand', 'more', 'close']);
-  // The subject sits between the clock and Artifacts: the thread's heading, whole or cut with "…".
+  // The title sits between the clock and Artifacts: the thread's heading. A named thread shows its name (the list's
+  // rule, the owner's 2026-11-02 call); its tooltip shows the whole subject, and the meta line has no chip repeating it.
   const subject = pane.locator('.ib-phead h2.ib-subject');
-  await expect(subject).toHaveText('Invoice list: cards or a table?');
+  expect(await subject.evaluate((h) => h.firstChild?.textContent)).toBe('invoices');
+  await expect(subject).toHaveAccessibleName('invoices: Invoice list: cards or a table?');
+  await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
+  await subject.hover();
+  await expect(page.locator('[data-side].bg-popover')).toHaveText('Invoice list: cards or a table?');
+  await page.mouse.move(0, 0);
   const [clockBox, subjectBox, artifactsBox] = await Promise.all([pane.locator('[data-thread-snooze]').boundingBox(), subject.boundingBox(), pane.locator('[data-artifacts-button]').boundingBox()]);
   expect(subjectBox!.x).toBeGreaterThanOrEqual(clockBox!.x + clockBox!.width - 0.5);
   expect(subjectBox!.x + subjectBox!.width).toBeLessThanOrEqual(artifactsBox!.x + 0.5);

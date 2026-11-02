@@ -587,7 +587,7 @@ test('a thread on a linked machine opens in the panel and closes to the empty pa
   await expect(page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first()).toBeVisible({ timeout: 30_000 });
   await expect(empty(page)).toBeVisible();
   await page.locator('.ib-lbody [data-thread-id]:visible').filter({ hasText: 'There' }).first().click();
-  await expect(subject(page)).toHaveText('On the MacBook');
+  await expect(subject(page)).toContainText('On the MacBook');
   expect(await width(page)).toBe(380);
   await page.getByRole('button', { name: 'Close the thread' }).click();
   await expect(empty(page)).toBeVisible();

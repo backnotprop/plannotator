@@ -172,7 +172,11 @@ test('the widest phone keeps every word: "‹ Inbox", the subject and the count'
     const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
     await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
     await expect(pane.locator('[data-phone-back] .ib-pback-l')).toBeVisible();
-    await expect(pane.locator('.ib-phead [data-header-subject]')).toHaveText('Visual QA for the checkout drawer redesign');
+    // A named thread: the bar shows its name (the list's rule); the whole subject is what a screen reader hears after it.
+    const title = pane.locator('.ib-phead [data-header-subject]');
+    await expect(title).toHaveAttribute('data-header-name', '');
+    expect(await title.evaluate((h) => h.firstChild?.textContent)).toBe('qa');
+    await expect(title.locator('.ib-sr')).toHaveText(': Visual QA for the checkout drawer redesign');
     await expect(pane.locator('.ib-phead')).not.toHaveAttribute('data-fit', /./);
     await expect(pane.locator('[data-artifacts-button] .ib-artbtn-n')).toBeVisible();
   } finally {

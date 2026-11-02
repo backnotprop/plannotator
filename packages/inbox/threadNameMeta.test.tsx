@@ -1,11 +1,12 @@
 /**
- * The open thread's name (design study "thread-name-header", option C): the list's
- * pill, first in the line under the subject, by the list's rule
- * (`threadChipName`). The failures this catches: a named thread whose open
- * view never says its name, a name shown twice when the subject already
- * starts with it, a pill that keeps the old name after a rename, a
- * one-message thread losing the name because it has no count line, and a
- * cut name with no way to read it whole.
+ * The open thread's name: the top bar's title, by the list's rule
+ * (`threadChipName`), else the subject (the owner, 2026-11-02, on approval
+ * "inbox-thread-header"; it replaces design study "thread-name-header"'s
+ * chip on the meta line). The failures this catches: a named thread whose
+ * open view never says its name, the name shown twice (bar and chip, or a
+ * subject that already starts with it), a title that keeps the old name after
+ * a rename, a one-message thread losing the name, and no way to read the
+ * whole subject behind a name.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -92,87 +93,67 @@ async function render(t: InboxThread) {
   return host;
 }
 
-const meta = () => host!.querySelector<HTMLElement>('.ib-pbody > [data-thread-meta]');
-const pill = () => meta()?.querySelector<HTMLElement>('.ib-key') ?? null;
-const pillName = () => pill()?.querySelector('.ib-keyt')?.textContent ?? null;
 
-test.skipIf(!hasDom)('a named thread shows its name first in the line under the subject, read with what it is', async () => {
+// The owner's call on approval "inbox-thread-header" (2026-11-02): the top bar shows the thread's name whenever the list
+// would show it (`threadChipName`), else the subject; the meta line no longer repeats the name as a chip.
+const bar = () => host!.querySelector<HTMLElement>('.ib-phead [data-header-subject]')!;
+const shown = () => bar().firstChild!.textContent;
+const meta = () => host!.querySelector<HTMLElement>('.ib-pbody > [data-thread-meta]');
+const chips = () => host!.querySelectorAll('.ib-pbody .ib-key');
+
+test.skipIf(!hasDom)('a named thread: the bar is its name and its one heading; the meta line is the count and time, no chip', async () => {
   await render(thread('session-refresh', 3));
-  expect(pillName()).toBe('session-refresh');
-  // First in the line; after it, the rest of the line as ONE item (count, dot, time), so a name that leaves too
-  // little room moves them to the next line together rather than one at a time with a dot left behind.
-  const rest = meta()!.querySelector<HTMLElement>('[data-thread-meta-rest]')!;
-  expect([...meta()!.children]).toEqual([pill()!, rest]);
-  expect(rest.textContent).toMatch(/^3 messages.*\d{1,2}:\d{2} [AP]M/);
-  expect(rest.querySelectorAll('.ib-tdot').length).toBeGreaterThan(0);
-  // A screen reader hears a label before the name (not a stray word); the pill itself shows only the name.
-  const lead = pill()!.querySelector<HTMLElement>('.ib-sr')!;
-  expect(lead.textContent!.trim()).not.toBe('');
-  expect(lead.compareDocumentPosition(pill()!.querySelector('.ib-keyt')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(shown()).toBe('session-refresh');
+  expect(bar().tagName).toBe('H2');
+  expect(host!.querySelectorAll('h2.ib-subject')).toHaveLength(1);
+  expect(host!.querySelector('.ib-pbody h2')).toBeNull();
+  expect(chips()).toHaveLength(0);
+  expect([...meta()!.children].map((el) => el.hasAttribute('data-thread-meta-rest'))).toEqual([true]);
+  expect(meta()!.textContent).toMatch(/^3 messages.*\d{1,2}:\d{2} [AP]M/);
+  // Whole in the tooltip: the subject, and never the native title.
+  expect(bar().hasAttribute('title')).toBe(false);
+  expect(await tooltipOf(bar())).toBe(SUBJECT);
 });
 
-test.skipIf(!hasDom)('no name, or a subject that already starts with the name: no pill, the line is the count and time as before', async () => {
+test.skipIf(!hasDom)("no name, or a subject that already starts with the name: the bar is the subject, by the list's rule", async () => {
   await render(thread(null, 3));
-  expect(pill()).toBeNull();
-  expect(meta()!.textContent).toMatch(/^3 messages/);
+  expect(shown()).toBe(SUBJECT);
   draw(thread('the refresh guard', 3));
   await settle();
-  expect(pill()).toBeNull();
+  expect(shown()).toBe(SUBJECT);
+  expect(chips()).toHaveLength(0);
   // The list's rule: a name that only starts a longer word of the subject still shows.
   draw(thread('the refresh', 3, 'The refreshed guard is in.'));
   await settle();
-  expect(pillName()).toBe('the refresh');
+  expect(shown()).toBe('the refresh');
 });
 
-test.skipIf(!hasDom)('a rename while the thread is open shows the new name; a name taken away takes the pill with it', async () => {
+test.skipIf(!hasDom)('a rename while the thread is open shows the new name; a name taken away puts the subject back', async () => {
   await render(thread('session-refresh', 2));
-  expect(pillName()).toBe('session-refresh');
+  expect(shown()).toBe('session-refresh');
   draw(thread('auth: token refresh', 2));
   await settle();
-  expect(pillName()).toBe('auth: token refresh');
-  expect(meta()!.querySelectorAll('.ib-key')).toHaveLength(1);
+  expect(shown()).toBe('auth: token refresh');
   draw(thread(null, 2));
   await settle();
-  expect(pill()).toBeNull();
+  expect(shown()).toBe(SUBJECT);
   expect(meta()!.textContent).toMatch(/^2 messages/);
 });
 
-test.skipIf(!hasDom)('a one-message thread has no count line, so a named one gets a line holding only its name', async () => {
+test.skipIf(!hasDom)('a one-message thread has no meta line, named or not; the bar still shows the name', async () => {
   await render(thread('session-refresh', 1));
-  expect(pillName()).toBe('session-refresh');
-  expect([...meta()!.children]).toEqual([pill()!]);
-  expect(meta()!.textContent).not.toContain('message');
+  expect(meta()).toBeNull();
+  expect(shown()).toBe('session-refresh');
   draw(thread(null, 1));
   await settle();
   expect(meta()).toBeNull();
+  expect(shown()).toBe(SUBJECT);
 });
 
-test.skipIf(!hasDom)('a name cut with "…" shows whole in its tooltip', async () => {
+test.skipIf(!hasDom)('a long name cut with "…": the bar keeps its start, the tooltip gives the whole subject', async () => {
   const long = 'Q4 invoice export: move the nightly CSV job off the cron box and onto the queue workers, with retries and dead-lettering';
   await render(thread(long, 2));
-  const text = pill()!.querySelector('.ib-keyt')!;
-  expect(text.textContent).toBe(long);
-  sized(text, 900, 320);
-  expect(await tooltipOf(text)).toBe(long);
-});
-
-// Approval "inbox-thread-header" (2026-11-02): the bar shows the thread's subject at once, named or not, one message or
-// many, and it is the thread's one heading (the body no longer repeats it); the name stays the chip on the meta line.
-test.skipIf(!hasDom)("the top bar is the thread's subject, its one heading, at once; the name stays the meta line's chip", async () => {
-  const bar = () => host!.querySelector<HTMLElement>('[data-header-subject]');
-  await render(thread('session-refresh', 1));
-  for (const [name, count] of [['session-refresh', 1], ['session-refresh', 3], [null, 1], [null, 3]] as const) {
-    draw(thread(name, count));
-    await settle();
-    expect(bar()!.textContent).toBe(SUBJECT);
-    expect(bar()!.tagName).toBe('H2');
-    expect(bar()!.closest('.ib-phead')).not.toBeNull();
-    expect(host!.querySelectorAll('h2.ib-subject')).toHaveLength(1);
-    expect(host!.querySelector('.ib-pbody h2')).toBeNull();
-    expect(pillName()).toBe(name ?? null);
-  }
-  // A subject cut with "…" shows whole in its tooltip; never the native title.
-  expect(bar()!.hasAttribute('title')).toBe(false);
-  sized(bar()!, 900, 120);
-  expect(await tooltipOf(bar()!)).toBe(SUBJECT);
+  expect(shown()).toBe(long);
+  sized(bar(), 900, 120);
+  expect(await tooltipOf(bar())).toBe(SUBJECT);
 });

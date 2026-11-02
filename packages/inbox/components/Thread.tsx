@@ -111,7 +111,6 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
-import { ThreadChip } from './InboxList';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -4471,12 +4470,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           <>
             {markReadButton}
             {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} />}
-            {/* The thread's subject, always, cut with "…" (its whole words in the tooltip); the thread's name stays the
-                chip on the meta line below. It is the thread's heading, and the focus target the way back falls back to
-                (a stacked thread), never a tab stop. */}
-            <Tip content={thread.subject ?? '(no subject)'} cut>
-              <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1} data-header-subject="">
-                {thread.subject ?? '(no subject)'}
+            {/* The thread's name (main's rule: `threadChipName`, the list's), else its subject (the owner, 2026-11-02, on
+                approval "inbox-thread-header"), cut with "…". With a name the tooltip always shows the whole subject and a
+                screen reader hears it after the name; with none the tooltip shows the subject only when it is cut. It is
+                the thread's heading, and the focus target the way back falls back to (a stacked thread), never a tab stop. */}
+            <Tip content={thread.subject ?? '(no subject)'} cut={!nameChip}>
+              <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={nameChip ? '' : undefined}>
+                {nameChip ?? thread.subject ?? '(no subject)'}
+                {nameChip && <span className="ib-sr">: {thread.subject ?? '(no subject)'}</span>}
               </h2>
             </Tip>
             {artifactsButton && (
@@ -4599,13 +4600,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
           </div>
         )}
-        {/* The thread's name first (the list's own pill and rule), then the count and time; a one-message thread has only the name. */}
-        {(!one || nameChip) && (
+        {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
+            chip would (the owner, 2026-11-02: never the same words twice). */}
+        {!one && (
           <div className="ib-tmeta" data-thread-meta="">
-            <ThreadChip name={nameChip} lead="Thread name: " />
-            {/* The rest of the line moves as one beside the name: a name that leaves too little room sends it all to the next line, never one dot. */}
-            {!one && (
-              <span className="ib-tmeta-rest" data-thread-meta-rest="">
+            <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 {participants.length > 1 && (
                   <>
                     <span className="ib-tg-hwho" data-thread-participants="">
@@ -4625,7 +4624,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   </>
                 )}
               </span>
-            )}
           </div>
         )}
         {thread.messages.flatMap((message, index) => {

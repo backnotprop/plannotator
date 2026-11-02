@@ -38,6 +38,7 @@ import { plural } from '../format';
 import { forgetTourMarkups, preloadTourAssets, tourAssetNameOf } from './assets';
 import { tourFileSource } from './fileSource';
 import { sentAnswersOf } from '../sentReply';
+import { threadChipName } from '../threadChip';
 import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
@@ -66,6 +67,7 @@ import {
   tourRecord,
   tourSections,
   tourSubject,
+  tourThreadName,
   tourTime,
   tourWaitingCount,
   tourWarmAnswer,
@@ -1292,11 +1294,16 @@ function TourThreadPane({
       </button>
     </Tip>
   );
-  // The subject leads the bar, as in the real header; the thread's heading (a focus target, never a tab stop).
+  // The title leads the bar, as in the real header: the thread's name by the list's rule, else the subject, with the
+  // whole subject in the name's tooltip; the thread's heading (a focus target, never a tab stop).
+  const headName = threadChipName(tourThreadName(thread), subject);
   const headSubject = (
-    <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1}>
-      {subject}
-    </h2>
+    <Tip content={subject} cut={!headName}>
+      <h2 className="ib-subject ib-phsubj" dir="auto" tabIndex={-1}>
+        {headName ?? subject}
+        {headName && <span className="ib-sr">: {subject}</span>}
+      </h2>
+    </Tip>
   );
   const artifactsButton = artifacts.length > 0 && (
     <Tip content={state.artifactsOpen ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
