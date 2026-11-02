@@ -374,7 +374,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [armed, setArmed] = useState(props.phone !== true);
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
-  const htmlViewerRef = useRef<ViewerHandle>(null);
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const source = useInboxFileSource();
   const suggestion = source.suggestion?.(attachment) ?? null;
@@ -1485,7 +1484,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     fileKey: `${attachment.id}:${annotationVersion}`,
     threadId,
     name: attachment.name,
-    viewer: htmlViewerRef,
+    viewer: viewerRef,
     tags: props.composer?.reply.tags,
     onSave: save,
     covered: () => {
@@ -1909,7 +1908,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <HtmlViewer
               ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
-              ref={htmlViewerRef}
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
