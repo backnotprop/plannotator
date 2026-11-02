@@ -301,8 +301,8 @@ export interface InboxCard {
    */
   auto_shipped?: InboxCardAutoShip | null;
   /**
-   * The PRs (`inboxCardShipPrs`) the card linked the last time it moved into
-   * Done, by anyone: by hand, by an agent's ship, by the Inbox. Kept when it
+   * The PRs (`inboxCardDonePrs`: every PR link, its own or context) the card
+   * linked when it moved into Done, with those of earlier moves, by anyone: by hand, by an agent's ship, by the Inbox. Kept when it
    * is moved back, so those PRs never move it to Done again; only a PR merged
    * since that is not among them does. Absent on a card that never was in
    * Done (a line from before this field reads it from the card's own earlier
@@ -379,6 +379,18 @@ export function inboxCardRefsOf(card: { refs?: readonly InboxCardRef[] | null; p
  */
 export function inboxCardShipPrs(card: { refs?: readonly InboxCardRef[] | null; prs: readonly InboxCardPr[] }): string[] {
   return [...new Set(inboxCardRefsOf(card).filter((ref) => ref.kind === "pr" && ref.via === "pr").map((ref) => ref.url))].sort();
+}
+
+/**
+ * What a move into Done records as `done_prs` (review of #2522, D1): every PR
+ * the card links, through `pr` or `ref`, marked or not (a link a released
+ * Inbox wrote has no `via`), with the PRs it held before. A larger set only
+ * ever stops an automatic move, so a PR re-given later as the card's own
+ * never undoes the person's move out of Done. Sorted, each once.
+ */
+export function inboxCardDonePrs(card: { refs?: readonly InboxCardRef[] | null; prs: readonly InboxCardPr[] }, before?: readonly string[] | null): string[] {
+  const urls = inboxCardRefsOf(card).filter((ref) => ref.kind === "pr").map((ref) => ref.url);
+  return [...new Set([...(before ?? []), ...urls])].sort();
 }
 
 function prSourceOf(url: string): string {
