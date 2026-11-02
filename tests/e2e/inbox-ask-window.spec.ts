@@ -355,7 +355,8 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
     await frame(phone).getByRole('button', { name: 'Reply in the thread' }).tap();
     await expect(frame(phone)).toHaveCount(0);
     await expect(phone.locator('section.ib-pane textarea')).toBeVisible();
-    await expect(phone.locator('section.ib-pane textarea')).toHaveValue('What was the plan?');
+    // Joined to whatever draft the thread already held (an agent's second message in a project may land in its open thread).
+    await expect(phone.locator('section.ib-pane textarea')).toHaveValue(/(^|\n\n)What was the plan\?$/);
   } finally {
     await context.close();
   }
