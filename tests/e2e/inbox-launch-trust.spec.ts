@@ -264,7 +264,16 @@ test('a folder that changes after the line was read: the click saves nothing and
   await expect(line.locator('[data-run-trust]')).toBeVisible();
   await expect(line.locator('[data-run-trust-warning]')).toHaveCount(0);
 
-  writeFileSync(join(folder, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo pulled' }] }] } }));
+  // Changed once the click has sent its reading: changed earlier, a refresh can draw the new line first, and then the
+  // click rightly saves.
+  await page.route(
+    '**/api/inbox/launch/*/trust',
+    async (route) => {
+      writeFileSync(join(folder, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'echo pulled' }] }] } }));
+      await route.continue();
+    },
+    { times: 1 },
+  );
   await line.locator('[data-run-trust]').click();
   await expect(line.locator('[data-run-error]')).toContainText('This folder changed, so nothing was saved.');
   await expect(line.locator('[data-run-trust-warning]')).toHaveText('This folder has 1 hook that will run once you trust it.');
