@@ -214,11 +214,14 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
    * from the root's text alone, so two sessions on the same text in different
    * projects (worktrees running one plan) share an index: an entry the other
    * session listed is not this session's to offer, count or clear.
+   * `anyPath`: the reader is on this machine (the one that may save a copy
+   * for a document outside the session's roots), so its copies outside the
+   * roots are offered back too.
    */
-  const servable = (canonical: string): boolean =>
+  const servable = (canonical: string, anyPath = false): boolean =>
     canonicalDocumentPath(canonical) === canonical &&
     !(rootPath && canonical === rootPath) &&
-    options.isAllowed(canonical, false);
+    options.isAllowed(canonical, anyPath);
 
   const clearDocumentCopy = (path: string) => {
     const key = annotateFileDraftKey(path);
@@ -272,7 +275,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
      * copy that is gone is dropped from the index; a file that is gone, or a
      * path the session may no longer serve, is not offered.
      */
-    offered(): { documents: OfferedDocumentDraft[]; ts: number } {
+    offered(anyPath = false): { documents: OfferedDocumentDraft[]; ts: number } {
       if (!indexKey) return { documents: [], ts: 0 };
       const index = readIndex();
       const documents: OfferedDocumentDraft[] = [];
@@ -285,7 +288,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
           pruned = true;
           continue;
         }
-        if (!servable(canonical)) continue;
+        if (!servable(canonical, anyPath)) continue;
         // The session draft's load names no page: a page that restores a
         // copy reads it again under its own id (useDocumentDrafts).
         if (!settled) cover(canonical, null);
@@ -428,10 +431,11 @@ export type DocumentDraftStore = ReturnType<typeof createDocumentDraftStore>;
 export function loadSessionDraftWithDocuments(
   keys: ReviewDraftKeys,
   store: DocumentDraftStore | null,
+  anyPath = false,
 ): ReviewDraftLoadResult {
   const result = loadReviewDraft(keys);
   if (!store?.indexed) return result;
-  const { documents, ts } = store.offered();
+  const { documents, ts } = store.offered(anyPath);
   if (!result.found) {
     if (documents.length === 0) return result;
     return {
@@ -475,8 +479,9 @@ export function createAnnotateDraftSession(options: AnnotateDraftSessionOptions)
     /** Whether this session advertises per-document copies to the client. */
     documentsEnabled: store !== null,
 
-    load(): ReviewDraftLoadResult {
-      const result = loadSessionDraftWithDocuments(keys, store);
+    /** `anyPath`: the reader's `/api/doc` access (`isThisMachineRequest`), so copies outside the roots come back. */
+    load(anyPath = false): ReviewDraftLoadResult {
+      const result = loadSessionDraftWithDocuments(keys, store, anyPath);
       if (!result.found) return result;
       // `patchChanged` is review vocabulary; an annotate client re-anchors
       // every comment by text on restore whatever the flag says.
