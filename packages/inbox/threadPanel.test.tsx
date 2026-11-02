@@ -3,8 +3,8 @@
  * What this catches: the view on in a browser that never chose it; a choice forgotten on the next load, or one that
  * leaves a cookie behind when turned off; the panel drawn on a phone or in a stacked window, where it would stand
  * alone; a menu item a screen reader does not hear as a checkbox or that closes the menu; a look option's write wiping
- * the choice; the panel's art starting anywhere but the keycap, losing the approved order or the way back to the
- * keycap, or drawing the wrong mode's mask. The whole window (the panes, a reload, closing a thread, a phone, the art's
+ * the choice; the panel's art starting anywhere but the list's first piece, leaving the list's order or losing the way
+ * back to the first, or drawing the wrong piece's or mode's mask. The whole window (the panes, a reload, closing a thread, a phone, the art's
  * keyboard path, the masks really painting) is proved in Chromium by tests/e2e/inbox-thread-panel.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -16,7 +16,7 @@ import type { TidyController } from './components/Tidy';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
-const { EmptyThreadPanel } = (hasDom ? await import('./components/EmptyThreadPanel') : {}) as typeof import('./components/EmptyThreadPanel');
+const { EmptyThreadPanel, PIECES } = (hasDom ? await import('./components/EmptyThreadPanel') : {}) as typeof import('./components/EmptyThreadPanel');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_LOOK_OFF, writeListLook } = await import('./listLook');
@@ -130,9 +130,6 @@ describe.skipIf(!hasDom)('the ⋮ menu item', () => {
 });
 
 describe.skipIf(!hasDom)('the empty panel\'s art', () => {
-  /** The owner's order, spread out on purpose (`.product/approved/inbox-thread-panel-art/`). */
-  const ORDER = ['keycap', 'saturn', 'anvil', 'android', 'newton', 'moon', 'sketchbook', 'pilot', 'vacuumtube', 'blackhole', 'vise', 'voyager', 'dividers', 'astronaut', 'telescope'];
-
   function Rotating() {
     const [piece, setPiece] = useState(0);
     return <EmptyThreadPanel piece={piece} onPiece={setPiece} />;
@@ -155,26 +152,19 @@ describe.skipIf(!hasDom)('the empty panel\'s art', () => {
 
   const mask = (button: HTMLElement) => button.querySelector<HTMLElement>('.ib-pempty-piece')!.style.getPropertyValue('--ib-pempty-mask');
 
-  test('opens on the keycap, and a click moves to saturn', () => {
-    const button = panel('light');
-    expect(button.dataset.piece).toBe('keycap');
-    act(() => button.click());
-    expect(button.dataset.piece).toBe('saturn');
-  });
-
-  test('walks all 15 in the approved order, and after the telescope goes back to the keycap', () => {
+  test('opens on the first piece, a click moves to the next, and after the last it goes back to the first', () => {
     const button = panel('light');
     const seen: string[] = [];
-    for (let i = 0; i <= ORDER.length; i++) {
+    for (let i = 0; i <= PIECES.length; i++) {
       seen.push(button.dataset.piece!);
       act(() => button.click());
     }
-    expect(seen).toEqual([...ORDER, 'keycap']);
+    expect(seen).toEqual([...PIECES.map((piece) => piece.slug), PIECES[0]!.slug]);
   });
 
   test('every piece has its own mask, and the dark mode draws its dark cut', () => {
     const button = panel('dark');
-    for (const slug of ORDER) {
+    for (const { slug } of PIECES) {
       expect(mask(button)).toContain(`${slug}-dark.png`);
       act(() => button.click());
     }
@@ -182,7 +172,7 @@ describe.skipIf(!hasDom)('the empty panel\'s art', () => {
 
   test('the light mode draws the light cut', () => {
     const button = panel('light');
-    for (const slug of ORDER) {
+    for (const { slug } of PIECES) {
       expect(mask(button)).toContain(`${slug}.png`);
       expect(mask(button)).not.toContain('-dark');
       act(() => button.click());

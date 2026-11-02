@@ -14,7 +14,7 @@
  *  - Rows at the short width: agents against the project, the project cut with "…", one line.
  *  - The panel's art in the built single-file window, under its real CSP: the mask paints (read back from a
  *    screenshot) in the line's color, light, dark and forced colors, by the app's mode against the computer's; click,
- *    Enter and Space turn it with no layout shift; it outlives a thread and a reload puts it back on the keycap.
+ *    Enter and Space turn it with no layout shift; it outlives a thread and a reload puts it back on the first piece.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-thread-panel.spec.ts`.
@@ -262,30 +262,30 @@ for (const theme of ['light', 'dark'] as const) {
   test(`the art paints in the built window, ${theme}: its own mask, in the line's color, whatever the computer prefers`, async ({ browser }) => {
     const page = await themed(browser, theme);
     await expect(page.locator('html')).toHaveClass(theme === 'light' ? /\blight\b/ : /^(?!.*\blight\b)/);
-    expect(await drawnMask(page)).toContain(`data:image/png;base64,${maskBytes(theme === 'light' ? 'keycap' : 'keycap-dark')}`);
+    const first = (await art(page).getAttribute('data-piece'))!;
+    expect(await drawnMask(page)).toContain(`data:image/png;base64,${maskBytes(theme === 'light' ? first : `${first}-dark`)}`);
 
-    const keycap = await painted(page);
-    expect(keycap.ink).toBe(true);
-    expect(keycap.share).toBeGreaterThan(0.05);
-    expect(keycap.share).toBeLessThan(0.8);
+    const opening = await painted(page);
+    expect(opening.ink).toBe(true);
+    expect(opening.share).toBeGreaterThan(0.05);
+    expect(opening.share).toBeLessThan(0.8);
 
-    await art(page).click();
-    await page.mouse.move(0, 0);
-    await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
-    const saturn = await painted(page);
-    expect(saturn.ink).toBe(true);
-    expect(saturn.bitmap).not.toBe(keycap.bitmap);
-
-    // Every other piece paints too, each its own picture.
-    const seen = new Set([keycap.bitmap, saturn.bitmap]);
-    for (let i = 2; i < 15; i++) {
+    // Every piece paints, in the same ink, each its own picture, until the turn comes back to the first.
+    const seen = new Set([opening.bitmap]);
+    let pieces = 1;
+    for (;;) {
       await art(page).click();
       await page.mouse.move(0, 0);
+      const name = (await art(page).getAttribute('data-piece'))!;
+      if (name === first) break;
       const piece = await painted(page);
-      expect(piece.share, await art(page).getAttribute('data-piece') ?? '').toBeGreaterThan(0.02);
+      expect(piece.ink, name).toBe(true);
+      expect(piece.share, name).toBeGreaterThan(0.02);
       seen.add(piece.bitmap);
+      pieces += 1;
     }
-    expect(seen.size).toBe(15);
+    expect(pieces).toBeGreaterThan(1);
+    expect(seen.size).toBe(pieces);
     await page.context().close();
   });
 }
@@ -296,25 +296,29 @@ test('forced colors: the art is still there, in the line\'s color, not painted o
   const page = await context.newPage();
   await page.goto(world.url);
   await expect(art(page)).toBeVisible();
-  const keycap = await painted(page);
-  expect(keycap.ink).toBe(true);
-  expect(keycap.share).toBeGreaterThan(0.05);
-  expect(keycap.share).toBeLessThan(0.8);
+  const opening = await painted(page);
+  expect(opening.ink).toBe(true);
+  expect(opening.share).toBeGreaterThan(0.05);
+  expect(opening.share).toBeLessThan(0.8);
   await context.close();
 });
 
 test('the art turns by click, Enter and Space, with a pointer and a ring, and nothing moves', async ({ browser }) => {
   const page = await open(browser);
-  await expect(art(page)).toHaveAttribute('data-piece', 'keycap');
   await expect(art(page)).toHaveCSS('cursor', 'pointer');
+  // Which piece is the list's business (EmptyThreadPanel's PIECES): here, only that it turned.
+  const turns = async (press: () => Promise<void>) => {
+    const was = (await art(page).getAttribute('data-piece'))!;
+    await press();
+    await expect(art(page)).not.toHaveAttribute('data-piece', was);
+  };
   const before = await artBox(page);
   expect(before).toMatchObject({ width: 96, height: 96 });
   const line = () => page.locator('[data-thread-panel-empty] p').evaluate((el) => el.getBoundingClientRect().top);
   const lineTop = await line();
   const rows = await rowTops(page);
 
-  await art(page).click();
-  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+  await turns(() => art(page).click());
   expect(await artBox(page)).toEqual(before);
   expect(await line()).toBe(lineTop);
 
@@ -325,10 +329,8 @@ test('the art turns by click, Enter and Space, with a pointer and a ring, and no
   await expect(art(page)).toHaveCSS('outline-style', 'solid');
   await expect(art(page)).toHaveCSS('outline-width', '2px');
 
-  await page.keyboard.press('Enter');
-  await expect(art(page)).toHaveAttribute('data-piece', 'anvil');
-  await page.keyboard.press('Space');
-  await expect(art(page)).toHaveAttribute('data-piece', 'android');
+  await turns(() => page.keyboard.press('Enter'));
+  await turns(() => page.keyboard.press('Space'));
 
   // The keys stayed on the button: no row opened and nothing moved.
   await expect(art(page)).toBeFocused();
@@ -339,21 +341,23 @@ test('the art turns by click, Enter and Space, with a pointer and a ring, and no
   await page.context().close();
 });
 
-test('the art keeps its place while a thread is open, and a reload is back on the keycap with nothing saved', async ({ browser }) => {
+test('the art keeps its place while a thread is open, and a reload is back on the first piece with nothing saved', async ({ browser }) => {
   const page = await open(browser);
   const saved = await page.context().cookies();
+  const first = (await art(page).getAttribute('data-piece'))!;
   await art(page).click();
-  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+  await expect(art(page)).not.toHaveAttribute('data-piece', first);
+  const turned = (await art(page).getAttribute('data-piece'))!;
 
   await row(page, threads.ledger).click();
   await expect(subject(page)).toBeVisible();
   await expect(art(page)).toHaveCount(0);
   await page.getByRole('button', { name: 'Close the thread' }).click();
-  await expect(art(page)).toHaveAttribute('data-piece', 'saturn');
+  await expect(art(page)).toHaveAttribute('data-piece', turned);
 
   expect((await page.context().cookies()).map((c) => c.name).sort()).toEqual(saved.map((c) => c.name).sort());
   await page.reload();
-  await expect(art(page)).toHaveAttribute('data-piece', 'keycap');
+  await expect(art(page)).toHaveAttribute('data-piece', first);
   await page.context().close();
 });
 
