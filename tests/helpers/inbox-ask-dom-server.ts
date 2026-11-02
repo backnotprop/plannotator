@@ -22,6 +22,7 @@ if (!dataDir || !projectsDir) throw new Error("usage: inbox-ask-dom-server.ts <d
 
 const project = join(projectsDir, "api");
 mkdirSync(project, { recursive: true });
+process.env.PLANNOTATOR_DATA_DIR = dataDir;
 const server = await startInboxServer({ dataDir, askAi: setting === "on", binaryPath: null });
 
 const client = new Client({ name: "inbox-ask-dom", version: "1.0.0" });

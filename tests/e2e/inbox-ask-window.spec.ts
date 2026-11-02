@@ -35,12 +35,13 @@ const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.local/proof/ask-window'));
 
-const QUESTION = 'Why five attempts and not three?';
+const QUESTION = 'Why five attempts and not a time limit?';
 const ANSWER = [
-  'Five attempts with that backoff keeps the total wait just under the relay’s 60 second timeout, so the last try still lands inside the window.',
+  "Five attempts with a 1, 2, 4, 8 and 16 second backoff keeps the worst case at about 31 seconds, under the relay's 60 second push timeout.",
   '',
-  'A third attempt would give up after 7 seconds, while the slow-relay test saw stalls of up to 20. Five covers those without a second queue at all.',
+  'A time limit is easier to explain, but a slow first attempt could use the whole budget and leave no retry at all.',
 ].join('\n');
+const ANSWER_SHOWS = 'keeps the worst case at about 31 seconds';
 
 interface World {
   root: string;
@@ -216,7 +217,7 @@ test('the icon opens the thread’s chat, and a question gets its answer from th
 
   await box().fill(QUESTION);
   await box().press('Enter');
-  await expect(frame()).toContainText('just under the relay’s 60 second timeout');
+  await expect(frame()).toContainText(ANSWER_SHOWS);
   await expect(box()).toHaveValue('');
   const answer = agentRow();
   await expect(answer).toContainText('Claude Code');
@@ -264,7 +265,7 @@ test('picking a chat moves to its thread and shows that chat', async () => {
   await chip().click();
   await row(threads.push).click();
   await expect(chip()).toContainText('Push retry budget');
-  await expect(frame()).toContainText('just under the relay’s 60 second timeout');
+  await expect(frame()).toContainText(ANSWER_SHOWS);
   await shot(page, '4-open-dark', 'dark');
   await chip().click();
   await expect(row(threads.invoice)).toBeVisible();
