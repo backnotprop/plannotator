@@ -74,6 +74,8 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
 
 /** Uploads wait for `release()` while set: a paste still uploading. */
 let heldUploads: { promise: Promise<void>; release: () => void } | null = null;
+/** While set, a paste's text read (`GET uploads/:id/text`) fails as an Inbox that cannot answer would (502). */
+let failTextReads = false;
 function holdUploads() {
   let release = () => {};
   const promise = new Promise<void>((done) => (release = done));
@@ -154,6 +156,9 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? String(init.body) : undefined;
     if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+    if (failTextReads && /\/uploads\/[^/]+\/text$/.test(path)) {
+      return new Response(JSON.stringify({ code: 'forward_failed', error: 'The Inbox could not answer.' }), { status: 502 });
+    }
     const answer = await loopback(path, method, body);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -180,6 +185,7 @@ afterEach(() => {
   heldUploads?.release();
   unmount();
   globalThis.fetch = savedFetch;
+  failTextReads = false;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   (globalThis as Record<string, unknown>).XMLHttpRequest = savedXhr;
 });
@@ -378,7 +384,7 @@ async function uploadAsOther(name: string, words: string): Promise<InboxUpload> 
   const answer = await loopback(`/api/inbox/uploads?name=${name}&serverSession=${session}`, 'POST', Buffer.from(words), { 'Content-Type': 'application/octet-stream' });
   return (JSON.parse(answer.text) as { upload: InboxUpload }).upload;
 }
-/** A phone's Send carrying `uploads` (no `clear_draft`: the draft stays, naming uploads that are no longer pending). */
+/** A phone's Send carrying `uploads` (no `clear_draft`: the draft stays, and the server drops those uploads from it). */
 async function phoneSend(uploads: string[]) {
   const answer = await loopback(
     `/api/inbox/messages/${world.waiting}/reply`,
@@ -435,9 +441,9 @@ test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others
   await until(() => unsentReply() === null, 'the guard at rest again');
   const [first, kept] = (await serverDraft())!.files!.map((file) => file.upload_id);
 
-  // A phone's Send carries the first paste: its upload is no longer pending, the draft still names it.
+  // A phone's Send carries the first paste: its upload is no longer pending, and the server's draft drops it.
   await phoneSend([first!]);
-  // The next save here names both; refused for the first, it saves the second beside the words.
+  // The next save here still names both; refused for the first, it saves the second beside the words, as this window's own.
   type(replyText(el)!, `${BEFORE}${AFTER} Thanks.`);
   await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks.`, 'the words saved');
   expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
@@ -447,7 +453,7 @@ test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others
 }, 30_000);
 
 test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the tile and the words stay', async () => {
-  // Another window's draft names a paste; a phone's Send then took that upload.
+  // Another window's draft names a paste; reading its words back then fails (the Inbox cannot answer).
   const upload = await uploadAsOther('pasted-text-gone.txt', LOG);
   const saved = await loopback(
     `/api/inbox/threads/${world.waiting}/draft`,
@@ -455,7 +461,7 @@ test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the til
     JSON.stringify({ serverSession: await serverSession(), body: BEFORE + AFTER, base: null, files: [{ upload_id: upload.upload_id, pasted: { at: BEFORE.length, preview: 'The gone paste' } }] }),
   );
   expect(saved.status).toBe(200);
-  await phoneSend([upload.upload_id]);
+  failTextReads = true;
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => replyBox(el) !== null && pastedTiles(el).length === 1, 'the box and its tile');
   act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());

@@ -3479,8 +3479,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
             if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
-            // Sent: the uploads are the reply's attachments now.
-            else if (attachments.length > 0) removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
+            // Sent: the uploads are the reply's attachments now, so no reply draft names them any more (one that kept
+            // a paste this Send did not carry, or another thread's): each draft that changed is told to its windows.
+            else if (attachments.length > 0) {
+              const sentIds = uploads.filter((id): id is string => typeof id === "string");
+              removeInboxUploads(store.dir, sentIds);
+              for (const threadId of store.dropSentUploadsFromReplyDrafts(sentIds)) for (const listener of draftListeners) listener(threadId);
+            }
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),

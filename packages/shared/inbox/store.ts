@@ -127,7 +127,7 @@ import {
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { pendingInboxUploadBlobs, removeUnusedInboxUploadFiles } from "./uploads";
+import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -4581,11 +4581,18 @@ export class InboxStore {
     // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
     // before that write's answer came back; the draft still holding those words is the window's own.
     // With `base_files` (the long pastes it wrote last), the draft must hold those too: the compare covers both.
+    // A paste a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
+    // the window that still names it is not told apart by it.
+    const existingIds = inboxReplyDraftFileIds(existing);
     const ownWords =
       baseBody !== null &&
       existing !== null &&
       existing.body === baseBody &&
-      (baseFiles === null || sameInboxUploadIds(inboxReplyDraftFileIds(existing), baseFiles));
+      (baseFiles === null ||
+        sameInboxUploadIds(
+          existingIds,
+          baseFiles.filter((id) => existingIds.includes(id) || readInboxUpload(this.dir, id) !== null),
+        ));
     if ((existing?.updated_at ?? null) !== base && !ownWords) {
       throw new InboxError(
         "draft_conflict",
@@ -4633,6 +4640,37 @@ export class InboxStore {
     const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== "" || fileIds.length > 0);
     if (!sameWords || !fileIds.every((id) => sent.has(id))) return false;
     return this.deleteReplyDraft(threadId);
+  }
+
+  /**
+   * A reply sent these uploads, so they are attachments now and no longer
+   * uploads: every reply draft naming one (a draft that kept other pastes the
+   * Send did not carry, or another thread's) drops it, with a new
+   * `updated_at`; a draft left with no words and no paste goes. The ids of the
+   * threads whose draft changed.
+   */
+  dropSentUploadsFromReplyDrafts(uploads: readonly string[]): string[] {
+    const sent = new Set(uploads);
+    if (sent.size === 0) return [];
+    const changed: string[] = [];
+    for (const draft of [...this.replyDrafts.values()]) {
+      const files = draft.files ?? [];
+      const kept = files.filter((file) => !sent.has(file.upload_id));
+      if (kept.length === files.length) continue;
+      changed.push(draft.thread_id);
+      if (draft.body.trim() === "" && kept.length === 0) {
+        this.deleteReplyDraft(draft.thread_id);
+        continue;
+      }
+      const at = this.stamp();
+      const updatedAt = at <= draft.updated_at ? new Date(Date.parse(draft.updated_at) + 1).toISOString() : at;
+      const { files: _files, ...rest } = draft;
+      const next: InboxReplyDraft = { ...rest, updated_at: updatedAt, ...(kept.length > 0 ? { files: kept } : {}) };
+      writeInboxReplyDraft(this.dir, next);
+      this.replyDrafts.set(draft.thread_id, next);
+      this.replyDraftChanged(draft.thread_id);
+    }
+    return changed;
   }
 
   /** Drop a thread's reply draft (Discard); true when there was one. */

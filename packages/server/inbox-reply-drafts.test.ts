@@ -461,6 +461,49 @@ describe("reply drafts keep long pastes", () => {
     expect(server.store.replyDraft(thread_id)).toEqual(theirs);
   });
 
+  test("a Send carrying some of a draft's pastes drops them from every reply draft (a new updated_at, a draft left empty goes) and says so in `event: drafts`", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_x");
+    const { thread_id: elsewhere } = await send("The deploy failed too.", "ses_y");
+    expect(elsewhere).not.toBe(thread_id);
+    const p = await upload(server, "pasted-text-p.txt", LOG);
+    const q = await upload(server, "pasted-text-q.txt", `${LOG}q\n`);
+    // Window A saves "Yes" and P; window B adds Q beside them. Another thread's draft holds P alone.
+    const mine = (await draftOf(await save(server, thread_id, { body: "Yes", base: null, files: [pasted(p.upload_id, 3)] })))!;
+    const theirs = (await draftOf(await save(server, thread_id, { body: "Yes", base: mine.updated_at, files: [pasted(p.upload_id, 3), pasted(q.upload_id, 3)] })))!;
+    expect((await save(server, elsewhere, { body: "", base: null, files: [pasted(p.upload_id, 0)] })).status).toBe(200);
+
+    const controller = new AbortController();
+    const stream = await fetch(url(server, `/api/inbox/events?cursor=${server.store.cursor()}&window=window-test-x&permission=granted`), { signal: controller.signal });
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+    // A, before it hears of B's save, sends "Yes" and P naming its own old updated_at: B's draft stays, without P.
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "x1", words: "Yes", uploads: [p.upload_id], clear_draft: mine.updated_at })).status).toBe(200);
+    const left = server.store.replyDraft(thread_id)!;
+    expect(left.body).toBe("Yes");
+    expect(left.files?.map((f) => f.upload_id)).toEqual([q.upload_id]);
+    expect(left.updated_at).not.toBe(theirs.updated_at);
+    expect(server.store.replyDraft(elsewhere)).toBeNull();
+    // Both threads' windows hear it.
+    const deadline = Date.now() + 3000;
+    const heard = () => text.includes(`event: drafts\ndata: {"thread_id":"${thread_id}"}`) && text.includes(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
+    while (!heard() && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
+    controller.abort();
+    expect(text).toContain(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
+    expect(text).toContain(`event: drafts\ndata: {"thread_id":"${thread_id}"}`);
+    // What the windows read back names no gone upload.
+    const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
+    expect(read.draft).toEqual(left);
+    // B, typing before it heard: its save names the base it knew and the pastes it saved last (P and Q). P is a
+    // sent paste now, so it does not tell B's draft apart: the save of Q alone beside B's words is B's own and lands.
+    const fromB = await save(server, thread_id, { body: "Yes, see Q", base: theirs.updated_at, base_body: "Yes", base_files: [p.upload_id, q.upload_id], files: [pasted(q.upload_id, 3)] });
+    expect(fromB.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)?.body).toBe("Yes, see Q");
+  });
+
   test("the upload sweep keeps a reply draft's paste a day on, and forgets one no draft names", async () => {
     const { dataDir, server, send } = await setup();
     const { thread_id } = await send("The nightly import failed.", "ses_t");
