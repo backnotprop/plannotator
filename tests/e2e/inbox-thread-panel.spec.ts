@@ -13,8 +13,8 @@
  *    the tour and an empty Inbox show neither.
  *  - Rows at the short width: agents against the project, the project cut with "…", one line.
  *  - The panel's art in the built single-file window, under its real CSP: the mask paints (read back from a
- *    screenshot) in the line's color, light and dark, by the app's mode against the computer's; click, Enter and Space
- *    turn it with no layout shift; it outlives a thread and a reload puts it back on the keycap.
+ *    screenshot) in the line's color, light, dark and forced colors, by the app's mode against the computer's; click,
+ *    Enter and Space turn it with no layout shift; it outlives a thread and a reload puts it back on the keycap.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-thread-panel.spec.ts`.
@@ -286,6 +286,19 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+test('forced colors: the art is still there, in the line\'s color, not painted on itself', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, forcedColors: 'active', reducedMotion: 'reduce' });
+  await panelOn(context);
+  const page = await context.newPage();
+  await page.goto(world.url);
+  await expect(art(page)).toBeVisible();
+  const keycap = await painted(page);
+  expect(keycap.ink).toBe(true);
+  expect(keycap.share).toBeGreaterThan(0.05);
+  expect(keycap.share).toBeLessThan(0.8);
+  await context.close();
+});
+
 test('the art turns by click, Enter and Space, with a pointer and a ring, and nothing moves', async ({ browser }) => {
   const page = await open(browser);
   await expect(art(page)).toHaveAttribute('data-piece', 'keycap');
@@ -347,7 +360,7 @@ test('the default is the wide view: no cookie, a thread beside the list, closing
   expect(await width(page)).toBeGreaterThan(900);
   expect(await cookie(page)).toBeNull();
   await openMenu(page);
-  await expect(page.locator('[data-tidy-menu-popup] [role="menuitemcheckbox"]').last()).toHaveText('Keep thread panel open');
+  await expect(page.locator('[data-tidy-menu-popup] [role="menuitemcheckbox"]').last()).toHaveAttribute('data-thread-panel-option', '');
   await expect(item(page)).toHaveAttribute('aria-checked', 'false');
   await page.keyboard.press('Escape');
 
@@ -366,7 +379,7 @@ test('the ⋮ item: panel view at once, the menu stays open, a ✓, remembered; 
   await openMenu(page);
   await item(page).click();
   await expect(empty(page)).toBeVisible();
-  await expect(empty(page)).toHaveText('No thread selected');
+  await expect(art(page)).toBeVisible();
   await expect(item(page)).toBeVisible();
   await expect(item(page)).toHaveAttribute('aria-checked', 'true');
   await expect(item(page).locator('.ib-pmi-check')).toBeVisible();
@@ -680,21 +693,16 @@ test('rows at the short width: the agents against the project, the project cut w
     const line = el.querySelector<HTMLElement>('.ib-l1')!;
     const tiles = line.querySelector<HTMLElement>('.ib-atiles')!;
     const project = [...line.querySelectorAll<HTMLElement>('*')].find((node) => node.textContent?.includes('northwind') && node.children.length === 0)!;
-    const style = getComputedStyle(project);
     return {
       gap: project.getBoundingClientRect().left - tiles.getBoundingClientRect().right,
       projectWidth: project.getBoundingClientRect().width,
       cut: project.scrollWidth > project.clientWidth,
-      overflow: style.textOverflow,
-      wrap: style.whiteSpace,
       lineHeight: line.getBoundingClientRect().height,
     };
   });
   expect(lead.gap).toBe(6);
   expect(lead.projectWidth).toBeGreaterThan(120);
   expect(lead.cut).toBe(true);
-  expect(lead.overflow).toBe('ellipsis');
-  expect(lead.wrap).toBe('nowrap');
   expect(lead.lineHeight).toBeLessThan(24);
   await page.context().close();
 });

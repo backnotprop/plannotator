@@ -2,11 +2,10 @@
  * The thread panel view's choice (threadPanel.ts) and its ⋮ menu item.
  * What this catches: the view on in a browser that never chose it; a choice forgotten on the next load, or one that
  * leaves a cookie behind when turned off; the panel drawn on a phone or in a stacked window, where it would stand
- * alone; a menu item a screen reader does not hear as a checkbox, that closes the menu, or that shows on a phone; the
- * one-time list options dialog's Done wiping the choice; the panel's art starting anywhere but the keycap, losing the
- * approved order or the way back to the keycap, drawing the wrong mode's mask, or not being a real button. The whole
- * window (the panes, a reload, closing a thread, the masks really painting) is proved in Chromium by
- * tests/e2e/inbox-thread-panel.spec.ts.
+ * alone; a menu item a screen reader does not hear as a checkbox or that closes the menu; a look option's write wiping
+ * the choice; the panel's art starting anywhere but the keycap, losing the approved order or the way back to the
+ * keycap, or drawing the wrong mode's mask. The whole window (the panes, a reload, closing a thread, a phone, the art's
+ * keyboard path, the masks really painting) is proved in Chromium by tests/e2e/inbox-thread-panel.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -49,7 +48,7 @@ afterEach(() => {
 
 const TIDY: TidyController = { surface: 'list', scope: null, plan: null, run: null, start: async () => null, refresh: () => {} };
 
-async function menu(threadPanel?: { on: boolean; onChange: (on: boolean) => void }, phone = false): Promise<HTMLElement> {
+async function menu(threadPanel: { on: boolean; onChange: (on: boolean) => void }): Promise<HTMLElement> {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -57,7 +56,7 @@ async function menu(threadPanel?: { on: boolean; onChange: (on: boolean) => void
   act(() => {
     root!.render(
       <SidebarProvider>
-        <InboxList title="Inbox" path={null} sections={[]} filtered={false} narrow={false} phone={phone} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} tidy={TIDY} threadPanel={threadPanel} />
+        <InboxList title="Inbox" path={null} sections={[]} filtered={false} narrow={false} phone={false} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} tidy={TIDY} threadPanel={threadPanel} />
       </SidebarProvider>,
     );
   });
@@ -91,7 +90,7 @@ describe('the choice', () => {
     expect(readThreadPanel()).toBe(false);
   });
 
-  test('the one-time list options dialog does not touch it', () => {
+  test('writing the look options leaves it alone', () => {
     writeThreadPanel(true);
     writeListLook(LIST_LOOK_OFF);
     expect(readThreadPanel()).toBe(true);
@@ -107,8 +106,7 @@ describe('the choice', () => {
 describe.skipIf(!hasDom)('the ⋮ menu item', () => {
   test('a checkbox after the look options, unchecked with no ✓ while off', async () => {
     const popup = await menu({ on: false, onChange: () => {} });
-    const boxes = [...popup.querySelectorAll('[role="menuitemcheckbox"]')].map((el) => el.textContent);
-    expect(boxes.at(-1)).toBe('Keep thread panel open');
+    expect([...popup.querySelectorAll('[role="menuitemcheckbox"]')].at(-1)).toBe(item(popup)!);
     expect(item(popup)!.getAttribute('aria-checked')).toBe('false');
     expect(item(popup)!.querySelector('.ib-pmi-check')).toBeNull();
   });
@@ -128,12 +126,6 @@ describe.skipIf(!hasDom)('the ⋮ menu item', () => {
     });
     expect(asked).toEqual([true]);
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
-  });
-
-  test('a phone, and the tour, pass no choice: no item', async () => {
-    const popup = await menu(undefined, true);
-    expect(popup.textContent).toContain('Compact rows');
-    expect(item(popup)).toBeNull();
   });
 });
 
@@ -195,14 +187,5 @@ describe.skipIf(!hasDom)('the empty panel\'s art', () => {
       expect(mask(button)).not.toContain('-dark');
       act(() => button.click());
     }
-  });
-
-  test('a button a keyboard reaches: named, in the tab order, and it submits nothing', () => {
-    const button = panel('light');
-    expect(button.tagName).toBe('BUTTON');
-    expect(button.type).toBe('button');
-    expect(button.tabIndex).toBe(0);
-    expect(button.getAttribute('aria-label')).toBe('Show another picture');
-    expect(host!.textContent).toBe('No thread selected');
   });
 });

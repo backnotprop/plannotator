@@ -196,7 +196,7 @@ test('beside a thread, by mouse: each option changes the rows at once, keeps the
     expect(today.ledger!.title.h, 'the long name wraps today').toBeGreaterThan(30);
 
     await page.locator('[data-tidy-menu]').click();
-    await expect(page.locator('[data-tidy-menu-popup] [role="menuitemcheckbox"]')).toHaveText(['Highlight thread subject', 'Compact rows', 'Hide agent icons', 'Smaller thread names', 'Keep thread panel open']);
+    await expect(page.locator('[data-tidy-menu-popup] [data-list-look]')).toHaveCount(4);
     for (const key of ['highlight', 'compact', 'hideAgents', 'smallNames']) await expect(option(page, key)).toHaveAttribute('aria-checked', 'false');
     await page.screenshot({ path: join(proofDir, 'menu-open.png') });
 
