@@ -676,7 +676,7 @@ test('leaving full screen keeps the file beside the thread with ‹ Inbox leadin
   await expect(thread.locator('.ib-phead > *').first()).toHaveAttribute('data-file-back', '');
   // Archive, then ⋯ More (the copy menu, design record "inbox-copy-message"), end the header.
   await expect(thread.locator('.ib-phead > *').last()).toHaveAttribute('data-thread-more', '');
-  await expect(thread.locator('.ib-phead > *').nth(-2)).toHaveAttribute('data-archive', '');
+  await expect(thread.locator('.ib-phead [data-archive]')).toHaveCount(0);
   await expect(thread.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(nav).toBeHidden();
   await expect(page.locator('.ib-listcol')).toHaveCount(0);
