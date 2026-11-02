@@ -6023,6 +6023,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-rn:hover { color: var(--foreground); text-decoration: underline; }
 .ib-crdp-rt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-crdp-rref { color: var(--muted-foreground); }
+/* A link-only reference (a Jira issue): a plain link icon, quiet like an unread state. */
+.pn-inbox svg.ib-crdp-rlink { color: var(--muted-foreground); stroke-width: 1.8; }
 .ib-crdp-rs { flex: none; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-crdp-rs[data-tone="open"] { color: var(--success, oklch(0.6 0.15 150)); }
 .ib-crdp-rs[data-tone="merged"] { color: var(--primary); }

@@ -6,6 +6,7 @@ import {
   INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   type InboxCardColumn,
   type InboxCardHistoryEntry,
@@ -604,16 +605,22 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
 function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
-  const kind = refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
+  // A link-only source (a Jira issue): the key links, beside a plain link icon and its site; no state is read.
+  const linkOnly = inboxCardRefIsLinkOnly(refItem);
+  const kind = refItem.source === 'jira' ? 'Jira issue' : refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
   const number = refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
   return (
-    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-state={state?.tone ?? (loading ? 'loading' : 'quiet')}>
-      <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
+    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-source={refItem.source} data-ref-state={state?.tone ?? (linkOnly ? 'quiet' : loading ? 'loading' : 'quiet')}>
+      {linkOnly ? (
+        <Icon name="link" size={15} className="ib-refmark ib-crdp-rlink" />
+      ) : (
+        <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
+      )}
       <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
         {number}
       </a>
       <span className="ib-crdp-rt" dir="auto">
-        {data ? data.title : <span className="ib-crdp-rref">{refItem.ref}</span>}
+        {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
       </span>
       {state && (
         <span className="ib-crdp-rs" data-tone={state.tone}>
@@ -623,6 +630,15 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
       )}
     </li>
   );
+}
+
+/** A link's host (`example.atlassian.net`), or the URL as written when it does not parse. */
+function siteOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /**
