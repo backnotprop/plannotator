@@ -322,7 +322,7 @@ describe("linked machines, on three real Inboxes", () => {
       // A file sent to B from A's window: never held, streamed through by its route; A's page session is checked here, never sent on.
       const { serverSession } = await getJson(A, "/api/inbox/health");
       const upload = (session: string) =>
-        fetch(`${base(A)}/api/inbox/m/${B.id}/uploads?name=notes.txt&idempotency_key=window-upload-${session.slice(0, 4)}&serverSession=${session}`, {
+        fetch(`${base(A)}/api/inbox/m/${B.id}/uploads?name=pasted-text-2026-11-01-2110.txt&idempotency_key=window-upload-${session.slice(0, 4)}&serverSession=${session}`, {
           method: "POST",
           headers: { "Content-Type": "text/plain", Origin: base(A) },
           body: "notes for B",

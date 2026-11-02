@@ -2795,9 +2795,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // The restart guard asks while files pasted into the box, or words not saved yet (a save waiting or on
   // its way, words a conflict left unsaved: replyDraftUnsaved, read when the guard asks), would be lost.
   const unsentSubject = thread.subject ?? 'this thread';
-  // A long paste that finished uploading is kept in the reply draft (approval "inbox-paste-attachment"): not lost by a
-  // restart, except on another machine's thread, whose drafts are not saved.
-  const unsentFiles = box.open && replyFiles.files.some((file) => !(file.pasted && file.state === 'done' && !machine));
+  // A long paste the reply draft holds on the server (approval "inbox-paste-attachment") is not lost by a restart. One
+  // still uploading, waiting for its save, refused (its upload gone), or on another machine's thread (whose drafts are
+  // not saved) would be: the guard asks.
+  const heldPastes = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
+  const unsentFiles =
+    box.open && replyFiles.files.some((file) => !(file.pasted && file.state === 'done' && file.upload && !machine && heldPastes.has(file.upload.upload_id)));
 
   // Files dropped on the reply box attach there (a dashed "Drop to attach"; approval "inbox-reply-attach").
   const boxDrop = useFileDrop((list) => {

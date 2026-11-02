@@ -561,6 +561,8 @@ export class InboxApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** The request's field the refusal names (`files[1]`), when it names one. */
+    readonly field: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -574,6 +576,7 @@ async function readJson<T>(response: Response): Promise<T> {
       response.status,
       typeof body.code === 'string' ? body.code : 'error',
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
+      typeof body.field === 'string' ? body.field : null,
     );
   }
   return body as T;

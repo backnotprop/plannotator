@@ -57,6 +57,9 @@ import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
 
+/** The name the window gives a long paste it attaches (packages/inbox/compose/pastedText.ts pastedTextName). */
+const PASTED_TEXT_NAME = /^pasted-text-[^/\\]+\.txt$/;
+
 /**
  * The lines an agent reads under a message's words for the files the person
  * attached, each with its path so the agent can open it: `Attached: name (path)`.
@@ -134,14 +137,15 @@ export function readInboxUpload(inboxDirPath: string, id: unknown): InboxUpload 
 }
 
 /**
- * The words of one pending text upload (a long paste the window attached,
- * approval "inbox-paste-attachment"), so Put back works after a reload or in
- * another window. Null when the id is not a pending upload of plain text (sent,
- * swept, never was, or another kind of file) or its bytes are gone.
+ * The words of one pending long paste (a pasted-text-….txt upload the window
+ * attached, approval "inbox-paste-attachment"), so Put back works after a
+ * reload or in another window. Null when the id is not a pending pasted text
+ * (sent, swept, never was, a text file the person dropped, or another kind of
+ * file) or its bytes are gone.
  */
 export function readInboxUploadText(inboxDirPath: string, id: unknown): string | null {
   const upload = readInboxUpload(inboxDirPath, id);
-  if (!upload || upload.kind !== "text") return null;
+  if (!upload || upload.kind !== "text" || !PASTED_TEXT_NAME.test(upload.name)) return null;
   try {
     return readFileSync(inboxBlobPath(inboxDirPath, upload.sha256), "utf8");
   } catch {

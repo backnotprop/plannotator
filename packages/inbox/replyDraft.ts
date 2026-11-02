@@ -228,9 +228,13 @@ export function useReplyDraft(threadId: string) {
             return;
           }
           if (cause instanceof InboxApiError && cause.code === 'upload_not_found' && files.length > 0) {
-            // A long paste's upload is gone (sent or swept elsewhere): the words alone are saved.
+            // A long paste's upload is gone (sent or swept elsewhere): saved again without it, the other pastes kept
+            // (the refusal names it, `files[i]`; without that, the words alone). Its tile stays in the box, not in
+            // the draft, so the restart guard asks for it (Thread).
             unsend();
-            if (generation === generationOf(target)) write(target, text);
+            const gone = /^files\[(\d+)\]$/.exec(cause.field ?? '');
+            const rest = gone ? files.filter((_, index) => index !== Number(gone[1])) : NO_FILES;
+            if (generation === generationOf(target)) write(target, text, rest);
             return;
           }
           if (!(cause instanceof InboxApiError) || cause.code !== 'draft_conflict') throw cause;

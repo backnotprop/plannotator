@@ -346,13 +346,21 @@ export function useComposeFiles(
   /**
    * The box takes a draft's words and long pastes (a reload, another window's
    * save): its pasted tiles become the draft's, anchored in `words`. Files that
-   * are not long pastes stay. Tiles already here keep their state.
+   * are not long pastes stay. Tiles already here keep their state. A paste
+   * pasted here that is not uploaded yet (or whose upload was refused) is in no
+   * draft: it stays, its text still to put back, carried into `words`.
    */
   const restorePasted = useCallback((list: readonly InboxDraftFile[], words: string) => {
     const wanted = new Set(list.filter((file) => file.pasted).map((file) => file.upload_id));
     const here = new Set(filesRef.current.filter((file) => file.pasted && file.upload).map((file) => file.upload!.upload_id));
+    const keep = (file: ComposeFile) => !file.pasted || !file.upload || wanted.has(file.upload.upload_id);
     for (const file of filesRef.current) {
-      if (file.pasted && !(file.upload && wanted.has(file.upload.upload_id))) release(file.key);
+      if (!keep(file)) release(file.key);
+      // Only here: its place follows the box's words to the draft's.
+      else if (file.pasted && !file.upload) {
+        const anchor = anchors.current.get(file.key);
+        if (anchor) anchor.at = Math.min(mapAnchor(anchoredIn.current, words, anchor.at), words.length);
+      }
     }
     for (const file of list) {
       if (!file.pasted) continue;
@@ -362,7 +370,7 @@ export function useComposeFiles(
     anchoredIn.current = words;
     undoArm.current = null;
     const added = list.filter((file) => file.pasted && !here.has(file.upload_id)).map(fromUpload);
-    const next = [...filesRef.current.filter((file) => !file.pasted || (file.upload && wanted.has(file.upload.upload_id))), ...added];
+    const next = [...filesRef.current.filter(keep), ...added];
     filesRef.current = next;
     setFiles(next);
   }, []);

@@ -10,7 +10,11 @@
  *  - another window's save (`event: drafts`) brings its tile into a box with
  *    no edits, and Put back works there;
  *  - a reply draft of the paste alone goes with the Send from a closed box;
- *  - a reopened New message draft offers Put back too.
+ *  - a reopened New message draft offers Put back too;
+ *  - a paste still uploading stays when another window saves the draft;
+ *  - one paste's upload gone: the draft keeps the others, and the restart
+ *    guard asks for the paste no draft holds (and for one still uploading);
+ *  - a Put back that cannot read the paste says so and keeps the tile.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -27,6 +31,8 @@ import { NO_BROWSER } from '../../tests/helpers/no-browser';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+/** The update control's restart guard: what a restart would lose (null: nothing). */
+const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 /** A 40 KB log: over the 32 KB line, so it becomes a tile. */
@@ -65,6 +71,15 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
   });
 }
 
+/** Uploads wait for `release()` while set: a paste still uploading. */
+let heldUploads: { promise: Promise<void>; release: () => void } | null = null;
+function holdUploads() {
+  let release = () => {};
+  const promise = new Promise<void>((done) => (release = done));
+  heldUploads = { promise, release: () => ((heldUploads = null), release()) };
+  return heldUploads;
+}
+
 /** The window's upload (api.ts uploadFile): an XMLHttpRequest, carried over loopback with the file's bytes. */
 class LoopbackXhr {
   status = 0;
@@ -85,6 +100,8 @@ class LoopbackXhr {
   }
   send(file: Blob) {
     void (async () => {
+      // An upload still on its way while the test holds it (`holdUploads`).
+      if (heldUploads) await heldUploads.promise;
       const bytes = Buffer.from(await file.arrayBuffer());
       const answer = await loopback(this.path, 'POST', bytes, { 'Content-Type': 'application/octet-stream' });
       if (this.aborted) return;
@@ -100,7 +117,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '4'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '7'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -159,6 +176,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  heldUploads?.release();
   unmount();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
@@ -351,4 +369,97 @@ test.skipIf(!hasDom)('a reopened New message draft offers Put back: the exact te
   await until(() => pastedTiles(dialog()!).length === 0, 'the words back');
   expect(reopened.value).toBe(BEFORE + LOG + AFTER);
   expect(reopened.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+/** A file uploaded and a draft saved as another window (or a phone) would: over loopback, never through this window. */
+async function uploadAsOther(name: string, words: string): Promise<InboxUpload> {
+  const session = await serverSession();
+  const answer = await loopback(`/api/inbox/uploads?name=${name}&serverSession=${session}`, 'POST', Buffer.from(words), { 'Content-Type': 'application/octet-stream' });
+  return (JSON.parse(answer.text) as { upload: InboxUpload }).upload;
+}
+/** A phone's Send carrying `uploads` (no `clear_draft`: the draft stays, naming uploads that are no longer pending). */
+async function phoneSend(uploads: string[]) {
+  const answer = await loopback(
+    `/api/inbox/messages/${world.waiting}/reply`,
+    'POST',
+    JSON.stringify({ serverSession: await serverSession(), idempotency_key: `phone-${crypto.randomUUID()}`, words: 'From the phone', uploads }),
+  );
+  expect(answer.status).toBe(200);
+}
+
+test.skipIf(!hasDom)("a paste still uploading stays when another window saves the draft, and Put back still puts it where it was", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, BEFORE + AFTER, BEFORE.length);
+  await until(async () => (await serverDraft())?.body === BEFORE + AFTER, 'the words saved');
+  const held = holdUploads();
+  expect(paste(text, LOG)).toBe(true);
+  expect(pastedTiles(el)[0]?.getAttribute('data-compose-file')).toBe('uploading');
+  // While it uploads, another window adds a sentence to the same draft.
+  const base = (await serverDraft())!.updated_at;
+  const theirs = `${BEFORE}${AFTER} Thanks.`;
+  const saved = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ serverSession: await serverSession(), body: theirs, base }));
+  expect(saved.status).toBe(200);
+  await act(async () => emit('drafts', { thread_id: world.waiting }));
+  await until(() => replyText(el)?.value === theirs, "the other window's words");
+  // The paste is still here, still uploading: nothing of it was lost.
+  expect(pastedTiles(el).length).toBe(1);
+  held.release();
+  // Uploaded, it joins the draft beside the other window's words.
+  await until(async () => (await serverDraft())?.files?.length === 1, 'the paste saved');
+  expect((await serverDraft())!.body).toBe(theirs);
+  // Within its 10 s the tile offers Undo, which puts it back as Put back does.
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-undo]') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el).length === 0, 'the words back');
+  expect(replyText(el)!.value).toBe(`${BEFORE}${LOG}${AFTER} Thanks.`);
+  expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others, and the restart guard asks for the one it lost', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, BEFORE + AFTER, BEFORE.length);
+  const held = holdUploads();
+  expect(paste(text, LOG)).toBe(true);
+  // Still uploading: a restart would lose it, so the guard asks.
+  expect(unsentReply()).not.toBeNull();
+  held.release();
+  // Uploaded and saved in the draft: a restart loses nothing, the guard asks nothing.
+  await until(async () => (await serverDraft())?.files?.length === 1, 'the first paste saved');
+  await until(() => unsentReply() === null, 'the guard at rest');
+  const second = `${LOG}second\n`;
+  text.setSelectionRange((BEFORE + AFTER).length, (BEFORE + AFTER).length);
+  expect(paste(text, second)).toBe(true);
+  await until(async () => (await serverDraft())?.files?.length === 2, 'both pastes saved');
+  await until(() => unsentReply() === null, 'the guard at rest again');
+  const [first, kept] = (await serverDraft())!.files!.map((file) => file.upload_id);
+
+  // A phone's Send carries the first paste: its upload is no longer pending, the draft still names it.
+  await phoneSend([first!]);
+  // The next save here names both; refused for the first, it saves the second beside the words.
+  type(replyText(el)!, `${BEFORE}${AFTER} Thanks.`);
+  await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks.`, 'the words saved');
+  expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
+  // The first tile is still in the box but no longer in any draft: a restart would lose it.
+  expect(pastedTiles(el).length).toBe(2);
+  expect(unsentReply()).not.toBeNull();
+}, 30_000);
+
+test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the tile and the words stay', async () => {
+  // Another window's draft names a paste; a phone's Send then took that upload.
+  const upload = await uploadAsOther('pasted-text-gone.txt', LOG);
+  const saved = await loopback(
+    `/api/inbox/threads/${world.waiting}/draft`,
+    'POST',
+    JSON.stringify({ serverSession: await serverSession(), body: BEFORE + AFTER, base: null, files: [{ upload_id: upload.upload_id, pasted: { at: BEFORE.length, preview: 'The gone paste' } }] }),
+  );
+  expect(saved.status).toBe(200);
+  await phoneSend([upload.upload_id]);
+  const el = await renderApp(`#thread=${world.waiting}`);
+  await until(() => replyBox(el) !== null && pastedTiles(el).length === 1, 'the box and its tile');
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
+  await until(() => !!pastedTiles(el)[0]?.querySelector('[role="alert"]'), 'the error');
+  expect(pastedTiles(el)[0]!.querySelector('[role="alert"]')!.textContent).toContain('could not be read back');
+  expect(pastedTiles(el).length).toBe(1);
+  expect(replyText(el)!.value).toBe(BEFORE + AFTER);
 }, 30_000);

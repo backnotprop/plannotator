@@ -4618,15 +4618,20 @@ export class InboxStore {
   /**
    * The Send that carried the reply box's words: drop the draft while it is
    * still the one those words were saved as (`updated_at`), or while it holds
-   * exactly those words (`words`: the window may not know the `updated_at` of a
-   * save whose answer it never read). A newer, different draft another window
-   * saved meanwhile stays. True when it went.
+   * exactly what the Send carried (the window may not know the `updated_at` of
+   * a save whose answer it never read): those `words`, and only long pastes
+   * among the Send's `uploads`. A paste alone counts when the words are empty.
+   * A newer, different draft another window saved meanwhile (other words, or a
+   * paste this Send did not carry) stays. True when it went.
    */
-  clearSentReplyDraft(threadId: string, updatedAt: string, words?: string): boolean {
+  clearSentReplyDraft(threadId: string, updatedAt: string, words?: string, uploads: readonly string[] = []): boolean {
     const existing = this.replyDrafts.get(threadId);
     if (!existing) return false;
-    const sameWords = words !== undefined && words.trim() !== "" && existing.body.trim() === words.trim();
-    if (existing.updated_at !== updatedAt && !sameWords) return false;
+    if (existing.updated_at === updatedAt) return this.deleteReplyDraft(threadId);
+    const fileIds = inboxReplyDraftFileIds(existing);
+    const sent = new Set(uploads);
+    const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== "" || fileIds.length > 0);
+    if (!sameWords || !fileIds.every((id) => sent.has(id))) return false;
     return this.deleteReplyDraft(threadId);
   }
 

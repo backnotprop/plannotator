@@ -3468,12 +3468,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               throw error;
             }
             // The Send that carried the reply box's words: its draft goes (a replay too, since the first one sent them),
-            // while it is the draft those words were saved as (`updated_at`) or holds exactly those words, so another
-            // window's newer, different draft stays.
+            // while it is the draft those words were saved as (`updated_at`) or holds exactly those words and only
+            // pastes this Send carried, so another window's newer, different draft stays.
             if (typeof body.clear_draft === "string") {
               const threadId = store.message(messageId)?.thread_id;
               const words = typeof body.words === "string" ? body.words : undefined;
-              if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words)) for (const listener of draftListeners) listener(threadId);
+              const sentUploads = uploads.filter((id): id is string => typeof id === "string");
+              if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
             }
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
