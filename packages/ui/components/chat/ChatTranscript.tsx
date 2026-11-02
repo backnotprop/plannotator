@@ -78,11 +78,16 @@ const BODY_PROSE = cn(
  * must then see what arrived, in full. */
 const TurnLiveContext = createContext(true);
 
+/** The transcript's `richMarkdown`, so a host's own `ChatMarkdown` in `renderPart`
+ * draws what the transcript's would, without saying so a second time. */
+const RichMarkdownContext = createContext(false);
+
 /** One text part as sanitized markdown, memoized on its text. */
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming = false,
   literalHtml = false,
+  richMarkdown,
   messageId,
   role,
   partIndex,
@@ -95,6 +100,10 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   streaming?: boolean;
   /** A person's own message: HTML they typed stays literal text. */
   literalHtml?: boolean;
+  /** Draw images, strikethrough, task checkboxes, link titles and list start
+   * numbers. Images load remote addresses from this text, so it is off unless a
+   * host turns it on. Absent: what `ChatTranscript` was told, or off. */
+  richMarkdown?: boolean;
   /** Where this text sits, as scalars so `memo` short-circuits. A host reads
    * them back off the element to anchor a selection. */
   messageId?: string;
@@ -110,7 +119,9 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const reducedMotion = usePrefersReducedMotion();
   const live = useContext(TurnLiveContext) && streaming;
   const shown = live && reducedMotion ? clipAtSentenceBoundary(text) : text;
-  const render = useMemo(() => chatTextRenderer(literalHtml), [literalHtml]);
+  const transcriptRich = useContext(RichMarkdownContext);
+  const rich = richMarkdown ?? transcriptRich;
+  const render = useMemo(() => chatTextRenderer(literalHtml, rich), [literalHtml, rich]);
   const html = useMemo(() => render(shown, live), [render, shown, live]);
   // One `{__html}` object per html string: React re-sets innerHTML whenever
   // that prop's identity changes, which would collapse a live selection.
@@ -169,6 +180,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   message,
   agentName,
   agentMark,
+  agentBadge,
   userName = 'You',
   userMark,
   stopped = false,
@@ -176,10 +188,13 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   indentContent = false,
   renderPart,
   footer,
+  richMarkdown,
 }: {
   message: ChatMessage<Part>;
   agentName: string;
   agentMark?: React.ReactNode;
+  /** After the name on an agent's turn, before the Stopped label. */
+  agentBadge?: React.ReactNode;
   userName?: string;
   userMark?: React.ReactNode;
   /** This turn's run was cancelled: partial text kept, labelled. */
@@ -192,6 +207,8 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
   /** Under the parts. */
   footer?: React.ReactNode;
+  /** See `ChatMarkdown`. Absent: what `ChatTranscript` was told, or off. */
+  richMarkdown?: boolean;
 }) {
   const isUser = message.role === 'user';
   return (
@@ -199,6 +216,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
       <div className="flex items-center gap-2 text-xs">
         {isUser ? userMark : agentMark}
         <span className="font-semibold text-foreground">{isUser ? userName : agentName}</span>
+        {!isUser && agentBadge}
         {stopped && (
           <span className="inline-flex h-5 items-center rounded-sm border border-border bg-muted px-1.5 text-2xs font-medium text-muted-foreground">
             {stoppedLabel}
@@ -217,6 +235,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
               text={part.text}
               streaming={part.state === 'streaming'}
               literalHtml={isUser}
+              richMarkdown={richMarkdown}
               messageId={message.id}
               role={message.role}
               partIndex={index}
@@ -237,6 +256,8 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
   readonly agentName: string;
   /** The face on the agent's turns. */
   readonly agentMark?: React.ReactNode;
+  /** After the name on the agent's turns, before the Stopped label. */
+  readonly agentBadge?: React.ReactNode;
   readonly userName?: string;
   /** The face on the person's turns. */
   readonly userMark?: React.ReactNode;
@@ -268,6 +289,10 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
   readonly scrollRef?: React.RefObject<HTMLDivElement | null>;
   /** Positioned in the pane's scroll space, so it rides with the text. */
   readonly overlay?: React.ReactNode;
+  /** Draw images, strikethrough, task checkboxes, link titles and list start
+   * numbers in text parts, a host's own `ChatMarkdown` included. Images load
+   * remote addresses from model text, so it is off unless a host turns it on. */
+  readonly richMarkdown?: boolean;
 }
 
 /**
@@ -303,6 +328,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   status,
   agentName,
   agentMark,
+  agentBadge,
   userName,
   userMark,
   empty,
@@ -318,6 +344,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   messageFooter,
   scrollRef,
   overlay,
+  richMarkdown = false,
 }: ChatTranscriptProps<Part>) {
   // `submitted` is set the moment a message is sent, and a stream's start can
   // push an assistant message with no parts without changing the status. The
@@ -352,19 +379,29 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
     return () => observer.disconnect();
   }, [paneRef]);
 
+  // An image grows the text with no change to `messages`, and the observer above
+  // watches the pane's box, not what is in it. `load` does not bubble, so this
+  // takes it on the way down. Only with `richMarkdown`: otherwise no image in text
+  // can load, and a host's own image must not move the pane.
+  const followImage = () => {
+    const node = paneRef.current;
+    if (node !== null && atBottomRef.current) node.scrollTop = node.scrollHeight;
+  };
+
   // An assistant turn that has painted nothing yet would be a bare name row,
   // so it is dropped and the pending turn stands in its place.
   const drawn = (message: ChatMessage<Part>, live: boolean): boolean =>
     message.role === 'user' ||
     (message.role === 'assistant' && chatTurnHasOutput(message, reducedMotion && live));
 
-  return (
+  const pane = (
     <div
       ref={paneRef}
       onScroll={(event) => {
         const node = event.currentTarget;
         atBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 24;
       }}
+      onLoadCapture={richMarkdown ? followImage : undefined}
       // Focusable, so a keyboard user can Tab in and arrow-scroll. Deliberately
       // not a live region: streamed deltas would announce token by token.
       role={panel === undefined ? 'region' : 'tabpanel'}
@@ -392,6 +429,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
                     message={message}
                     agentName={agentName}
                     agentMark={agentMark}
+                    agentBadge={agentBadge}
                     userName={userName}
                     userMark={userMark}
                     stopped={stopped?.has(message.id) ?? false}
@@ -419,4 +457,5 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
       )}
     </div>
   );
+  return <RichMarkdownContext.Provider value={richMarkdown}>{pane}</RichMarkdownContext.Provider>;
 }

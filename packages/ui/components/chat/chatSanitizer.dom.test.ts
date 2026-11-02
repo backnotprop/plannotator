@@ -1,57 +1,29 @@
 /**
- * The sanitizer really running, with the folder's own allowlist. As it stands
- * happy-dom cannot host DOMPurify, for two reasons, and both are bridged here:
- * its NodeIterator loses its place when the node under it goes, so here the walk
- * is a list taken up front; and `Node.prototype.nodeName`, which DOMPurify reads
- * directly, is blank there, so here it answers as a browser's does. The rest is
- * DOMPurify's own code, and if either bridge stops working the sanitizer fails
- * its proof and every test below fails. The spec in
+ * The sanitizer really running, with the folder's own allowlist, over the bridges
+ * in `tests/helpers/chat-sanitizer-dom.ts`. The spec in
  * `tests/e2e/chat-window.spec.ts` proves the same text in Chromium.
  * Requires DOM (DOM_TESTS=1).
  */
 import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import { Lexer } from 'marked';
+import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import type * as Markdown from './chatMarkdown';
 
 const hasDom = typeof document !== 'undefined';
 let chatMarkdownHtml: typeof Markdown.chatMarkdownHtml;
 let personMarkdownHtml: typeof Markdown.personMarkdownHtml;
 let chatTextRenderer: typeof Markdown.chatTextRenderer;
-let realNodeName: PropertyDescriptor | undefined;
-
-function nameLikeABrowser(this: Node) {
-  if (this.nodeType === 1) return (this as Element).tagName;
-  if (this.nodeType === 3) return '#text';
-  if (this.nodeType === 8) return '#comment';
-  return realNodeName?.get?.call(this);
-}
-
-function walkFromAList(root: Node) {
-  const nodes: Node[] = [];
-  const visit = (node: Node) => {
-    nodes.push(node);
-    for (const child of node.childNodes) visit(child);
-  };
-  visit(root);
-  let at = 0;
-  return { nextNode: () => nodes[at++] ?? null };
-}
+let unbridge: (() => void) | undefined;
 
 beforeAll(async () => {
   if (!hasDom) return;
-  realNodeName = Object.getOwnPropertyDescriptor(Node.prototype, 'nodeName');
-  Object.defineProperty(Node.prototype, 'nodeName', { configurable: true, get: nameLikeABrowser });
-  Object.defineProperty(document, 'createNodeIterator', { configurable: true, value: walkFromAList });
+  unbridge = bridgeSanitizerDom();
   ({ chatMarkdownHtml, personMarkdownHtml, chatTextRenderer } = await import('./chatMarkdown'));
   // The sanitizer proves itself on first use, so that has to happen with the walk in place.
   chatMarkdownHtml('first use');
 });
 
-afterAll(() => {
-  if (!hasDom) return;
-  delete (document as { createNodeIterator?: unknown }).createNodeIterator;
-  Object.defineProperty(Node.prototype, 'nodeName', realNodeName!);
-});
+afterAll(() => unbridge?.());
 
 function parsed(html: string) {
   const host = document.createElement('div');
