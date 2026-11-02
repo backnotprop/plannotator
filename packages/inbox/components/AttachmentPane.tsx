@@ -301,6 +301,14 @@ export interface AttachmentPaneHandle {
  * existing comment being edited whose words differ from the saved ones: its
  * textarea. `savedText` answers an annotation's saved words by id.
  */
+/** The pane on screen (one at a time), as its unsaved-comment question. */
+let openPane: { unsaved: () => boolean } | null = null;
+
+/** Whether the file open now holds a comment not saved yet, by the same rule its own `leave` asks (saved words compared). */
+export function openPaneUnsaved(): boolean {
+  return openPane?.unsaved() ?? false;
+}
+
 export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement | null {
   const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
   // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page.
@@ -543,6 +551,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   const leaveRef = useRef(leave);
   leaveRef.current = leave;
+  const readOnlyRef = useRef(props.readOnly);
+  readOnlyRef.current = props.readOnly;
+  // The question `leave` asks, for the window's link listener (App.tsx): an edit not changed is not unsaved.
+  useEffect(() => {
+    const entry = { unsaved: () => !readOnlyRef.current && unsavedComposer(sectionRef.current, savedTextRef.current) !== null };
+    openPane = entry;
+    return () => {
+      if (openPane === entry) openPane = null;
+    };
+  }, []);
   const exitFullRef = useRef<() => void>(() => {});
   useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go), exitFull: () => exitFullRef.current() }), []);
 
@@ -1260,8 +1278,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in. */
   const followLink = (href: string, baseDir: string) => {
-    // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'.
-    const inPlace = props.onInboxLink?.(href);
+    // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
+    // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
+    // person's click: the page's own script can post this message too, and must not move the window
+    // (HtmlEmbedBlock's rule). Without one, the page's rules below decide, as before links opened in place.
+    const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
+    const inPlace = /^\s*https?:\/\//i.test(href) && activation?.isActive === true ? props.onInboxLink?.(href) : null;
     if (inPlace) {
       leave(null, inPlace);
       return;

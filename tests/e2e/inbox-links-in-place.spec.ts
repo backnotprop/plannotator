@@ -56,6 +56,8 @@ interface World {
   project: string;
   markdown: string;
   html: string;
+  /** An attached page whose script posts a link message on load. */
+  script: string;
   machine: string;
 }
 
@@ -109,14 +111,14 @@ test.beforeAll(async () => {
     thread: 'decide-thread',
     body: [
       ':::question',
-      `Pick one, see [T2 from a dialog](${origin}/#thread=${T2}).`,
+      `Pick one, see [T2 from a dialog](${origin}/#thread=${T2}) or [hash only from a dialog](#thread=${T2}).`,
       '',
       '- [ ] A',
       '- [ ] B',
       ':::',
       '',
       ':::question',
-      `Pick another, see [hash only from a dialog](#thread=${T2}).`,
+      'Pick another.',
       '',
       '- [ ] C',
       '- [ ] D',
@@ -142,7 +144,15 @@ test.beforeAll(async () => {
   );
   writeFileSync(
     join(alpha, 'docs', 'page.html'),
-    `<!doctype html><html><head><meta charset="utf-8"><title>page</title></head><body><h1>Page</h1><p><a href="${origin}/#thread=${T2}">Page to T2</a></p><p><a href="http://127.0.0.1:${port}/#thread=${T3}">Page to T3</a></p><p><a href="${OUTSIDE}">Page to the web</a></p></body></html>`,
+    `<!doctype html><html><head><meta charset="utf-8"><title>page</title></head><body><h1>Page</h1><p><a href="${origin}/#thread=${T2}">Page to T2</a></p><p><a href="http://127.0.0.1:${port}/#thread=${T3}">Page to T3</a></p><p><a href="${OUTSIDE}">Page to the web</a></p><p><a href="/#thread=${T2}">Page root hash</a></p><p><a href="./#thread=${T2}">Page dot hash</a></p></body></html>`,
+  );
+  // A page whose own script hands the window a link, with no click: the message a click on a link sends.
+  writeFileSync(
+    join(alpha, 'docs', 'script.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>script</title></head><body><h1>Script page</h1><script>
+      const send = () => parent.postMessage({ type: 'plannotator-bridge-link-click', href: ${JSON.stringify(`${origin}/#thread=${T2}`)} }, '*');
+      for (const wait of [200, 600, 1200, 2000]) setTimeout(send, wait);
+    </script></body></html>`,
   );
   const lines = [
     `[link to T2](${origin}/#thread=${T2})`,
@@ -166,7 +176,7 @@ test.beforeAll(async () => {
   const message = await agent.send({
     project_path: alpha,
     reply_to: T1,
-    attachments: ['docs/notes.md', 'docs/page.html'],
+    attachments: ['docs/notes.md', 'docs/page.html', 'docs/script.html'],
     body: [
       filler(6, 'Before'),
       ...lines,
@@ -187,6 +197,7 @@ test.beforeAll(async () => {
     project: (t2.project as { id: string }).id,
     markdown: files.find((file) => file.name === 'notes.md')!.id,
     html: files.find((file) => file.name === 'page.html')!.id,
+    script: files.find((file) => file.name === 'script.html')!.id,
     machine: `http://localhost:${otherPort}/#thread=${T2}`,
   };
 });
@@ -569,12 +580,16 @@ test.describe('still a new tab', () => {
       await page.locator('[data-thread-decide]').click();
       const dialog = page.locator('[data-decision-mode]');
       await expect(dialog).toBeVisible();
-      const prompt = dialog.getByRole('link', { name: 'T2 from a dialog', exact: true });
-      const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), prompt.click()]);
-      await expect(tab).toHaveURL(threadUrl(world.T2));
-      await tab.close();
-      await expect(dialog).toBeVisible();
-      await expect(page).toHaveURL(threadUrl(world.T4));
+      // A full URL (ui draws it with target=_blank), and a hash-only link, which has no target: the window opens its tab.
+      for (const name of ['T2 from a dialog', 'hash only from a dialog']) {
+        const link = dialog.getByRole('link', { name, exact: true });
+        const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), link.click()]);
+        await expect(tab).toHaveURL(threadUrl(world.T2));
+        await tab.close();
+        await expect(dialog).toBeVisible();
+        await expect(page).toHaveURL(threadUrl(world.T4));
+      }
+      expect(context.pages()).toHaveLength(1);
     });
   });
 
@@ -594,6 +609,93 @@ test.describe('still a new tab', () => {
       await expect(page).toHaveURL(new RegExp(`file=${world.markdown}`));
     });
   });
+
+  test('a saved comment opened for editing and not changed is not unsaved: the link opens in place', async ({ browser }) => {
+    await scene(browser, 'desktop', async (s) => {
+      const { page, context } = s;
+      const SAVED = 'saved words of this comment';
+      /** POST to the Inbox from its own page, with its session, as the window does. */
+      const post = (path: string, body: Record<string, unknown>) =>
+        page.evaluate(
+          async ({ path, body }) => {
+            const { serverSession } = (await (await fetch('/api/inbox/settings')).json()) as { serverSession: string };
+            const done = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, ...body }) });
+            if (!done.ok) throw new Error(`${path}: ${done.status} ${await done.text()}`);
+          },
+          { path, body },
+        );
+      await page.goto(`${world.origin}/`);
+      await post('/api/inbox/annotations', {
+        attachment_id: world.markdown,
+        version: 'current',
+        annotation: { id: 'ann-links-edit', type: 'COMMENT', text: SAVED, originalText: 'Notes', blockId: 'block-0', startOffset: 0, endOffset: 5, createdA: 1 },
+      });
+      try {
+        const pane = await openFile(page, world.markdown);
+        // A stand-in for the comment's edit box, open on its saved words (the pane reads `[data-annotation-id] textarea`).
+        const editing = (words: string) =>
+          page.evaluate(
+            ({ words }) => {
+              document.querySelector('[data-links-edit]')?.remove();
+              const card = document.createElement('div');
+              card.setAttribute('data-annotation-id', 'ann-links-edit');
+              card.setAttribute('data-links-edit', '');
+              const area = document.createElement('textarea');
+              area.value = words;
+              card.append(area);
+              document.querySelector('[data-attachment-pane]')!.append(card);
+            },
+            { words },
+          );
+        await editing(SAVED);
+        const link = pane.getByRole('link', { name: 'other thread', exact: true });
+        // Changed: unsaved, a new tab keeps it.
+        await editing(`${SAVED}, and more`);
+        const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), link.click()]);
+        await expect(tab).toHaveURL(threadUrl(world.T2));
+        await tab.close();
+        await expect(page).toHaveURL(new RegExp(`file=${world.markdown}`));
+        s.tabs.length = 0;
+        // Its saved words, unchanged: nothing to keep, the link opens in place.
+        await editing(SAVED);
+        await link.click();
+        await expect(page).toHaveURL(threadUrl(world.T2), { timeout: 5_000 });
+        await noTabOpened(s);
+      } finally {
+        await post('/api/inbox/annotations/ann-links-edit/remove', {});
+      }
+    });
+  });
+});
+
+test.describe('an attached HTML page', () => {
+  test('its own script, with no click, does not move the window', async ({ browser }) => {
+    await scene(browser, 'desktop', async (s) => {
+      const { page } = s;
+      await openFile(page, world.script);
+      await expect(page.frameLocator('.ib-htmlframe iframe').getByRole('heading', { name: 'Script page' })).toBeVisible();
+      // The page posts its link message four times in its first two seconds.
+      await page.waitForTimeout(3_000);
+      await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${world.script}`));
+      await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+      await noTabOpened(s);
+    });
+  });
+
+  for (const name of ['Page root hash', 'Page dot hash']) {
+    test(`"${name}" is the page's folder, not an Inbox thread`, async ({ browser }) => {
+      await scene(browser, 'desktop', async (s) => {
+        const { page } = s;
+        await openFile(page, world.html);
+        await page.frameLocator('.ib-htmlframe iframe').getByRole('link', { name, exact: true }).click();
+        await page.waitForTimeout(1_000);
+        await expect(page).not.toHaveURL(threadUrl(world.T2));
+        await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${world.html}`));
+        await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+        await noTabOpened(s);
+      });
+    });
+  }
 });
 
 test.describe('left alone', () => {

@@ -68,7 +68,7 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
 import { ThreadPane } from './components/Thread';
-import { unsavedComposer } from './components/AttachmentPane';
+import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
 import { SearchHost, type SearchLanding } from './components/SearchHost';
@@ -948,7 +948,9 @@ function Inbox() {
         return;
       }
       // Over a dialog the screen would change out of sight, and a comment not saved yet would go with its file: a new tab keeps both.
-      if (link.closest('dialog') || inOverlay(link) || unsavedComposer(document.querySelector<HTMLElement>('[data-attachment-pane]'))) {
+      // The pane's own question (saved words compared), so a comment opened for editing and not changed is not unsaved.
+      // Here a new tab keeps the comment; a link inside an attached HTML page asks the pane's "Discard and go" instead.
+      if (link.closest('dialog') || inOverlay(link) || openPaneUnsaved()) {
         if (link.target) return;
         event.preventDefault();
         event.stopPropagation();
