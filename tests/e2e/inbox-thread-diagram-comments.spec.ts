@@ -178,6 +178,12 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   await expect(composer(page)).toHaveCount(0);
   await expect(badges(mermaid)).toHaveCount(1);
 
+  // A press on the badge selects it, the next one lets go.
+  await badges(mermaid).click();
+  await expect(badges(mermaid)).toHaveClass(/ring-2/);
+  await badges(mermaid).click();
+  await expect(badges(mermaid)).not.toHaveClass(/ring-2/);
+
   // Graphviz is the same path.
   await clickPart(page, part(graphviz, 'worker'));
   await saveComment(page, 'One worker is not enough.');
@@ -219,7 +225,7 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   // The reply box's list names the part, and points back at it.
   await openReply(page);
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('3 annotations');
+  await expect(chip).toHaveText('3 comments');
   await chip.click();
   const row = page.locator('.ib-annpop [data-annotation-row]').filter({ hasText: 'Tests pass?' });
   await expect(row).toContainText('node B');

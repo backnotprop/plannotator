@@ -194,7 +194,7 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   // The reply box's chip lists them under the message.
   await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 annotations');
+  await expect(chip).toHaveText('2 comments');
   await chip.click();
   const row = page.locator('.ib-annpop [data-annotation-row]').filter({ hasText: 'two, four and eight seconds' });
   await expect(row).toContainText("Claude Code's message, ");
