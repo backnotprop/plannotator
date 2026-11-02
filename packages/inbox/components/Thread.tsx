@@ -34,7 +34,7 @@ import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileV
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
 import type { InboxToastModel } from './Toast';
-import { AnnotationsChip } from './AnnotationsChip';
+import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
@@ -373,6 +373,10 @@ export function MessageBody({
     onSave: (annotation: Annotation) => Promise<boolean>;
     onUnanchored?: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
     onPainted?: () => void;
+    /** A press on a comment's highlight: the list of comments, at this one. Null: the press made a selection, the list makes way. */
+    onOpen?: (id: string | null) => void;
+    /** The comment the list is open at: its highlight shows it. */
+    openId?: string | null;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
@@ -471,6 +475,7 @@ export function MessageBody({
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pressSelected = useRef(false);
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   useEffect(() => {
@@ -701,11 +706,19 @@ export function MessageBody({
   // person removes elsewhere (the reply box's list) leaves the text.
   const viewerRef = useRef<ViewerHandle>(null);
   const commentList = useMemo<Annotation[]>(() => (comments ? [...comments.annotations] : NO_ANNOTATIONS), [comments?.annotations]);
+  // A diagram's numbered badge, in the message or its popout, shows its comment selected. A text highlight's press is
+  // openHighlight's, and reaches here too, so it is passed over.
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
+  const selectBadge = useCallback(
+    (id: string | null) => {
+      if (id !== null && !commentList.find((comment) => comment.id === id)?.diagramAnchor) return;
+      setSelectedBadge((current) => (current === id ? null : id));
+    },
+    [commentList],
+  );
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const painted = useRef<Set<string>>(new Set());
-  const [selectedComment, setSelectedComment] = useState<string | null>(null);
-  const selectComment = useCallback((id: string | null) => setSelectedComment((current) => (current === id ? null : id)), []);
   const addComment = useCallback((annotation: Annotation) => {
     painted.current.add(annotation.id);
     void commentsRef.current?.onSave(annotation).then((saved) => {
@@ -793,9 +806,25 @@ export function MessageBody({
     />
   );
 
+  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
+  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
+  const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
+    const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
+    // A link in the highlight stays a link.
+    if (!id || target.closest('a, button')) return;
+    // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
+    comments?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
+  };
+  // Read on the way down: the highlighter takes the selection away at this mouseup, so the click finds none.
+  const readPress = () => {
+    pressSelected.current = window.getSelection()?.isCollapsed === false;
+  };
+
   return (
     <ImageResolverContext.Provider value={resolveImage}>
-    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
       <Viewer
@@ -804,8 +833,8 @@ export function MessageBody({
         markdown={shown}
         annotations={commentList}
         onAddAnnotation={comments ? addComment : noop}
-        onSelectAnnotation={comments ? selectComment : noop}
-        selectedAnnotationId={comments ? (comments.revealed ?? selectedComment) : null}
+        onSelectAnnotation={comments ? selectBadge : noop}
+        selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
@@ -2028,7 +2057,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
     }
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
@@ -2036,8 +2065,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       await inboxApi.removeAnnotation(record.id);
       dropRecord(record.id);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
     }
+  };
+  /** The list of comments: open or not, one state for its four ways in (reply box, foot, highlights, full-screen card). */
+  const [commentsList, setCommentsList] = useState<CommentsListAt | null>(null);
+  const [commentEdit, setCommentEdit] = useState<CommentEdit | null>(null);
+  const openListAt = (id: string | null) => {
+    if (id === null) setCommentsList(null);
+    else if (listHome && records.some((record) => record.id === id)) setCommentsList((open) => ({ at: id, press: (open?.press ?? 0) + 1 }));
+  };
+  const commentsListProps: AnnotationsListProps = {
+    records,
+    attachments: allFiles,
+    onEdit: editRecord,
+    onRemove: removeRecord,
+    onOpen: openRecord,
+    messageName: messageCommentName,
+    unanchored: unanchoredComments,
+    editing: commentEdit,
+    onEditing: setCommentEdit,
   };
   /** The annotations as Plannotator's feedback text: each file version's text read now, so line numbers are what the person read. */
   const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
@@ -3818,6 +3865,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             canSend: boxWords !== '' || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0),
             picks: picksCount,
             annotations: records.length,
+            comments: {
+              ...commentsListProps,
+              // A comment on a message's text shows in the thread: back to it first, and to the passage once it is drawn.
+              onOpen: (record) => (record.message ? fileToThread(() => requestAnimationFrame(() => requestAnimationFrame(() => openRecord(record)))) : openRecord(record)),
+              list: commentsList?.card ? commentsList : null,
+              onList: (next) => setCommentsList(next && { ...next, card: true }),
+            },
             files: box.open ? replyFiles.files : [],
             onFiles: (list) => attachFromComposer(list, true),
             onDropFiles: (list) => attachFromComposer(list, false),
@@ -3875,6 +3929,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const [rowFit, setRowFit] = useState<{ level: number; max: OpenQuestionsLabelForm } | null>(null);
   const rowLevel = rowFit?.level ?? null;
   const footStatusShown = waiting || draftKept;
+  // What the foot shows in the list's place, in the order the foot draws them. A list opened then would show only later, by itself.
+  const listHome = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && (box.open || !(route.open && asking));
+  // The list lives where it opened: another thread, another view, the box opening or closing, or anything taking the foot's place, takes it away.
+  useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn, listHome]);
+  /** Closes the foot's list. `back`: to the count that shows at this width (the foot's first button once no comment is left). */
+  const closeFootList = (back: boolean) => {
+    setCommentsList(null);
+    if (!back) return;
+    const row = footRowRef.current;
+    const links = [...(row?.querySelectorAll<HTMLElement>('[data-comments-link]') ?? [])];
+    const link = links.find((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
+    (link ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+  };
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
@@ -4009,19 +4076,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     else go();
   };
 
-  const archiveButton = (
-    <Tip content={archived ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}>
-      <button
-        type="button"
-        className="ib-iconbtn"
-        onClick={() => void resolve(!archived)}
-        aria-label={archived ? 'Unarchive the thread' : 'Archive the thread'}
-        data-archive=""
-      >
-        <Icon name="archive" />
-      </button>
-    </Tip>
-  );
   // Pin to the sidebar (approval "inbox-pinned-threads"): the header ⋯ menu's first item (Pin thread /
   // Unpin thread), the phone's way to pin.
   // A click shows its state at once and its request waits for the one before it, so a quick
@@ -4142,7 +4196,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         </div>
       )}
       <div className="ib-phead" ref={headRef} data-artifacts-on={artifactsOn ? '' : undefined}>
-        {/* A phone leads with the way back to the list; Archive sits at the right, where the close was. */}
+        {/* A phone leads with the way back to the list; the ⋯ menu (with Archive) sits at the right, where the close was. */}
         {phone && artifactsOn ? (
           // On a phone Artifacts is a screen of its own: its way back is to the thread (the browser's Back, so the swipe agrees).
           <>
@@ -4216,7 +4270,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           </>
         )}
         {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
-            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, Archive, then the close.
+            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close.
             A phone keeps the same order after its way back. */}
         {phone && artifactsOn ? null : (
           <>
@@ -4262,8 +4316,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 </button>
               </Tip>
             )}
-            {archiveButton}
-            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} markUnread={markUnreadInMenu ? onMarkUnread : undefined} />
+            <ThreadMore
+              {...copyHost}
+              pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              markUnread={markUnreadInMenu ? onMarkUnread : undefined}
+              archive={{ archived, onToggle: () => void resolve(!archived) }}
+            />
             {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -4696,6 +4754,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
                           onUnanchored: noteUnanchored,
                           onPainted: () => repaintHits(message.id),
+                          onOpen: openListAt,
+                          openId: commentsList?.at ?? null,
                           revealed: revealedComment,
                         }
                       : undefined
@@ -5025,15 +5085,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   </Tip>
                 )}
                 {takesAnnotations && (
-                  <AnnotationsChip
-                    records={records}
-                    attachments={allFiles}
-                    onEdit={editRecord}
-                    onRemove={removeRecord}
-                    onOpen={openRecord}
-                    messageName={messageCommentName}
-                    unanchored={unanchoredComments}
-                  />
+                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
                 )}
                 <VoiceFoot voice={voice} phone={phone} />
               </div>
@@ -5151,7 +5203,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             </div>
             {(waiting || draftKept) && (
               <div className="ib-footstatus" data-foot-status="">
-                <DraftFootNote id={draftNoteId} unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }} />
+                <DraftFootNote
+                  id={draftNoteId}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
+                  commentsOpen={commentsList !== null && !commentsList.card}
+                />
                 {waiting && unanswered.length > 0 && (
                   <span className={keepOpen ? 'ib-keep' : undefined}>
                     <SkipChip id={skipNoteId} count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
@@ -5165,6 +5222,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 foot instead, never over a button. With Send waiting (picks or kept words), no pill. */}
             {showNew && phone && !waiting && !draftKept && newPill}
           </div>
+          {commentsList && !commentsList.card && (
+            <div className="ib-annat ib-annfoot">
+              <div className="ib-annat-in">
+                <AnnotationsList {...commentsListProps} at={commentsList.at} press={commentsList.press} onClose={closeFootList} />
+              </div>
+            </div>
+          )}
           </>
         )}
         {!archived && (

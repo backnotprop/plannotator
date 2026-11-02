@@ -178,6 +178,12 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   await expect(composer(page)).toHaveCount(0);
   await expect(badges(mermaid)).toHaveCount(1);
 
+  // A press on the badge selects it, the next one lets go.
+  await badges(mermaid).click();
+  await expect(badges(mermaid)).toHaveClass(/ring-2/);
+  await badges(mermaid).click();
+  await expect(badges(mermaid)).not.toHaveClass(/ring-2/);
+
   // Graphviz is the same path.
   await clickPart(page, part(graphviz, 'worker'));
   await saveComment(page, 'One worker is not enough.');
@@ -219,7 +225,7 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   // The reply box's list names the part, and points back at it.
   await openReply(page);
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('3 annotations');
+  await expect(chip).toHaveText('3 comments');
   await chip.click();
   const row = page.locator('.ib-annpop [data-annotation-row]').filter({ hasText: 'Tests pass?' });
   await expect(row).toContainText('node B');
@@ -274,8 +280,10 @@ test("the person's own message, a sent reply and an archived message open no com
   await expect(composer(page)).toHaveCount(0);
 
   // Archived: the agent's message before the archive takes none either.
-  await page.locator('section.ib-pane').getByRole('button', { name: /Archive/ }).first().click();
-  await expect(page.locator('section.ib-pane').getByRole('button', { name: 'Unarchive the thread' })).toBeVisible();
+  // Archive is in the header's ⋯ menu (no header button); the foot then names the archive.
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.getByRole('menuitem', { name: 'Archive thread' }).click();
+  await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
   await page.reload();
   await page.locator(`[data-message-article="${id}"] [data-fold-head]`).first().click();
   await expect(message(page, id).locator('[data-diagram-svg] svg').first()).toBeVisible();

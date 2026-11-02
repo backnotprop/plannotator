@@ -317,7 +317,7 @@ export function StaleGuard({
   const rest = [
     words ? 'your words' : '',
     otherPicks > 0 ? `${otherPicks} other ${otherPicks === 1 ? 'pick' : 'picks'}` : '',
-    annotations > 0 ? `${annotations} ${annotations === 1 ? 'annotation' : 'annotations'}` : '',
+    annotations > 0 ? `${annotations} ${annotations === 1 ? 'comment' : 'comments'}` : '',
   ].filter(Boolean);
   const restText = rest.length > 1 ? `${rest.slice(0, -1).join(', ')} and ${rest.at(-1)}` : (rest[0] ?? '');
   const heading = questions.length === 1 ? `${questionName(first)} changed before you sent` : `${questions.length} questions changed before you sent`;

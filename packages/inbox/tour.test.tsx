@@ -495,7 +495,9 @@ test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send
   await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('after the tour'), 'Mark read answers');
   // A click on the card's words shows its target again.
   await click($(el, '[data-tour-coach] h2'));
-  await until(() => document.querySelector('.ib-tour-again') !== null, 'the target pointed at again');
+  await until(() => document.querySelector('.ib-tour-mark') !== null, 'the target pointed at again');
+  // The highlight is its own class: it never lands on the first-run line, which keeps `ib-tour-again` for its text.
+  expect(document.querySelector('.ib-tour-again.ib-tour-mark')).toBeNull();
   expect(writes()).toEqual([]);
 }, 90_000);
 
