@@ -3281,6 +3281,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // A question replaced under an answer during the wait: as a Send pressed after it does, it stops for the guard.
       if (replacedSaves.current.size > 0 && !options.despiteReplaced) {
         setGuard(true);
+        // The guard draws once the thread shows the question replaced; until a read brings that, the error says why.
+        const drawn = threadRef.current.messages.some((m) =>
+          (m.questions ?? []).some((q) => q.state === 'superseded' && replacedSaves.current.has(`${q.message_id}/${q.key}`)),
+        );
+        if (!drawn) pickNotSaved();
         if (options.stayFull) fileToThread();
         return;
       }

@@ -80,6 +80,8 @@ let saveMs: number;
 let refusals: { status: number; code: string; error: string }[];
 /** Set: reading the thread again waits here. */
 let changed: Promise<void> | null;
+/** Set: reading the thread again brings nothing, as a read that failed on a bad network. */
+let rereadFails: boolean;
 
 const FULL = { status: 500, code: 'error', error: 'The disk is full.' };
 
@@ -148,6 +150,7 @@ beforeEach(() => {
   saveMs = 0;
   refusals = [];
   changed = null;
+  rereadFails = false;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -229,7 +232,7 @@ function Pane() {
       }
       onChanged={async () => {
         await changed;
-        setThread(threadNow());
+        if (!rereadFails) setThread(threadNow());
       }}
       onClose={() => {}}
       file={null}
@@ -549,6 +552,7 @@ test.skipIf(!hasDom)('changes after the press go in the Send, up to the point th
   expect(log.indexOf('reply')).toBeLessThan(log.lastIndexOf('pick'));
   await release();
   await until(() => toasts.length === 1, 'the notice');
+  // Pinned on purpose: the only word the person gets that their last change did not go (wording reported to the owner).
   expect(toasts[0]!.lead).toBe('Pick not saved. That question was already sent, so your last change did not go.');
   expect(saved.get(FIRST)!.answer?.other).toBe('abcd');
   expect(saved.get(FIRST)!.sent).toBe(true);
@@ -610,6 +614,7 @@ test.skipIf(!hasDom)('a first answer on a question replaced during the wait: the
   await until(() => picks.length === 3, 'the newest answer');
   await release();
   await until(() => toasts.length > 0, 'the notice');
+  // Pinned on purpose: the only word the person gets that these words were the only copy (wording reported to the owner).
   expect(toasts.map((toast) => toast.lead)).toEqual(["Pick not saved. That question was replaced, so this answer won't be sent."]);
   await until(() => el.textContent?.includes('Your pick on it will not be sent.') === true, 'the guard');
   expect(replies).toHaveLength(0);
@@ -632,6 +637,7 @@ test.skipIf(!hasDom)('a save refused after the pane closed: a notice says so, na
   await release();
   await until(() => toasts.length === 1, 'the notice');
   expect(toasts[0]!.icon).toBe('warn');
+  // Pinned on purpose: with the pane gone, this is the only word the person gets, and it names the thread (wording reported to the owner).
   expect(toasts[0]!.lead).toBe('Pick not saved. Your answer in "Retry" did not reach the Inbox.');
 });
 
@@ -644,7 +650,45 @@ test.skipIf(!hasDom)('leaving the pane with words not saved: a notice says so as
   expect(toasts).toHaveLength(0);
   act(() => root!.unmount());
   root = null;
+  // Pinned on purpose: as above, the only word the person gets once the pane is gone.
   expect(toasts.map((toast) => toast.lead)).toEqual(['Pick not saved. Your answer in "Retry" did not reach the Inbox.']);
+});
+
+test.skipIf(!hasDom)('replaced during the wait and the thread read after it failed: the stopped Send says why, never a silent stop', async () => {
+  const el = await render();
+  await act(async () => option(el, 'One minute').click());
+  await until(() => saved.get(SECOND)!.answer !== null, 'the second question saved');
+  await until(() => sendButton(el) !== null, 'the Send');
+  gate = [];
+  rereadFails = true;
+  type(el, 'first');
+  await until(() => picks.length === 2, 'the save in flight');
+  saved.set(FIRST, { ...saved.get(FIRST)!, superseded: true });
+  await press(el);
+  await release();
+  await until(() => toasts.length === 1, 'the notice');
+  // The thread on screen does not show the question replaced, so no guard can draw: the error says why.
+  await until(() => el.textContent?.includes('The pick was not saved.') === true, 'why the Send stopped');
+  expect(el.textContent).not.toContain('will not be sent.');
+  expect(replies).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('after a Send the guard stopped past its wait, a new answer still saves', async () => {
+  const el = await render();
+  await act(async () => option(el, 'One minute').click());
+  await until(() => saved.get(SECOND)!.answer !== null, 'the second question saved');
+  await until(() => sendButton(el) !== null, 'the Send');
+  gate = [];
+  type(el, 'first');
+  await until(() => picks.length === 2, 'the save in flight');
+  saved.set(FIRST, { ...saved.get(FIRST)!, superseded: true });
+  await press(el);
+  await release();
+  await until(() => el.textContent?.includes('will not be sent.') === true, 'the guard');
+  gate = null;
+  await act(async () => option(el, 'Ten minutes').click());
+  await until(() => saved.get(SECOND)!.answer?.selected[0] === 'Ten minutes', 'the new answer saved');
+  expect(replies).toHaveLength(0);
 });
 
 test.skipIf(!hasDom)('a saved pick reads the files once at most: only a read of the thread reads them again', async () => {
@@ -684,6 +728,17 @@ test.skipIf(!hasDom)('Re-ask waits for the newest answer: the note goes after it
   await release();
   await until(() => log.includes('reask'), 'the note');
   expect(log).toEqual(['pick', 'reask']);
+});
+
+test.skipIf(!hasDom)('after a Re-ask, a new answer still saves', async () => {
+  const el = await render();
+  type(el, 'first');
+  await until(() => saved.get(FIRST)!.answer?.other === 'first', 'the first answer saved');
+  await reask(el);
+  await until(() => log.includes('reask'), 'the note');
+  await settle(5);
+  type(el, 'first, then more');
+  await until(() => saved.get(FIRST)!.answer?.other === 'first, then more', 'the new answer saved');
 });
 
 test.skipIf(!hasDom)('Re-ask stops on an answer not saved: the error shows and nothing is asked', async () => {
