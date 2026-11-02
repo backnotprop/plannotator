@@ -1246,7 +1246,7 @@ export async function startAnnotateServer(options: {
 				annotateDrafts.remove(readDraftGenerationFromUrl(req));
 				json(res, { ok: true });
 			} else {
-				const loaded = annotateDrafts.load(isThisMachineRequest(req));
+				const loaded = annotateDrafts.load();
 				if (loaded.found) json(res, loaded.draft);
 				else json(res, { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) }, 404);
 			}

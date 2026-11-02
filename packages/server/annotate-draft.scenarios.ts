@@ -457,18 +457,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect((await fetch(`${alone.url}/api/draft/document?path=${encodeURIComponent(alias)}`)).status).toBe(403);
     });
 
-    test("a this-machine reader's comments on a document outside the session's folders come back in Draft Recovered; a forwarded reader is not offered them", async () => {
-      const outside = join(root, "outside-the-roots.md");
-      writeFileSync(outside, "# Outside\n");
-      const folder = await openFolder();
-      // Saved by a reader on this machine: it may open any document, so it may keep comments on it.
-      const saved = await saveDocuments(folder, [{ path: outside, annotations: [comment("far")] }]);
-      expect((await saved.json()).rejected ?? []).toEqual([]);
-      expect(await offeredPaths(folder)).toEqual([[outside, ["far"]]]);
-      const forwarded = await fetch(`${folder.url}/api/draft`, { headers: FORWARDED });
-      expect(forwarded.status === 200 ? ((await forwarded.json()) as { documents?: unknown[] }).documents ?? [] : []).toEqual([]);
-    });
-
     test("only existing regular files get a copy, keyed by their real path", async () => {
       const folder = await openFolder();
       const missing = join(docDir, "missing.md");

@@ -1430,7 +1430,7 @@ export async function startAnnotateServer(
               annotateDrafts.remove(readDraftGenerationFromUrl(req));
               return Response.json({ ok: true });
             }
-            const loaded = annotateDrafts.load(isThisMachineRequest(req));
+            const loaded = annotateDrafts.load();
             if (loaded.found) return Response.json(loaded.draft);
             return Response.json(
               { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
