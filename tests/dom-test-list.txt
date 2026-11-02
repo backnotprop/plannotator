@@ -153,6 +153,7 @@ packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
 packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
+packages/inbox/ask/askWindow.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/tabCountWindow.test.tsx

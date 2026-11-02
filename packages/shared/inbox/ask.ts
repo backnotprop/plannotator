@@ -23,7 +23,7 @@
  * means an `answered_at` later than it.
  */
 
-import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
 import { INBOX_DRAFT_BODY_MAX } from "./drafts";
@@ -146,6 +146,41 @@ function namesIn(inboxDirPath: string): string[] {
 
 /** The thread a file belongs to: `<id>.json`, a crash's `<id>.json.<pid>.tmp`, a set-aside `<id>.json.<time>.bad`. */
 const threadOfFile = (name: string): string => name.split(".", 1)[0]!;
+
+/** What the chat list needs of a conversation: the agent of its last turn, when anything last happened, a new answer. */
+export interface InboxAskSummary {
+  host: string | null;
+  at: string;
+  unread: boolean;
+}
+
+export function inboxAskSummary(conversation: InboxAskConversation | null): InboxAskSummary | null {
+  const last = conversation?.turns.at(-1);
+  if (!conversation || !last) return null;
+  const times = (turn: InboxAskTurn): number[] => [Date.parse(turn.at), Date.parse(turn.answered_at ?? "")].filter(Number.isFinite);
+  const newest = (values: number[]): number => values.reduce((latest, value) => Math.max(latest, value), Number.NEGATIVE_INFINITY);
+  const answered = newest(conversation.turns.map((turn) => Date.parse(turn.answered_at ?? "")).filter(Number.isFinite));
+  const seen = Date.parse(conversation.seen_at ?? "");
+  return {
+    host: last.host,
+    at: new Date(newest(conversation.turns.flatMap(times))).toISOString(),
+    unread: Number.isFinite(answered) && (!Number.isFinite(seen) || answered > seen),
+  };
+}
+
+/** Each thread's conversation file with what says it changed, without reading it. */
+export function inboxAskFiles(inboxDirPath: string): { threadId: string; mtimeMs: number; size: number }[] {
+  return namesIn(inboxDirPath).flatMap((name) => {
+    const threadId = threadOfFile(name);
+    if (name !== `${threadId}.json` || !isInboxId("msg", threadId)) return [];
+    try {
+      const { mtimeMs, size } = statSync(join(dirOf(inboxDirPath), name));
+      return [{ threadId, mtimeMs, size }];
+    } catch {
+      return [];
+    }
+  });
+}
 
 function removeFiles(inboxDirPath: string, names: string[]): boolean {
   let removed = false;

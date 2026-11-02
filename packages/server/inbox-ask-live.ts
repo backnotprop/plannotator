@@ -13,11 +13,14 @@
  *      POST /ask waits for that first poll, at most 5 seconds: a new bridge
  *      reports `ready` until polled, so a query before it would skip the busy
  *      check and go into the agent's running work.
- *   4. The window runs a query on the provider POST /ask named. The answer is
- *      kept here as it streams and written when it ends, or what came of it on
- *      a failure, whether or not a browser is still reading. It is written only
- *      if the turn is still there: End and a thread delete stop the question,
- *      and the file does not come back.
+ *   4. POST /ask names a provider for that one turn. The window's AI session
+ *      must name it, so a session is bound to its turn by what POST /ask said,
+ *      and never by whatever holds the slot when it arrives.
+ *   5. The window runs a query on that session. The answer is kept here as it
+ *      streams and written when it ends, or what came of it on a failure,
+ *      whether or not a browser is still reading. It is written only if the
+ *      turn is still there: End and a thread delete stop the question, and the
+ *      file does not come back.
  *
  * The slot frees when the query ends for any reason, or after 30 seconds if
  * none starts. A busy answer ends the query, so a retry claims the slot again
@@ -43,7 +46,7 @@ import {
 } from "@plannotator/ai/session-bridge";
 import { createPullSessionBridge, SESSION_BRIDGE_EVENT_PATH, SESSION_BRIDGE_POLL_PATH, type PullSessionBridge } from "@plannotator/ai/session-bridge-pull";
 import { SessionManager } from "@plannotator/ai/session-manager";
-import type { AISession, CreateSessionOptions } from "@plannotator/ai/types";
+import type { AIContext, AISession, CreateSessionOptions } from "@plannotator/ai/types";
 import { INBOX_ASK_CUT_NOTE, INBOX_ASK_FILE_MAX, INBOX_ASK_TEXT_MAX, updateInboxAskTurn, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { INBOX_ASK_BRIDGE_PREFIX } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -97,9 +100,19 @@ export interface InboxAskClaim {
   slot: Slot;
 }
 
+/**
+ * An AI session's context here. inbox-ask.ts builds it, and never takes it from
+ * the window: `turn` says which turn the session answers, and the surface the
+ * agent reads names the thread's subject.
+ */
+export type InboxAskContext = AIContext & { turn: string };
+
+/** What POST /ask hands the window as `provider_id`: this bridge's provider, for this one turn. */
+const turnProvider = (bridge: LiveBridge, slot: Slot): string => `${bridge.providerId}#${slot.turnId}`;
+
 /** Ask this session's provider, with the slot's say over which query may run. */
 class InboxAskProvider extends SessionBridgeProvider {
-  private readonly slotHooks: { made(query: SessionBridgeSession): void; take(query: SessionBridgeSession): boolean; ended(query: SessionBridgeSession): void };
+  private readonly slotHooks: { made(query: SessionBridgeSession, turn: string | undefined): void; take(query: SessionBridgeSession): boolean; ended(query: SessionBridgeSession): void };
 
   constructor(bridge: SessionBridge, slotHooks: InboxAskProvider["slotHooks"]) {
     super(bridge);
@@ -108,7 +121,7 @@ class InboxAskProvider extends SessionBridgeProvider {
 
   override async createSession(options: CreateSessionOptions): Promise<AISession> {
     const query = await super.createSession(options);
-    this.slotHooks.made(query as SessionBridgeSession);
+    this.slotHooks.made(query as SessionBridgeSession, (options.context as Partial<InboxAskContext>).turn);
     return query;
   }
 
@@ -264,8 +277,8 @@ export function createInboxAskLive(options: {
       },
     };
     const provider = new InboxAskProvider(wrapped, {
-      made(query) {
-        if (live.slot) madeFor.set(query, live.slot.turnId);
+      made(query, turn) {
+        if (turn) madeFor.set(query, turn);
       },
       // A query needs a turn to answer: POST /ask made one, this session was made for it, and it is not taken.
       take(query) {
@@ -334,7 +347,15 @@ export function createInboxAskLive(options: {
     return false;
   };
 
-  /** Stop what runs for a thread: End, and a deleted thread. */
+  /** The slot this `provider_id` names, while that turn still holds it. A late window's value names none. */
+  const heldBy = (providerId: unknown): InboxAskClaim | null => {
+    for (const bridge of bridges.values()) {
+      if (bridge.slot && turnProvider(bridge, bridge.slot) === providerId) return { bridge, slot: bridge.slot };
+    }
+    return null;
+  };
+
+  /** Stop what runs for a thread: Stop, End, and a deleted thread. */
   const stopThread = (threadId: string): void => {
     const held = slotOf(threadId);
     if (!held) return;
@@ -378,6 +399,11 @@ export function createInboxAskLive(options: {
     claim,
     free: ({ bridge, slot }: InboxAskClaim) => free(bridge, slot),
     connected,
+    heldBy,
+    /** What POST /ask hands the window for the turn holding this slot. */
+    providerOf: ({ bridge, slot }: InboxAskClaim): string => turnProvider(bridge, slot),
+    /** Whether this session's connection can answer now: the icons' rule. */
+    canAnswer: (session: string): boolean => BRIDGE_HOSTS.has(hostOf(session) ?? ""),
     waits,
     onWaits(listener: (session: string) => void): () => void {
       waitListeners.add(listener);

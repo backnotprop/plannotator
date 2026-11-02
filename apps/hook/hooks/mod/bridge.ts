@@ -15,9 +15,10 @@
  * `turn.complete`'s answer as `done`. Busy = Claude is mid-turn: reported as
  * `busy`, so the reviewer chooses wait or interrupt; an interrupt aborts the
  * running turn with `$.turn.abort`, except a question's turn the person typed
- * into (turns.ts, take-over), which is theirs, and a turn another plugin's
- * prompt started, which that plugin may be waiting on. Plan review does not block the session
- * under the mod, so the status is never `blocked`.
+ * into (turns.ts, take-over), which is theirs, a turn another plugin's prompt
+ * started, which that plugin may be waiting on, and any turn once the launch is
+ * not live here. Plan review does not block the session under the mod, so the
+ * status is never `blocked`.
  */
 
 import type { Host } from './host'
@@ -51,6 +52,11 @@ export const TAKEN_OVER_INTERRUPT_TEXT =
 /** Why "Interrupt and ask now" refuses a turn another plugin's prompt started. */
 export const OTHER_PLUGIN_INTERRUPT_TEXT =
   'The session is answering a message from another plugin, so Plannotator will not stop it. Ask when it finishes instead.'
+/**
+ * Why "Interrupt and ask now" refuses once the launch is not live here. Same
+ * text as the server's own refusal of a gone session (packages/ai/session-bridge-pull.ts).
+ */
+export const SESSION_GONE_INTERRUPT_TEXT = 'The session is no longer available.'
 
 /** Used when a `taken_over` comes without a message. */
 const TAKEN_OVER_FALLBACK_NOTE =
@@ -236,6 +242,12 @@ export function createBridge(options: BridgeOptions): BridgeHandle {
   const runInterrupt = async (interruptId: string) => {
     if (seenInterrupts.has(interruptId)) return
     seenInterrupts.add(interruptId)
+    // As in runAsk: past the session's end or a lease move, the running turn
+    // belongs to whatever conversation the process went on with.
+    if (!options.isLive()) {
+      emit({ type: 'interrupted', interruptId, ok: false, message: SESSION_GONE_INTERRUPT_TEXT })
+      return
+    }
     const running = turns.runningTurnId
     if (!running) {
       emit({ type: 'interrupted', interruptId, ok: true })

@@ -6560,6 +6560,40 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .pn-inbox .ib-vkey { flex: 1; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line); border-radius: 7px; background: var(--background); color: var(--foreground); font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-vkey:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 
+/* Ask AI (ask/): the shared chat window floats in this layer, over everything but the toast and the menus. The height
+   follows the phone's keyboard (--ib-vvh, phone.ts). The layer lets the page take the clicks around the window. */
+.ib-ask-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 41; pointer-events: none; isolation: isolate; }
+.ib-ask-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
+.pn-inbox .ib-ask-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 6px; border: none; border-radius: 8px; background: var(--muted); color: var(--foreground); cursor: pointer; }
+.pn-inbox .ib-ask-chip:hover, .pn-inbox .ib-ask-chip[data-popup-open] { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
+.pn-inbox .ib-ask-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-ask-chipname { min-width: 0; max-width: 150px; overflow: hidden; font-size: var(--ib-fs-12, 12px); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.pn-inbox .ib-ask-caret { flex: none; color: var(--muted-foreground); }
+.ib-ask-menu { width: 288px; max-height: min(440px, 70dvh); overflow-y: auto; }
+.pn-inbox .ib-pm .ib-pmi.ib-ask-row { gap: 10px; height: auto; min-height: 44px; padding: 6px 8px; white-space: normal; }
+.ib-ask-rowtext { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.ib-ask-rowname, .ib-ask-rowsub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-ask-rowname { font-size: var(--ib-fs-13, 13px); line-height: 17px; }
+.ib-ask-rowsub { font-size: var(--ib-fs-11-5, 11.5px); line-height: 15px; color: color-mix(in oklab, var(--muted-foreground) 85%, var(--popover)); }
+.pn-inbox .ib-ask-check { flex: none; color: var(--foreground); }
+/* The approved column: a state mark stands one slot left of the current chat's check. */
+.ib-ask-spin { margin-right: 32px; }
+.ib-ask-dot { margin-right: 34px; }
+.ib-ask-spin { flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: ib-ask-spin 800ms linear infinite; }
+@keyframes ib-ask-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-ask-spin { animation: none; } }
+.ib-ask-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); }
+.ib-ask-grouplabel { padding: 6px 8px 2px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+.ib-ask-empty { margin: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-ask-note { margin: 6px 0 0; font-size: var(--ib-fs-12, 12px); line-height: 1.45; color: var(--muted-foreground); }
+.ib-ask-note p { margin: 0; }
+.ib-ask-noteacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pn-inbox .ib-ask-notebtn { height: 24px; padding: 0 8px; border: 1px solid var(--ib-line, var(--border)); border-radius: 6px; background: none; color: var(--foreground); font-size: var(--ib-fs-12, 12px); cursor: pointer; }
+.pn-inbox .ib-ask-notebtn:hover:not(:disabled) { background: var(--muted); }
+.pn-inbox .ib-ask-notebtn:disabled { opacity: 0.5; cursor: default; }
+.pn-inbox .ib-ask-notebtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-ask-problem { margin: 0 0 6px; font-size: var(--ib-fs-12, 12px); color: var(--destructive); }
+
 /* The count opens the list of comments (AnnotationsChip.tsx). In the closed foot, a quiet link; its bigger press area
    is an overlay, so the foot's row keeps its size and nothing moves. */
 .pn-inbox button.ib-comments-link { position: relative; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); }
