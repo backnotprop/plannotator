@@ -10,8 +10,9 @@
  * and icon; the dropdown's rows, states and grouping; a pick moves `#thread=`
  * and marks its answer seen; Mod+Enter and Escape in the window leave the reply
  * draft and the thread alone, from the transcript, the header and a press on
- * the header's plain surface; the window stands on a phone, where Enter is a
- * new line.
+ * the header's plain surface, and bare keys stay out of the Inbox; the window
+ * stands on a phone, where Enter is a new line and nothing is sent, and Reply
+ * in the thread leaves the reply in sight.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-ask-window.spec.ts`.
@@ -49,6 +50,8 @@ interface World {
   url: string;
   target: { port: number; serverSession: string };
   threads: Record<'push' | 'search' | 'invoice' | 'webhook' | 'migration' | 'keys', string>;
+  projects: Record<'relay' | 'web' | 'billing', string>;
+  send: (project: string, session: string, host: string, name: string, subject: string, body: string) => Promise<string>;
   agents: ScriptedAskAgent[];
   client: Client;
   context: BrowserContext;
@@ -175,7 +178,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  world = { root, dataDir, url, target: { port: registry.port, serverSession: registry.serverSession }, threads, agents, client, context, page, errors, held };
+  world = { root, dataDir, url, target: { port: registry.port, serverSession: registry.serverSession }, threads, projects, send, agents, client, context, page, errors, held };
 
   // A window elsewhere is mid-answer on the Search chat.
   await expect(async () => {
@@ -293,7 +296,10 @@ test('Mod+Enter and Escape in the window leave the reply draft and the thread al
   const pressed = async () => {
     await page.keyboard.press('ControlOrMeta+Enter');
     await page.keyboard.press('Escape');
+    // No check on where this key came from: only the window's overlay mark keeps it from the Inbox.
+    await page.keyboard.press('Shift+Slash');
     await page.waitForTimeout(200);
+    await expect(page.locator('.ib-map')).toHaveCount(0);
     await expect(reply).toHaveValue('A reply that must stay a draft');
     expect(page.url()).toContain(threads.keys);
     await expect(frame()).toBeVisible();
@@ -328,10 +334,28 @@ test('the window stands on a phone, where Enter is a new line', async ({ browser
     expect(rect.width).toBe(390);
     expect(rect.height).toBeLessThanOrEqual(844);
     await expect(box(phone)).toBeInViewport();
+    const posted: string[] = [];
+    phone.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/ask')) posted.push(request.url());
+    });
     await box(phone).fill('one');
     await box(phone).press('Enter');
-    await expect(box(phone)).not.toHaveValue('');
+    // A new line in the box, and nothing sent: a box still holding "one" could be a POST on its way.
+    await expect(box(phone)).toHaveValue('one\n');
+    await phone.waitForTimeout(200);
+    expect(posted).toEqual([]);
     await phone.screenshot({ path: join(shotsDir, '6-phone-light.png') });
+
+    // After the pictures, so this thread stays out of them. The window fills a phone: it steps aside for the reply.
+    const noted = await world.send(world.projects.web, 'ses-keys', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
+    writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(noted, 'ses-keys', 'claude-code', 5, 'What was the plan?', null, false));
+    await phone.goto(`${url}#thread=${noted}`);
+    await expect(askIcon(phone)).toBeVisible();
+    await askIcon(phone).tap();
+    await frame(phone).getByRole('button', { name: 'Reply in the thread' }).tap();
+    await expect(frame(phone)).toHaveCount(0);
+    await expect(phone.locator('section.ib-pane textarea')).toBeVisible();
+    await expect(phone.locator('section.ib-pane textarea')).toHaveValue('What was the plan?');
   } finally {
     await context.close();
   }
