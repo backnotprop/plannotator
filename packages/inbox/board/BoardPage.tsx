@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
-import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo } from '@plannotator/core/inbox-types';
+import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
@@ -26,10 +26,12 @@ import { projectNames } from '../search/model';
 import {
   agentState,
   askWhereBody,
+  BOARD_LANE_COLUMNS,
   boardCounts,
   boardLanes,
   boardProjects,
   cardsInProject,
+  inDoneLane,
   BOARD_FILTER_ROW_BELOW,
   cardAge,
   cardLabel,
@@ -48,6 +50,8 @@ import {
   youLinkLabel,
   youThread,
   unseenDrops,
+  waitingLinkLabel,
+  waitingThread,
   type BoardMove,
   type BoardView,
 } from './model';
@@ -106,9 +110,10 @@ export interface BoardPageProps {
 }
 
 /**
- * The Board (approval "inbox-board", step 2): the five live columns as lanes
- * (Soft + Lanes), cards in variant C "Lean", Done and Cancelled as links to
- * their own lists, the agents' unseen drops above the lanes. A card opens in
+ * The Board (approval "inbox-board", step 2; columns v2): five lanes, Backlog,
+ * Todo, In progress, In review and Done (its last seven days), cards in
+ * variant C "Lean", All done and Cancelled as links to their own lists, the
+ * agents' unseen drops above the lanes. A card opens in
  * a panel beside the Board (the lanes narrow and scroll, so the card's lane
  * stays in view); on a phone the lanes are one stacked list (Done and
  * Cancelled folded at the end) and an opened card is a full screen. Every move
@@ -141,8 +146,6 @@ export function BoardPage(props: BoardPageProps) {
       .catch(() => {});
   }, [props.claimIntro]);
   const promptCopy = useCopyBoardPrompt(props.mcpCommand);
-  // Cards on the lanes (Backlog too): none is the empty Board's line. "In flight" in the header leaves Backlog out.
-  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column)).length;
   const [sendingCard, setSendingCard] = useState<InboxCardWire | null>(null);
   const [said, setSaid] = useState('');
   const [failed, setFailed] = useState<string | null>(null);
@@ -151,6 +154,8 @@ export function BoardPage(props: BoardPageProps) {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+  // Cards on the lanes (Backlog, and Done's last week, too): none is the empty Board's line.
+  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inDoneLane(card, now)).length;
   const { model: sessions } = useComposeSessions(true);
   const live = sessions ? sessions.projects.flatMap((g) => g.sessions) : null;
   const open = props.openCard ? (allCards.find((c) => c.id === props.openCard) ?? null) : null;
@@ -380,7 +385,7 @@ export function BoardPage(props: BoardPageProps) {
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
-  // header, as on a phone, so neither it nor the counts are cut to a few letters.
+  // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
   useLayoutEffect(() => {
     const el = pageRef.current;
@@ -529,7 +534,7 @@ export function BoardPage(props: BoardPageProps) {
         {!phone && view === 'lanes' && model && (
           <nav className="ib-blinks" aria-label="Cards out of the lanes">
             <a href="#board=done" data-board-link="done" onClick={(event) => (event.preventDefault(), props.onView('done'))}>
-              Done {formatCount(counts.done)}
+              All done
             </a>
             <span aria-hidden="true">·</span>
             <a href="#board=cancelled" data-board-link="cancelled" onClick={(event) => (event.preventDefault(), props.onView('cancelled'))}>
@@ -695,9 +700,9 @@ function Lanes({
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!openColumn || !el || fit === null) return;
-    const index = INBOX_CARD_LIVE_COLUMNS.indexOf(openColumn);
+    const index = BOARD_LANE_COLUMNS.indexOf(openColumn);
     if (index < 0) return;
-    const start = laneWindowStart(index, fit, INBOX_CARD_LIVE_COLUMNS.length);
+    const start = laneWindowStart(index, fit, BOARD_LANE_COLUMNS.length);
     const lane = el.querySelectorAll<HTMLElement>('[data-lane]')[start];
     if (lane) el.scrollLeft = lane.offsetLeft - el.querySelector<HTMLElement>('[data-lane]')!.offsetLeft;
   }, [openColumn, common.openId, fit]);
@@ -709,7 +714,7 @@ function Lanes({
       data-fit={fit ?? undefined}
       style={fit ? ({ '--ib-lanes-fit': fit } as CSSProperties) : undefined}
     >
-      {boardLanes(cards).map((lane) => {
+      {boardLanes(cards, common.now).map((lane) => {
         const target = dragging !== null && dragging.column !== lane.column;
         const dragOver = (event: DragEvent) => {
           if (!target) return;
@@ -775,6 +780,7 @@ const LANE_EMPTY: Partial<Record<InboxCardColumn, string>> = {
   todo: 'Nothing asked and waiting to start.',
   in_progress: 'No agent is working on anything.',
   in_review: 'Nothing waits on your review.',
+  done: 'Nothing done in the last 7 days.',
 };
 
 /** A lane card's title is cut (clamped at three lines, or a word cut at the edge): its button overflows. */
@@ -819,10 +825,13 @@ function BoardCard({
   const mark = markOf(card);
   const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
+  // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
+  const waiting = line?.you ? null : waitingThread(card, rowOf);
+  const waitingSubject = waiting ? displayInboxSubject(rowOf(waiting)?.subject) : null;
   // "Title row" (approval board-lane-card, r1): a card is its title row, the marks and the age at its right.
-  // A second line only when the person owes something ("You: …") or a send is pending ("Sent to …"); the
-  // agent's last word is left off the lane card and stays in the opened card. Never an empty second line.
-  const oneLine = !sent && !line?.you;
+  // A second line only when the person owes something ("You: …", "Waiting on you") or a send is pending
+  // ("Sent to …"); the agent's last word is left off the lane card and stays in the opened card. Never an empty second line.
+  const oneLine = !sent && !line?.you && !waiting;
   const owner = cardOwnerName(card);
   const meta = (
     <span className="ib-bc-meta">
@@ -880,6 +889,11 @@ function BoardCard({
                 {delivery ? <DeliveryTick delivery={delivery} /> : <Icon name="clock" size={13} />}
                 <span className="ib-bc-sentt">Sent to {sent}</span>
               </span>
+            ) : waiting ? (
+              <button type="button" className="ib-bc-youlink" data-card-waiting={waiting} aria-label={waitingLinkLabel(waitingSubject)} onClick={() => onOpenThread(card, waiting)}>
+                <b className="ib-bc-youw">Waiting on you:</b> <span className="ib-bc-yout">{waitingSubject ?? 'a question'}</span>
+                <Icon name="arrowUpRight" size={12} />
+              </button>
             ) : line?.you && thread ? (
               <button type="button" className="ib-bc-youlink" data-card-you-link={thread} aria-label={youLinkLabel(line.text)} onClick={() => onOpenThread(card, thread)}>
                 <b className="ib-bc-youw">You:</b> <span className="ib-bc-yout">{line.text}</span>
@@ -1055,9 +1069,10 @@ function DroppedList({ cards, onRestore, inProject = null }: { cards: readonly I
 }
 
 /**
- * A phone: the lanes as one stacked list in column order, each foldable,
- * with Done and Cancelled folded at the end. No drag: a
- * card opens full screen, where its column menu moves it.
+ * A phone: the lanes as one stacked list in column order, each foldable
+ * (Done, its last seven days, and Cancelled folded at the end), Done ending
+ * in "All done" when older cards are done. No drag: a card opens full
+ * screen, where its column menu moves it.
  */
 function PhoneBoard({
   cards,
@@ -1066,6 +1081,7 @@ function PhoneBoard({
   ...common
 }: CardCommon & { cards: readonly InboxCardWire[]; counts: ReturnType<typeof boardCounts>; onRestore: (card: InboxCardWire) => unknown }) {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(['done', 'dropped']));
+  const [allDone, setAllDone] = useState(false);
   const toggle = (key: string) =>
     setFolded((current) => {
       const next = new Set(current);
@@ -1083,14 +1099,45 @@ function PhoneBoard({
     ) : (
       <p className="ib-lane-empty">{empty}</p>
     );
-  const groups: { key: string; label: string; count: number; body: ReactNode }[] = boardLanes(cards).map((lane) => ({
-    key: lane.column,
-    label: lane.label,
-    count: lane.cards.length,
-    body: list(lane.cards, LANE_EMPTY[lane.column] ?? ''),
-  }));
+  const done = cards.filter((c) => c.column === 'done');
+  const stackRef = useRef<HTMLDivElement | null>(null);
+  // "All done" leaves the page when tapped: focus goes to the first card it shows, never to the body.
+  const [focusCard, setFocusCard] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusCard) return;
+    setFocusCard(null);
+    stackRef.current?.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(focusCard)}"] [data-card-open]`)?.focus();
+  }, [focusCard]);
+  const groups: { key: string; label: string; count: number; body: ReactNode }[] = boardLanes(cards, common.now).map((lane) => {
+    if (lane.column !== 'done') return { key: lane.column, label: lane.label, count: lane.cards.length, body: list(lane.cards, LANE_EMPTY[lane.column] ?? '') };
+    const recent = new Set(lane.cards.map((card) => card.id));
+    const older = done.filter((card) => !recent.has(card.id));
+    const showAll = allDone && older.length > 0;
+    return {
+      key: 'done',
+      label: lane.label,
+      count: showAll ? done.length : lane.cards.length,
+      body: (
+        <>
+          {showAll ? list(done, '') : list(lane.cards, LANE_EMPTY.done ?? '')}
+          {older.length > 0 && !showAll && (
+            <button
+              type="button"
+              className="ib-lnk ib-bdoneall"
+              data-board-done-all=""
+              onClick={() => {
+                setAllDone(true);
+                setFocusCard(older[0]!.id);
+              }}
+            >
+              All done ({formatCount(done.length)})
+            </button>
+          )}
+        </>
+      ),
+    };
+  });
   const dropped = cards.filter((c) => c.column === 'dropped');
-  groups.push({ key: 'done', label: 'Done', count: counts.done, body: list(cards.filter((c) => c.column === 'done'), 'Nothing done yet.') });
   groups.push({
     key: 'dropped',
     label: 'Cancelled',
@@ -1098,7 +1145,7 @@ function PhoneBoard({
     body: dropped.length > 0 ? <DroppedList cards={dropped} onRestore={onRestore} /> : <p className="ib-lane-empty">Nothing cancelled.</p>,
   });
   return (
-    <div className="ib-bstack">
+    <div ref={stackRef} className="ib-bstack">
       {groups.map((group) => {
         const opened = !folded.has(group.key);
         const bodyId = `ib-bstack-${group.key}`;
