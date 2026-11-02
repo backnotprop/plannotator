@@ -274,6 +274,8 @@ describe("linked machines, on three real Inboxes", () => {
       const views = await machinesOf(A);
       expect(typeof views.find((x) => x.id === B.id)!.list_cursor).toBe("number");
       expect(views.find((x) => x.self)!.list_cursor).toBeNull();
+      // Both keep snoozes, and A says so of B (its list said so): A's window offers Snooze on B's rows.
+      expect(views.map((x) => x.snoozes)).toEqual([true, true]);
       // A's own list (no machines=1) stays A's own.
       expect(((await getJson(A, "/api/inbox/threads")).sections as Json[]).flatMap((s) => s.threads).some((r: Json) => r.thread_id === sent.thread_id)).toBe(false);
       // The person opens the thread from A (a read forwarded to B), then presses Send.

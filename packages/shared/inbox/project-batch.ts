@@ -81,7 +81,7 @@ export function markProjectRead(store: InboxStore, projectId: string): ProjectRe
     if (snoozed.has(row.thread_id)) continue;
     // A thread back from a snooze and otherwise Quiet: nothing to mark, only its clock to take away.
     if (!inboxRowOffersMarkRead(row)) {
-      if (store.snoozes().some((entry) => entry.thread_id === row.thread_id)) store.clearSnooze(row.thread_id);
+      if (store.snoozes().some((entry) => entry.thread_id === row.thread_id)) store.endSnooze(row.thread_id);
       continue;
     }
     try {
@@ -107,7 +107,7 @@ export function archiveProject(store: InboxStore, projectId: string): ProjectArc
         store.markRead(row.thread_id, true);
         read.push(row.thread_id);
       } else {
-        store.resolveThread(row.thread_id, true);
+        store.resolveThread(row.thread_id, true, "person");
         resolved.push(row.thread_id);
       }
     } catch (error) {

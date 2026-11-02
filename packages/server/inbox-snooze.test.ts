@@ -42,7 +42,7 @@ async function setup() {
         structuredContent: { thread_id: string; message_id: string };
       }
     ).structuredContent;
-  return { server, client, send };
+  return { server, client, send, project };
 }
 
 const url = (server: InboxServer, path: string) => `http://127.0.0.1:${server.port}${path}`;
@@ -144,6 +144,27 @@ describe("snooze", () => {
     await snooze(server, a.thread_id, later(3_600_000));
     await snooze(server, a.thread_id, null);
     expect(server.store.snoozes()).toEqual([]);
+    // Unsnooze names a thread too: no such thread is a 404, never a quiet 200.
+    for (const id of ["msg_01K70000000000000000000099", "zzz"]) {
+      const missing = await snooze(server, id, null);
+      expect(missing.status).toBe(404);
+      expect(((await missing.json()) as { code: string }).code).toBe("thread_not_found");
+    }
+  });
+
+  test("an agent's resolve_message leaves the snooze; the person's Archive ends it", async () => {
+    const { server, client, send, project } = await setup();
+    const a = await send("Plain news", "ses_a");
+    await snooze(server, a.thread_id, later(3_600_000));
+    await client.callTool({ name: "resolve_message", arguments: { message_id: a.message_id } });
+    expect(server.store.snoozedThreads()).toEqual(new Set([a.thread_id]));
+    // The agent writes again after its own archive: the thread is still in the band, not back in the list.
+    await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_a", agent_name: "Claude Code", body: "One more thing", reply_to: a.message_id } });
+    expect((await list(server)).snoozed!.map((r) => r.thread_id)).toEqual([a.thread_id]);
+    const b = await send("Other news", "ses_b");
+    await snooze(server, b.thread_id, later(3_600_000));
+    expect((await post(server, `/api/inbox/messages/${b.message_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(server.store.snoozedThreads().has(b.thread_id)).toBe(false);
   });
 
   test("search finds a snoozed thread, but no Status does", async () => {

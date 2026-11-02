@@ -57,6 +57,8 @@ export interface PeerList {
   cursor: number;
   rows: (InboxListRow & { machine: string })[];
   projects: Record<string, unknown>[];
+  /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
+  snoozes: boolean;
 }
 
 export interface PeerLinkOptions {
@@ -293,6 +295,7 @@ export class PeerLink {
       cursor,
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
+      snoozes: list.snoozes === true,
     };
     this.options.onChange();
     return true;

@@ -20,6 +20,7 @@
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxSnoozeDelay, type InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_SNOOZE_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/snooze$/;
@@ -42,6 +43,9 @@ export function createInboxSnoozes(options: {
     const body = await options.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (body.until === null) {
+      // Unsnooze names a thread like a snooze does: no such thread is a 404, never a quiet 200.
+      const root = store.message(match[1]!);
+      if (!root || root.thread_id !== match[1]) throw new InboxError("thread_not_found", `No thread ${match[1]}.`);
       store.clearSnooze(match[1]!);
       return json({ snoozed: null });
     }

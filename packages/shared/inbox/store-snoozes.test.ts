@@ -88,6 +88,29 @@ describe("snoozes in the store", () => {
     expect(store.listRow(thread)!.questions.open).toBe(1);
   });
 
+  test("an agent's archive (resolve_message) does not end it: the agent writing again finds the thread still snoozed", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "News", thread: "lane" }).message;
+    store.setSnooze(root.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
+    // The MCP tool's call: no `by`, an agent's.
+    store.resolveThread(root.id, true);
+    expect(store.snoozes().map((s) => s.thread_id)).toEqual([root.thread_id]);
+    store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "Back again", reply_to: root.id });
+    expect(store.listRow(root.thread_id)!.back_from_archive || store.listRow(root.thread_id)!.agent_after_archive).toBe(true);
+    expect(store.snoozedThreads().has(root.thread_id)).toBe(true);
+  });
+
+  test("`at` (Undo's earlier snooze) is a real time, not after now, and stored normalized", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const thread = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "News" }).message.thread_id;
+    const until = new Date(t.now().getTime() + HOUR).toISOString();
+    expect(code(() => store.setSnooze(thread, until, "1"))).toBe("validation_error");
+    expect(code(() => store.setSnooze(thread, until, new Date(t.now().getTime() + 1000).toISOString()))).toBe("validation_error");
+    expect(store.setSnooze(thread, until, "2026-11-03T09:40:00-05:00").at).toBe("2026-11-03T14:40:00.000Z");
+  });
+
   test("the person's reply, Mark read, Archive and Unsnooze end it", () => {
     const t = clock();
     const { store, project } = open(t.now);
@@ -101,7 +124,7 @@ describe("snoozes in the store", () => {
     store.markRead(read.thread_id, true);
     const archived = make("a");
     store.setSnooze(archived.thread_id, until());
-    store.resolveThread(archived.thread_id, true);
+    store.resolveThread(archived.thread_id, true, "person");
     const cleared = make("c");
     store.setSnooze(cleared.thread_id, until());
     store.clearSnooze(cleared.thread_id);

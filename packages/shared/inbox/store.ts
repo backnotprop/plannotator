@@ -1066,8 +1066,12 @@ export class InboxStore {
     const refusal = inboxSnoozeRefusal(until, this.now());
     if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
-    if (at !== undefined && (typeof at !== "string" || Number.isNaN(Date.parse(at)))) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
-    const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: (at as string | undefined) ?? this.now().toISOString() };
+    const now = this.now();
+    // `at` (Undo's earlier snooze) is a real ISO time, not after now; stored normalized like `until`.
+    if (at !== undefined && (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime())) {
+      throw new InboxError("validation_error", "at: an ISO time, not after now.", { field: "at" });
+    }
+    const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: at === undefined ? now.toISOString() : new Date(at as string).toISOString() };
     this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
     return snooze;
   }
@@ -1083,7 +1087,7 @@ export class InboxStore {
    * read, Archive. The act already stands, so a file that cannot be written
    * never fails it; the snooze then runs out by itself.
    */
-  private endSnooze(threadId: string): void {
+  endSnooze(threadId: string): void {
     try {
       this.clearSnooze(threadId);
     } catch {
@@ -4248,8 +4252,13 @@ export class InboxStore {
     return next;
   }
 
-  /** Resolve (or reopen) the thread a message belongs to. */
-  resolveThread(messageId: string, resolved: boolean): InboxThreadSummary {
+  /**
+   * Resolve (or reopen) the thread a message belongs to. `by`: whose Archive
+   * it is. Only the person's ends a snooze (approval "inbox-snooze": nothing an
+   * agent writes ends it); an agent's `resolve_message` leaves the snooze, so
+   * a thread the agent archives and then writes in again stays snoozed.
+   */
+  resolveThread(messageId: string, resolved: boolean, by: "person" | "agent" = "agent"): InboxThreadSummary {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const root = this.messages.get(message.thread_id);
@@ -4272,7 +4281,7 @@ export class InboxStore {
         at,
       );
     }
-    if (resolved) this.endSnooze(root.id);
+    if (resolved && by === "person") this.endSnooze(root.id);
     return this.threadSummary(root.id)!;
   }
 

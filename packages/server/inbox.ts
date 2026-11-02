@@ -1091,6 +1091,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Without it they stay in their sections, each with its `snoozed` field, as an older window and the phone expect.
       sections: inboxListSections(listed ? listed.rows : unarchived),
       ...(listed ? { snoozed: listed.snoozed } : {}),
+      /** This Inbox keeps snoozes: a linked machine offers Snooze on this machine's rows only when its list says so. Additive. */
+      snoozes: true,
       /**
        * The sidebar's pinned threads (approval "inbox-pinned-threads"), in pin
        * order: every pinned thread whatever the project filter or `archived`
@@ -3572,7 +3574,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (body.resolved !== undefined && typeof body.resolved !== "boolean") {
               throw new InboxError("validation_error", "resolved: must be a boolean.");
             }
-            const thread = store.resolveThread(messageId, body.resolved !== false);
+            // The person's Archive (the window, a phone, a linked machine's forward): it ends a snooze.
+            const thread = store.resolveThread(messageId, body.resolved !== false, "person");
             // Unarchived: a Mark read's set-aside note an archive held back is due again.
             if (body.resolved === false) {
               scheduleSetAside(thread.thread_id);
