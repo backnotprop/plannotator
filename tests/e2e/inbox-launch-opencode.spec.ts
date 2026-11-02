@@ -4,8 +4,8 @@
  * the Inbox is mocked. The only fakes are the programs launch runs, on a PATH
  * of their own: `opencode` (tests/helpers/fake-opencode/: `--version`,
  * `opencode serve`'s HTTP API as 1.18.23 has it, `session delete`, and an agent
- * that answers through the Inbox as Plannotator's plugin does), `osascript`
- * (recorded, nothing opens) and a stand-in login shell. The real OpenCode, the
+ * that answers through the Inbox as Plannotator's plugin does) and a stand-in
+ * login shell. The real OpenCode, the
  * real home and the person's Inbox are never touched: temp HOME and
  * PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0,
  * PLANNOTATOR_UPDATE_CHECK=0, NO_BROWSER.
@@ -14,7 +14,7 @@
  *     on a free port it picked (never 0 or 4096) with this Inbox's data dir,
  *     the plugin's tool and the launch id; its
  *     password only in launch/<id>/server.json (0600), never in a log, the
- *     page, the run line or the attach command; Working; Open in Terminal runs
+ *     page, the run line or the attach command; Working; the attach command is
  *     `opencode attach`; the answer lands as a reply to the root.
  *  2. Permission prompts on the card: the header names OpenCode, OpenCode's
  *     choices (no mode switch, no Terminal hand-off); the session choice is
@@ -196,14 +196,6 @@ function filesHolding(dir: string, secret: string, found: string[] = []): string
   return found;
 }
 
-const osascriptRuns = () =>
-  existsSync(join(world.root, 'osascript.log'))
-    ? readFileSync(join(world.root, 'osascript.log'), 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => line.split('\u001f').filter(Boolean))
-    : [];
-
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
@@ -216,8 +208,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const fake = installFakeOpenCode({ bin, state: join(root, 'fake-opencode') });
   // `$SHELL -ilc <command>`: the fakes on PATH, as a person's .zshrc would put them.
   writeFileSync(join(bin, 'login-shell'), `#!/bin/sh\nPATH='${bin}':"$PATH"\nexport PATH\nexec /bin/sh -c "$2"\n`, { mode: 0o755 });
-  // Open in Terminal: what it would have run, recorded; nothing opens.
-  writeFileSync(join(bin, 'osascript'), `#!/bin/sh\nfor a in "$@"; do printf '%s\\037' "$a"; done >> '${join(root, 'osascript.log')}'\nprintf '\\n' >> '${join(root, 'osascript.log')}'\n`, { mode: 0o755 });
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
@@ -273,7 +263,7 @@ test('OpenCode 2, or no Plannotator plugin in the OpenCode config: no row; with 
   await expect.poll(offered, { timeout: 20_000 }).toEqual(['opencode']);
 });
 
-test('the journey: the To row; Send starts one server with the password only in server.json; Working; Open in Terminal; the answer lands', async () => {
+test('the journey: the To row; Send starts one server with the password only in server.json; Working; the attach command; the answer lands', async () => {
   const { page, fake } = world;
   fake.configure({ hold: true, prompts: [] });
   await page.goto(world.url);
@@ -316,13 +306,13 @@ test('the journey: the To row; Send starts one server with the password only in 
   // The person's own OpenCode permissions, beside the one rule that reads their attachments.
   expect(session.permission).toEqual([{ permission: 'external_directory', pattern: `${join(world.dataDir, 'inbox', 'uploads')}/*`, action: 'allow' }]);
 
-  // ⋯: Open in Terminal runs `opencode attach` on this server and session; the password is read from the file there, never written out.
+  // ⋯: the attach command is `opencode attach` on this server and session; the password is read from the file there, never written out.
   await p.locator('[data-thread-more]').click();
-  await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Open in Terminal', 'Copy attach command', 'Stop OpenCode', 'Delete OpenCode session…']);
-  await page.locator('[data-launch-item="open"]').click();
-  const ran = await waitFor('osascript', () => osascriptRuns()[0]);
-  expect(ran.at(-1)).toContain(`cd ${world.projects.plannotator} && OPENCODE_SERVER_PASSWORD="$(sed -n`);
-  expect(ran.at(-1)).toContain(`opencode attach ${server.url} --session ${session.id}`);
+  await expect(page.locator('[data-launch-item="attach"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  const attach = (await readThread(page, threadId)).attach_command!;
+  expect(attach).toContain(`cd ${world.projects.plannotator} && OPENCODE_SERVER_PASSWORD="$(sed -n`);
+  expect(attach).toContain(`opencode attach ${server.url} --session ${session.id}`);
 
   // It answers: a reply to the root, and it rests.
   fake.configure({ hold: false });
@@ -337,9 +327,9 @@ test('the journey: the To row; Send starts one server with the password only in 
   expect(JSON.stringify(read)).not.toContain(server.password);
   expect(read.attach_command).toContain('opencode attach');
   expect(await page.content()).not.toContain(server.password);
-  expect(ran.join(' ')).not.toContain(server.password);
-  // The attach command's shell read does yield it (Open in Terminal works).
-  const probe = spawnSync('/bin/sh', ['-c', `${ran.at(-1)!.replace(/ opencode attach .*$/, '')} /bin/sh -c 'printf %s "$OPENCODE_SERVER_PASSWORD"'`], { encoding: 'utf8' });
+  expect(attach).not.toContain(server.password);
+  // The attach command's shell read does yield it.
+  const probe = spawnSync('/bin/sh', ['-c', `${attach.replace(/ opencode attach .*$/, '')} /bin/sh -c 'printf %s "$OPENCODE_SERVER_PASSWORD"'`], { encoding: 'utf8' });
   expect(probe.stdout).toBe(server.password);
 });
 
