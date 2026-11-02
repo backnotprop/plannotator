@@ -328,8 +328,10 @@ for (const view of ['desktop', 'phone'] as const) {
         await openFirstThread(page);
         await press(inMessage('project alpha')(page));
         await expect(page).toHaveURL(`${world.origin}/#project=${world.project}`, { timeout: 5_000 });
-        await expect(page.locator(`[data-thread-id="${world.T2}"]:visible`).first()).toBeVisible();
-        await expect(page.locator(`[data-thread-id="${world.T3}"]`)).toHaveCount(0);
+        // The rows drawn, so a failure says what the list shows.
+        const rows = () =>
+          page.evaluate(() => [...new Set([...document.querySelectorAll('.ib-lbody [data-thread-id]')].filter((el) => el.getClientRects().length > 0).map((el) => el.getAttribute('data-thread-id')))].sort());
+        await expect.poll(rows).toEqual([world.T1, world.T2, world.T4].sort());
         await noTabOpened(s);
         await page.goBack();
         await expect(subject(page)).toHaveText(/First thread/);
@@ -592,9 +594,15 @@ test.describe('left alone', () => {
     });
   });
 
-  test('a download link and an Alt click stay where they are', async ({ browser }) => {
+  test('a download link and an Alt click are the browser\'s, not opened in place', async ({ browser }) => {
     await scene(browser, 'desktop', async ({ page }) => {
       await openFirstThread(page);
+      // After the window's own capture listener on the same target: whether the click was cancelled.
+      await page.evaluate(() => {
+        (window as unknown as { cancelled: boolean[] }).cancelled = [];
+        window.addEventListener('click', (event) => (window as unknown as { cancelled: boolean[] }).cancelled.push(event.defaultPrevented), true);
+      });
+      const cancelled = () => page.evaluate(() => (window as unknown as { cancelled: boolean[] }).cancelled);
       await inMessage('link to T2')(page).click({ modifiers: ['Alt'] });
       await page.waitForTimeout(500);
       await expect(page).toHaveURL(threadUrl(world.T1));
@@ -607,8 +615,8 @@ test.describe('left alone', () => {
         document.body.append(link);
       }, threadUrl(world.T2));
       await page.getByRole('link', { name: 'save this', exact: true }).click();
-      await page.waitForTimeout(500);
-      await expect(page).toHaveURL(threadUrl(world.T1));
+      // Not cancelled: the browser does what it does with it (WebKit follows a same-page `download` link's hash).
+      await expect.poll(cancelled).toEqual([false, false]);
     });
   });
 });
