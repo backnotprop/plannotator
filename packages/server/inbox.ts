@@ -122,7 +122,7 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
-import { combineSuggestions } from "./inbox-combine-suggestions";
+import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -162,7 +162,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
-import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
+import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
@@ -405,6 +405,8 @@ export interface InboxServerOptions {
   refRunner?: RefRunner;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
+  /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
+  projectRootHome?: string | null;
   /**
    * How long after a Mark read the asking agents are told what it closed (the
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
@@ -902,7 +904,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
   // and live sessions, so they always agree.
-  const projectRoots = createInboxProjectRoots(options.projectRootGit ? { git: options.projectRootGit } : {});
+  const projectRoots = createInboxProjectRoots({
+    ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+    ...(options.projectRootHome !== undefined ? { home: options.projectRootHome } : {}),
+  });
+  // The projects a guess (git past its time limit) may file into (inbox-project-root.ts `guessableProjects`).
+  const repositoryProjects = () => guessableProjects(store.allProjects(), projectRoots.home);
   // Images messages show that have no captured file yet: copied in the background after a read of their thread (inbox-message-images.ts).
   const imageCapture = createInboxImageCapture(store);
   const projectLocks = new Map<string, Promise<InboxProject>>();
@@ -917,8 +924,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // from disk, no git), else the agent is told to try again. A folder
       // project (`~`, a notes folder) never takes a guess: a new worktree or
       // repository under it would be filed there for good.
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) return holder;
       throw new InboxError(
         "project_unresolved",
@@ -948,8 +954,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const existing = store.projectByRoot(root);
     if (existing) projects.push(existing);
     else if (!settled) {
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) projects.push(holder);
     }
     const earlier = worktree ? store.projectByRoot(worktree) : null;
@@ -2719,6 +2724,41 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
   });
 
+  /**
+   * Each project folder's agent messages (by the folder's own project id) for
+   * Tidy's "started a folder above" suggestion: who sent each, and the folder
+   * it was sent from (`base_path`). Built on the first read, then kept up by
+   * the store's lines: only a NEW agent message adds to it (a mark-read or any
+   * other rewrite of a message line does not), and a re-read from disk (a
+   * deletion, `reloadCount`) builds it again. Read by group at lookup, so a
+   * combine or an undo needs no rebuild.
+   */
+  let agentWorkIndex: { reloads: number; seen: Set<string>; byProject: Map<string, InboxAgentWork[]> } | null = null;
+  const addAgentWork = (index: NonNullable<typeof agentWorkIndex>, message: InboxMessage) => {
+    if (message.author.kind !== "agent" || index.seen.has(message.id)) return;
+    index.seen.add(message.id);
+    const work = index.byProject.get(message.project_id) ?? [];
+    work.push({ session: message.author.session, folder: message.base_path ?? null });
+    index.byProject.set(message.project_id, work);
+  };
+  const unsubscribeAgentWork = store.subscribe((line) => {
+    if (agentWorkIndex && line.kind === "message") addAgentWork(agentWorkIndex, line.record);
+  });
+  const agentWorkOf = (projectId: string): InboxAgentWork[] => {
+    if (agentWorkIndex?.reloads !== store.reloadCount()) {
+      const index = { reloads: store.reloadCount(), seen: new Set<string>(), byProject: new Map<string, InboxAgentWork[]>() };
+      for (const threadId of store.threadIds()) {
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message) addAgentWork(index, message);
+        }
+      }
+      agentWorkIndex = index;
+    }
+    const index = agentWorkIndex;
+    return store.projectGroup(projectId).flatMap((id) => index.byProject.get(id) ?? []);
+  };
+
   // Tidy (packages/server/inbox-tidy.ts): the list header's and the Board's ⋮ menu.
   const tidy = createInboxTidy({
     store,
@@ -2740,7 +2780,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return threads.get(id) ?? 0;
       };
-      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf, sameProject: (a, b) => store.sameProject(a, b) });
+      return combineSuggestions({
+        projects: store.listProjects(),
+        everyProject: store.allProjects(),
+        repoOf: (root) => repos.peek(root),
+        threads: threadsOf,
+        sameProject: (a, b) => store.sameProject(a, b),
+        // A folder above a repository (read from disk, no git): not a repository, the home folder or `/`.
+        plainFolder: (root) => !existsSync(join(root, ".git")) && !isHomeOrRootFolder(root, projectRoots.home),
+        holdsOtherWork: folderHoldsOtherWork,
+        agentWork: agentWorkOf,
+      });
     },
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });
@@ -3971,6 +4021,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     void foldCheckoutFolderProjects({
       store,
       ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+      // The same home the sends' resolver keeps apart (projectRootHome in tests).
+      home: projectRoots.home,
       log: (fold) => debugLog?.note("project_folded", fold),
     }).catch(() => {});
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
@@ -4010,6 +4062,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(autoSendWatch);
     unsubscribeWaits();
     launch.stop();
+    unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
     voice.stop();
