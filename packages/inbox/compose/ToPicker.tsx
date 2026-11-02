@@ -13,7 +13,9 @@ import { filterGroups, hostLabel, pickerRows, splitProjectName, type ComposeGrou
  * goes under the agent, since To there has room for only part of it. A start
  * time shows only where one project has two or more live sessions. The current project first, then the most recently active.
  * ↓ ↑ move a wrapping highlight, Enter picks, Escape closes the picker only
- * (the dialog stays), typing filters by host, project and last subject.
+ * (the dialog stays), typing filters by host, label, project and last subject.
+ * A session with a label (approval "inbox-session-label") shows it in the
+ * project's place, with the project after it on a phone.
  * With nobody in To it opens with no row highlighted, so Enter picks nothing
  * (the first row is the session last sent to: one Enter must not bring back
  * the auto-fill compose dropped); typing or an arrow key highlights the first row.
@@ -131,7 +133,13 @@ export function ToPicker({
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      <div className="ib-cp-list" role="listbox" id={`ib-cp-list-${uid}`} aria-label="Live agent sessions">
+      <div
+        className="ib-cp-list"
+        role="listbox"
+        id={`ib-cp-list-${uid}`}
+        aria-label="Live agent sessions"
+        data-session-labels={rows.some((row) => row.target.label) ? '' : undefined}
+      >
         {rows.length === 0 && <div className="ib-cp-none">No live session matches.</div>}
         {rows.map(({ target, started }, i) => {
           const folder = tildePath(target.project.root, home);
@@ -141,7 +149,7 @@ export function ToPicker({
               id={optionId(i)}
               role="option"
               aria-selected={i === hl}
-              aria-label={`${hostLabel(target.host)} in ${target.project.name}, ${folder}${started ? `, started ${started}` : ''}`}
+              aria-label={`${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}, ${folder}${started ? `, started ${started}` : ''}`}
               className={`ib-cp-opt${i === hl ? ' ib-hl' : ''}`}
               data-compose-session={target.session}
               data-compose-project={target.project.name}
@@ -151,9 +159,18 @@ export function ToPicker({
             >
               <HostMark host={target.host} />
               <b className="ib-cp-oa">{hostLabel(target.host)}</b>
-              <span className="ib-cp-op" dir="auto">
-                {target.project.name}
-              </span>
+              {target.label ? (
+                <Tip content={target.label} cut>
+                  <span className="ib-cp-op" dir="auto" data-session-label="">
+                    <bdi className="ib-cp-ol">{target.label}</bdi>
+                    {phone && <span className="ib-cp-olp">{` · ${target.project.name}`}</span>}
+                  </span>
+                </Tip>
+              ) : (
+                <span className="ib-cp-op" dir="auto">
+                  {target.project.name}
+                </span>
+              )}
               <FolderPath path={folder} />
               <Tip content={started ? `Started ${started}` : null}>
                 <span className="ib-cp-os" data-compose-started={started ?? undefined}>
@@ -177,12 +194,15 @@ export function ToPicker({
  * give way first, cut with "…", and drop out entirely once only a sliver of them
  * would show (they wrap onto a line the box hides); a folder name too long for
  * the row is then cut with its own "…". The whole name and folder in a tooltip while
- * anything is cut; on a phone the picker shows it whole.
+ * anything is cut; on a phone the picker shows it whole. A session's `label` leads
+ * and stays whole in the folder's place, and the project gives way as the parents
+ * do ("· Fix login redirect · ai-collab"); a " · " inside the label splits nothing.
  */
-export function SessionDetail({ name, root, suffix }: { name: string; root: string | null; suffix?: string }) {
-  const { folder, parents } = splitProjectName(name);
+export function SessionDetail({ name, root, suffix, label }: { name: string; root: string | null; suffix?: string; label?: string }) {
+  const { folder, parents } = label ? { folder: label, parents: name } : splitProjectName(name);
+  const whole = label ? `${label} · ${name}` : name;
   return (
-    <Tip content={root ? <ProjectTipText name={name} root={root} /> : name} when={detailCut}>
+    <Tip content={root ? <ProjectTipText name={whole} root={root} /> : whole} when={detailCut}>
       <span className="ib-cp-tod" data-compose-detail="">
         {/* The spaces read in the text (copy, `textContent`); the gaps draw them. */}
         <span className="ib-cp-tdsep">{'· '}</span>

@@ -921,6 +921,13 @@ export interface InboxReplyCommand {
 export const INBOX_TAGS_POLL_FIELD = 'tags'
 
 /**
+ * The most of a poll's `label` (the session's name) anyone looks at, in
+ * characters (code points): a client keeps no longer a name, and the server
+ * reads no further before it cleans and cuts the label to what it shows.
+ */
+export const INBOX_SESSION_LABEL_INPUT_MAX = 200
+
+/**
  * The fixed second line of the wake of a session the person tagged in a
  * thread another session owns: not a reply to anything it asked.
  */

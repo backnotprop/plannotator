@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -131,6 +131,8 @@ interface SeenSession {
   sendNow: boolean;
   /** Its poll said it understands a reply it was tagged in (`tags`): only then can it be tagged. */
   tags: boolean;
+  /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
+  label?: string | null;
   /** Its poll said it can answer Ask AI live (`ask`). */
   ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
@@ -189,6 +191,24 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
  * the list.
  */
 export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
+
+/** The longest session label kept, in characters (code points, so a pair is never split). */
+export const INBOX_SESSION_LABEL_MAX = 60;
+
+/**
+ * A poll's `label` as the window may draw it: control characters, line
+ * separators and bidi controls stripped (the same characters a thread name
+ * refuses), trimmed, at most INBOX_SESSION_LABEL_MAX characters. Null for
+ * anything that is not a string, or that leaves nothing visible.
+ */
+export function cleanInboxSessionLabel(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  // Twice as many UTF-16 units always hold that many characters, so the first cut never spends on the rest of a long string.
+  const input = Array.from(value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join("");
+  const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
+  const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
+  return label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() ? label : null;
+}
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const finiteMs = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null);
@@ -368,6 +388,8 @@ export function createInboxLiveSessions(options: {
     entry.host = host;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
+    entry.label = cleanInboxSessionLabel(body.label);
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -547,6 +569,7 @@ export function createInboxLiveSessions(options: {
     /** Its connection understands a reply it was tagged in (`tags`). */
     tags: boolean;
     sendNow: boolean;
+    label: string | null;
   }[] => {
     const out = [];
     for (const [session, entry] of sessions) {
@@ -561,6 +584,7 @@ export function createInboxLiveSessions(options: {
         idleSince: entry.busy === false ? entry.idleSince : null,
         tags: entry.tags,
         sendNow: entry.sendNow,
+        label: entry.label ?? null,
       });
     }
     return out;

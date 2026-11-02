@@ -474,7 +474,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           aria-expanded={picker}
           aria-label={
             target
-              ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change`
+              ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
               : endedNote
                 ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
                 : loading
@@ -491,7 +491,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
-              <SessionDetail name={target.project.name} root={target.project.root} />
+              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
             </>
           ) : endedNote ? (
             <>
