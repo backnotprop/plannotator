@@ -332,9 +332,8 @@ for (const phone of PHONES) {
       const names = await box.locator('[data-compose-file]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-file-name')!));
       await pane.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(box).toHaveCount(0);
-      const answer = await world.agent.waitForReply(threadId, 10);
-      const body = (answer.reply as { body: string }).body;
-      for (const n of names) expect(body).toContain(`Attached: ${n} (`);
+      const answer = await world.agent.nextReply(threadId, 10);
+      expect((answer.attachments as { name: string }[]).map((a) => a.name)).toEqual(names);
       expect(errors).toEqual([]);
     });
 

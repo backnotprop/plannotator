@@ -21,20 +21,24 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
-import { ToPicker } from './ToPicker';
-import { ThreadNameChip } from './ThreadNameChip';
+import { SessionDetail, ToPicker } from './ToPicker';
+import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
+import { isLongPaste } from './pastedText';
 import { useComposeSessions } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
+import { VoiceFoot } from '../components/VoiceMic';
+import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import {
+  DRAFT_TOO_LONG,
   NOTHING_SENT_NO_AGENT,
   composeGroups,
   composeTargets,
@@ -168,15 +172,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
+  const say = (words: string) => {
+    setPasteSaid('');
+    setTimeout(() => setPasteSaid(words), 30);
+  };
+  // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
-    onPasted: (names) => {
-      setPasteSaid('');
-      setTimeout(() => setPasteSaid(attachedAnnouncement(names)), 30);
-    },
+    onPasted: (names) => say(attachedAnnouncement(names)),
+    onPutBack: () => say('The pasted text is back in your message.'),
+    text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
   const { model, load } = useComposeSessions(true, transport?.sessions);
+  const voice = useVoiceSession();
   const projects = model?.projects ?? [];
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
@@ -211,6 +220,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [nameError, setNameError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
+
+  // The draft question or a phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind
+  // it. Choosing an agent is part of writing, so To ends a take and keeps what was said; a take already on its way isn't
+  // a recording, and its words still land.
+  const footCovered = question || (picker && phone);
+  useEffect(() => {
+    if (!footCovered) return;
+    if (!question) voice.session.stop();
+    if (voice.session.view().phase !== 'sending') voice.session.covered();
+  }, [footCovered, question, voice.session]);
 
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(crypto.randomUUID());
@@ -281,15 +300,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
 
   // ── sending ──
   const send = async () => {
-    // Still reading the live sessions: nothing to say yet, the status line says it.
-    if (busy || !model) return;
+    // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
+    if (busy || !model || voice.busy) return;
     setError(null);
     if (!target) {
       // The error is an alert, which says it: no second announcement.
       setError(anyLive ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (!body.trim()) {
+    // Words or files, as a reply takes: a message of a pasted text tile alone goes.
+    if (!body.trim() && !files.files.some((file) => file.state !== 'refused')) {
       setError('Write a message first.');
       textRef.current?.focus();
       return;
@@ -340,6 +360,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Wait for the files to finish uploading.');
       return null;
     }
+    // Said plainly, before the Inbox refuses it with its own field words.
+    if (body.length > INBOX_DRAFT_BODY_MAX) {
+      setError(DRAFT_TOO_LONG);
+      return null;
+    }
     setBusy('save');
     setError(null);
     try {
@@ -347,7 +372,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
+      const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
+      const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
@@ -360,7 +388,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         } catch {
           setError('This draft changed in another window.');
         }
-      } else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
+      } else if (cause instanceof InboxApiError && cause.code === 'validation_error' && cause.message.startsWith('body:')) setError(DRAFT_TOO_LONG);
+      else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
       return null;
     } finally {
       setBusy(null);
@@ -368,6 +397,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const keepDraft = async () => {
+    // As Send: the words of a running take are not in yet, and leaving would lose them.
+    if (voice.busy) return;
     const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
     if (result) props.onSaved(result);
     else setQuestion(false);
@@ -427,14 +458,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const sendable = !!target;
+  const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
   const loading = !model;
-  // Save draft only for something written: an empty compose offers none (a phone shows the disabled Send instead).
+  // Save draft only for something written: an empty compose offers none.
   const saveOffered = keepsDrafts && !sendable && !loading && !empty;
   const title = draft ? 'Draft' : 'New message';
   const status = statusLine({ target, anyLive, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
+
+  // Back from the picker: to the message. In the tour on a phone, to To: a focused message raises the keyboard, and in
+  // the room it leaves "Press Send" would have no card to read.
+  const afterPicker = () => (phone && transport ? toRef.current : textRef.current)?.focus();
 
   const toRow = (
     <div className="ib-cp-to">
@@ -454,7 +490,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           aria-expanded={picker}
           aria-label={
             target
-              ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change`
+              ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change`
               : endedNote
                 ? `To: ${hostLabel(endedNote.host)}, ended. Pick a session`
                 : loading
@@ -471,23 +507,17 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <>
               <HostMark host={target.host} />
               <b>{hostLabel(target.host)}</b>
-              <span className="ib-cp-tod">
-                · <bdi>{target.project.name}</bdi>
-              </span>
+              <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
             </>
           ) : endedNote ? (
             <>
               <HostMark host={endedNote.host} />
               <s>{hostLabel(endedNote.host)}</s>
-              <span className="ib-cp-tod">
-                ·{' '}
-                {endedNote.project_name ? (
-                  <>
-                    <bdi>{endedNote.project_name}</bdi> ·{' '}
-                  </>
-                ) : null}
-                ended
-              </span>
+              {endedNote.project_name ? (
+                <SessionDetail name={endedNote.project_name} root={endedNote.project_root} suffix="ended" />
+              ) : (
+                <span className="ib-cp-tod">· ended</span>
+              )}
             </>
           ) : (
             <span className="ib-cp-tod">{model ? 'Choose an agent' : 'Looking for live agents…'}</span>
@@ -526,34 +556,30 @@ export function ComposeDialog(props: ComposeDialogProps) {
       }}
     >
       {phone ? (
-        <div className="ib-cp-bar">
-          <button type="button" className="ib-cp-barb" onClick={requestClose} data-compose-cancel="">
-            Cancel
-          </button>
-          <h2 id={titleId}>{title}</h2>
-          {saveOffered ? (
-            <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
-              Save draft
+        // One box, so To can take the top bar's line while the keyboard is up (inbox.css).
+        <div className="ib-cp-head">
+          <div className="ib-cp-bar">
+            <button type="button" className="ib-cp-barb" onClick={requestClose} data-compose-cancel="">
+              Cancel
             </button>
-          ) : (
-            <button
-              type="button"
-              className={`ib-cp-barb ib-strong${sendable ? '' : ' ib-dis'}`}
-              aria-disabled={!sendable || undefined}
-              onClick={() => void send()}
-              disabled={busy !== null}
-              data-compose-send=""
-            >
-              Send
-            </button>
-          )}
+            <h2 id={titleId}>{title}</h2>
+            {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
+            {saveOffered && (!draft || dirty) && (
+              <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+                Save draft
+              </button>
+            )}
+          </div>
+          {toRow}
         </div>
       ) : (
-        <h2 id={titleId} className="ib-sr">
-          {title}
-        </h2>
+        <>
+          <h2 id={titleId} className="ib-sr">
+            {title}
+          </h2>
+          {toRow}
+        </>
       )}
-      {toRow}
       {card && (
         <p className="ib-cp-card" data-compose-card={card.id}>
           <span>
@@ -571,12 +597,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             setChosen(picked.session);
             setPicker(false);
             setError(null);
-            textRef.current?.focus();
+            afterPicker();
           }}
           onClose={() => {
             setPicker(false);
             // Still nobody in To: back on To, where the choice is made.
-            (target ? textRef.current : (toRef.current ?? textRef.current))?.focus();
+            if (target) afterPicker();
+            else (toRef.current ?? textRef.current)?.focus();
           }}
         />
       )}
@@ -592,8 +619,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }}
           onDone={() => textRef.current?.focus()}
           onOverflow={(text) => {
-            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             setError(null);
+            const lead = body.trim() ? (/[\r\n]/.test(text) ? '\n' : ' ') : '';
+            if (takesFiles && isLongPaste(text)) {
+              // 32 KB or more goes to the message as a pasted text tile, at its end, as the words would have
+              // (never where the dialog takes no files, the tour: the words go to the message as before).
+              files.takeText(text, body.trim() ? body.replace(/\s+$/, '').length : body.length, { field: textRef.current, lead });
+              requestAnimationFrame(() => {
+                const area = textRef.current;
+                if (!area) return;
+                area.focus();
+                area.setSelectionRange(area.value.length, area.value.length);
+              });
+              return THREAD_NAME_ATTACHED_NOTE;
+            }
+            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             // Dictation goes on in the message from here.
             requestAnimationFrame(() => {
               const area = textRef.current;
@@ -645,6 +685,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <div className="ib-cp-field" data-compose-text="">
           <InboxComposerField
             textareaRef={textRef}
+            voice={voice}
             ariaLabel="Message"
             ariaDescribedBy={status ? statusId : undefined}
             destination="your message"
@@ -667,6 +708,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // The × goes with its tile: focus stays in the dialog, in the message.
             textRef.current?.focus();
           }}
+          onPutBack={(key) => files.putBack(key, textRef.current)}
         />
       </div>
       {error && (
@@ -705,7 +747,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <button type="button" className="ib-btn" onClick={props.onClose} data-compose-discard="">
             Discard
           </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-keep="" autoFocus>
+          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-keep="" autoFocus>
             Keep draft
           </button>
         </div>
@@ -721,44 +763,55 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </span>
             </Tip>
           )}
-          {/* On a desktop the To line already says "Draft · saved". */}
-          {draft && !dirty && phone && (
-            <span className="ib-cp-savedline" data-compose-saved="">
-              <Icon name="check" size={14} />
-              Saved as a draft {whenTime(draft.updated_at)}
+          {/* With the keyboard up the tiles step aside, so a phone's row says how many (inbox.css). */}
+          {phone && attached > 0 && (
+            <span className="ib-cp-clipn" data-compose-file-count="">
+              {attached}
+              <span className="ib-sr"> attached</span>
             </span>
           )}
-          {draft && (
+          {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
+          {draft && !dirty && phone && (
+            <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
+              <Icon name="check" size={14} />
+              <span>Saved</span>
+              <span>{whenTime(draft.updated_at)}</span>
+            </span>
+          )}
+          {/* A phone deletes a draft from its row on the Drafts page. */}
+          {draft && !phone && (
             <button type="button" className="ib-cp-del" onClick={() => void deleteDraft()} disabled={busy !== null} data-compose-delete="">
               Delete draft
             </button>
           )}
           <span className="ib-sp" />
+          {/* On a phone To and its note say this already; it stays for a screen reader (the message field's description). */}
           {status && (
-            <span className="ib-cp-status" id={statusId} data-compose-status="">
+            <span className={phone ? 'ib-sr' : 'ib-cp-status'} id={statusId} data-compose-status="">
               {status}
             </span>
           )}
-          {saveOffered && !phone && (
-            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
-              Save draft
-            </button>
-          )}
-          {!phone && (
-            <button
-              type="button"
-              className={`ib-btn ib-pri${sendable ? '' : ' ib-dis'}`}
-              aria-disabled={!sendable || undefined}
-              aria-keyshortcuts={sendKeys}
-              onClick={() => void send()}
-              disabled={busy !== null}
-              data-compose-send=""
-            >
-              <Icon name="send" size={15} />
-              Send
-              <ShortcutHint scope={inboxThreadShortcuts} action="send" />
-            </button>
-          )}
+          {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
+          <VoiceFoot voice={voice} phone={phone}>
+            {saveOffered && !phone && (
+              <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+                Save draft
+              </button>
+            )}
+          </VoiceFoot>
+          <button
+            type="button"
+            className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
+            aria-disabled={!sendable || undefined}
+            aria-keyshortcuts={sendKeys}
+            onClick={() => void send()}
+            disabled={busy !== null || voice.busy}
+            data-compose-send=""
+          >
+            <Icon name="send" size={15} />
+            {phone ? <span className="ib-cp-sendl">Send</span> : 'Send'}
+            <ShortcutHint scope={inboxThreadShortcuts} action="send" />
+          </button>
         </div>
       )}
       <div className="ib-sr" aria-live="polite" data-compose-paste-live="">

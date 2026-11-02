@@ -207,6 +207,16 @@ export interface ComposerTokenTextareaProps {
     React.TextareaHTMLAttributes<HTMLTextAreaElement>,
     'value' | 'onChange' | 'onKeyDown' | 'onSelect' | 'onScroll' | 'className' | 'placeholder'
   >;
+  /** Paint on the mirror that is not in the value. Same metric rule as the token spans: it must add no width. */
+  mirrorPaint?: ComposerMirrorPaint;
+}
+
+export interface ComposerMirrorPaint {
+  /** Drawn at this offset (past the end of a token it falls inside). */
+  at?: number;
+  node?: React.ReactNode;
+  /** A range of plain text behind a mark. A token inside it keeps its own paint. */
+  wash?: { start: number; end: number; className: string };
 }
 
 /**
@@ -241,6 +251,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   inputClassName,
   mirrorClassName,
   inputProps,
+  mirrorPaint,
 }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [composing, setComposing] = useState(false);
@@ -325,15 +336,45 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   }
 
   const segments: React.ReactNode[] = [];
+  let paintDrawn = false;
+  /** One run of plain text, cut at the paint's offsets. With no paint, the plain string as ever. */
+  const pushPlain = (start: number, end: number) => {
+    if (!mirrorPaint) {
+      segments.push(value.slice(start, end));
+      return;
+    }
+    const { at, node, wash } = mirrorPaint;
+    const cuts = [start, end, ...[at, wash?.start, wash?.end].filter((cut): cut is number => cut !== undefined && cut > start && cut < end)].sort((a, b) => a - b);
+    for (let i = 0; i + 1 < cuts.length; i++) {
+      const from = cuts[i]!;
+      const to = cuts[i + 1]!;
+      if (!paintDrawn && at !== undefined && from >= at) {
+        paintDrawn = true;
+        segments.push(<React.Fragment key="mirror-paint">{node}</React.Fragment>);
+      }
+      if (from === to) continue;
+      const text = value.slice(from, to);
+      segments.push(
+        wash && from >= wash.start && to <= wash.end ? (
+          <mark key={`mirror-wash-${from}`} className={wash.className}>
+            {text}
+          </mark>
+        ) : (
+          text
+        ),
+      );
+    }
+  };
   let pos = 0;
   for (const range of ranges) {
-    if (range.start > pos) segments.push(value.slice(pos, range.start));
+    if (range.start > pos) pushPlain(pos, range.start);
     segments.push(
       renderTokenSpan(range, value.slice(range.start, range.end), mentionChips?.tokenClassName),
     );
     pos = range.end;
   }
-  segments.push(value.slice(pos));
+  pushPlain(pos, value.length);
+  if (mirrorPaint?.at !== undefined && !paintDrawn) segments.push(<React.Fragment key="mirror-paint">{mirrorPaint.node}</React.Fragment>);
 
   return (
     <div className="relative">

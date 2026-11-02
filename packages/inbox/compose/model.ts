@@ -5,7 +5,7 @@
  */
 
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
-import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -22,9 +22,20 @@ export interface ComposeGroup {
 
 export const hostLabel = (host: string): string => INBOX_HOST_NAMES[host] ?? host;
 
+/**
+ * A project's name in its two parts: the folder's own name, and the parent
+ * folders the Inbox adds when two projects share it ("main · workspaces/worktrees",
+ * `inboxProjectLabels`), or null. To keeps the first whole and cuts the parents.
+ */
+export function splitProjectName(name: string): { folder: string; parents: string | null } {
+  const at = name.indexOf(' · ');
+  return at > 0 ? { folder: name.slice(0, at), parents: name.slice(at + 3) || null } : { folder: name, parents: null };
+}
+
 /** Every live session, in the server's order (the most recently active project first). */
 export function composeTargets(projects: readonly InboxComposeProject[]): ComposeTarget[] {
-  return projects.flatMap((group) => group.sessions.map((session) => ({ ...session, project: group.project })));
+  // A session in another folder of a combined project shows that folder, under the group's name.
+  return projects.flatMap((group) => group.sessions.map((session) => ({ ...session, project: session.root ? { ...group.project, root: session.root } : group.project })));
 }
 
 export function findTarget(projects: readonly InboxComposeProject[], session: string | null | undefined): ComposeTarget | null {
@@ -50,7 +61,7 @@ export function composeGroups(
   const groups = projects.map((group) => ({
     project: group.project,
     current: isCurrent(group.project, current),
-    sessions: group.sessions.map((session) => ({ ...session, project: group.project })),
+    sessions: composeTargets([group]),
   }));
   const ordered = [...groups.filter((g) => g.current), ...groups.filter((g) => !g.current)];
   const at = last ? ordered.findIndex((g) => g.sessions.some((s) => s.session === last)) : -1;
@@ -60,12 +71,12 @@ export function composeGroups(
   return [{ ...lead, sessions }, ...ordered.filter((_, i) => i !== at)];
 }
 
-/** The groups narrowed by the picker's filter: host, project name or path, and the last thread's subject. */
+/** The groups narrowed by the picker's filter: host, label, project name or path, and the last thread's subject. */
 export function filterGroups(groups: readonly ComposeGroup[], query: string): ComposeGroup[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
@@ -277,6 +288,9 @@ export function statusLine(input: {
 
 /** What ⌘↵ says when nothing can be sent. */
 export const NOTHING_SENT_NO_AGENT = 'Nothing sent: no live agent is chosen. Save it as a draft.';
+
+/** A draft over the Inbox's limit, said plainly (the server's own words name a field). */
+export const DRAFT_TOO_LONG = `Too long to save as a draft: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
 
 /** The Drafts page chip's words: "Claude Code is live", "That session ended", "No agent chosen". */
 export function draftChip(draft: Pick<InboxDraft, 'to'> & { status: 'live' | 'ended' | 'none' }): string {

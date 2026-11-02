@@ -446,6 +446,33 @@ const TERMINAL_THEME_PRESETS: Record<string, Partial<Record<TerminalThemeMode, A
       brightWhite: "#c0caf5",
     },
   },
+  "tokyo-night-moon": {
+    dark: {
+      background: "#222436",
+      foreground: "#c8d3f5",
+      cursor: "#c8d3f5",
+      cursorAccent: "#222436",
+      selectionBackground: "#2d3f76",
+      selectionForeground: "#c8d3f5",
+      selectionInactiveBackground: "#2f334d",
+      black: "#1b1d2b",
+      red: "#ff757f",
+      green: "#c3e88d",
+      yellow: "#ffc777",
+      blue: "#82aaff",
+      magenta: "#c099ff",
+      cyan: "#86e1fc",
+      white: "#828bb8",
+      brightBlack: "#444a73",
+      brightRed: "#ff757f",
+      brightGreen: "#c3e88d",
+      brightYellow: "#ffc777",
+      brightBlue: "#82aaff",
+      brightMagenta: "#c099ff",
+      brightCyan: "#86e1fc",
+      brightWhite: "#c8d3f5",
+    },
+  },
 };
 
 for (const themeId of ["everforest", "everforest-hard", "everforest-soft"]) {

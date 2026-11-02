@@ -249,6 +249,12 @@ export interface MarkerEngine {
   parseModels: (stdout: string) => MarkerModel[];
   /** Format one stream line for the live log, or null to skip it. */
   formatLogEvent: (event: MarkerStreamEvent) => string | null;
+  /**
+   * The same run with its prompt on stdin instead of in the argv, or null when
+   * the argv is not this engine's. Used only where the prompt cannot be an
+   * argument: a Windows `.cmd` shim, which runs through cmd.exe (#2372).
+   */
+  promptOnStdin?: (argv: string[]) => { command: string[]; stdin: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +782,16 @@ function piBuildArgv(prompt: string, model?: string, cwd?: string, opts?: Marker
   ];
 }
 
+/**
+ * Pi reads piped stdin as the message (`readPipedStdin`, in every release
+ * since the 0.79.1 peer floor), so `pi … -p <prompt>` runs the same as
+ * `pi … -p` with the prompt on stdin.
+ */
+function piPromptOnStdin(argv: string[]): { command: string[]; stdin: string } | null {
+  if (argv.length < 2 || argv[argv.length - 2] !== "-p") return null;
+  return { command: argv.slice(0, -1), stdin: argv[argv.length - 1]! };
+}
+
 // ---------------------------------------------------------------------------
 // Copilot engine helpers
 // ---------------------------------------------------------------------------
@@ -981,6 +997,7 @@ const PI_ENGINE: MarkerEngine = {
   modelsArgv: ["--list-models"],
   parseModels: piParseModels,
   formatLogEvent: piFormatLogEvent,
+  promptOnStdin: piPromptOnStdin,
 };
 
 const COPILOT_ENGINE: MarkerEngine = {

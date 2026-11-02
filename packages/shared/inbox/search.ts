@@ -403,7 +403,7 @@ export class InboxSearchIndex {
     switch (line.kind) {
       case "project":
         // A new project can change the others' names too ("api" becomes "api · work"): every label is read again.
-        for (const project of this.store.listProjects()) this.dirtyProjects.add(project.id);
+        for (const project of this.store.allProjects()) this.dirtyProjects.add(project.id);
         break;
       case "message":
         this.dirtyMessages.add(line.record.id);
@@ -472,7 +472,7 @@ export class InboxSearchIndex {
       // A re-read or a newer build while this one waited: this build is void.
       return this.generation === generation && this.store.reloadCount() === reloads;
     };
-    for (const project of this.store.listProjects()) this.indexProject(project);
+    for (const project of this.store.allProjects()) this.indexProject(project);
     for (const threadId of threadIds) {
       // A slice ends between messages, so one thread of long messages never holds the server.
       for (const id of this.store.threadMessageIds(threadId)) {
@@ -973,17 +973,21 @@ export class InboxSearchIndex {
     const terms = inboxSearchTerms(q);
     const filtered = Boolean(query.project || query.status || query.from);
     const base = { q, terms, indexing: false, threads: this.threadCount() };
-    const labels = projectLabels(this.store.listProjects());
+    // Every folder, each read as the project it shows under: a combined project's hits name the group.
+    const labels = new Map(this.store.allProjects().map((project) => [project.id, { id: this.store.canonicalProjectId(project.id), name: project.name }]));
     if (terms.length === 0 && !filtered) {
       return { ...base, took_ms: this.now() - started, totals: null, groups: null, recent: this.recentThreads(labels) };
     }
     const groups: Record<InboxSearchGroupId, { doc: number; score: number }[]> = { threads: [], messages: [], files: [], projects: [] };
 
-    const statusOk = (facts: ThreadFacts | null): boolean => {
+    // A snoozed thread stays in search, but it has left its section, so a Status never finds it. Read here, not in the
+    // cached facts: a snooze writes no line, and it ends by the clock.
+    const snoozed = query.status ? this.store.snoozedThreads() : null;
+    const statusOk = (facts: ThreadFacts | null, threadId: string | null): boolean => {
       if (!query.status) return true;
       if (!facts) return false;
       if (query.status === "archived") return facts.archived;
-      if (facts.archived) return false;
+      if (facts.archived || (threadId !== null && snoozed?.has(threadId))) return false;
       if (query.status === "waiting") return facts.section === "stopped" || facts.section === "holding" || facts.section === "waiting";
       return facts.section === query.status;
     };
@@ -993,7 +997,9 @@ export class InboxSearchIndex {
       return doc.from === query.from;
     };
     const admit = (doc: Doc): { group: InboxSearchGroupId; facts: ThreadFacts | null } | null => {
-      if (query.project && doc.projectId !== query.project) return null;
+      if (query.project && !this.store.sameProject(doc.projectId, query.project)) return null;
+      // A combined project is found through the project it went into: only that one has a page.
+      if (doc.type === "project" && this.store.canonicalProjectId(doc.ref) !== doc.ref) return null;
       let group: InboxSearchGroupId;
       switch (doc.type) {
         case "thread":
@@ -1013,7 +1019,7 @@ export class InboxSearchIndex {
       }
       const facts = doc.threadId ? this.factsOf(doc.threadId) : null;
       if (doc.threadId && !facts) return null;
-      if (!statusOk(facts) || !fromOk(doc, facts)) return null;
+      if (!statusOk(facts, doc.threadId ?? null) || !fromOk(doc, facts)) return null;
       return { group, facts };
     };
     const score = (tier: number, title: boolean, archived: boolean, current: boolean, at: number): number =>
@@ -1034,7 +1040,7 @@ export class InboxSearchIndex {
         const admitted = admit(doc);
         if (!admitted) continue;
         const archived = admitted.facts?.archived ?? false;
-        groups[admitted.group].push({ doc: hit.doc, score: score(hit.tier, hit.title, archived, !!query.current && doc.projectId === query.current, doc.at) });
+        groups[admitted.group].push({ doc: hit.doc, score: score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at) });
       }
     }
     const totals = {} as Record<InboxSearchGroupId, number>;
@@ -1105,7 +1111,7 @@ export class InboxSearchIndex {
           id: message.id,
           thread_id: message.thread_id,
           ...where,
-          author: message.author.kind === "agent" ? { kind: "agent", name: inboxAgentName(message.author) } : { kind: "me", name: "You" },
+          author: message.author.kind === "agent" ? { kind: "agent", name: inboxAgentName(message.author), host: message.author.host ?? null } : { kind: "me", name: "You", host: null },
           title: facts.subject || "(no subject)",
           thread_name: facts.threadName,
           snippet: inboxSearchSnippet(best.text, inboxSearchRanges(best.text, terms)),

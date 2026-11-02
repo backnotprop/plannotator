@@ -59,15 +59,15 @@ const FIRST_ROWS = 5;
 /**
  * Whether the asking message is evidence that its session can end: it came
  * through a connection that wakes its session (`wakes`, the Claude Code mod,
- * Pi, OpenCode 2). An MCP-only agent or OpenCode 1 never polls, and may be
- * waiting in wait_for_reply right now, so it is never called ended.
+ * Pi, OpenCode 2). An MCP-only agent or OpenCode 1 never polls, and may read
+ * the thread at any time, so it is never called ended.
  */
 export const askerCanEnd = (asking: AskingSession | null): boolean => asking?.message.wakes === true;
 
 /**
  * Whether the session that asked has ended, as the window can know it: its
  * message came through a waking connection, and the Inbox has not heard from
- * it since (no poll, no MCP call, no open wait; with the server's 60 s grace).
+ * it since (no poll, no MCP call; with the server's 60 s grace).
  */
 export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsModel | null): boolean {
   if (!asking || !askerCanEnd(asking) || !live?.asker || live.asker.session !== asking.session) return false;

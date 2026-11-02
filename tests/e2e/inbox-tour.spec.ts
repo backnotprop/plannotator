@@ -547,7 +547,8 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   await expect(coach(page).locator('[data-tour-your-turn]')).toHaveText('Your turn');
   // A click on the card's own words points at its target again.
   await coach(page).locator('h2').click();
-  await expect(page.locator('.ib-tour-again')).toHaveCount(1);
+  await expect(page.locator('.ib-tour-mark')).toHaveCount(1);
+  await expect(page.locator('.ib-tour-mark')).toHaveCSS('outline-style', 'solid');
   // The step's end, then the next step's card, for every step to 9; then step 9's end is the loop.
   const ends: Record<number, string> = { 1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: '8-open', 8: '9' };
   for (let n = 1; n <= 8; n++) {
@@ -665,6 +666,72 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
     expect(await ownList(w)).toBe(before);
     expect(errors).toEqual([]);
     await context.close();
+  } finally {
+    await browser.close();
+  }
+});
+
+// The keyboard is a stand-in: an iPhone's readings of the visual viewport (see inbox-phone-compose-send.spec.ts), not a real one.
+test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and with it up (a tap on the message) Send is free', async () => {
+  const w = startWorld('phone-send');
+  const errors: string[] = [];
+  const browser = await webkit.launch({ args: [] });
+  const stand = (page: Page, height: number) =>
+    page.evaluate((height) => {
+      const vv = window.visualViewport!;
+      if (height) Object.defineProperty(vv, 'height', { configurable: true, get: () => document.documentElement.clientHeight - height });
+      else delete (vv as unknown as Record<string, unknown>).height;
+      vv.dispatchEvent(new Event('resize'));
+    }, height);
+  try {
+    for (const { width, height, keyboard } of [
+      { width: 320, height: 568, keyboard: 353 },
+      { width: 393, height: 659, keyboard: 402 },
+    ]) {
+      const { context, page } = await open(browser, w, errors, { ...devices['iPhone 15'], viewport: { width, height } });
+      const press = presser(page, true);
+      const at = (key: string) => expect(coach(page)).toHaveAttribute('data-tour-coach', key, { timeout: 15_000 });
+      const html = page.locator('html');
+      const field = page.locator('[data-compose] textarea');
+      const send = page.locator('[data-compose] .ib-cp-foot [data-compose-send]');
+      const sendFree = () =>
+        send.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return r.bottom <= window.visualViewport!.height + 0.5 && !!hit?.closest('[data-compose-send]');
+        });
+      await page.goto(`${w.url}#tour=9`);
+      await at('9');
+      await press('[data-open-compose]');
+      await at('9-open');
+      await press('[data-compose] [data-compose-to]');
+      await page.locator('[role="option"]').first().tap();
+      await at('9-to');
+
+      // The pick: focus on To, never on the message, so nothing raises a keyboard.
+      await expect(page.locator('[data-compose] [data-compose-to]')).toBeFocused();
+      await expect(field).not.toBeFocused();
+      expect(await sendFree(), `${width}: Send is free with the keyboard down`).toBe(true);
+      await expect(coach(page)).toBeVisible();
+
+      // A tap on the message raises it all the same: the card gives way, Send and Exit stay.
+      await field.focus();
+      await stand(page, keyboard);
+      await expect(html).toHaveAttribute('data-ib-keyboard', '');
+      await expect(coach(page)).toBeHidden();
+      await expect.poll(sendFree, { message: `${width}: Send is free with the keyboard up` }).toBe(true);
+      await expect(page.locator('[data-tour-bar-over] [data-tour-exit]')).toBeVisible();
+      await stand(page, 0);
+      await expect(html).not.toHaveAttribute('data-ib-keyboard', /.*/);
+      await expect(coach(page)).toBeVisible();
+
+      await stand(page, keyboard);
+      await expect(coach(page)).toBeHidden();
+      await send.tap();
+      await at('9-loop');
+      await context.close();
+    }
+    expect(errors).toEqual([]);
   } finally {
     await browser.close();
   }

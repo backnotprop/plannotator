@@ -131,7 +131,7 @@ export function resolveInboxToolEnabled(envValue: string | undefined, configText
 
 /**
  * Whether a session that has the `plannotator_inbox` tool starts with the
- * Inbox's one-line reminder (a `prompt.context` block; register.ts also
+ * Inbox's one-line reminder (the first prompt's context; register.ts also
  * requires that the Inbox has run here). Never without the tool; then on
  * unless turned off in config.json with:
  *

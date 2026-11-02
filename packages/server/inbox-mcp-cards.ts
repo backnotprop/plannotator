@@ -14,6 +14,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
+import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_COLUMNS,
@@ -124,7 +125,7 @@ const OP_COMMON = new Set<keyof CardCallInput>(["op", "project_path", "agent_ses
  */
 async function cardScope(context: InboxMcpContext, path: string): Promise<{ project: InboxProject | null; projectIds: Set<string>; unresolved: boolean }> {
   const found = context.findProjects ? await context.findProjects(path) : { projects: [], unresolved: false };
-  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.map((p) => p.id)), unresolved: found.unresolved };
+  return { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => context.store.projectGroup(p.id))), unresolved: found.unresolved };
 }
 
 /** Run one card call; throws InboxError on a refusal. */
@@ -151,7 +152,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     );
   }
   const session = input.agent_session?.trim() || null;
-  const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: input.agent_name?.trim() || null };
+  const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: inboxStoredAgentName(input.agent_name) };
   // A title that reads like a sentence gets a hint after the card line (approved 2026-10-27; never refused).
   const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);

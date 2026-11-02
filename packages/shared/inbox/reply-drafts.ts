@@ -6,7 +6,7 @@
  *
  * Files, not the store's JSONL, for the reasons compose drafts are
  * (drafts.ts): a draft changes on every pause in typing, and it must never
- * enter the event log, which the window's stream, wait_for_reply's cursor,
+ * enter the event log, which the window's stream, read_thread's cursor,
  * the phone relay and search read. So agents and the MCP never see it.
  *
  * A save is a compare-and-set on `updated_at`: `base` is the `updated_at` the
@@ -14,14 +14,20 @@
  * `409 draft_conflict` with the newer draft. A save may also name `base_body`,
  * the words that window saved last: a draft still holding them is the window's
  * own (a save sent as the page goes, before an earlier save answered). Saving
- * an empty body deletes it. The Send that carries the words clears the draft
+ * an empty body with no files deletes it. The Send that carries the words clears the draft
  * only while it is still the one they were saved as (its `updated_at`).
+ *
+ * A draft may keep long pastes beside the words (`files`, approval
+ * "inbox-paste-attachment"): each a pending upload with where it goes back
+ * (`pasted`). The compare-and-set covers both: any save moves `updated_at`, and
+ * `base_body`'s shortcut holds only while the draft also holds `base_files`.
+ * The upload sweep keeps the uploads a reply draft names.
  */
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId, type InboxReplyDraft } from "@plannotator/core/inbox-types";
-import { INBOX_DRAFT_BODY_MAX } from "./drafts";
+import { isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
+import { checkInboxDraftFiles, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import { InboxError } from "./schema";
 
 export const INBOX_REPLY_DRAFTS_DIR = "reply-drafts";
@@ -39,7 +45,15 @@ function parse(text: string): InboxReplyDraft | null {
     const value = JSON.parse(text) as InboxReplyDraft;
     if (!value || value.v !== 1 || !isInboxId("msg", value.thread_id)) return null;
     if (typeof value.body !== "string" || typeof value.updated_at !== "string" || typeof value.created_at !== "string") return null;
-    return { v: 1, thread_id: value.thread_id, body: value.body, created_at: value.created_at, updated_at: value.updated_at };
+    const files = Array.isArray(value.files) ? value.files.filter((file) => file && typeof file.upload_id === "string" && file.pasted && typeof file.pasted.at === "number") : [];
+    return {
+      v: 1,
+      thread_id: value.thread_id,
+      body: value.body,
+      created_at: value.created_at,
+      updated_at: value.updated_at,
+      ...(files.length > 0 ? { files } : {}),
+    };
   } catch {
     return null;
   }
@@ -66,11 +80,32 @@ export function readInboxReplyDrafts(inboxDirPath: string): Map<string, InboxRep
   return out;
 }
 
-/** The checks on a save's input, before anything is written. */
-export function checkInboxReplyDraftInput(input: { body?: unknown; base?: unknown; base_body?: unknown }): {
+/** The upload ids a reply draft names, in order (its long pastes). */
+export function inboxReplyDraftFileIds(draft: Pick<InboxReplyDraft, "files"> | null | undefined): string[] {
+  return (draft?.files ?? []).map((file) => file.upload_id);
+}
+
+/** Two lists of upload ids hold the same files in the same order. */
+export function sameInboxUploadIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/**
+ * The checks on a save's input, before anything is written. `files`: the long
+ * pastes kept beside the words (each `{ upload_id, pasted }`, an upload still
+ * pending); `base_files`: the upload ids this window saved last, which
+ * `base_body`'s shortcut must also match (absent: words only, as an older window
+ * sends).
+ */
+export function checkInboxReplyDraftInput(
+  inboxDirPath: string,
+  input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown },
+): {
   body: string;
   base: string | null;
   baseBody: string | null;
+  files: InboxDraftFile[];
+  baseFiles: string[] | null;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -82,7 +117,12 @@ export function checkInboxReplyDraftInput(input: { body?: unknown; base?: unknow
   if (baseBody !== null && (typeof baseBody !== "string" || baseBody.length > INBOX_DRAFT_BODY_MAX)) {
     throw new InboxError("validation_error", "base_body: the words this window saved last, or null.", { field: "base_body" });
   }
-  return { body, base, baseBody };
+  const listedBase = input.base_files === undefined || input.base_files === null ? null : input.base_files;
+  if (listedBase !== null && (!Array.isArray(listedBase) || listedBase.some((id) => typeof id !== "string"))) {
+    throw new InboxError("validation_error", "base_files: the upload ids this window saved last, or null.", { field: "base_files" });
+  }
+  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length, { onlyPasted: true });
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null };
 }
 
 /** Write one draft whole (owner-only folder and file). */

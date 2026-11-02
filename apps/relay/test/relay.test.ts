@@ -799,7 +799,7 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     record("storage-1-items-held.json", dumpMailbox(relay, mailbox.mailbox_id));
   }, 60_000);
 
-  test("the phone reads the list and the thread through the relay, then picks and sends; the agent's wait_for_reply gets the answer", async () => {
+  test("the phone reads the list and the thread through the relay, then picks and sends; the agent reads the answer", async () => {
     const list = await ask(a, "GET", "threads");
     expect(list.status).toBe(200);
     expect(list.contentType).toContain("application/json");
@@ -821,11 +821,10 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     });
     expect(reply.status).toBe(200);
     expect(reply.json()).toMatchObject({ replayed: false, reply: { reply_to: messageId, author: { kind: "person" } } });
-    const got = await agent.waitForReply(threadId, 20);
-    expect(got.status).toBe("replied");
-    expect(got.reply.body).toContain("Go ahead.");
-    expect(got.reply.body).toContain("Yes");
-    say(`pick and Send as commands: results 200; the agent's wait_for_reply: replied, "${got.reply.body.split("\n")[0]}"`);
+    const got = await agent.nextReply(threadId, 20);
+    expect(got.body).toContain("Go ahead.");
+    expect(got.body).toContain("Yes");
+    say(`pick and Send as commands: results 200; the agent read the reply: "${got.body.split("\n")[0]}"`);
     // Both commands are gone from the relay once applied.
     await until(() => rows("commands").length, (n) => n === 0, "the commands deleted once applied");
 
@@ -940,14 +939,11 @@ describe("the carriage: a phone reads and answers the Inbox through the relay al
     agent = await SimAgent.connect({ binary: join(w.bin, "plannotator"), env, name: "Claude Code", host: "claude-code", cwd: w.project });
     const result = await resultOf(a, key);
     expect(result.status).toBe(200);
-    const got = await agent.waitForReply(second.thread_id, 20);
-    expect(got.status).toBe("replied");
-    expect(got.reply.body).toContain("No");
-    // Waiting again from the cursor that answer returned: no second reply comes.
-    expect((await agent.waitForReply(second.thread_id, 2, got.cursor)).status).toBe("waiting");
+    const got = await agent.nextReply(second.thread_id, 20);
+    expect(got.body).toContain("No");
     expect((await agent.readThread(second.thread_id)).messages.filter((m: Json) => m.author.kind === "person").length).toBe(1);
     await until(() => rows("commands").length, (n) => n === 0, "the command deleted once applied");
-    say(`Inbox started: the command applied once (result 200); wait_for_reply: replied; again: waiting; one person reply in the thread`);
+    say(`Inbox started: the command applied once (result 200); one person reply in the thread`);
   }, 60_000);
 
   test("acknowledged items are deleted: the storage is empty of envelopes", async () => {

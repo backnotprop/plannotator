@@ -461,10 +461,12 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const replyId = await personSends(w, asked.message_id, words);
 		const wake = await waitFor("the wake turn", () => wakes(pi)[0]);
 		const lines = wake.split("\n");
-		expect(lines[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+		// A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+		expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
+		expect(wake).not.toContain(SUBJECT);
 		expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
 		const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
-		expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: SUBJECT, body: reply.body }));
+		expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }));
 		// The closing line: the thread and the tool as this host registered it (plannotator_inbox).
 		expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
 		expect(wake).toContain(words);
@@ -697,7 +699,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		const asked = sentFrom(m);
 		const replyId = await personSends(w, asked.message_id, "Retry with the same key.");
 		const wake = await waitFor("the wake turn", () => wakes(pi)[0]);
-		expect(wake.split("\n", 1)[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+		expect(wake.split("\n", 1)[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
 		await Bun.sleep(3_000);
 		expect(wakes(pi)).toHaveLength(1);
 		expect(pi.events.some((event) => event.type === "agent_settled")).toBe(false);

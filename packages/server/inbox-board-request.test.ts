@@ -2,7 +2,7 @@
  * Compose's Board chip (approval "inbox-compose-board-chip"), through the
  * server's real doors: a Send with `board_request` stores the flag on the
  * person's message and never in its words; everything the agent receives for
- * that message (the delivered turn, read_thread, wait_for_reply) carries the
+ * that message (the delivered turn, read_thread) carries the
  * Board request block once; nothing else does. Every test uses its own temp
  * data dir and decides the Board itself; the connections are plain HTTP calls
  * with the registry's token, never a real agent.
@@ -106,19 +106,19 @@ describe("Board request", () => {
     expect(count(await readThreadText(client, sent.message.thread_id), INBOX_BOARD_REQUEST_OPEN)).toBe(1);
   });
 
-  test("wait_for_reply hands the message sent with the chip with the block once in its text, and its JSON keeps the words", async () => {
+  test("read_thread has the block once in its text, and its JSON keeps the words", async () => {
     const { server, client, project } = await setup(true);
     await poll(server, "ses-a", project);
     const sent = await send(server, { body: WORDS, idempotency_key: "k1", board_request: true });
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-a", timeout_seconds: 1 } })) as {
+    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-a" } })) as {
       content: { text: string }[];
-      structuredContent: { reply: { body: string; board_request?: boolean } };
+      structuredContent: { thread: { messages: { body: string; board_request?: boolean }[] } };
     };
-    const first = waited.content.map((part) => part.text).join("\n");
+    const first = read.content.map((part) => part.text).join("\n");
     expect(first).toContain(WORDS);
     expect(count(first, INBOX_BOARD_REQUEST_OPEN)).toBe(1);
-    // The JSON keeps the person's words and a flag, as read_thread's does: a client that prints both reads the block once.
-    expect(waited.structuredContent.reply).toMatchObject({ body: WORDS, board_request: true });
+    // The JSON keeps the person's words and a flag: a client that prints both reads the block once.
+    expect(read.structuredContent.thread.messages.at(-1)).toMatchObject({ body: WORDS, board_request: true });
   });
 
   test("of two turns handed in one poll, only the one sent with the chip carries the block", async () => {

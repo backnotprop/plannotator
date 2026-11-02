@@ -6,7 +6,7 @@
  * and the thread's foot ("Draft · 2 picks" before Send / Edit draft). Action
  * items waiting for the Send count as "1 done", "1 can't do".
  */
-import type { InboxRowUnsent } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, type InboxRowUnsent } from '@plannotator/core/inbox-types';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
 
@@ -49,6 +49,9 @@ export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; 
   );
 }
 
+/** Above the reply box when its words are longer than a draft holds (the Inbox refuses such a draft). */
+export const DRAFT_NOT_SAVED_TOO_LONG = `Not saved: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
+
 /** The conflict line's words: both windows hold words for this reply. */
 export function conflictText(sentElsewhere: boolean): string {
   return sentElsewhere ? 'Not saved: this reply was sent or discarded in another window.' : 'Not saved: this reply changed in another window.';
@@ -73,12 +76,28 @@ export function DraftHead({
   savedAt,
   onDiscard,
   conflict = null,
+  tooLong = false,
 }: {
   label: string;
   savedAt: string | null;
   onDiscard: (() => void) | null;
   conflict?: DraftConflict | null;
+  /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
+  tooLong?: boolean;
 }) {
+  if (tooLong && !conflict) {
+    return (
+      <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-too-long="">
+        <span className="ib-draft-for" dir="auto">
+          {label}
+        </span>
+        <span className="ib-sp" />
+        <span className="ib-draft-saved" role="status">
+          {DRAFT_NOT_SAVED_TOO_LONG}
+        </span>
+      </div>
+    );
+  }
   if (conflict) {
     // Not a live region: the thread's own region says it once when it appears.
     return (
@@ -123,30 +142,61 @@ export function DraftHead({
  * The words before the comments ("Your reply, 2 picks") and the comment count are spans of their own: short of room
  * the foot's row drops the pick words (footFit.ts step `draft`) and shows the count in the pill instead ("Draft 💬3").
  * That glyph and number are hidden from screen readers; the words stay as hidden text ("Draft, 2 picks, 3 comments").
+ *
+ * With `onComments` the count is the way to the list: the words a quiet link, the pill's count a button. One of the
+ * two shows at a time (inbox.css keeps the other out of the Tab order), and each says the same words to a screen reader.
+ * Send's description then reads a hidden copy of the words: from the note itself, the pill's button would speak first.
  */
-export function DraftFootNote({ unsent, id }: { unsent: { reply: boolean; picks: number; comments: number; done?: number; cant?: number }; id?: string }) {
+export function DraftFootNote({
+  unsent,
+  id,
+  onComments,
+  commentsOpen = false,
+}: {
+  unsent: { reply: boolean; picks: number; comments: number; done?: number; cant?: number };
+  id?: string;
+  onComments?: () => void;
+  commentsOpen?: boolean;
+}) {
   const lead = unsentWords({ ...unsent, comments: 0 });
   const comments = unsent.comments > 0 ? unsentWords({ reply: false, picks: 0, comments: unsent.comments }, lead === '') : '';
+  const link = onComments ? { type: 'button' as const, onClick: onComments, 'aria-expanded': commentsOpen, 'aria-haspopup': 'dialog' as const, 'data-comments-link': '' } : null;
   return (
-    <span className="ib-draft-foot" data-draft-foot="" id={id}>
+    <>
+    {link && <span id={id} hidden>{['Draft', lead, comments].filter(Boolean).join(', ')}</span>}
+    <span className="ib-draft-foot" data-draft-foot="" id={link ? undefined : id}>
       <span className="ib-draft-pill">
         {/* The comma is for the ear ("Draft, 1 pick, 3 comments"): inline and sized to nothing, so no space comes before it. */}
         <span>
           Draft
           {(lead || comments) && <span className="ib-draft-comma">,</span>}
         </span>
-        {unsent.comments > 0 && (
-          <span className="ib-draft-pc" data-draft-pill-count="" aria-hidden="true">
-            <Icon name="comment" size={12} />
-            {unsent.comments}
-          </span>
-        )}
+        {unsent.comments > 0 &&
+          (link ? (
+            <button {...link} className="ib-draft-pc ib-comments-link" data-draft-pill-count="" aria-label={comments}>
+              <Icon name="comment" size={12} />
+              {unsent.comments}
+            </button>
+          ) : (
+            <span className="ib-draft-pc" data-draft-pill-count="" aria-hidden="true">
+              <Icon name="comment" size={12} />
+              {unsent.comments}
+            </span>
+          ))}
       </span>{' '}
       <span className="ib-st">
         {lead && <span data-draft-words="">{lead}</span>}
         {lead && comments && <span data-draft-sep="">{', '}</span>}
-        {comments && <span data-draft-comments="">{comments}</span>}
+        {comments &&
+          (link ? (
+            <button {...link} className="ib-comments-link" data-draft-comments="">
+              {comments}
+            </button>
+          ) : (
+            <span data-draft-comments="">{comments}</span>
+          ))}
       </span>
     </span>
+    </>
   );
 }

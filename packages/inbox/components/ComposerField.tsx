@@ -38,6 +38,10 @@ import type { MentionPerson, MentionSource } from '@plannotator/ui/utils/mention
 import { TAG_UPDATE_WORDS, tagPeople, tagPickedWords, type TagOption } from '../tags';
 import { caretAnchor, caretLineRect, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
 import { TagNotes, TagPicker } from './TagPicker';
+import { VoiceNote, voiceHidesCaret, voicePaint } from './VoiceMic';
+import type { VoiceHandle } from '../voice';
+import { textareaField } from '../voiceField';
+import { isTouchScreen } from '../phone';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -83,6 +87,8 @@ export interface InboxComposerFieldProps {
   caretMenu?: CaretMenuOptions;
   /** Escape closes an open picker even before a query was typed (compose: Escape would ask about a draft). */
   escapeClosesMenu?: boolean;
+  /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
+  voice?: VoiceHandle;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -99,6 +105,7 @@ export function InboxComposerField({
   tags,
   caretMenu,
   escapeClosesMenu = false,
+  voice,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -108,6 +115,13 @@ export function InboxComposerField({
     },
     [textareaRef],
   );
+  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip.
+  const voiceSession = voice?.session;
+  useEffect(() => {
+    if (!voiceSession || !innerRef.current) return;
+    return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
+  }, [voiceSession]);
+  const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
   const skills = useSkillReferenceAutocomplete({
     text: value,
     setText: onChange,
@@ -167,7 +181,7 @@ export function InboxComposerField({
   const host = caretMenu ? (innerRef.current?.closest('dialog') ?? null) : null;
   const describedBy = [ariaDescribedBy, showNotes ? notesId : null].filter(Boolean).join(' ') || undefined;
   return (
-    <div className="ib-cfield" data-composer-field="">
+    <div className="ib-cfield" data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
       {skills.menu && !tagMenu && caretMenu && host && innerRef.current ? (
         <CaretSkillMenu textarea={innerRef.current} host={host} options={caretMenu}>
           {(boundary) => (
@@ -208,7 +222,8 @@ export function InboxComposerField({
           skills.onSelect();
           mention.onSelect();
         }}
-        placeholder={placeholder}
+        placeholder={voiceLive ? '' : placeholder}
+        mirrorPaint={voice ? voicePaint(voice.view, voice.session, value) : undefined}
         sizeClassName=""
         textClassName=""
         inputClassName="ib-rtext"
@@ -221,6 +236,7 @@ export function InboxComposerField({
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
+      {voice && <VoiceNote voice={voice} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (

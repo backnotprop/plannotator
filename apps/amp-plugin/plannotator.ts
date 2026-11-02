@@ -1007,6 +1007,9 @@ function loadPlannotatorConfig(): PromptConfig {
   }
 }
 
+/** What only Plannotator writes into its data directory (DATA_DIR_MARKERS in packages/shared/data-dir.ts). */
+export const DATA_DIR_MARKERS = ["history", "sessions", "drafts", "inbox", "claude-code-mod", "install-flags.json"] as const;
+
 export function getPlannotatorDataDir(): string {
   const home = homedir();
 
@@ -1019,18 +1022,26 @@ export function getPlannotatorDataDir(): string {
     return resolve(value);
   }
 
-  // Legacy-first: an existing ~/.plannotator always wins so current
-  // installs never move. Only when it is absent AND XDG_DATA_HOME is
-  // explicitly set to an absolute path does the XDG location apply.
+  // Legacy-first: an existing ~/.plannotator wins so current installs never
+  // move, unless it is a stray folder (none of Plannotator's data) while the
+  // XDG folder holds the data (#2305). Only when it is absent AND
+  // XDG_DATA_HOME is explicitly set to an absolute path does the XDG
+  // location apply otherwise. A copy of packages/shared/data-dir.ts (this
+  // plugin is one file); tests/data-dir-mirrors.test.ts keeps them equal.
   const legacyDir = join(home, ".plannotator");
-  if (existsSync(legacyDir)) return legacyDir;
-
   const xdgDataHome = process.env.XDG_DATA_HOME?.trim();
-  if (xdgDataHome && isAbsolute(xdgDataHome)) {
-    return join(xdgDataHome, "plannotator");
+  const xdgDir = xdgDataHome && isAbsolute(xdgDataHome) ? join(xdgDataHome, "plannotator") : null;
+
+  if (existsSync(legacyDir)) {
+    if (xdgDir && existsSync(xdgDir) && holdsPlannotatorData(xdgDir) && !holdsPlannotatorData(legacyDir)) return xdgDir;
+    return legacyDir;
   }
 
-  return legacyDir;
+  return xdgDir ?? legacyDir;
+}
+
+function holdsPlannotatorData(dir: string): boolean {
+  return DATA_DIR_MARKERS.some((entry) => existsSync(join(dir, entry)));
 }
 
 function getConfiguredPrompt(

@@ -14,14 +14,14 @@ import {
   type InboxSearchStatus,
   type InboxSearchThreadRow,
 } from '@plannotator/core/inbox-search';
-import { INBOX_SECTIONS, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { INBOX_SECTIONS, inboxProjectDisplayName, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { threadChipName } from '../threadChip';
 
-export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string }>> = {
-  threads: { heading: 'Threads', noun: 'threads' },
-  messages: { heading: 'Messages', noun: 'messages' },
-  files: { heading: 'Files', noun: 'files' },
-  projects: { heading: 'Projects', noun: 'projects' },
+export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string; one: string }>> = {
+  threads: { heading: 'Threads', noun: 'threads', one: 'thread' },
+  messages: { heading: 'Messages', noun: 'messages', one: 'message' },
+  files: { heading: 'Files', noun: 'files', one: 'file' },
+  projects: { heading: 'Projects', noun: 'projects', one: 'project' },
 };
 
 /** One option of the listbox. */
@@ -131,12 +131,20 @@ export function chipText(kind: keyof SearchFilters, filters: SearchFilters, proj
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
 }
 
-/** Project names as the person reads them: a second project with the same name gets its parent folder ("api · work"). */
-export function projectNames(projects: readonly { id: string; name: string; root: string }[]): Map<string, string> {
+/**
+ * Project names as the person reads them: a second project with the same name gets its parent folder ("api · work").
+ * A project the person renamed (`display_name`) reads that name as it is.
+ */
+export function projectNames(projects: readonly { id: string; name: string; root: string; display_name?: unknown }[]): Map<string, string> {
   const counts = new Map<string, number>();
-  for (const p of projects) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+  for (const p of projects) if (inboxProjectDisplayName(p) === null) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
   const out = new Map<string, string>();
   for (const p of projects) {
+    const given = inboxProjectDisplayName(p);
+    if (given !== null) {
+      out.set(p.id, given);
+      continue;
+    }
     const parts = p.root.split(/[\\/]+/).filter(Boolean);
     const parent = parts.length >= 2 ? parts[parts.length - 2] : null;
     out.set(p.id, (counts.get(p.name) ?? 0) > 1 && parent ? `${p.name} · ${parent}` : p.name);
@@ -144,10 +152,11 @@ export function projectNames(projects: readonly { id: string; name: string; root
   return out;
 }
 
-/** "Searched only plannotator, Archived": the scope a "No matches" names. */
-export function scopeWords(filters: SearchFilters, projectName: (id: string) => string): string[] {
+/** "Searched only plannotator, Archived", or with a picked type "Searched only files in plannotator": the scope a "No matches" names. */
+export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null): string[] {
   const out: string[] = [];
-  if (filters.project) out.push(projectName(filters.project));
+  if (type) out.push(filters.project ? `${GROUP_LABELS[type].noun} in ${projectName(filters.project)}` : GROUP_LABELS[type].noun);
+  else if (filters.project) out.push(projectName(filters.project));
   if (filters.status) out.push(STATUS_OPTIONS.find((o) => o.value === filters.status)!.label);
   if (filters.from) out.push(filters.from === 'me' ? 'From me' : 'From agents');
   return out;
@@ -166,6 +175,18 @@ export function countWords(answer: { totals: Record<InboxSearchGroupId, number> 
   const n = groups.reduce((sum, id) => sum + totals[id], 0);
   if (n === 0) return q.trim() ? `No matches for ${q.trim()}` : filtered ? 'No threads match these filters' : '';
   return `${formatCount(n)} ${n === 1 ? 'result' : 'results'} in ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`;
+}
+
+/**
+ * What the live region says once an answer lands while the Type chip names one
+ * group (approval "inbox-search-type-filter"): that group's total, "10 files",
+ * from the answer's `totals`. With no words there is nothing to count.
+ */
+export function typeCountWords(answer: { totals: Record<InboxSearchGroupId, number> | null; indexing?: boolean } | null, q: string, type: InboxSearchGroupId): string {
+  if (!answer || answer.indexing || !answer.totals || !q.trim()) return '';
+  const n = answer.totals[type];
+  if (n === 0) return `No ${GROUP_LABELS[type].noun} match ${q.trim()}`;
+  return `${formatCount(n)} ${n === 1 ? GROUP_LABELS[type].one : GROUP_LABELS[type].noun}`;
 }
 
 const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -213,6 +234,31 @@ export interface RowThreadChip {
   kind: 'name' | 'subject';
   /** The thread's subject, for the chip's title and its accessible words. */
   subject: string;
+}
+
+/**
+ * The mark a result row starts with: who wrote it or what it is (approval
+ * "inbox-search-contrast", option B). A message: its agent's mark (the host,
+ * null when unknown or from an older Inbox, which draws the generic agent
+ * mark as the list does), or the person's outline for a reply; a thread: a
+ * speech bubble; a file: a document; a guided review: a book; a project: a
+ * folder. Purely visual: the row's words say the same.
+ */
+export type SearchRowMark = { kind: 'agent'; host: string | null } | { kind: 'icon'; icon: 'user' | 'comment' | 'doc' | 'book' | 'folder' };
+
+export function searchRowMark(row: InboxSearchRow): SearchRowMark {
+  switch (row.type) {
+    case 'message':
+      return row.author.kind === 'me' ? { kind: 'icon', icon: 'user' } : { kind: 'agent', host: row.author.host ?? null };
+    case 'thread':
+      return { kind: 'icon', icon: 'comment' };
+    case 'file':
+      return { kind: 'icon', icon: 'doc' };
+    case 'guide':
+      return { kind: 'icon', icon: 'book' };
+    case 'project':
+      return { kind: 'icon', icon: 'folder' };
+  }
 }
 
 /**

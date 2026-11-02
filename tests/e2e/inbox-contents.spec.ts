@@ -154,7 +154,9 @@ for (const layout of ['side', 'full'] as const) {
         const heading = (await pane.locator('#rollout').boundingBox())!;
         return heading.y >= pageBox.y && heading.y < pageBox.y + pageBox.height / 2;
       }).toBe(true);
-      // The heading read now is the one marked, as in plan review's list.
+      // The heading read now is the one marked, as in plan review's list. The pick marks it at once; the
+      // scroll's own event reads the position again a frame later, so look once that frame has run.
+      await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
       await expect(rail.locator('[aria-current="location"] .pn-contents-rail-label')).toHaveText('Rollout');
 
       // Escape closes the panel (focus anywhere), and full screen stays.

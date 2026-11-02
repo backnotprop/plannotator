@@ -58,10 +58,10 @@ import {
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
 import { enableTailscaleServe, removeTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
-import { INBOX_TAILNET_HTTPS_PORT } from "./inbox-devices";
+import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE } from "./inbox-tailnet-door";
 
-/** Phones' tailnet HTTPS port (inbox-devices.ts, 8443): the window's mapping never takes it. */
-export const PHONES_TAILNET_HTTPS_PORT = INBOX_TAILNET_HTTPS_PORT;
+/** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
+export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
 
 /** A serve route that points at the window's own port: it hands the tailnet the whole Inbox, `/mcp` included. */
 export interface InboxTailnetExposure {
@@ -344,7 +344,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     const port = context.port();
     if (!reconcile()) return false;
     try {
-      if (port === PHONES_TAILNET_HTTPS_PORT) throw new Error(`Port ${port} is kept for phones.`);
+      if (isDoorTailnetPort(port)) throw new Error(`Port ${port} is kept for the Inbox's door (${INBOX_TAILNET_PORT_RANGE}).`);
       const who = readAllowed();
       state.owner = who.owner;
       state.allowed = who.allowed;

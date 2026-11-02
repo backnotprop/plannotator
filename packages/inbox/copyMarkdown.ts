@@ -149,7 +149,8 @@ function agentMarkdown(message: InboxMessageWire): string {
   for (const [startLine, parsed] of parsedActions) {
     const end = directiveEnds.get(startLine);
     if (end === undefined) continue;
-    const record = actionRecords.get(parsed.key) ?? null;
+    // By its place when the key moved (a message stored before the reader dropped a task box), as actionForBlock does.
+    const record = actionRecords.get(parsed.key) ?? [...actionRecords.values()].find((a) => a.position === parsed.position) ?? null;
     swaps.push({ start: startLine, end, lines: actionLines((record?.position ?? parsed.position) + 1, parsed, record) });
   }
   const lines = body.split('\n');

@@ -71,7 +71,8 @@ export function createInboxTagsRoute(options: {
     const projectOfRoot = (root: string | null, session: string): InboxTaggableSession["project"] => {
       if (root !== null) {
         const known = store.projectByRoot(root);
-        return known ? { id: known.id, name: known.name, root } : { id: null, name: basename(root) || root, root };
+        // The head's id: the thread's project reads as the head, so a session in another folder of it is "here".
+        return known ? { id: store.canonicalProjectId(known.id), name: known.name, root } : { id: null, name: basename(root) || root, root };
       }
       const wrote = lastThreads.get(session);
       const project = wrote ? store.project(wrote.project_id) : null;
@@ -80,7 +81,7 @@ export function createInboxTagsRoute(options: {
     const liveRows: (InboxTaggableSession & { rank: number; activity: number })[] = live.allLive().map((entry) => {
       const project = projectOfRoot(entry.root, entry.session);
       const isOwner = owner?.session === entry.session;
-      const sameProject = project?.id === thread.project.id;
+      const sameProject = !!project?.id && store.sameProject(project.id, thread.project.id);
       return {
         session: entry.session,
         host: entry.host,

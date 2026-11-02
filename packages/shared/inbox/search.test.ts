@@ -159,12 +159,26 @@ describe("groups and rows", () => {
     const message = answer.groups!.messages![0] as InboxSearchMessageRow;
     expect(message.question?.key).toBeTruthy();
     expect(marked(message.snippet.text, message.snippet.marks)).toEqual(["rate", "lim"]);
-    expect(message.author).toEqual({ kind: "agent", name: "Claude Code" });
+    // The agent's host rides along (additive), so the window draws that agent's mark.
+    expect(message.author).toEqual({ kind: "agent", name: "Claude Code", host: "claude-code" });
     const file = answer.groups!.files![0] as InboxSearchFileRow;
     expect(file).toMatchObject({ type: "file", name: "relay-rate-limits.md", folder: "implementation", kind: "md", thread_id: root.id });
     expect(marked(file.name, file.name_marks)).toEqual(["rate", "lim"]);
     expect(answer.totals).toEqual({ threads: 1, messages: 1, files: 1, projects: 0 });
     expect(search(index, "plannotator").groups!.projects!.map((p) => p.id)).toEqual([relay.id]);
+  });
+
+  test("a message row carries its agent's host as the store has it, null when the agent gave none", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "api", root: "/w/api" });
+    const fromPi = store.sendMessage({ project_id: project.id, author: PI, subject: "Cache warmup", body: "Warmup runs nightly." }).message;
+    const unknown = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: null, session: "ses_c", name: "Helper" }, subject: "Warmup notes", body: "Warmup takes four minutes." }).message;
+    const index = await built(store);
+    const rows = search(index, "warmup").groups!.messages! as InboxSearchMessageRow[];
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.author]))).toEqual({
+      [fromPi.id]: { kind: "agent", name: "Pi", host: "pi" },
+      [unknown.id]: { kind: "agent", name: "Helper", host: null },
+    });
   });
 
   test("a thread whose messages match is listed under Threads only when its own title fields match", async () => {
@@ -187,7 +201,7 @@ describe("groups and rows", () => {
     const index = await built(store);
     const answer = search(index, "spread retry");
     const row = answer.groups!.messages!.find((m) => m.id === reply.id) as InboxSearchMessageRow;
-    expect(row.author).toEqual({ kind: "me", name: "You" });
+    expect(row.author).toEqual({ kind: "me", name: "You", host: null });
     // The generated line is not the person's words.
     expect(messageIds(search(index, "answered"))).toEqual([]);
     // The answer is indexed on the question (the agent's message).

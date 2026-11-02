@@ -5,6 +5,7 @@
 /* Theme files — each defines .theme-{name} (dark) and .theme-{name}.light */
 @import "./themes/plannotator.css";
 @import "./themes/plannotator-graphite.css";
+@import "./themes/plannotator-modern.css";
 @import "./themes/claude-plus.css";
 @import "./themes/soft-pop.css";
 @import "./themes/adwaita.css";
@@ -24,6 +25,7 @@
 @import "./themes/solar-dusk.css";
 @import "./themes/terminal.css";
 @import "./themes/tokyo-night.css";
+@import "./themes/tokyo-night-moon.css";
 @import "./themes/tinacious.css";
 @import "./themes/cursor.css";
 @import "./themes/cursor-hc.css";

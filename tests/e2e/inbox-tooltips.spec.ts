@@ -224,7 +224,7 @@ test("a tooltip floats with no visible border (owner's ruling q4), Soft's float 
 test('Escape with a tooltip open still closes the thread (the tooltip does not swallow the key)', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
-    await page.locator('section.ib-pane [data-archive]').hover();
+    await page.locator('section.ib-pane [data-thread-more]').hover();
     await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
@@ -234,7 +234,7 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
   }
 });
 
-test('a wrapped control keeps its width: Mark read never spills over Archive, from 320 px to 1440 px', async ({ browser }) => {
+test('a wrapped control keeps its width: Mark read never spills over the icons after it, from 320 px to 1440 px', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
     for (const width of [320, 390, 600, 810, 1024, 1280, 1440]) {
@@ -244,7 +244,7 @@ test('a wrapped control keeps its width: Mark read never spills over Archive, fr
         const box = (sel: string) => document.querySelector(`section.ib-pane ${sel}`)?.getBoundingClientRect() ?? null;
         const mark = box('[data-mark-read]');
         const wrap = box('[data-tip-wrap]:has(> [data-mark-read])');
-        const archive = box('[data-archive]');
+        const archive = box('[data-thread-more]');
         const button = document.querySelector<HTMLElement>('section.ib-pane [data-mark-read]');
         const style = button ? getComputedStyle(button) : null;
         const margins = style ? parseFloat(style.marginLeft) + parseFloat(style.marginRight) : 0;
@@ -253,7 +253,7 @@ test('a wrapped control keeps its width: Mark read never spills over Archive, fr
           : null;
       });
       expect(boxes, `the header at ${width}px`).not.toBeNull();
-      expect(boxes!.markRight, `Mark read ends before Archive at ${width}px`).toBeLessThanOrEqual(boxes!.archiveLeft);
+      expect(boxes!.markRight, `Mark read ends before ⋯ More at ${width}px`).toBeLessThanOrEqual(boxes!.archiveLeft);
       // The wrapper is exactly as wide as the button it holds (with its margins), and the button is never squeezed.
       expect(Math.abs(boxes!.wrapWidth - boxes!.markWidth), `the wrapper at ${width}px`).toBeLessThan(0.5);
       expect(boxes!.cut, `Mark read squeezed at ${width}px`).toBe(false);

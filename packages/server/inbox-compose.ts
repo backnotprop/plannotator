@@ -22,6 +22,9 @@
  *   POST /api/inbox/drafts/:id               create or replace one (compare-and-set on `base`)
  *   POST /api/inbox/drafts/:id/delete        delete one
  *   POST /api/inbox/uploads?name=&serverSession=   one file, the raw body streamed
+ *   GET  /api/inbox/uploads/:id/text         `{ text }`: a pending pasted-text upload's words, for
+ *                                            Put back after a reload (another site's read refused;
+ *                                            404 `upload_not_found` once sent or swept)
  *
  * Drafts and pending uploads live in files under `inbox/` (drafts.ts,
  * uploads.ts), outside the event log, so agents, phones and search never see
@@ -40,11 +43,13 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   inboxUploadAttachments,
   INBOX_UPLOAD_MAX_BYTES,
+  readInboxUploadText,
   receiveInboxUpload,
   removeInboxAttachmentFiles,
   removeInboxUploads,
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
@@ -66,6 +71,8 @@ export function createInboxCompose(options: {
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
+  machine?: () => string;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -87,11 +94,14 @@ export function createInboxCompose(options: {
     for (const entry of live.allLive()) {
       const root = placeOf(entry.root, entry.session, lastThreads);
       if (root === null) continue;
-      let group = groups.get(root);
+      // The folders of a combined project are one group, under the project the person sees.
+      const known = store.projectByRoot(root);
+      const head = known ? store.project(store.canonicalProjectId(known.id)) : null;
+      const key = head?.id ?? root;
+      let group = groups.get(key);
       if (!group) {
-        const known = store.projectByRoot(root);
-        group = { project: known ? { id: known.id, name: known.name, root } : { id: null, name: basename(root) || root, root }, sessions: [] };
-        groups.set(root, group);
+        group = { project: head ? { id: head.id, name: head.name, root: head.root } : { id: null, name: basename(root) || root, root }, sessions: [] };
+        groups.set(key, group);
       }
       const last = lastThreads.get(entry.session);
       group.sessions.push({
@@ -102,6 +112,8 @@ export function createInboxCompose(options: {
         busy: entry.busy,
         idle_since: entry.idleSince === null ? null : iso(entry.idleSince),
         last_thread: last ? { id: last.id, subject: last.subject, at: last.at } : null,
+        ...(root !== group.project.root ? { root } : {}),
+        ...(entry.label ? { label: entry.label } : {}),
         activity: Math.max(entry.startedAt, last ? Date.parse(last.at) : 0),
       });
     }
@@ -126,9 +138,12 @@ export function createInboxCompose(options: {
       const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
       return json({ thread_id: result.message.thread_id, message: result.message, replayed: true });
     }
-    if (typeof body.body !== "string" || body.body.trim() === "") throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
     if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
+    // Words or files, as a reply takes (approval "inbox-paste-attachment"): a long paste attached alone is a message.
+    if (typeof body.body !== "string" || (body.body.trim() === "" && uploads.length === 0)) {
+      throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    }
     const target = live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
@@ -187,6 +202,7 @@ export function createInboxCompose(options: {
       const session = url.searchParams.get("session");
       return json({
         serverSession,
+        ...(options.machine ? { machine: options.machine() } : {}),
         home: homedir(),
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
@@ -232,6 +248,15 @@ export function createInboxCompose(options: {
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
       return json({ upload });
     }
+    const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);
+    if (textMatch) {
+      if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      // Words the person pasted: another site's page never reads them.
+      if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+      const text = readInboxUploadText(store.dir, textMatch[1]);
+      if (text === null) throw new InboxError("upload_not_found", "That pasted text is no longer here.");
+      return json({ text });
+    }
     return null;
   };
 
@@ -241,7 +266,9 @@ export function createInboxCompose(options: {
       .listRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
       .map((row) => {
-        const words = store.replyDraft(row.thread_id)?.body.trim().replace(/\s+/g, " ") ?? "";
+        const draft = store.replyDraft(row.thread_id);
+        // A draft holding only a long paste reads as the paste's first words.
+        const words = (draft?.body.trim() || draft?.files?.[0]?.pasted?.preview || "").replace(/\s+/g, " ").trim();
         return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
       })
       .sort((a, b) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id));
@@ -249,7 +276,10 @@ export function createInboxCompose(options: {
   /** Forget uploads older than a day that no draft names, and the blobs only they held. */
   const sweep = () => {
     try {
-      sweepInboxUploads(store.dir, { keep: inboxDraftUploadIds(store.dir), usedBlobs: store.usedBlobs(), now: now().getTime() });
+      const keep = inboxDraftUploadIds(store.dir);
+      // A reply draft's long pastes (approval "inbox-paste-attachment") are kept as a compose draft's files are.
+      for (const id of store.replyDraftUploadIds()) keep.add(id);
+      sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {
       // Best effort: the next sweep tries again.
     }

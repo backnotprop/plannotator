@@ -356,13 +356,11 @@ test('beside the thread a document keeps its frame, and the peek opens over it',
 test('Send carries the comment on the image in the message, named by its path and its message', async () => {
   const page = world.page;
   await pane().getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await page.getByRole('textbox', { name: /^Reply to / }).fill('One note on B.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('the images your messages showed');
   expect(body).toMatch(/## design\/checkout-b-steps\.png \(image in your \d{1,2}:\d{2} [AP]M message\)/);
   expect(body).toContain('Make step 1 bold');

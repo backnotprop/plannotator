@@ -220,6 +220,7 @@ import { isQwenPlanPermissionRequest, qwenPlanFromEvent, qwenPlanHookOutput } fr
 import { resolveClaudePlan } from "./claude-plan";
 import { takeModPlanApproval } from "./mod-plan-approval";
 import {
+  DATA_DIR_COMMAND_USAGE,
   formatInteractiveNoArgClarification,
   formatSubcommandHelp,
   formatTopLevelHelp,
@@ -237,10 +238,11 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runInboxCallCommand } from "./inbox-call-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
-import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { getPlannotatorDataDir, getUnusedPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
 import {
   annotateStartupFailureExitCode,
@@ -325,6 +327,22 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
+// Here, like the card command: it takes its own flags, and JSON is not ours to scan.
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "call") {
+    const callDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxCallCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(callDataDir),
       }),
     );
   }
@@ -659,6 +677,25 @@ if (helpSubcommand) {
 }
 
 exitOnUnknownSubcommand(args);
+
+// `plannotator data-dir`: print the data directory and exit, creating
+// nothing. Skills ask this instead of naming ~/.plannotator (#2305).
+if (args[0] === "data-dir") {
+  if (args.length > 1) {
+    console.error(`plannotator data-dir takes no arguments.\n\n${DATA_DIR_COMMAND_USAGE}`);
+    process.exit(2);
+  }
+  console.log(getPlannotatorDataDir());
+  const unused = getUnusedPlannotatorDataDir();
+  // Worded so no agent reads it as a folder to clean up: it may hold the
+  // person's older plans and history.
+  if (unused) {
+    console.error(
+      `Note: ${unused} also exists. It may hold older Plannotator data, so leave it alone: do not delete, move or write to it. Plannotator uses the folder above.`,
+    );
+  }
+  process.exit(0);
+}
 
 // Read a caller-supplied unified diff for static patch mode (`--patch-file`).
 /**

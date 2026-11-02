@@ -13,7 +13,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { whenTime } from './format';
 
 const hasDom = typeof document !== 'undefined';
@@ -108,6 +108,7 @@ let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean } } = { sessions: [] };
 let replyAnswer: () => Response = () => new Response('{}');
+let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
 
@@ -117,6 +118,7 @@ beforeEach(() => {
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   liveness = null;
+  annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -125,7 +127,7 @@ beforeEach(() => {
       if (path.endsWith('/reply')) return replyAnswer();
       return Response.json({ questions: [] });
     }
-    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) {
       // With `liveness`, `?asker=` is answered for whichever session the window asks about.
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
@@ -505,4 +507,37 @@ test.skipIf(!hasDom)("picks only on A's older question, the latest message from 
   await settle();
   expect(el.querySelector('[data-route-choice]')).not.toBeNull();
   expect(replies()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  annotations = [{ id: 'ann_1', project_id: PROJECT.id, thread_id: M1, message_id: M1, attachment_id: '', path: M1, version: 'current', message: { at: '2026-10-11T10:41:00.000Z' }, annotation: { id: 'ann_1', type: 'COMMENT', text: 'Why three?', originalText: 'retry policy' }, created_at: '2026-10-11T10:50:00.000Z', updated_at: '2026-10-11T10:50:00.000Z', removed_at: null, sent_reply_id: null }];
+  const el = await render(threadOf(asking()));
+  const list = () => el.querySelector('[data-comments-list]');
+
+  // The window's own Send: no press outside comes first, so only the foot changing can take the list.
+  act(() => (el.querySelector('[data-comments-link]') as HTMLElement).click());
+  expect(list()).not.toBeNull();
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+  expect(list()).toBeNull();
+
+  const mark = document.createElement('mark');
+  mark.setAttribute('data-highlight-id', 'ann_1');
+  el.querySelector('.ib-body')!.append(mark);
+  act(() => mark.click());
+  await settle();
+  expect(list()).toBeNull();
+
+  key(radio(el, 'ses_other'), { key: 'Escape' });
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).toBeNull();
+  expect(el.querySelector('[data-foot-row]')).not.toBeNull();
+  expect(list()).toBeNull();
+
+  // Back on the foot, the same press opens it: what stopped it was the choice.
+  act(() => mark.click());
+  await settle();
+  expect(list()).not.toBeNull();
 });

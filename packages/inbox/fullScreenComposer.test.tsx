@@ -65,7 +65,7 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
   });
 }
 
-const TESTS = 11;
+const TESTS = 13;
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000020000000308060000009d74c6e10000000d49444154789c636060000000040001f61738550000000049454e44ae426082', 'hex');
 const image = (name: string) => new File([PNG], name, { type: 'image/png' });
@@ -412,6 +412,34 @@ test.skipIf(!hasDom)('a Send from the card goes: the words leave the card and th
   expect(radio('reply').getAttribute('aria-checked')).toBe('true');
 });
 
+test.skipIf(!hasDom)('the chord on the card (a tab, off the field) sends the reply once; not from the Comment tab, nor with Shift; the thread behind never sends it too', async () => {
+  await renderFull('shot.png');
+  const chord = (el: HTMLElement, init: KeyboardEventInit = {}) =>
+    act(() => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true, ...init }));
+    });
+  const replies = () => posted.filter((p) => p.path.endsWith('/reply')).length;
+  const settle = () =>
+    act(async () => {
+      await new Promise((r) => setTimeout(r, 400));
+    });
+  // The Comment tab: the chord is the comment's, never a send (the thread's own handler stands down under full screen).
+  chord(radio('comment'));
+  await settle();
+  expect(replies()).toBe(0);
+  await click(radio('reply'));
+  type(replyField()!, 'Looks right. Ship it.');
+  await until(async () => (await draftOnServer()) === 'Looks right. Ship it.', 'the draft saved');
+  chord(radio('reply'), { shiftKey: true });
+  await settle();
+  expect(replies()).toBe(0);
+  chord(radio('reply'));
+  await until(() => replies() === 1, 'the one reply');
+  await settle();
+  expect(replies()).toBe(1);
+  expect(host!.querySelector('[data-attachment-pane][data-full-view]')).not.toBeNull();
+});
+
 test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply tab’s toolbar; a chosen file is the thread box’s file too, and the card’s Send carries it', async () => {
   await renderFull('shot.png');
   // A comment takes no files: no paperclip with the image's comment row.
@@ -479,6 +507,38 @@ test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on t
   // Files and no words: minimized, the pill still says a reply waits.
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
   expect(pill()!.textContent).toContain('Reply draft');
+});
+
+test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in both places; Undo in the card puts it back in the card’s words, caret after it', async () => {
+  await renderFull('page.html');
+  const before = 'Here is the log.';
+  const after = ' It fails on the third retry.';
+  const log = 'worker-3 retry 2 status=failed\n'.repeat(1200);
+  type(replyField()!, `${before}${after}`);
+  act(() => {
+    replyField()!.focus();
+    replyField()!.setSelectionRange(before.length, before.length);
+  });
+  const items = [{ kind: 'string', type: 'text/plain', getAsFile: () => null }];
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files: [], items, types: ['text/plain'], getData: (t: string) => (t === 'text/plain' ? log : '') } });
+  act(() => {
+    replyField()!.dispatchEvent(event);
+  });
+  expect(event.defaultPrevented).toBe(true);
+  await until(() => card()!.querySelectorAll('[data-pasted-text]').length === 1, 'the tile in the card');
+  expect(threadFiles()!.querySelectorAll('[data-pasted-text]')).toHaveLength(1);
+  expect(replyField()!.value).toBe(`${before}${after}`);
+
+  await click(card()!.querySelector<HTMLButtonElement>('[data-pasted-undo]')!);
+  await until(() => replyField()!.value.includes(log), 'the words back');
+  expect(replyField()!.value).toBe(`${before}${log}${after}`);
+  expect(replyField()!.selectionStart).toBe(before.length + log.length);
+  expect(document.activeElement).toBe(replyField());
+  expect(card()!.querySelectorAll('[data-pasted-text]')).toHaveLength(0);
+  expect(threadFiles()?.querySelectorAll('[data-pasted-text]').length ?? 0).toBe(0);
+  // The thread's box holds the same words: it is one reply.
+  expect(threadBox()!.value).toBe(`${before}${log}${after}`);
 });
 
 for (const away of ['the Reply tab', 'minimized'] as const) {

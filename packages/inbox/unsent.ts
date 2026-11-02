@@ -5,16 +5,26 @@
  * typed (replyDraft.ts), and picks and comments are saved at once, so what a
  * restart loses is files pasted into the box, and words not saved yet (a save
  * waiting or on its way, or words a conflict left unsaved). The open thread
- * reports its subject and its pasted files; the guard reads it.
+ * reports its subject and its pasted files; the guard reads it. It reports too
+ * whether its reply box is open with words or files in it (`replyBeingWritten`),
+ * for the list options dialog, which waits while a reply is written.
  */
 import { onReplyDraftUnsavedChange, replyDraftUnsaved } from './replyDraft';
 
-let open: { subject: string; files: boolean } | null = null;
+let open: { subject: string; files: boolean; writing?: boolean } | null = null;
 
-/** The open thread's reply box: its subject and whether it holds pasted files, else null (no box open). */
-export function reportUnsentReply(value: { subject: string; files: boolean } | null): void {
+/**
+ * The open thread's reply box: its subject, whether it holds pasted files and whether it is open with words or
+ * files in it (`writing`), else null (no thread open).
+ */
+export function reportUnsentReply(value: { subject: string; files: boolean; writing?: boolean } | null): void {
   open = value;
   syncBeforeUnload();
+}
+
+/** The open thread's reply box is open with words or files in it, wherever focus is (saved as a draft or not). */
+export function replyBeingWritten(): boolean {
+  return open?.writing === true;
 }
 
 /** What a restart would lose, by the thread's subject, else null. */

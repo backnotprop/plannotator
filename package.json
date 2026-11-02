@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.40",
+  "version": "0.28.45",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -75,6 +75,7 @@
     "katex": "^0.19.0"
   },
   "patchedDependencies": {
-    "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch"
+    "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
+    "@pierre/diffs@1.5.2": "patches/@pierre%2Fdiffs@1.5.2.patch"
   }
 }

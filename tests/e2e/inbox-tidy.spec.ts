@@ -208,6 +208,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       inboxSound: { dialogShownFor: 'tidy-e2e' },
       inboxBoard: true,
       inboxBoardIntro: { shownAt: new Date(now).toISOString() },
+      // Due on a used Inbox, and its check would run the `codex` on this PATH.
+      inboxVoiceIntro: { shownAt: new Date(now).toISOString() },
       inboxAgentNotes: { offered: true },
     }),
   );

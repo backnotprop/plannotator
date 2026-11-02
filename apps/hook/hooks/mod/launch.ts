@@ -84,13 +84,30 @@ export function launchArgv(dir: string, cliArgv: readonly string[]): string[] {
 }
 
 /**
+ * What only Plannotator writes into its data directory (`DATA_DIR_MARKERS`
+ * in packages/shared/data-dir.ts; a hooks module imports only its own files,
+ * so this is a copy, and tests/data-dir-mirrors.test.ts keeps it equal).
+ */
+export const DATA_DIR_MARKERS = ['history', 'sessions', 'drafts', 'inbox', 'claude-code-mod', 'install-flags.json'] as const
+
+/**
  * The data directory, as the CLI resolves it (`getPlannotatorDataDir`):
  * `PLANNOTATOR_DATA_DIR` (with `~` expanded); else `~/.plannotator` when it
- * exists; else `$XDG_DATA_HOME/plannotator` when that is absolute; else
- * `~/.plannotator`. A relative `PLANNOTATOR_DATA_DIR` (resolved against the
- * CLI's cwd) is refused: the mod could not name the same directory.
+ * exists, unless it holds no Plannotator data while the XDG folder does
+ * (a stray folder, #2305); else `$XDG_DATA_HOME/plannotator` when that is
+ * absolute; else `~/.plannotator`. A relative `PLANNOTATOR_DATA_DIR`
+ * (resolved against the CLI's cwd) is refused: the mod could not name the
+ * same directory. `legacyHoldsData` / `xdgHoldsData` matter only when the
+ * legacy folder exists (see `resolveDataDir`).
  */
-export function dataDirOf(env: { home?: string; dataDir?: string; xdgDataHome?: string; legacyExists?: boolean }): string | null {
+export function dataDirOf(env: {
+  home?: string
+  dataDir?: string
+  xdgDataHome?: string
+  legacyExists?: boolean
+  legacyHoldsData?: boolean
+  xdgHoldsData?: boolean
+}): string | null {
   const home = env.home?.replace(/\/+$/, '')
   const custom = env.dataDir?.trim()
   if (custom) {
@@ -101,10 +118,31 @@ export function dataDirOf(env: { home?: string; dataDir?: string; xdgDataHome?: 
   }
   if (!home) return null
   const legacy = `${home}/.plannotator`
-  if (env.legacyExists) return legacy
-  const xdg = env.xdgDataHome?.trim()
-  if (xdg && xdg.startsWith('/')) return `${xdg.replace(/\/+$/, '')}/plannotator`
-  return legacy
+  const xdgHome = env.xdgDataHome?.trim()
+  const xdg = xdgHome && xdgHome.startsWith('/') ? `${xdgHome.replace(/\/+$/, '')}/plannotator` : null
+  if (env.legacyExists) return xdg && env.xdgHoldsData && !env.legacyHoldsData ? xdg : legacy
+  return xdg ?? legacy
+}
+
+/** `dataDirOf`, with the folder checks it needs made through `exists` (only when the legacy folder exists and XDG is set). */
+export async function resolveDataDir(
+  env: { home?: string; dataDir?: string; xdgDataHome?: string },
+  exists: (path: string) => Promise<boolean>,
+): Promise<string | null> {
+  const home = env.home?.replace(/\/+$/, '')
+  if (env.dataDir?.trim() || !home) return dataDirOf(env)
+  const legacy = `${home}/.plannotator`
+  const legacyExists = await exists(legacy)
+  const xdgHome = env.xdgDataHome?.trim()
+  if (!legacyExists || !xdgHome || !xdgHome.startsWith('/')) return dataDirOf({ ...env, legacyExists })
+  const holdsData = async (dir: string) => {
+    for (const entry of DATA_DIR_MARKERS) if (await exists(`${dir}/${entry}`)) return true
+    return false
+  }
+  const xdg = `${xdgHome.replace(/\/+$/, '')}/plannotator`
+  const xdgHoldsData = (await exists(xdg)) && (await holdsData(xdg))
+  const legacyHoldsData = xdgHoldsData ? await holdsData(legacy) : true
+  return dataDirOf({ ...env, legacyExists, xdgHoldsData, legacyHoldsData })
 }
 
 /**

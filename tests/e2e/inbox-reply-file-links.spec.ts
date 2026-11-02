@@ -90,12 +90,11 @@ test('each file the sent reply commented on opens from its heading; a drawing sh
     const page = await context.newPage();
     await page.goto(`${url}/#thread=${sent.thread_id}`);
     await expect(page.locator('.ib-pfoot [data-draft-foot], .ib-pfoot').first()).toBeVisible();
-    const waiting = agent.waitForReply(sent.thread_id, 40);
     await page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).first().click();
     await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Notes on the files below.');
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-    const reply = await waiting;
-    const body = reply.reply.body as string;
+    const reply = await agent.nextReply(sent.thread_id, 40);
+    const body = reply.body as string;
     // The agent's text is unchanged: the headings name the files, no link the window draws.
     expect(body).toContain('## design/checkout.png\n');
     expect(body).not.toContain('.inbox-reply/');

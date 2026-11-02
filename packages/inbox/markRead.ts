@@ -8,8 +8,8 @@
  * once not to wait on them. It comes back when an agent writes again.
  */
 
-import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxSectionId } from '@plannotator/core/inbox-types';
-import { agentName, plural } from './format';
+import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId } from '@plannotator/core/inbox-types';
+import { agentName, plural, shortAgentName } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
 export const MARK_READ_UNDO_MS = 7_000;
@@ -31,7 +31,7 @@ export const waitsOnPerson = inboxRowWaitsOnPerson;
  */
 export function canToggleRead(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'read_at' | 'agent_after_archive'>,
-  drawn?: InboxSectionId | null,
+  drawn?: InboxListGroupId | null,
 ): boolean {
   if (row.resolved_at !== null && row.agent_after_archive !== true) return false;
   return (row.read_at ?? null) !== null || waitsOnPerson(row) || seenHeldInNew(row, drawn);
@@ -42,7 +42,7 @@ export function canToggleRead(
  * on Sent or Quiet, except a row the list still draws in New
  * (`seenHeldInNew`).
  */
-export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxSectionId | null): boolean {
+export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>[0], drawn?: InboxListGroupId | null): boolean {
   return inboxRowOffersMarkRead(row) || seenHeldInNew(row, drawn);
 }
 
@@ -56,8 +56,32 @@ export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>
  * Not a thread with a question or unsent work (the server keeps those out of
  * Quiet), one marked read, or an archived one.
  */
-export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxSectionId | null | undefined): boolean {
+export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'> & { read_at?: string | null }, drawn: InboxListGroupId | null | undefined): boolean {
   return drawn === 'new' && row.section === 'quiet' && row.resolved_at === null && (row.read_at ?? null) === null;
+}
+
+/**
+ * Mark unread (the owner's ask, 2026-10-31) is offered on the thread: it is
+ * read (not bold, nothing waits on the person), not archived, and an agent
+ * wrote after the person's last reply (`sent` is null; a reply is a look, so
+ * there would be nothing to make new). The store's `markUnread` makes the
+ * latest agent message new again: the row goes to New, bold. Never on a row
+ * that waits on the person (Mark read's). With `drawn` (the header's button,
+ * which shows one or the other), not on a seen update the list still holds
+ * in New either: Mark read stays that button, and the menus offer both.
+ */
+export function canMarkUnread(
+  row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
+  drawn?: InboxListGroupId | null,
+): boolean {
+  if (row.resolved_at !== null || row.unread) return false;
+  if (waitsOnPerson(row) || seenHeldInNew(row, drawn)) return false;
+  return row.sent === null;
+}
+
+/** The toast after Mark unread: where the row went (the subject names it, as the list's Mark read toast does). */
+export function markUnreadToast(before: Pick<InboxListRow, 'subject'>): { lead: string; detail: string } {
+  return { lead: 'Marked unread', detail: `“${before.subject ?? '(no subject)'}” · back in New` };
 }
 
 export interface MarkReadToast {
@@ -65,10 +89,14 @@ export interface MarkReadToast {
   lead: string;
   /** What a phone says instead ("Read": the pressed Read button says the same). */
   phoneLead?: string;
-  /** The muted rest of the line, cut with "…" when it does not fit. */
+  /** The muted rest of the line, cut with "…" where it does not fit (Toast.tsx; the live region says it whole). */
   detail: string;
+  /** A phone's detail: what happened first, the agent's name last, so a cut only ever eats the name. */
+  phoneDetail?: string;
   /** An agent was stopped or held up on the thread: the toast warns and offers Reply. */
   warn: boolean;
+  /** What the live region says instead, when the detail cut the agent's name (shortAgentName). */
+  speech?: string;
 }
 
 /**
@@ -95,7 +123,18 @@ export function markReadToast(
   const warn = before.questions.stopped || before.questions.holds_up.length > 0;
   // Another thread is open: name the row marked, or the toast reads as if the open thread was.
   if (place === 'held') return { lead: 'Marked read', phoneLead: 'Read', detail: subject, warn };
-  if (before.questions.stopped) return { lead: 'Marked read', phoneLead: 'Read', detail: `${agentName(before.author)} was stopped`, warn: true };
+  if (before.questions.stopped) {
+    const name = agentName(before.author);
+    const short = shortAgentName(name);
+    return {
+      lead: 'Marked read',
+      phoneLead: 'Read',
+      detail: `${short} was stopped`,
+      phoneDetail: `Stopped · ${short}`,
+      warn: true,
+      ...(short !== name ? { speech: `Marked read. ${name} was stopped.` } : {}),
+    };
+  }
   if (before.questions.holds_up.length > 0) {
     return { lead: 'Marked read', phoneLead: 'Read', detail: `Held up ${plural(before.questions.holds_up.length, 'thing')}`, warn: true };
   }

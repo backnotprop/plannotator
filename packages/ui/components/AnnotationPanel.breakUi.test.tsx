@@ -97,6 +97,17 @@ describe('AnnotationPanel worst-case cards', () => {
     }
   });
 
+  test.skipIf(!hasDom)('a code card on a Windows path names the file, not the whole path', async () => {
+    const code: CodeAnnotation = {
+      id: 'win', type: 'comment', filePath: 'C:\\repo\\src\\a.ts', lineStart: 1, lineEnd: 2, side: 'new', scope: 'line',
+      text: 'check this', createdAt: Date.now(),
+    };
+    const el = await mount([], [code]);
+    const text = card(el, 'win').textContent ?? '';
+    expect(text).toContain('a.ts · lines 1-2');
+    expect(text).not.toContain('C:\\repo');
+  });
+
   test.skipIf(!hasDom)('a comment from an earlier year names its year; this year does not', async () => {
     const old = new Date(2023, 9, 20, 12).getTime();
     // 30 days back: older than the relative "Nd" window, and this year

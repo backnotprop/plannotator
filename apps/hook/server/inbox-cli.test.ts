@@ -20,7 +20,7 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_DEFAULT_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
 import { GUIDE_BRIEF_EXAMPLE } from "../../../packages/server/inbox-guides";
 import { runPlannotatorUninstall } from "@plannotator/server/uninstall";
-import { INBOX_MAX_REQUEST_BYTES } from "@plannotator/shared/inbox/connection";
+import { INBOX_MAX_REQUEST_BYTES, INBOX_REMOVED_ACTION_TEXT } from "@plannotator/shared/inbox/connection";
 import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
@@ -290,7 +290,6 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
     const { thread } = await (await fetch(`${base}/api/inbox/threads/${sent.thread_id}`)).json();
     const question = thread.messages[0].questions[0] as InboxQuestion;
     expect(question.asked_by_agent_id).toMatch(/^ses_[0-9A-Z]{26}$/);
-    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, timeout_seconds: 30 } });
     const answer = { v: 1, key: question.key, kind: question.kind, prompt: question.prompt, selected: ["Yes"] };
     const pick = await fetch(`${base}/api/inbox/messages/${sent.message_id}/picks`, {
       method: "POST",
@@ -304,9 +303,13 @@ describe("plannotator inbox mcp (the stdio shim)", () => {
       body: JSON.stringify({ idempotency_key: "send-1", questions: [{ key: question.key, revision: 1 }] }),
     });
     expect(send.status).toBe(200);
-    const reply = (await waiting).structuredContent as { status: string; reply: { body: string } };
-    expect(reply.status).toBe("replied");
-    expect(reply.reply.body).toContain("Answer: Yes (your recommendation)");
+    const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id } })).structuredContent as { thread: { messages: { body: string }[] } };
+    expect(read.thread.messages.at(-1)!.body).toContain("Answer: Yes (your recommendation)");
+
+    // An older skill or plugin still calling the removed wait_for_reply through this shim: told what to do, nothing written.
+    const removed = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id } })) as { isError?: boolean; content: { text: string }[] };
+    expect(removed.isError).toBe(true);
+    expect(removed.content[0]!.text).toBe(INBOX_REMOVED_ACTION_TEXT);
 
     // submit_guide is routed like send_message: no project_path, and it lands in the same project
     // and session (an MCP-only agent has no other way to name them).
@@ -503,7 +506,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(fill("send_message", { body: "hi" }, meta)._meta).toEqual(meta);
     expect(fill("read_thread", {}, meta).arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
     // Codex's client name alone is enough (a call without turn metadata).
-    expect(fill("wait_for_reply", {}, { threadId: CODEX_THREAD }, "codex-mcp-client").arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
+    expect(fill("read_thread", {}, { threadId: CODEX_THREAD }, "codex-mcp-client").arguments).toEqual({ project_path: "/work", agent_session: CODEX_THREAD });
     // Not from Codex, or no thread id: the environment's session, as before.
     expect(fill("send_message", { body: "hi" }, { threadId: CODEX_THREAD }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION, agent_host: "claude-code" });
     expect(fill("send_message", { body: "hi" }, { threadId: "nope", "x-codex-turn-metadata": {} }).arguments).toMatchObject({ agent_session: CLAUDE_SESSION });
@@ -517,9 +520,8 @@ describe("plannotator inbox mcp inside an agent session", () => {
       fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, "/work", "ses_OWN", hostSession).params!
         .arguments as Record<string, unknown>;
     expect(call("send_message", { body: "hi" })).toEqual({ body: "hi", project_path: "/work", agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
-    // read_thread and wait_for_reply have strict schemas without agent_host.
+    // read_thread has a strict schema without agent_host.
     expect(call("read_thread", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
-    expect(call("wait_for_reply", {})).toEqual({ project_path: "/work", agent_session: CLAUDE_SESSION });
     // search takes the project only (strict, no session), and nothing when it searches every project.
     expect(call("search", { query: "retry" })).toEqual({ query: "retry", project_path: "/work" });
     expect(call("search", { query: "retry", all_projects: true })).toEqual({ query: "retry", all_projects: true });
@@ -610,7 +612,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(await poll("another-session")).toEqual([]);
   }, 90_000);
 
-  test("the shim inside a Claude Code session whose bridge polls now is told the reply arrives by itself; without the poll, to wait_for_reply", async () => {
+  test("the shim inside a Claude Code session whose bridge polls now is told the reply arrives by itself; without the poll, to read the thread later", async () => {
     const box = sandbox();
     const project = gitProject(box);
     const registry = (await background(box)).registry!;
@@ -637,7 +639,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
 
     const after = textOf(await client.callTool({ name: "send_message", arguments: { body: "After the poll.", idempotency_key: "wake-1" } }));
     expect(after).toContain("The person's reply arrives in this session by itself");
-    expect(after).not.toContain("wait_for_reply with this thread_id");
+    expect(after).not.toContain("call read_thread");
   }, 90_000);
 
   test("an explicit agent_session wins; a malformed tag is ignored (one fresh id per process); Pi's PI_SESSION_ID is that session", async () => {

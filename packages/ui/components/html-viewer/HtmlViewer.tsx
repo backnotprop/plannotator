@@ -377,6 +377,13 @@ export interface HtmlViewerProps {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
+   * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
+   * a finger counts, read from `selectionchange` once it rests (a long press
+   * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
+   * mouseup reports a selection, unchanged.
+   */
+  touchSelection?: boolean;
+  /**
    * Opt-in host capability for a native shell whose web view decides every
    * navigation itself (the Inbox surface in the iPhone app). A link the
    * person taps in Interact opens as a new window (`window.open`, the sandbox
@@ -462,6 +469,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
     },
@@ -1055,6 +1063,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
 
+    // Selections made with a finger (`touchSelection`). A viewer that never
+    // asked posts nothing.
+    const touchSelectionAskedRef = useRef(false);
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || (!touchSelection && !touchSelectionAskedRef.current)) return;
+      touchSelectionAskedRef.current = touchSelection;
+      postToBridge({ type: `${PREFIX}set-touch-selection`, active: touchSelection });
+    }, [iframeReadyVersion, touchSelection]);
+
     // The hidden composer's Escape rung: with focus outside the iframe,
     // Escape closes the hidden draft (its text stays in the draft store) and
     // is used, so the next press reaches the rest of the ladder. Capture
@@ -1175,7 +1192,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         hook.applyAnnotations(forCurrentPage(anns)),
       stepPin: (direction: "parent" | "child") =>
         postToBridge({ type: `${PREFIX}step-pin`, direction }),
-      revealPin: () => postToBridge({ type: `${PREFIX}reveal-pin` }),
+      revealPin: (options?: { clearBottom?: number }) =>
+        postToBridge({
+          type: `${PREFIX}reveal-pin`,
+          ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
+        }),
     }));
 
     const handleGlobalCommentSubmit = useCallback(

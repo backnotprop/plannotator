@@ -174,36 +174,65 @@ export function cardShowsUnread(card: InboxCardWire, visitLook: number | null, h
   return !handled.has(card.id) && isInboxCardUnread(card, visitLook);
 }
 
-/** One thing the Move menu offers for a card. */
-export type CardMove =
-  | { kind: 'column'; column: InboxCardColumn; label: string }
-  | { kind: 'ship'; label: string }
-  | { kind: 'icebox'; label: string }
-  | { kind: 'drop'; label: string }
-  | { kind: 'restore'; label: string };
+/** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */
+export type BoardMove = { op: 'move'; column: InboxCardColumn } | { op: 'icebox' } | { op: 'drop'; reason?: string | null } | { op: 'restore' };
+
+/** One item of a card's right-click menu. */
+export type CardMenuItem =
+  | { kind: 'thread'; threadId: string; label: string }
+  | { kind: 'column'; column: InboxCardColumn; label: string; current: boolean }
+  | { kind: 'restore'; label: string }
+  | { kind: 'drop'; label: string };
 
 /**
- * The Move menu's items for a card. A live card: every other live column,
- * then Ship, Icebox and Drop…. A shipped card: back to a live column, Icebox,
- * Drop…. In the Icebox or Dropped: Restore (where it was), then Drop… for an
- * iceboxed one. The store refuses nothing the person may do here.
+ * A Board card's right-click menu (approval "inbox-board-card-menu", layout
+ * A "one flat menu"), as groups drawn with a line between them: Open thread
+ * when the card links one (`thread`, from `youThread`); then the opened
+ * card's Move menu item for item and word for word (`columnChoices`: the five
+ * lanes, the card's own checked, then Shipped and Icebox), or for a card in
+ * the Icebox "Restore to <where it was>" (the foot's words); then Drop…. A
+ * dropped card has no menu (its row has Restore): no groups.
  */
-export function cardMoves(card: InboxCardWire): CardMove[] {
-  if (card.column === 'icebox' || card.column === 'dropped') {
-    const back = card.aside_from ?? 'backlog';
-    const out: CardMove[] = [{ kind: 'restore', label: `Restore to ${INBOX_CARD_COLUMN_LABELS[back]}` }];
-    if (card.column === 'icebox') out.push({ kind: 'drop', label: 'Drop…' });
-    return out;
+export function cardMenuItems(card: InboxCardWire, thread: string | null): CardMenuItem[][] {
+  if (card.column === 'dropped') return [];
+  const groups: CardMenuItem[][] = [];
+  if (thread) groups.push([{ kind: 'thread', threadId: thread, label: 'Open thread' }]);
+  if (card.column === 'icebox') {
+    groups.push([{ kind: 'restore', label: `Restore to ${INBOX_CARD_COLUMN_LABELS[card.aside_from ?? 'backlog']}` }]);
+  } else {
+    const choices = columnChoices(card).map((choice) => ({ kind: 'column' as const, ...choice }));
+    groups.push(choices.slice(0, INBOX_CARD_LIVE_COLUMNS.length), choices.slice(INBOX_CARD_LIVE_COLUMNS.length));
   }
-  const out: CardMove[] = INBOX_CARD_LIVE_COLUMNS.filter((column) => column !== card.column).map((column) => ({
-    kind: 'column' as const,
-    column,
-    label: `Move to ${INBOX_CARD_COLUMN_LABELS[column]}`,
-  }));
-  if (card.column !== 'shipped') out.push({ kind: 'ship', label: 'Ship' });
-  out.push({ kind: 'icebox', label: 'Move to Icebox' });
-  out.push({ kind: 'drop', label: 'Drop…' });
-  return out;
+  groups.push([{ kind: 'drop', label: 'Drop…' }]);
+  return groups;
+}
+
+/**
+ * The toast after a card leaves the lanes from its right-click menu (owner's
+ * yes, 2026-10-31): Icebox, Shipped, or a Drop started from the menu, each
+ * with Undo through the same route. Null for any other move (lane to lane, a
+ * restore): the card is seen moving, and the live region says it.
+ * Undo: a restore for an iced or dropped card (back where it was), and for a
+ * card dropped from the Icebox the Icebox again (a restore would skip it);
+ * the lane it came from for a shipped card.
+ */
+export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead: string; detail: string; undo: BoardMove } | null {
+  if (moved.column === card.column) return null;
+  const detail = `“${card.title}”`;
+  if (moved.column === 'icebox') return { lead: 'Moved to Icebox', detail, undo: { op: 'restore' } };
+  if (moved.column === 'dropped') return { lead: 'Dropped', detail, undo: card.column === 'icebox' ? { op: 'icebox' } : { op: 'restore' } };
+  if (moved.column === 'shipped' && INBOX_CARD_LIVE_COLUMNS.includes(card.column)) return { lead: 'Shipped', detail, undo: { op: 'move', column: card.column } };
+  return null;
+}
+
+/**
+ * Whether a menu move's Undo may still run: the card is still where that
+ * move put it (its column, and no move since: `moved_at`). An agent or the
+ * person moved it on while the toast was up, or it is gone: Undo sends
+ * nothing, so it never pulls a card out of where it went since.
+ */
+export function cardUndoStillApplies(moved: Pick<InboxCardWire, 'column' | 'moved_at'>, now: Pick<InboxCardWire, 'column' | 'moved_at'> | null): boolean {
+  return now !== null && now.column === moved.column && now.moved_at === moved.moved_at;
 }
 
 /** What the live region says after a move. */

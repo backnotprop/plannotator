@@ -13,7 +13,7 @@
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { inboxId, isInboxId, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
+import { inboxId, isInboxId, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxTidyBody, inboxTidyPlan, inboxTidyRun, inboxTidyWakeThread, type InboxTidySurface } from "@plannotator/shared/inbox/tidy";
@@ -33,6 +33,10 @@ export interface InboxTidyDeps {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   now?: () => number;
+  /** Projects that are one (inbox-combine-suggestions.ts). */
+  combineSuggestions?: () => InboxTidyCombine[];
+  /** Whether repositories are still being read, so `combineSuggestions` may be short of a pair. */
+  combineLoading?: () => boolean;
 }
 
 export function createInboxTidy(deps: InboxTidyDeps) {
@@ -70,9 +74,13 @@ export function createInboxTidy(deps: InboxTidyDeps) {
     const found = planFor(projectId, surface, reachOf);
     // A session that never wrote anywhere has no thread to carry its wake: not offered.
     const agents = found.agents.filter((agent) => inboxTidyWakeThread(store, agent) !== null);
+    // The list's Tidy only, and every project: a project filter does not hide a duplicate of it.
+    const combine = surface === "list" ? (deps.combineSuggestions?.() ?? []) : [];
     return {
       serverSession: deps.serverSession,
-      count: agents.reduce((n, a) => n + a.items.length, 0),
+      ...(combine.length > 0 ? { combine } : {}),
+      ...(surface === "list" && deps.combineLoading?.() ? { combine_loading: true as const } : {}),
+      count: agents.reduce((n, a) => n + a.items.length, 0) + combine.length,
       agents: agents.map((agent) => ({
         session: agent.session,
         host: agent.host,

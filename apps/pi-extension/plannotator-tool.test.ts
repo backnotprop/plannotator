@@ -256,6 +256,17 @@ describe("plannotator tool on Pi", () => {
 		expect(() => validate({ action: "explode" })).toThrow();
 	});
 
+	// #2292: on GitHub Copilot's Responses models every property is required,
+	// and the model sends the ones it means to omit empty. The failure: Pi
+	// passes the call and the tool refuses it ("takes no target") on every try.
+	test("a Copilot strict-schema call with every optional field empty passes Pi's validator and lists", async () => {
+		const harness = createHarness();
+		const tool = harness.tool();
+		const copilot = { action: "list", target: "", gate: false, options: { base: "", markdown: false }, session: "" };
+		const validated = validateToolArguments(tool as never, { type: "toolCall", id: "t", name: tool.name, arguments: copilot } as never);
+		expect((await harness.call(validated)).content[0]!.text).toContain("No open Plannotator reviews");
+	});
+
 	test("annotate opens at once with Ask this session attached; feedback arrives later as a followUp naming the session", async () => {
 		const harness = createHarness();
 		const file = harness.writeFile("notes.md", "# Notes\n\nSome text.\n");

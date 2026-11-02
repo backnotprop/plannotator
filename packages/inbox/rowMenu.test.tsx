@@ -63,7 +63,7 @@ async function serverSections(): Promise<Map<string, string>> {
   return new Map(model.sections.flatMap((s) => s.threads.map((r) => [r.thread_id, s.id] as const)));
 }
 
-const TESTS = 15;
+const TESTS = 16;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -224,6 +224,11 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   // An Inbox that keeps pins (approval "inbox-pinned-threads"): Pin or Unpin leads, an archived row's too.
   expect(rowMenuActions(base, true, false)).toEqual(['pin', 'copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
   expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, true)).toEqual(['unpin', 'copy-thread', 'copy-link', 'copy-id']);
+  // An Inbox that keeps snoozes (approval "inbox-snooze"): Snooze on a thread not archived, Unsnooze too on a snoozed one.
+  expect(rowMenuActions(base, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'snooze', 'read', 'archive']);
+  const snoozedRow = { ...base, snoozed: { until: '2026-10-21T12:00:00Z', at: '2026-10-20T00:00:00Z' } } as typeof base;
+  expect(rowMenuActions(snoozedRow, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'snooze', 'unsnooze', 'read', 'archive']);
+  expect(rowMenuActions({ ...snoozedRow, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
   // A seen update the held list still draws in New keeps Mark read; drawn in Quiet, or marked read, or archived, it does not.
   const seen = { ...base, section: 'quiet' } as typeof base;
   expect(rowMenuActions(seen, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
@@ -231,12 +236,28 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   expect(rowMenuActions(seen, false, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
   expect(rowMenuActions({ ...seen, read_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
   expect(rowMenuActions({ ...seen, resolved_at: '2026-10-20T00:00:00Z' }, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id']);
+  // Mark unread (canMarkUnread): a read row an agent wrote last in (`sent` null), opened or marked read. Move back
+  // stays next to it while a Mark read stands, the only way to reopen what it closed. Not where Mark read is offered,
+  // not after the person's own reply (Sent), not archived.
+  const read = { ...base, section: 'quiet', unread: false, sent: null } as typeof base;
+  expect(rowMenuActions(read, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'mark-unread', 'archive']);
+  expect(rowMenuActions({ ...read, read_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'mark-unread', 'unread', 'archive']);
+  // Back in New with a Mark read standing: Mark read gives the look back, and Move back stays.
+  expect(rowMenuActions({ ...base, section: 'new', unseen: 1, unread: true, sent: null, read_at: '2026-10-20T00:00:00Z' } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'unread', 'archive']);
+  // Held in New (a seen update): both, Mark read first.
+  expect(rowMenuActions(read, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'mark-unread', 'archive']);
+  // A row that waits on the person takes Mark read only.
+  expect(rowMenuActions({ ...base, unread: true, sent: null } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
+  expect(rowMenuActions({ ...read, sent: { at: '2026-10-20T00:00:00Z' } } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
+  expect(rowMenuActions({ ...read, read_at: '2026-10-20T00:00:00Z', sent: { at: '2026-10-20T00:00:00Z' } } as typeof base, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'unread', 'archive']);
+  expect(rowMenuActions({ ...read, resolved_at: '2026-10-20T00:00:00Z' }, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
+  expect(rowMenuActions(read, false)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
 });
 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -282,7 +303,7 @@ test.skipIf(!hasDom)('Copy thread on a row whose thread is not open reads it and
   expect((await serverSections()).get(ids.waiting)).toBe(before);
 });
 
-test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Move back', async () => {
+test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu then offers Mark unread, which brings it back to New, bold, sending nothing', async () => {
   await renderApp();
   await openMenu(ids.waiting);
   await choose('read');
@@ -297,9 +318,41 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
+  await choose('mark-unread');
+  expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
+  // New, not Waiting: the question Mark read set aside stays closed; the row is bold again.
+  await until(async () => (await serverSections()).get(ids.waiting) === 'new', 'the row back in New');
+  await until(() => toast()?.textContent?.includes('Marked unread') === true, 'the toast');
+  await until(() => rowWrap(ids.waiting)?.closest('[data-section-id="new"]') != null, 'the row drawn in New');
+  expect(rowButton(ids.waiting)!.classList.contains('ib-u')).toBe(true);
+  const after = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as typeof before;
+  expect(after.thread.messages.length).toBe(before.thread.messages.length);
+  expect(after.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['closed']);
+  // Undo puts back exactly what was there: the same Mark read, so Move back still reopens its question.
+  await act(async () => {
+    toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
+  });
+  await until(async () => (await serverSections()).get(ids.waiting) === 'quiet', 'the row back in Quiet');
+  await until(() => rowWrap(ids.waiting)?.closest('[data-section-id="quiet"]') != null, 'the row drawn in Quiet');
+  await openMenu(ids.waiting);
   await choose('unread');
-  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the row back');
+  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
+  const reopened = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as typeof before;
+  expect(reopened.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['open']);
+});
+
+test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu, which reopens the question its Mark read closed', async () => {
+  await loopback(`/api/inbox/threads/${ids.waiting}/read`, 'POST', '{}');
+  await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
+  await renderApp();
+  await openMenu(ids.waiting);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  await choose('unread');
+  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
+  const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
+  expect(thread.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state))).toEqual(['open']);
 });
 
 test.skipIf(!hasDom)('Archive takes the row out of the list with the Archived toast and its Undo', async () => {
@@ -342,6 +395,35 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
   await until(() => document.activeElement === rowButton(ids.mixed), 'focus on the row after Tab');
   // Nothing opened.
   expect(window.location.hash).not.toContain('thread=');
+});
+
+test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  await renderApp();
+  const row = rowButton(ids.waiting)!;
+  act(() => row.focus());
+  await act(async () => {
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  await until(() => menu()?.getAttribute('data-row-menu') === ids.waiting, 'the menu');
+  await choose('snooze');
+  await until(() => !!menu()?.querySelector('[data-snooze-view="times"]'), 'the times');
+  await until(() => document.activeElement === menu()!.querySelector('[data-snooze-choice]'), 'focus on the first time');
+  // The menu's own arrows go on from there: Down is the second time.
+  await act(async () => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  });
+  await until(() => document.activeElement === menu()!.querySelectorAll('[data-snooze-choice]')[1], 'focus on the second time');
+  await act(async () => {
+    menu()!.querySelector<HTMLElement>('[data-snooze-back]')!.click();
+  });
+  await until(() => !!item('snooze'), 'the menu again');
+  await until(() => document.activeElement === item('snooze'), 'focus on Snooze after Back');
+  // Still the menu's: Escape closes it and focus goes back to the row.
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !menu(), 'the menu to close');
+  await until(() => document.activeElement === rowButton(ids.waiting), 'focus on the row');
 });
 
 test.skipIf(!hasDom)('a touch never opens it, and outside the rows the browser keeps its own menu', async () => {
