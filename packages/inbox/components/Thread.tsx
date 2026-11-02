@@ -49,6 +49,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { useReplyDraft } from '../replyDraft';
+import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -3971,6 +3972,49 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     }
   };
 
+  // Request guided review (the header's ⋯, guideRequest.ts): the person's reply asking for a guided review of the
+  // thread's code changes, to the session a typed reply reaches. Hidden on an archived thread, for a host that gets
+  // no guided reviews, and while the session it would reach has ended, as the window knows it. That session is the
+  // target's (after a hand-off, the new owner's), read with the asker's liveness when it is the same session, else
+  // on its own.
+  const guideTarget = guideRequestTarget(thread);
+  const guideSession = guideTarget && guideTargetCanEnd(guideTarget) ? guideTarget.to.session : null;
+  const guideWatch = guideSession !== null && guideSession !== askerToWatch ? guideSession : null;
+  const { model: guideLive } = useLiveSessions(thread.thread_id, guideWatch, guideWatch !== null);
+  const guideLiveNow = guideSession === null ? null : guideSession === askerToWatch ? live : guideLive;
+  const guideEnded = guideSession !== null && guideLiveNow?.asker?.session === guideSession && guideLiveNow.asker.live === false;
+  const guideOffered = guideTarget !== null && !guideEnded;
+  /** One request at a time (a double click sends one). */
+  const requestingGuide = useRef(false);
+  /** The key of a request that did not land, kept for a retry of that same request: the message it answers, and the key. */
+  const guideKey = useRef<{ message: string; key: string } | null>(null);
+  /**
+   * An ordinary reply of words alone, through the reply route: stored, shown as the person's message with its
+   * Delivered or Queued line, and waking the session as a typed reply does. The reply box, its draft, picks and
+   * comments are left as they are: the request carries none of them.
+   */
+  const requestGuide = async () => {
+    if (requestingGuide.current || sending) return;
+    const target = guideRequestTarget(threadRef.current);
+    if (!target) return;
+    requestingGuide.current = true;
+    setError(null);
+    // A retry of the same request keeps its key; a request to another message (another thread, or the agent wrote
+    // again) is a new one, never a key the Inbox has seen on another reply (`idempotency_key_reused`).
+    if (guideKey.current?.message !== target.message.id) guideKey.current = { message: target.message.id, key: newUuid() };
+    try {
+      await inboxApi.reply(target.message.id, { idempotency_key: guideKey.current.key, words: GUIDE_REQUEST_WORDS, questions: [] });
+      guideKey.current = null;
+      announce(`Asked ${hostName(target.to.host)} for a guided review.`);
+      await onChanged();
+      requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    } catch (cause) {
+      setError(`The guided review request was not sent. ${cause instanceof InboxApiError ? cause.message : 'Try again.'}`);
+    } finally {
+      requestingGuide.current = false;
+    }
+  };
+
   // Open questions in this thread (approval "inbox-thread-open-questions", option A): the "N open questions"
   // button lists them (Re-ask at its foot), and a row takes the person to the card (unfolding its message).
   const openQFromServer = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
@@ -4534,6 +4578,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               snooze={onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined}
+              requestGuide={guideOffered ? () => void requestGuide() : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
