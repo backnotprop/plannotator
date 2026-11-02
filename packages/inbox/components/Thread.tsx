@@ -1350,8 +1350,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   /** A save of this window's landed: the box takes the draft's files (set below, once the tiles exist). */
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
-  /** Only another window changed the words: the box takes them (set below, once the tiles exist). */
-  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => void>(() => {});
+  /** Only another window changed the words: the box takes them (set below, once the tiles exist); true when it did. */
+  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => boolean>(() => false);
   const replyDraft = useReplyDraft(thread.thread_id, {
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
@@ -1422,12 +1422,25 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
   takeTheirWords.current = (threadId, draft, was) => {
-    if (threadId !== threadRef.current.thread_id || !boxRef.current.open || boxRef.current.text !== was) return;
+    // The box's live words (a key typed sets `boxRef` at once): changed since, the person's words win (a conflict).
+    if (threadId !== threadRef.current.thread_id || !boxRef.current.open || boxRef.current.text !== was) return false;
     // The box still holds the words this window last knew: it takes the other window's, with its files and this
-    // window's file changes not saved yet.
+    // window's file changes not saved yet. A tile finished since the box's last save is in no save yet: it stays, and
+    // its own save adds it.
+    const files = draftFilesWithMine(draft.files ?? []);
+    const listed = new Set(files.map((file) => file.upload_id));
+    const held = new Set(replyDraft.heldOf(threadId));
+    const fresh = replyFiles.draftFiles().map((file) => file.upload_id).filter((id) => !held.has(id) && !listed.has(id));
     setBox({ open: true, text: draft.body });
-    takeDraftFiles(draftFilesWithMine(draft.files ?? []), draft.body);
+    boxRef.current = { open: true, text: draft.body };
+    takeDraftFiles(files, draft.body, 'replace', fresh);
+    if (fresh.length > 0) {
+      const saved = replyFiles.draftFiles().filter((file) => !fresh.includes(file.upload_id));
+      filesSaved.current = pastedSignature(saved);
+      replyDraft.boxTook(threadId, saved.map((file) => file.upload_id));
+    }
     announce('This reply changed in another window.');
+    return true;
   };
   takeMergedFiles.current = (threadId, draft, wanted) => {
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;

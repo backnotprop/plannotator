@@ -624,6 +624,37 @@ describe("reply drafts keep every attached file", () => {
     expect(ids((await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json() as { draft: InboxReplyDraft }).draft)).toEqual([theirs.upload_id, later.upload_id]);
   });
 
+  test("a page sending again an add whose answer it lost never brings back a file another window removed since; a newer save still adds it", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the dashboard.", "ses_f11");
+    const f = await upload(server, "f.png", PNG);
+    const g = await upload(server, "g.png", Uint8Array.from([...PNG, 1]));
+    const NO = { files_remove: [], files_place: [] };
+    // This window's add of f lands, but its answer is lost: it still knows no draft (base null).
+    const landed = (await draftOf(await save(server, thread_id, { body: "Shots", base: null, files_add: [f.upload_id], ...NO })))!;
+    // The phone takes f out.
+    const phone = (await draftOf(await save(server, thread_id, { body: "Shots", base: landed.updated_at, files_add: [], files_remove: [f.upload_id], files_place: [] })))!;
+    expect(ids(phone)).toEqual([]);
+    // This window sends the add again (its own words, a step behind) with a new file: f stays out, g joins.
+    const again = await save(server, thread_id, { body: "Shots!", base: null, base_body: "Shots", files_add: [f.upload_id, g.upload_id], ...NO });
+    expect(again.status).toBe(200);
+    const afterAgain = (await draftOf(again))!;
+    expect(ids(afterAgain)).toEqual([g.upload_id]);
+    // A step behind on a version that already held f (before the phone's removal): still not back.
+    const stale = (await draftOf(await save(server, thread_id, { body: "Shots!!", base: landed.updated_at, base_body: "Shots!", files_add: [f.upload_id], ...NO })))!;
+    expect(ids(stale)).toEqual([g.upload_id]);
+    // A save that knows the removal (its base is after it) adds f back: the person attached it again.
+    const back = (await draftOf(await save(server, thread_id, { body: "Shots!!", base: stale.updated_at, files_add: [f.upload_id], ...NO })))!;
+    expect(ids(back)).toEqual([g.upload_id, f.upload_id]);
+    // Once back, a save a step behind that names it again changes nothing (it is there).
+    const twice = (await draftOf(await save(server, thread_id, { body: "Shots!!!", base: landed.updated_at, base_body: "Shots!!", files_add: [f.upload_id], ...NO })))!;
+    expect(ids(twice)).toEqual([g.upload_id, f.upload_id]);
+    // The draft gone (Discard), one made again against no draft adds every file it names.
+    expect((await post(server, `/api/inbox/threads/${thread_id}/draft/delete`, {})).status).toBe(200);
+    const fresh = (await draftOf(await save(server, thread_id, { body: "New", base: null, files_add: [f.upload_id], ...NO })))!;
+    expect(ids(fresh)).toEqual([f.upload_id]);
+  });
+
   test("a page's added file whose upload is gone (sent or swept) is left out and the save lands; a long paste's place follows; nothing left deletes the draft", async () => {
     const { server, send } = await setup();
     const { thread_id } = await send("Here is the log.", "ses_f10");

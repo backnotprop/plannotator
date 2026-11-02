@@ -610,6 +610,13 @@ export class InboxStore {
    */
   private readonly replyDrafts = new Map<string, InboxReplyDraft>();
   /**
+   * Per thread, the files its reply draft lost and has not taken back since, each with the `updated_at` of the
+   * draft that dropped it. A page's save sent against an older version does not add one again (`saveReplyDraft`):
+   * it is that page sending again a change whose answer it never read, after another window took the file out.
+   * Kept in memory: after a restart such a file comes back at worst (never one lost).
+   */
+  private readonly replyDraftRemovals = new Map<string, Map<string, string>>();
+  /**
    * The threads pinned to the window's sidebar, in pin order (pins.ts,
    * approval "inbox-pinned-threads"): a file outside the event log, read at
    * load. Read by nothing that routes, lists or answers an agent.
@@ -663,6 +670,7 @@ export class InboxStore {
     }
     this.seq = Math.max(this.seq, this.readSeqFloor());
     this.replyDrafts.clear();
+    this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) {
@@ -4729,8 +4737,13 @@ export class InboxStore {
           { draft: existing },
         );
       }
+      // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
+      // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
+      // that save's, sent again, not a new one.
+      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
+      const add = removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add;
       // Words changed: another window's long paste this save does not place moves with them.
-      const after = applyReplyDraftFileOps(existing?.files ?? [], ops, existing ? { from: existing.body, to: body } : undefined);
+      const after = applyReplyDraftFileOps(existing?.files ?? [], { ...ops, add }, existing ? { from: existing.body, to: body } : undefined);
       if (body.trim() === "" && after.length === 0) {
         this.deleteReplyDraft(threadId);
         return null;
@@ -4785,8 +4798,22 @@ export class InboxStore {
     };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
+    this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
     return draft;
+  }
+
+  /** The files `existing` held that `draft` (its next version) does not: dropped at its `updated_at`; one back is not. */
+  private noteReplyDraftRemovals(threadId: string, existing: InboxReplyDraft | null, draft: InboxReplyDraft): void {
+    const kept = new Set((draft.files ?? []).map((file) => file.upload_id));
+    let removals = this.replyDraftRemovals.get(threadId);
+    for (const id of kept) removals?.delete(id);
+    for (const file of existing?.files ?? []) {
+      if (kept.has(file.upload_id)) continue;
+      if (!removals) this.replyDraftRemovals.set(threadId, (removals = new Map()));
+      removals.set(file.upload_id, draft.updated_at);
+    }
+    if (removals?.size === 0) this.replyDraftRemovals.delete(threadId);
   }
 
   /**
@@ -4839,6 +4866,8 @@ export class InboxStore {
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
   deleteReplyDraft(threadId: string): boolean {
+    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
+    this.replyDraftRemovals.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
@@ -4959,6 +4988,7 @@ export class InboxStore {
       if (this.messages.get(threadId)?.thread_id === threadId) continue;
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
+      this.replyDraftRemovals.delete(threadId);
     }
     // So does its Ask AI conversation.
     pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);

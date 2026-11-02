@@ -51,19 +51,33 @@ export const NO_FILE_OPS: ReplyDraftFileOps = { add: [], remove: [], place: [] }
  * that span's start. An insertion exactly at the anchor goes after the pasted
  * text's place (the anchor stays), so typing on at the caret after a paste
  * keeps the paste ahead of the new words, as a plain paste would.
+ *
+ * Two edits at once (words added at both ends, as a save that spans several
+ * pauses carries) look like one span covering the anchor: when the old span is
+ * found whole, once, inside the new one, the anchor keeps its place in it. The
+ * span never starts or ends between the two halves of a surrogate pair, so an
+ * anchor never splits an emoji.
  */
 export function mapAnchor(before: string, after: string, at: number): number {
   if (before === after) return at;
   const max = Math.min(before.length, after.length);
   let start = 0;
   while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;
+  if (start > 0 && isHighSurrogate(before.charCodeAt(start - 1))) start--;
   let end = 0;
   while (end < max - start && before.charCodeAt(before.length - 1 - end) === after.charCodeAt(after.length - 1 - end)) end++;
+  if (end > 0 && isLowSurrogate(before.charCodeAt(before.length - end))) end--;
   const removedEnd = before.length - end;
   if (at <= start) return at;
   if (at >= removedEnd) return at + (after.length - before.length);
+  const old = before.slice(start, removedEnd);
+  const span = after.slice(start, after.length - end);
+  const found = span.indexOf(old);
+  if (found >= 0 && span.lastIndexOf(old) === found) return start + found + (at - start);
   return start;
 }
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
 
 /**
  * The draft's files after a save's changes: removed ids go, an added file joins
@@ -99,6 +113,20 @@ export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(
   return [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
 }
 
+/**
+ * The same changes for other words: each long paste's place (added or placed), made in `from`, moved to where it is
+ * in `to` (`mapAnchor`, within the new words), so a save of `to` never names a place past its end.
+ */
+export function rewordReplyDraftFileOps<F extends ReplyDraftFileRef>(ops: ReplyDraftFileOps<F>, from: string, to: string): ReplyDraftFileOps<F> {
+  if (from === to) return ops;
+  const move = <P extends InboxDraftPasted>(pasted: P): P => ({ ...pasted, at: Math.max(0, Math.min(mapAnchor(from, to, pasted.at), to.length)) });
+  return {
+    add: ops.add.map((file) => (file.pasted ? { ...file, pasted: move(file.pasted) } : file)),
+    remove: ops.remove,
+    place: ops.place.map((entry) => ({ ...entry, pasted: move(entry.pasted) })),
+  };
+}
+
 /** What changed from `before` (ids) to `after` (the box's files): added files and removed ids. */
 export function diffReplyDraftFiles<F extends ReplyDraftFileRef>(before: readonly string[], after: readonly F[]): ReplyDraftFileOps<F> {
   const was = new Set(before);
@@ -106,12 +134,22 @@ export function diffReplyDraftFiles<F extends ReplyDraftFileRef>(before: readonl
   return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [] };
 }
 
-/** `first`, then `then`: one set of changes (the later says last for an id). */
+/**
+ * `first`, then `then`: one set of changes (the later says last for an id). A long paste `first` adds and `then`
+ * places goes in at `then`'s place (the place in the later words, which the save carries).
+ */
 export function composeReplyDraftFileOps<F extends ReplyDraftFileRef>(first: ReplyDraftFileOps<F>, then: ReplyDraftFileOps<F>): ReplyDraftFileOps<F> {
   const touched = new Set([...then.add.map((file) => file.upload_id), ...then.remove]);
   const placed = new Set(then.place.map((entry) => entry.upload_id));
+  const placeOf = new Map(then.place.map((entry) => [entry.upload_id, entry.pasted]));
   return {
-    add: [...first.add.filter((file) => !touched.has(file.upload_id)), ...then.add],
+    add: [
+      ...first.add.filter((file) => !touched.has(file.upload_id)).map((file) => {
+        const pasted = file.pasted && placeOf.get(file.upload_id);
+        return pasted ? { ...file, pasted } : file;
+      }),
+      ...then.add,
+    ],
     remove: [...first.remove.filter((id) => !touched.has(id)), ...then.remove],
     place: [...first.place.filter((entry) => !placed.has(entry.upload_id)), ...then.place],
   };

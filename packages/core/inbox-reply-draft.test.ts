@@ -4,6 +4,7 @@ import {
   composeReplyDraftFileOps,
   diffReplyDraftFiles,
   replyDraftFilesAfterSave,
+  rewordReplyDraftFileOps,
   settleReplyDraftAfterSend,
 } from './inbox-reply-draft';
 
@@ -39,6 +40,23 @@ describe('diffReplyDraftFiles and composeReplyDraftFileOps: what a box changed, 
     // The same files either way (their order is not part of the draft's meaning).
     const together = ids(applyReplyDraftFileOps([f('a'), f('b')], composeReplyDraftFileOps(first, then))).sort();
     expect(together).toEqual(ids(applyReplyDraftFileOps(applyReplyDraftFileOps([f('a'), f('b')], first), then)).sort());
+  });
+  test("a long paste added by one and placed by the later goes in at the later's place (the words the save carries)", () => {
+    const first = ops([f('p', 40)]);
+    const then = ops([], [], [{ upload_id: 'p', pasted: { at: 2, preview: 'p' } }]);
+    expect(applyReplyDraftFileOps([], composeReplyDraftFileOps(first, then))).toEqual([f('p', 2)]);
+  });
+});
+
+describe("rewordReplyDraftFileOps: a save's changes for other words", () => {
+  test('each long paste added or placed moves with the words, never past their end; other changes stay', () => {
+    const before = ops([f('p', 11), f('img')], ['gone'], [{ upload_id: 'q', pasted: { at: 6, preview: 'q' } }]);
+    const after = rewordReplyDraftFileOps(before, 'Hello world', 'Oh. Hello world');
+    expect(after.add).toEqual([f('p', 15), f('img')]);
+    expect(after.remove).toEqual(['gone']);
+    expect(after.place.map((entry) => entry.pasted.at)).toEqual([10]);
+    // Shorter words: the place past their end goes to the end.
+    expect(rewordReplyDraftFileOps(ops([f('p', 40)]), 'Here is a longer sentence before the log', 'Hi').add).toEqual([f('p', 2)]);
   });
 });
 
