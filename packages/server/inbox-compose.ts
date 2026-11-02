@@ -22,6 +22,9 @@
  *   POST /api/inbox/drafts/:id               create or replace one (compare-and-set on `base`)
  *   POST /api/inbox/drafts/:id/delete        delete one
  *   POST /api/inbox/uploads?name=&serverSession=   one file, the raw body streamed
+ *   GET  /api/inbox/uploads/:id/text         `{ text }`: a pending pasted-text upload's words, for
+ *                                            Put back after a reload (another site's read refused;
+ *                                            404 `upload_not_found` once sent or swept)
  *
  * Drafts and pending uploads live in files under `inbox/` (drafts.ts,
  * uploads.ts), outside the event log, so agents, phones and search never see
@@ -40,11 +43,13 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   inboxUploadAttachments,
   INBOX_UPLOAD_MAX_BYTES,
+  readInboxUploadText,
   receiveInboxUpload,
   removeInboxAttachmentFiles,
   removeInboxUploads,
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
+import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
@@ -243,6 +248,15 @@ export function createInboxCompose(options: {
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
       return json({ upload });
     }
+    const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);
+    if (textMatch) {
+      if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      // Words the person pasted: another site's page never reads them.
+      if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+      const text = readInboxUploadText(store.dir, textMatch[1]);
+      if (text === null) throw new InboxError("upload_not_found", "That pasted text is no longer here.");
+      return json({ text });
+    }
     return null;
   };
 
@@ -252,7 +266,9 @@ export function createInboxCompose(options: {
       .listRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
       .map((row) => {
-        const words = store.replyDraft(row.thread_id)?.body.trim().replace(/\s+/g, " ") ?? "";
+        const draft = store.replyDraft(row.thread_id);
+        // A draft holding only a long paste reads as the paste's first words.
+        const words = (draft?.body.trim() || draft?.files?.[0]?.pasted?.preview || "").replace(/\s+/g, " ").trim();
         return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
       })
       .sort((a, b) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id));
@@ -260,7 +276,10 @@ export function createInboxCompose(options: {
   /** Forget uploads older than a day that no draft names, and the blobs only they held. */
   const sweep = () => {
     try {
-      sweepInboxUploads(store.dir, { keep: inboxDraftUploadIds(store.dir), usedBlobs: store.usedBlobs(), now: now().getTime() });
+      const keep = inboxDraftUploadIds(store.dir);
+      // A reply draft's long pastes (approval "inbox-paste-attachment") are kept as a compose draft's files are.
+      for (const id of store.replyDraftUploadIds()) keep.add(id);
+      sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {
       // Best effort: the next sweep tries again.
     }

@@ -132,6 +132,7 @@ packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
 packages/inbox/pasteText.test.tsx
+packages/inbox/pasteDraft.test.tsx
 packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx

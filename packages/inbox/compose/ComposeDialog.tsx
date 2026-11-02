@@ -372,7 +372,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
       const project = target
         ? { id: target.project.id, root: target.project.root, name: target.project.name }
         : (draft?.project ?? (current?.root ? { id: current.id, root: current.root, name: current.name ?? current.root } : null));
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: uploadIds, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
+      const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
+      const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;
