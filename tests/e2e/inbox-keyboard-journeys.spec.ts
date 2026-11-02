@@ -409,7 +409,7 @@ test('S1: deep work in one thread, a detour, and back', async () => {
   // Rollout is as it was left: the draft comes back in the box (focus stays on the row), with both comments; the
   // row is still read. Reopened, the read messages fold again (the Inbox's rule for a thread opened; finding F4).
   await expect(box).toHaveValue('Holding EU until Monday; going to everyone else today.');
-  await expect(page.locator('section.ib-pane').getByText(/^2 annotations$/)).toBeVisible();
+  await expect(page.locator('section.ib-pane').getByText(/^2 comments$/)).toBeVisible();
   expect({ bold: await row(rollout).evaluate((el) => el.classList.contains('ib-u')), section: await row(rollout).getAttribute('data-section') }, 'the row reads as it did').toEqual(rolloutLookBefore);
   await press('r');
   await expect(box).toBeFocused();
