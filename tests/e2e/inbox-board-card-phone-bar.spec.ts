@@ -10,8 +10,10 @@
  *
  * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
  * default text size and the largest (15), on an In progress card with no
- * thread (Create thread) and one with a thread (Open thread), and at 1440 px
- * where nothing gives way. Build the binary first (see inbox.spec.ts). PNGs
+ * thread (Create thread), one with a thread (Open thread) and a sent card (the
+ * pill "Todo · sent"); at 280 and 240 px, where the way back gives way too; on
+ * a phone resized 320 → 430 → 320 (the bar gives way, takes its words back,
+ * gives way again); and at 1440 px, where nothing gives way. Build the binary first (see inbox.spec.ts). PNGs
  * land in .local/proof/card-panel-phone/ (PLANNOTATOR_E2E_PROOF_DIR).
  */
 
@@ -35,6 +37,8 @@ interface World {
   create: string;
   /** An In progress card with a thread: Open thread. */
   open: string;
+  /** A Todo card sent to the agent: the pill reads "Todo · sent". */
+  sent: string;
   /** The live session's poll, so Create thread has somewhere to go. */
   stop: boolean;
   loop: Promise<void> | null;
@@ -59,7 +63,7 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(env.PLANNOTATOR_DATA_DIR);
   const url = started.stdout.trim();
-  world = { url, claude: undefined as unknown as SimAgent, create: '', open: '', stop: false, loop: null };
+  world = { url, claude: undefined as unknown as SimAgent, create: '', open: '', sent: '', stop: false, loop: null };
   await post('settings', { board: { on: true } });
   await post('board/intro', {});
   const project = scratchProject(join(root, 'src'), 'plannotator');
@@ -83,6 +87,9 @@ test.beforeAll(async () => {
     ((await claude.card({ op: 'create', project_path: project, title, column: 'in_progress', say: 'Option 3 of 6 rendered', ...fields })).card as { id: string }).id;
   world.create = await make('Hero scene timers, easing');
   world.open = await make('Checkout drawer redesign', { thread_id: sent.thread_id });
+  // Sent from the window (compose's Send links the thread it started): the card waits in Todo, "· sent" on its pill.
+  world.sent = await make('Promo field on the cart', { column: 'todo', thread_id: sent.thread_id });
+  await post(`cards/${world.sent}`, { op: 'send', thread_id: sent.thread_id });
 });
 
 test.afterAll(async () => {
@@ -113,14 +120,46 @@ async function readBar(page: Page) {
       .filter((b) => b.r.width > 0)
       .sort((a, b) => a.r.x - b.r.x)
       .map(({ el, r }) => ({ name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '', left: r.left, right: r.right, top: r.top, w: r.width, h: r.height }));
-    // The pill's words: one line box per line they are drawn on.
+    // The pill's words ("In progress", "Todo · sent"): one line box per line they are drawn on.
+    const pill = top.querySelector<HTMLElement>('.ib-crdp-col');
+    const tops = new Set<number>();
+    const walker = document.createTreeWalker(pill ?? top, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const r of range.getClientRects()) if (r.width > 0) tops.add(Math.round(r.top));
+    }
+    const lines = tops.size;
     const label = top.querySelector<HTMLElement>('.ib-crdp-col b');
-    const range = document.createRange();
-    if (label) range.selectNodeContents(label);
-    const lines = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
     const labelCut = label !== null && label.scrollWidth > label.clientWidth + 0.5;
     return { scrollWidth: top.scrollWidth, clientWidth: top.clientWidth, end, controls, lines, labelCut, fit: top.getAttribute('data-fit') };
   });
+}
+
+type Bar = Awaited<ReturnType<typeof readBar>>;
+
+/** One line with nothing past its edge, none over another, each control a 44 px target; the pill's words on one line (and whole, unless the bar is narrower than any phone). */
+function expectOneLine(m: Bar, { pillWhole }: { pillWhole: boolean }): void {
+  expect(m.scrollWidth, `the bar scrolls ${m.scrollWidth} in ${m.clientWidth} (${JSON.stringify(m.controls)})`).toBeLessThanOrEqual(m.clientWidth);
+  expect(m.controls.at(-1)!.right, 'the last control ends inside the bar').toBeLessThanOrEqual(m.end + 0.5);
+  expect(m.lines, 'the column label is on one line').toBe(1);
+  if (pillWhole) expect(m.labelCut, 'the column label is whole, not cut to "…"').toBe(false);
+  for (let i = 1; i < m.controls.length; i++) expect(m.controls[i].left, `${m.controls[i - 1].name} overlaps ${m.controls[i].name}`).toBeGreaterThanOrEqual(m.controls[i - 1].right - 0.5);
+  for (const c of m.controls) {
+    expect(c.h, `${c.name} is ${Math.round(c.w)}x${Math.round(c.h)}`).toBeGreaterThanOrEqual(43.9);
+    expect(c.w, `${c.name} is ${Math.round(c.w)}x${Math.round(c.h)}`).toBeGreaterThanOrEqual(43.9);
+    expect(Math.abs(c.top + c.h / 2 - (m.controls[0].top + m.controls[0].h / 2)), `${c.name} is on the bar's line`).toBeLessThan(1);
+  }
+}
+
+/** Opens a card on the page and waits for its bar to be drawn at the text size asked. */
+async function openCard(page: Page, id: string, size: number) {
+  await page.goto(`${world.url}#board&card=${id}`);
+  const panel = page.locator(`[data-card-panel="${id}"]`);
+  await expect(panel.locator('[data-card-back]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : String(size));
+  await page.evaluate(() => document.fonts.ready);
+  return panel;
 }
 
 for (const size of [14, 15]) {
@@ -150,20 +189,7 @@ for (const size of [14, 15]) {
           }
           await page.emulateMedia({ colorScheme: scheme });
 
-          const m = await readBar(page);
-          // Nothing past the bar's edge.
-          expect(m.scrollWidth, `the bar scrolls ${m.scrollWidth} in ${m.clientWidth} (${JSON.stringify(m.controls)})`).toBeLessThanOrEqual(m.clientWidth);
-          expect(m.controls.at(-1)!.right, 'the last control ends inside the bar').toBeLessThanOrEqual(m.end + 0.5);
-          // The pill's label on one line.
-          expect(m.lines, 'the column label is on one line').toBe(1);
-          expect(m.labelCut, 'the column label is whole, not cut to "…"').toBe(false);
-          // One row, none over another, each a 44 px target.
-          for (let i = 1; i < m.controls.length; i++) expect(m.controls[i].left, `${m.controls[i - 1].name} overlaps ${m.controls[i].name}`).toBeGreaterThanOrEqual(m.controls[i - 1].right - 0.5);
-          for (const c of m.controls) {
-            expect(c.h, `${c.name} is ${Math.round(c.w)}x${Math.round(c.h)}`).toBeGreaterThanOrEqual(43.9);
-            expect(c.w, `${c.name} is ${Math.round(c.w)}x${Math.round(c.h)}`).toBeGreaterThanOrEqual(43.9);
-            expect(Math.abs(c.top + c.h / 2 - (m.controls[0].top + m.controls[0].h / 2)), `${c.name} is on the bar's line`).toBeLessThan(1);
-          }
+          expectOneLine(await readBar(page), { pillWhole: true });
           // Whatever gave way keeps its name.
           await expect(action).toHaveAccessibleName(which === 'create' ? 'Create thread' : 'Open thread');
           await expect(panel.locator('[data-card-back]')).toHaveAccessibleName(/Board/);
@@ -174,6 +200,69 @@ for (const size of [14, 15]) {
     }
   }
 }
+
+// The longest pill a card shows: its column and "· sent".
+for (const size of [14, 15]) {
+  for (const width of [320, 390]) {
+    test(`${width} px, text ${size}, a sent card: "Todo · sent" on one line, nothing cut`, async ({ browser }) => {
+      await post('settings', { text_size: size });
+      const context = await phone(browser, width, 'light');
+      try {
+        const page = await context.newPage();
+        const panel = await openCard(page, world.sent, size);
+        await expect(panel.locator('[data-card-column="todo"] .ib-crdp-colsent')).toHaveText('· sent');
+        await page.screenshot({ path: join(proofDir, `${width}-text${size}-sent-light.png`), clip: { x: 0, y: 0, width, height: 240 } });
+        expectOneLine(await readBar(page), { pillWhole: true });
+        await expect(panel.locator('[data-card-column="todo"]')).toHaveAccessibleName('Column: Todo, sent. Move');
+      } finally {
+        await context.close();
+      }
+    });
+  }
+}
+
+// Narrower than a phone in portrait: the second step, the way back's chevron alone; at 240 px every control still 44 px.
+for (const width of [280, 240]) {
+  test(`${width} px, text 15: the way back gives way too, every control 44 px`, async ({ browser }) => {
+    await post('settings', { text_size: 15 });
+    const context = await phone(browser, width, 'light');
+    try {
+      const page = await context.newPage();
+      const panel = await openCard(page, world.open, 15);
+      await page.screenshot({ path: join(proofDir, `${width}-text15-open-light.png`), clip: { x: 0, y: 0, width, height: 240 } });
+      await expect(panel.locator('.ib-crdp-top')).toHaveAttribute('data-fit', 'icon back');
+      expectOneLine(await readBar(page), { pillWhole: width >= 280 });
+      await expect(panel.locator('[data-card-back]')).toHaveAccessibleName('Board');
+      await expect(panel.locator('[data-card-open-thread]')).toHaveAccessibleName('Open thread');
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+test('a phone resized 320 → 430 → 320: the bar gives way, takes its words back, and gives way again', async ({ browser }) => {
+  await post('settings', { text_size: 14 });
+  const context = await phone(browser, 320, 'light');
+  try {
+    const page = await context.newPage();
+    const panel = await openCard(page, world.create, 14);
+    const top = panel.locator('.ib-crdp-top');
+    const label = panel.locator('[data-card-create-thread] .ib-crdp-open-l');
+    const drawn = () => label.evaluate((el) => el.getBoundingClientRect().width > 1);
+    await expect(top).toHaveAttribute('data-fit', 'icon');
+    expectOneLine(await readBar(page), { pillWhole: true });
+    await page.setViewportSize({ width: 430, height: 760 });
+    await expect(top).not.toHaveAttribute('data-fit', /./);
+    await expect.poll(drawn).toBe(true);
+    expectOneLine(await readBar(page), { pillWhole: true });
+    await page.setViewportSize({ width: 320, height: 760 });
+    await expect(top).toHaveAttribute('data-fit', 'icon');
+    await expect.poll(drawn).toBe(false);
+    expectOneLine(await readBar(page), { pillWhole: true });
+  } finally {
+    await context.close();
+  }
+});
 
 test('the widest phone keeps every word: "‹ Board", "In progress" and "Create thread"', async ({ browser }) => {
   await post('settings', { text_size: 14 });
@@ -194,6 +283,25 @@ test('the widest phone keeps every word: "‹ Board", "In progress" and "Create 
       { text: 'In progress', shown: true },
       { text: 'Create thread', shown: true },
     ]);
+  } finally {
+    await context.close();
+  }
+});
+
+// The phone's rules stay on the phone: in a narrow desktop window the pill is drawn as before, never cut to "● … ⌄".
+test('a narrow desktop window, text 15: the pill keeps its words', async ({ browser }) => {
+  await post('settings', { text_size: 15 });
+  const context = await browser.newContext({ viewport: { width: 800, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    await page.goto(`${world.url}#board&card=${world.open}`);
+    const top = page.locator(`[data-card-panel="${world.open}"] .ib-crdp-top`);
+    await expect(top.locator('[data-card-open-thread]')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe('15');
+    await page.evaluate(() => document.fonts.ready);
+    await expect(top).not.toHaveAttribute('data-fit', /./);
+    const label = await top.locator('.ib-crdp-col-l').evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
+    expect(label.shown, `the pill shows ${label.shown} of ${label.whole} px of its words`).toBeGreaterThanOrEqual(label.whole - 0.5);
   } finally {
     await context.close();
   }

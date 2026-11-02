@@ -5990,9 +5990,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The opened card: a panel beside the Board (a full screen on a phone). */
 .ib-crdp { flex: 0 0 min(560px, 44%); min-width: 0; display: flex; flex-direction: column; border-radius: var(--ib-lr-lg, 10px); background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent); overflow: hidden; }
 .ib-crdp-top { display: flex; align-items: center; gap: 8px; padding: 12px 14px 0; flex: none; }
-.ib-crdp-col { display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--ib-lane-bg); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); white-space: nowrap; cursor: pointer; }
-/* The column's words stay on one line: when even the narrowest bar is short they end in "…", never break. */
-.ib-crdp-col-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-crdp-col { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--ib-lane-bg); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); cursor: pointer; }
 .ib-crdp-col:hover, .ib-crdp-col[data-popup-open] { background: color-mix(in oklch, var(--muted) 80%, var(--card)); }
 .ib-crdp-colsent { color: var(--muted-foreground); }
 .ib-crdp-x { margin-left: auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
@@ -6011,7 +6009,6 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-crdp-open { gap: 5px; }
 .ib-crdp-top > :is(.ib-crdp-open, .ib-tipwrap:has(> .ib-crdp-open)) { margin-left: auto; }
 .ib-crdp-top > :is(.ib-crdp-open, .ib-tipwrap:has(> .ib-crdp-open)) ~ .ib-crdp-x { margin-left: 0; }
-.ib-crdp-open { white-space: nowrap; }
 /* "Ask for an update": a quiet link by History. */
 .ib-crdp-sec h3.ib-crdp-hhead { display: flex; align-items: baseline; gap: 8px; }
 .ib-crdp-ask { margin-left: auto; padding: 0; border: 0; background: none; color: var(--muted-foreground); font: inherit; font-weight: 500; cursor: pointer; }
@@ -6163,12 +6160,15 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-bpage-card { display: flex; flex-direction: column; }
   .ib-crdp.ib-crdp-phone { flex: 1; border-radius: 0; box-shadow: none; }
   .ib-crdp-phone .ib-crdp-top { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; border-bottom: 1px solid var(--ib-hair); justify-content: space-between; }
-  .ib-crdp-phone .ib-crdp-col { height: 44px; }
+  /* A phone's bar is one line (cardTopFit.ts): the column's words never break; when even the last way is short they end in "…". */
+  .ib-crdp-phone .ib-crdp-col { height: 44px; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+  .ib-crdp-phone .ib-crdp-col-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ib-crdp-phone .ib-crdp-open { white-space: nowrap; }
   /* A short bar gives way (cardTopFit.ts): the thread action's icon alone, then the way back's chevron alone. The words
      stay for a screen reader (the .ib-sr technique), so "Create thread" and "Board" keep their names. */
   .ib-crdp-top[data-fit~="icon"] .ib-crdp-open-l,
   .ib-crdp-top[data-fit~="back"] .ib-bback-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
-  .pn-inbox .ib-crdp-top[data-fit~="icon"] .ib-crdp-open { width: 44px; padding: 0; justify-content: center; }
+  .pn-inbox .ib-crdp-top[data-fit~="icon"] .ib-crdp-open { width: 44px; flex-shrink: 0; padding: 0; justify-content: center; }
   .ib-crdp-top[data-fit~="back"] .ib-bback { min-width: 44px; padding: 0; justify-content: center; }
   .ib-crdp-phone .ib-crdp-ask { margin-left: 0; min-height: 44px; }
   .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
