@@ -360,6 +360,13 @@ export interface InboxCardRef {
    * before it: context, never counted (a step-1 card's `prs` read as `pr`).
    */
   via?: "pr" | "ref";
+  /**
+   * `person` when the person linked it (from the window), even after an
+   * agent did. Absent: an agent linked it, or it was written before this
+   * field and is treated as an agent's. Only a person's web link has its
+   * favicon fetched (the server's `/api/inbox/cards/:id/favicon`).
+   */
+  by?: "person";
 }
 
 /**
@@ -404,15 +411,54 @@ function prSourceOf(url: string): string {
 }
 
 /**
- * Sources a card only links, with no state to read (user feedback #9: a Jira
- * issue, no sign-in). The opened card draws them with a plain link icon, and
- * a lane card never marks them, so they never hide a forge link's state.
+ * Sources a card only links, with no state to read and nothing fetched (user
+ * feedback #9: a Jira issue; #10: a YouTrack issue and any other web link,
+ * `web`). The opened card draws them with their source's mark or a plain link
+ * icon, and a lane card never marks them, so they never hide a forge link's
+ * state. Two of them are the same link only by URL.
  */
-export const INBOX_CARD_LINK_ONLY_SOURCES: readonly string[] = ["jira"];
+export const INBOX_CARD_LINK_ONLY_SOURCES: readonly string[] = ["jira", "youtrack", "web"];
 
 /** Whether `ref` is a link only (INBOX_CARD_LINK_ONLY_SOURCES). */
 export function inboxCardRefIsLinkOnly(ref: Pick<InboxCardRef, "source">): boolean {
   return INBOX_CARD_LINK_ONLY_SOURCES.includes(ref.source);
+}
+
+/** How long a web link's label may run before it is cut in the middle. */
+export const INBOX_CARD_LINK_LABEL_MAX = 44;
+
+/**
+ * A web link's short, readable label (user feedback #10): its host without
+ * `www.`, then its path without the trailing slash, percent-escapes decoded
+ * when that yields printable text; no query, no fragment (the full URL is the
+ * tooltip). An IDN host stays in its `xn--` form, as the browser's own
+ * lookalike rule would show a mixed-script name. Longer than `max`, it is cut
+ * in the middle (`notion.so/acme/Road…3c4d`), never inside a character.
+ */
+export function inboxCardLinkLabel(url: string, max: number = INBOX_CARD_LINK_LABEL_MAX): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return cutMiddle(url, max);
+  }
+  let path = parsed.pathname.replace(/\/+$/, "");
+  try {
+    const decoded = decodeURIComponent(path);
+    // A decoded control, bidi or zero-width character could disguise the label: keep the escapes then.
+    if (!/\p{C}/u.test(decoded)) path = decoded;
+  } catch {
+    // A stray `%` that is no escape: the path as written.
+  }
+  return cutMiddle(parsed.host.replace(/^www\./i, "") + path, max);
+}
+
+function cutMiddle(text: string, max: number): string {
+  const chars = Array.from(text);
+  if (chars.length <= max) return text;
+  const tail = Math.floor((max - 1) / 2);
+  const head = max - 1 - tail;
+  return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - tail).join("")}`;
 }
 
 /**

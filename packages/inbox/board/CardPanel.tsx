@@ -7,6 +7,7 @@ import {
   INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
+  inboxCardLinkLabel,
   inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   type InboxCardColumn,
@@ -22,6 +23,7 @@ import { checksText, useRefHoverCards } from '@plannotator/ui/components/RefHove
 import { fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
+import { inboxUrl } from '../inboxUrl';
 import { useInboxTextSize } from '../textSize';
 import { clearCardTop, fitCardTop } from './cardTopFit';
 import { OnceButton } from './OnceButton';
@@ -259,7 +261,7 @@ export function CardPanel(props: CardPanelProps) {
           {refs.length > 0 && (
             <ul className="ib-crdp-refs">
               {refs.map((ref) => (
-                <RefRow key={ref.url} refItem={ref} resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null} loading={props.refs === null} />
+                <RefRow key={ref.url} cardId={card.id} refItem={ref} resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null} loading={props.refs === null} />
               ))}
             </ul>
           )}
@@ -623,31 +625,46 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
   );
 }
 
+/** What a link-only source's key is called, for its link's accessible name. */
+const LINK_ONLY_KIND: Record<string, string> = { jira: 'Jira issue', youtrack: 'YouTrack issue', web: 'Link' };
+
 /** One link: its number and, once read, its title and live state (open, draft, checks, merged or closed, with dates). */
-function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
+function RefRow({ cardId, refItem, resolved, loading }: { cardId: string; refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
-  // A link-only source (a Jira issue): the key links, beside the source's mark and its site; no state is read.
+  // A link-only source (a Jira or YouTrack issue, any web link): the key or label links, beside the source's mark; no state is read.
   const linkOnly = inboxCardRefIsLinkOnly(refItem);
-  const kind = refItem.source === 'jira' ? 'Jira issue' : refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
-  const number = refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
+  const web = refItem.source === 'web';
+  const kind = LINK_ONLY_KIND[refItem.source] ?? (refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind);
+  // A web link reads as its short label (host and path, cut in the middle), drawn from the URL.
+  const number = web ? inboxCardLinkLabel(refItem.url) : refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
   const link = (
-    <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
+    <a
+      href={refItem.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={web ? 'ib-crdp-rn ib-crdp-rweb' : 'ib-crdp-rn'}
+      dir={web ? 'ltr' : undefined}
+      aria-label={web ? `${kind} ${number}` : `${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}
+    >
       {number}
     </a>
   );
   return (
     <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-source={refItem.source} data-ref-state={state?.tone ?? (linkOnly ? 'quiet' : loading ? 'loading' : 'quiet')}>
       {linkOnly ? (
-        refItem.source === 'jira' ? <JiraMark /> : <Icon name="link" size={15} className="ib-refmark ib-crdp-rlink" />
+        refItem.source === 'jira' ? <JiraMark /> : refItem.source === 'youtrack' ? <YouTrackMark /> : <LinkFavicon src={cardLinkFaviconUrl(cardId, refItem)} />
       ) : (
         <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
       )}
       {/* A link-only ref has no hover card: its tooltip says where the key goes. */}
       {linkOnly ? <Tip content={<UrlTip url={refItem.url} />}>{link}</Tip> : link}
-      <span className="ib-crdp-rt" dir="auto">
-        {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
-      </span>
+      {/* A web link's label already names its site; a tracker's key is followed by its site. */}
+      {!web && (
+        <span className="ib-crdp-rt" dir="auto">
+          {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
+        </span>
+      )}
       {state && (
         <span className="ib-crdp-rs" data-tone={state.tone}>
           {state.label}
@@ -671,6 +688,99 @@ function JiraMark() {
     <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="jira" width={15} height={15} viewBox="-1.5 -1.5 27 27" aria-hidden="true" focusable="false">
       <path fill="currentColor" d={JIRA_MARK} />
     </svg>
+  );
+}
+
+/**
+ * The YouTrack mark, one colour in currentColor like Jira's: the black square
+ * of JetBrains' own YouTrack product icon with its "YT" and bar cut out, the
+ * gradient behind it dropped. Source: JetBrains' YouTrack_icon.svg
+ * (resources.jetbrains.com/storage/products/company/brand/logos/). YouTrack
+ * and its icon are JetBrains trademarks, used here only to name the product;
+ * not CC0 (Simple Icons has no `youtrack` icon: simple-icons#14456 waits on
+ * JetBrains' permission). The square fills its box, so it gets the same room
+ * around it as Jira's mark.
+ */
+const YOUTRACK_MARK =
+  'M12 12h40v40H12ZM21.4666 26.3709l-5.4881-9.3787h3.1513l3.3981 5.9919.3969.8575.3968-.8682 3.3119-5.9812h3.0975l-5.4025 9.3575v5.6487h-2.8619v-5.6275ZM33 43.9984H17v3h16v-3ZM42.3248 16.9922H30.2879l-.0006 2.6369h4.5662v12.3693h2.9263V19.6291h4.545v-2.6369Z';
+
+function YouTrackMark() {
+  return (
+    <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="youtrack" width={15} height={15} viewBox="9.5 9.5 45 45" aria-hidden="true" focusable="false">
+      <path fill="currentColor" fillRule="evenodd" d={YOUTRACK_MARK} />
+    </svg>
+  );
+}
+
+/**
+ * Where a web link's favicon is read (the owner's answer, 2026-11-02): the
+ * Inbox's own route, which fetches `https://<host>/favicon.ico` for a link
+ * the person added and serves it from this origin. Null (the link icon
+ * alone, nothing asked) for an agent's link, an http link, and a host that
+ * is an IP address, `localhost` or one label: the server refuses those, so
+ * the window does not ask.
+ */
+export function cardLinkFaviconUrl(cardId: string, ref: InboxCardRef): string | null {
+  if (ref.source !== 'web' || ref.by !== 'person') return null;
+  let host: string;
+  try {
+    const url = new URL(ref.url);
+    if (url.protocol !== 'https:') return null;
+    host = url.hostname;
+  } catch {
+    return null;
+  }
+  if (!host.includes('.') || host.startsWith('[') || /^\d+(\.\d+){3}$/.test(host) || host === 'localhost' || host.endsWith('.localhost')) return null;
+  return inboxUrl(`/cards/${encodeURIComponent(cardId)}/favicon`, `url=${encodeURIComponent(ref.url)}`);
+}
+
+/** Favicon addresses that failed or drew nothing in this window, so a row drawn again never asks twice. */
+const failedFavicons = new Set<string>();
+
+/**
+ * A web link's mark: the generic link icon, drawn at once and kept while a
+ * favicon (`src`) loads; the favicon takes its place only once it has loaded
+ * with a real size (more than 1 px each way), so a failed, empty or 1×1
+ * image never shows, and nothing moves: both sit in the same 15 px box.
+ * `src` is the Inbox's own route (`cardLinkFaviconUrl`): the window's CSP
+ * (`img-src 'self' data: blob:`) never loads a remote site's icon itself.
+ * Null draws the link icon alone.
+ */
+export function LinkFavicon({ src }: { src: string | null }) {
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(() => (src ? failedFavicons.has(src) : false));
+  useEffect(() => {
+    setShown(false);
+    setFailed(src ? failedFavicons.has(src) : false);
+  }, [src]);
+  const fail = () => {
+    if (src) failedFavicons.add(src);
+    setFailed(true);
+  };
+  const tryImage = src !== null && !failed;
+  return (
+    <span className="ib-refmark ib-crdp-rfav" data-ref-mark="web" data-favicon={tryImage ? (shown ? 'shown' : 'loading') : 'none'} aria-hidden="true">
+      {!shown && <Icon name="link" size={15} className="ib-crdp-rlink" />}
+      {tryImage && (
+        <img
+          src={src}
+          alt=""
+          width={15}
+          height={15}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          data-shown={shown ? '' : undefined}
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
+            else fail();
+          }}
+          onError={fail}
+        />
+      )}
+    </span>
   );
 }
 
@@ -723,13 +833,13 @@ function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string 
       }}
     >
       <label className="ib-sr" htmlFor="ib-card-link">
-        Link an issue or PR
+        Add a link
       </label>
       <input
         id="ib-card-link"
         type="text"
-        // The sources it reads; a phone's narrow field keeps the short form whole.
-        placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
+        // Any web link, or GitHub's owner/repo#123; a phone's narrow field keeps the short form whole.
+        placeholder={phone ? 'Paste a link' : 'Paste a link, or owner/repo#123'}
         value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
       {error && (
         <p className="ib-error" role="alert">

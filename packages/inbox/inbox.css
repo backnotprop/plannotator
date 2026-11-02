@@ -6039,6 +6039,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rjira { color: var(--foreground); }
 .ib-crdp-rn:focus-visible { color: var(--foreground); text-decoration: underline; }
 @media (forced-colors: active) { .ib-crdp-rjira { color: CanvasText; } }
+/*
+ * A web link (user feedback #10): its label (host and path, already cut in the middle at 44
+ * characters) wraps anywhere on a narrow phone rather than losing its end to a second ellipsis.
+ * Its mark is a 15 px box: the link icon, and over it a favicon only once it has loaded
+ * (LinkFavicon), so the row never moves.
+ */
+.ib-crdp-rweb { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ib-crdp-rfav { position: relative; width: 15px; height: 15px; }
+.ib-crdp-rfav > svg { display: block; }
+.ib-crdp-rfav > img { position: absolute; inset: 0; width: 15px; height: 15px; object-fit: contain; opacity: 0; }
+.ib-crdp-rfav > img[data-shown] { opacity: 1; }
 /* A link-only ref's URL in its tooltip: wraps only after a slash (UrlTip's <wbr>), never at the key's dash. */
 .ib-tip-url { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
 .ib-tip-url > span { white-space: nowrap; }
