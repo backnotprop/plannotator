@@ -5305,7 +5305,8 @@ export class InboxStore {
     if (!input.to) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
-    if (!body) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    // Words or files: a message of attached files alone (a long paste) is the person's too, as a reply of files is.
+    if (!body && !(input.attachments && input.attachments.length > 0)) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     if (threadName && auto && this.threadNameTaken(input.project_id, threadName, null)) threadName = null;
     if (threadName && this.threadNameTaken(input.project_id, threadName, null)) {

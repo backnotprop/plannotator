@@ -21,13 +21,14 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker } from './ToPicker';
-import { ThreadNameChip } from './ThreadNameChip';
+import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
+import { isLongPaste } from './pastedText';
 import { useComposeSessions } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { VoiceFoot } from '../components/VoiceMic';
@@ -37,6 +38,7 @@ import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import {
+  DRAFT_TOO_LONG,
   NOTHING_SENT_NO_AGENT,
   composeGroups,
   composeTargets,
@@ -170,11 +172,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
+  const say = (words: string) => {
+    setPasteSaid('');
+    setTimeout(() => setPasteSaid(words), 30);
+  };
+  // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
-    onPasted: (names) => {
-      setPasteSaid('');
-      setTimeout(() => setPasteSaid(attachedAnnouncement(names)), 30);
-    },
+    onPasted: (names) => say(attachedAnnouncement(names)),
+    onPutBack: () => say('The pasted text is back in your message.'),
+    text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
@@ -302,7 +308,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError(anyLive ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (!body.trim()) {
+    // Words or files, as a reply takes: a message of a pasted text tile alone goes.
+    if (!body.trim() && !files.files.some((file) => file.state !== 'refused')) {
       setError('Write a message first.');
       textRef.current?.focus();
       return;
@@ -353,6 +360,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Wait for the files to finish uploading.');
       return null;
     }
+    // Said plainly, before the Inbox refuses it with its own field words.
+    if (body.length > INBOX_DRAFT_BODY_MAX) {
+      setError(DRAFT_TOO_LONG);
+      return null;
+    }
     setBusy('save');
     setError(null);
     try {
@@ -373,7 +385,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         } catch {
           setError('This draft changed in another window.');
         }
-      } else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
+      } else if (cause instanceof InboxApiError && cause.code === 'validation_error' && cause.message.startsWith('body:')) setError(DRAFT_TOO_LONG);
+      else setError(cause instanceof InboxApiError ? cause.message : 'The draft was not saved.');
       return null;
     } finally {
       setBusy(null);
@@ -603,8 +616,20 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }}
           onDone={() => textRef.current?.focus()}
           onOverflow={(text) => {
-            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             setError(null);
+            const lead = body.trim() ? (/[\r\n]/.test(text) ? '\n' : ' ') : '';
+            if (isLongPaste(text)) {
+              // 32 KB or more goes to the message as a pasted text tile, at its end, as the words would have.
+              files.takeText(text, body.trim() ? body.replace(/\s+$/, '').length : body.length, { field: textRef.current, lead });
+              requestAnimationFrame(() => {
+                const area = textRef.current;
+                if (!area) return;
+                area.focus();
+                area.setSelectionRange(area.value.length, area.value.length);
+              });
+              return THREAD_NAME_ATTACHED_NOTE;
+            }
+            setBody((current) => (current.trim() ? `${current.replace(/\s+$/, '')}${/[\r\n]/.test(text) ? '\n' : ' '}${text}` : text));
             // Dictation goes on in the message from here.
             requestAnimationFrame(() => {
               const area = textRef.current;
@@ -679,6 +704,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             // The × goes with its tile: focus stays in the dialog, in the message.
             textRef.current?.focus();
           }}
+          onPutBack={(key) => files.putBack(key, textRef.current)}
         />
       </div>
       {error && (

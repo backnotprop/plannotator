@@ -132,9 +132,12 @@ export function createInboxCompose(options: {
       const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
       return json({ thread_id: result.message.thread_id, message: result.message, replayed: true });
     }
-    if (typeof body.body !== "string" || body.body.trim() === "") throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
     if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
+    // Words or files, as a reply takes (approval "inbox-paste-attachment"): a long paste attached alone is a message.
+    if (typeof body.body !== "string" || (body.body.trim() === "" && uploads.length === 0)) {
+      throw new InboxError("validation_error", "body: write a message.", { field: "body" });
+    }
     const target = live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");

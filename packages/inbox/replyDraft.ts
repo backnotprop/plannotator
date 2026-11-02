@@ -31,7 +31,7 @@
  */
 import { inboxUrl, machineOf } from './inboxUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, type InboxReplyDraft } from '@plannotator/core/inbox-types';
 import { inboxApi, InboxApiError, pageServerSession } from './api';
 
 /** How long typing pauses before the words are saved. */
@@ -48,6 +48,11 @@ export interface ReplyDraftState {
    * until the person picks Keep mine or Discard.
    */
   conflict: string | null;
+  /**
+   * The box's words are longer than a draft holds (INBOX_DRAFT_BODY_MAX): they
+   * are not saved, and the line above the box says so, until they are shorter.
+   */
+  tooLong: boolean;
 }
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
@@ -58,8 +63,10 @@ let unsaved = 0;
  * closes or another opens, and these words must come back when it reopens.
  */
 const conflictWords = new Map<string, string>();
+/** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
+const tooLongThreads = new Set<string>();
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || conflictWords.size > 0;
+  return unsaved > 0 || conflictWords.size > 0 || tooLongThreads.size > 0;
 }
 
 /** Told when replyDraftUnsaved() may have changed (unsent.ts keeps the page's beforeunload question in step). */
@@ -74,7 +81,7 @@ function unsavedChanged(): void {
 
 
 export function useReplyDraft(threadId: string) {
-  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null });
+  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null, tooLong: false });
   const stateRef = useRef(state);
   stateRef.current = state;
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -127,8 +134,16 @@ export function useReplyDraft(threadId: string) {
     adopt(target, draft);
     learned.current += 1;
   };
+  /** The box's words are (or are no longer) longer than a draft holds. */
+  const markTooLong = (target: string, on: boolean) => {
+    if (on === tooLongThreads.has(target)) return;
+    if (on) tooLongThreads.add(target);
+    else tooLongThreads.delete(target);
+    unsavedChanged();
+    if (target === current.current) setState((s) => ({ ...s, tooLong: on }));
+  };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target) });
   };
   /**
    * A save of `text` went without its answer reaching here: it may have landed. The draft holding
@@ -158,6 +173,13 @@ export function useReplyDraft(threadId: string) {
         try {
           answer = await inboxApi.saveReplyDraft(target, text, baseOf(target), baseBody ?? null);
         } catch (cause) {
+          if (cause instanceof InboxApiError && cause.code === 'validation_error') {
+            // Refused for its size (the Inbox's own limit): not saved, and the line above the box says so.
+            if (baseBody === undefined) sentWords.current.delete(target);
+            else sentWords.current.set(target, baseBody);
+            if (generation === generationOf(target)) markTooLong(target, true);
+            return;
+          }
           if (!(cause instanceof InboxApiError) || cause.code !== 'draft_conflict') throw cause;
           // Refused: these words never landed, so they are not this window's on the server.
           if (baseBody === undefined) sentWords.current.delete(target);
@@ -207,16 +229,16 @@ export function useReplyDraft(threadId: string) {
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
-    setState({ loadedFor: null, draft: null, conflict: null });
+    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId) });
     void chain.current.then(async () => {
       try {
         // An older Inbox answers 404 (caught below): no draft.
         const draft = (await inboxApi.replyDraft(threadId)).draft ?? null;
         if (!live) return;
         adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null });
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null });
+        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
       }
     });
     return () => {
@@ -272,6 +294,15 @@ export function useReplyDraft(threadId: string) {
       // Another machine's thread (linked machines): its drafts live on that machine, whose door takes none, so
       // the words stay in this box only.
       if (claimed.current.has(target) || machineOf(target)) return;
+      // Longer than a draft holds: never sent (the Inbox would refuse it), said above the box instead.
+      if (text.length > INBOX_DRAFT_BODY_MAX) {
+        pending.current = null;
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
+        markTooLong(target, true);
+        return;
+      }
+      if (tooLongThreads.has(target)) markTooLong(target, false);
       if (conflicts.current.has(target)) {
         // Emptied, or the same words the server holds: no conflict left. Otherwise still not
         // saved: the person chooses (Keep mine / Discard).
@@ -299,7 +330,9 @@ export function useReplyDraft(threadId: string) {
     // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
     learn(target, null);
-    setState({ loadedFor: target, draft: null, conflict: null });
+    tooLongThreads.delete(target);
+    unsavedChanged();
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
     if (machineOf(target)) return;
     chain.current = chain.current.then(() => inboxApi.discardReplyDraft(target).then(() => undefined, () => undefined));
   }, []);
@@ -339,6 +372,9 @@ export function useReplyDraft(threadId: string) {
     claimed.current.delete(target);
     // Sent: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    tooLongThreads.delete(target);
+    unsavedChanged();
+    setState((s) => (s.tooLong ? { ...s, tooLong: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
     if (conflicts.current.has(target)) {
@@ -347,7 +383,7 @@ export function useReplyDraft(threadId: string) {
       return;
     }
     learn(target, null);
-    setState({ loadedFor: target, draft: null, conflict: null });
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
   }, []);
 
   /**
