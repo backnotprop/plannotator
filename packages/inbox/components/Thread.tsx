@@ -5194,7 +5194,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           <>
             <DraftHead
               label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
-              savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
+              savedAt={box.text.trim() || replyDraft.draft?.files?.length ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
               conflict={
                 replyDraft.conflict !== null
