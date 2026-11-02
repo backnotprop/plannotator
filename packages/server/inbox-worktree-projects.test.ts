@@ -413,3 +413,71 @@ test("read_thread's list when git does not answer in time: project_unresolved an
   expect(listed.structuredContent.threads).toEqual([]);
   expect(server.store.listProjects()).toEqual([]);
 });
+
+test("a session started in a plain folder holding one repository's checkouts files into that repository's project, and still reads the folder's old threads", async () => {
+  // The owner's layout (2026-11-02): `appnotes` is a folder of notes; `appnotes/worktrees/main` is the
+  // repository's main checkout and `appnotes/worktrees/agent-pr-plan-box` a linked worktree of it.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-")));
+  scratch.push(root);
+  const folder = join(root, "workspaces", "projects", "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  mkdirSync(join(folder, "shots"));
+  writeFileSync(join(folder, "shots", "notes.png"), png());
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const branch = join(folder, "worktrees", "agent-pr-plan-box");
+  git(main, "worktree", "add", "-q", branch, "-b", "agent-pr-plan-box");
+  const dataDir = join(root, "data");
+
+  // What this Inbox made before: a folder project for `appnotes`, with a question the person answered.
+  const before = InboxStore.open(dataDir);
+  const old = before.ensureProject({ name: "appnotes", root: folder });
+  const author = { kind: "agent" as const, host: "claude-code", session: "ses_folder", name: "Claude Code" };
+  const asked = before.sendMessage({ project_id: old.id, author, body: "Ship the notes page?\n\n:::question\nShip the notes page?\n- Yes\n- No\n:::" }).message;
+  before.sendReply(asked.id, { words: "Yes.", idempotency_key: "reply-folder" });
+
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const fromBranch = await send(client, { project_path: branch, body: "From a checkout.", agent_session: "ses_branch" });
+  expect(fromBranch.project.root).toBe(main);
+  // Agents read the repository's name, as the window shows it, not the checkout's folder ("main"); the old
+  // folder project still stands beside it until the next start folds it, so the checkout is named.
+  expect(fromBranch.project.name).toBe("appnotes · main");
+  const fromFolder = await send(client, { project_path: folder, body: "![notes](shots/notes.png)", agent_session: "ses_folder_new" });
+  // The same project as the checkouts', not the folder's; the folder stays the base its relative paths start at.
+  expect(fromFolder.project.id).toBe(fromBranch.project.id);
+  expect(server.store.message(fromFolder.message_id)?.base_path).toBe(folder);
+  expect((await image(server, fromFolder.message_id, "shots/notes.png")).status).toBe(200);
+  // Nothing was moved: the folder project keeps its thread (the person can Combine it), and a read from the folder finds it.
+  expect(server.store.message(asked.id)?.project_id).toBe(old.id);
+  const listed = (await client.callTool({ name: "read_thread", arguments: { project_path: folder, agent_session: "ses_folder", include_resolved: true } })) as {
+    isError?: boolean;
+    structuredContent: Record<string, any>;
+  };
+  expect(listed.isError).toBeFalsy();
+  expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toContain(asked.id);
+  const reply = await send(client, { project_path: folder, reply_to: asked.id, body: "Shipped.", agent_session: "ses_folder" });
+  expect(reply.project.id).toBe(old.id);
+});
+
+test("a fresh session in a checkouts folder whose checkout's git runs past the time limit still sends: it files into the repository read from disk", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-slow-")));
+  scratch.push(root);
+  const folder = join(root, "appnotes");
+  mkdirSync(join(folder, "worktrees"), { recursive: true });
+  const main = join(folder, "worktrees", "main");
+  git(root, "init", "-q", main);
+  writeFileSync(join(main, "README.md"), "appnotes\n");
+  git(main, "add", ".");
+  git(main, "commit", "-qm", "init");
+  const real = inboxGitRunner();
+  // The folder's own git answers (not a work tree); the checkout's gives no answer.
+  const slow: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
+  const server = await start(join(root, "data"), slow);
+  const sent = await send(await agent(server), { project_path: folder, body: "From the folder, git slow.", agent_session: "ses_slow" });
+  expect(sent.project.root).toBe(main);
+  expect(sent.project.name).toBe("appnotes");
+});

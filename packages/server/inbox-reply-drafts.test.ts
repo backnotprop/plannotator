@@ -8,11 +8,11 @@
  * holding unsent work never sits in Quiet unless archived.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxListRow, InboxListSection, InboxReplyDraft } from "@plannotator/core/inbox-types";
+import type { InboxListRow, InboxListSection, InboxReplyDraft, InboxUpload } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -322,5 +322,207 @@ describe("reply drafts", () => {
     while (!text.includes("event: drafts") && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
     controller.abort();
     expect(text).toContain(`event: drafts\ndata: {"thread_id":"${thread_id}"}`);
+  });
+});
+
+/**
+ * A long paste kept beside the words (approval "inbox-paste-attachment"): the
+ * reply draft's `files`, each a pending upload with where it goes back, read
+ * back after a reload or in another window through `GET uploads/:id/text`.
+ */
+describe("reply drafts keep long pastes", () => {
+  const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
+  const PREVIEW = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed";
+  const upload = async (server: InboxServer, name: string, bytes: string | Uint8Array): Promise<InboxUpload> => {
+    const response = await fetch(url(server, `/api/inbox/uploads?name=${encodeURIComponent(name)}&serverSession=${server.serverSession}`), { method: "POST", body: bytes });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { upload: InboxUpload }).upload;
+  };
+  const pasted = (id: string, at: number) => ({ upload_id: id, pasted: { at, preview: PREVIEW } });
+  const save = (server: InboxServer, threadId: string, body: Record<string, unknown>) => post(server, `/api/inbox/threads/${threadId}/draft`, body);
+  const draftOf = async (response: Response) => ((await response.json()) as { draft: InboxReplyDraft | null }).draft;
+  const textOf = async (server: InboxServer, id: string) => {
+    const response = await fetch(url(server, `/api/inbox/uploads/${id}/text`));
+    return { status: response.status, body: (await response.json()) as { text?: string; code?: string } };
+  };
+
+  test("saved and read back with its place; its words come back by the text route; files alone keep the draft; no words and no files delete it", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("The nightly import failed. Can you send me the log?", "ses_p");
+    const file = await upload(server, "pasted-text-2026-11-01-2110.txt", LOG);
+    const words = "Here is the log. It fails on the third retry.";
+    const first = await save(server, thread_id, { body: words, base: null, files: [pasted(file.upload_id, "Here is the log.".length)] });
+    expect(first.status).toBe(200);
+    const draft = (await draftOf(first))!;
+    expect(draft.files).toEqual([{ ...file, pasted: { at: "Here is the log.".length, preview: PREVIEW } }]);
+    // Another window (or a reload) reads the same draft, then the paste's exact words.
+    const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
+    expect(read.draft).toEqual(draft);
+    expect(await textOf(server, file.upload_id)).toEqual({ status: 200, body: { text: LOG } });
+
+    // Words gone, the paste kept: still a draft, still unsent on its row.
+    const filesOnly = await draftOf(await save(server, thread_id, { body: "", base: draft.updated_at, files: [pasted(file.upload_id, 0)] }));
+    expect(filesOnly?.files?.map((f) => f.upload_id)).toEqual([file.upload_id]);
+    expect((await rowOf(server, thread_id)).unsent?.reply_at).toBe(filesOnly!.updated_at);
+    // Nothing left: deleted, as an empty body was.
+    expect(await draftOf(await save(server, thread_id, { body: "  ", base: filesOnly!.updated_at }))).toBeNull();
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+  });
+
+  test("the compare-and-set covers the files: base_body's shortcut holds only while the draft holds the files this window saved last", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("The nightly import failed.", "ses_q");
+    const a = await upload(server, "pasted-text-a.txt", LOG);
+    const b = await upload(server, "pasted-text-b.txt", `${LOG}more\n`);
+    const mine = (await draftOf(await save(server, thread_id, { body: "Log:", base: null, files: [pasted(a.upload_id, 4)] })))!;
+    // Another window keeps the same words but swaps the paste.
+    const theirs = (await draftOf(await save(server, thread_id, { body: "Log:", base: mine.updated_at, files: [pasted(b.upload_id, 4)] })))!;
+    // This window's next save is a step behind: its words match, its files do not. Refused, nothing written over.
+    const refused = await save(server, thread_id, { body: "Log: see the file", base: mine.updated_at, base_body: "Log:", base_files: [a.upload_id], files: [pasted(a.upload_id, 4)] });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ code: "draft_conflict", draft: theirs });
+    expect(server.store.replyDraft(thread_id)).toEqual(theirs);
+    // Naming the files the draft does hold, the shortcut holds.
+    const ok = await save(server, thread_id, { body: "Log: see the file", base: mine.updated_at, base_body: "Log:", base_files: [b.upload_id], files: [pasted(b.upload_id, 4)] });
+    expect(ok.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)?.body).toBe("Log: see the file");
+  });
+
+  test("refusals write nothing: a place past the words, a file that is not a long paste, a lead that is not space, an upload that is gone", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("The nightly import failed.", "ses_r");
+    const file = await upload(server, "pasted-text-c.txt", LOG);
+    expect((await save(server, thread_id, { body: "Log:", base: null, files: [pasted(file.upload_id, 5)] })).status).toBe(422);
+    expect((await save(server, thread_id, { body: "Log:", base: null, files: [file.upload_id] })).status).toBe(422);
+    expect((await save(server, thread_id, { body: "Log:", base: null, files: [{ upload_id: file.upload_id, pasted: { at: 1, lead: "ab", preview: "x" } }] })).status).toBe(422);
+    const gone = await save(server, thread_id, { body: "Log:", base: null, files: [pasted("upl_01K70000000000000000000099", 0)] });
+    expect(gone.status).toBe(404);
+    expect(((await gone.json()) as { code: string }).code).toBe("upload_not_found");
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+  });
+
+  test("the text route: another site's read refused; a picture, an unknown id and a sent paste are 404", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_s");
+    const file = await upload(server, "pasted-text-d.txt", LOG);
+    expect((await fetch(url(server, `/api/inbox/uploads/${file.upload_id}/text`), { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+    const png = await upload(server, "shot.png", Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]));
+    expect((await textOf(server, png.upload_id)).status).toBe(404);
+    expect(await textOf(server, "upl_01K70000000000000000000099")).toMatchObject({ status: 404, body: { code: "upload_not_found" } });
+    // A draft of the paste alone, carried by the Send: the draft is cleared and the paste is no longer pending.
+    const draft = (await draftOf(await save(server, thread_id, { body: "", base: null, files: [pasted(file.upload_id, 0)] })))!;
+    const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-1", words: "", uploads: [file.upload_id], clear_draft: draft.updated_at });
+    expect(sent.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+    expect((await textOf(server, file.upload_id)).status).toBe(404);
+  });
+
+  test("the text route reads only long pastes: a .txt the person dropped is 404", async () => {
+    const { server } = await setup();
+    const dropped = await upload(server, "notes.txt", "my private notes\n");
+    expect(dropped.kind).toBe("text");
+    expect(await textOf(server, dropped.upload_id)).toMatchObject({ status: 404, body: { code: "upload_not_found" } });
+    const paste = await upload(server, "pasted-text-2026-11-01-2110-2.txt", LOG);
+    expect(await textOf(server, paste.upload_id)).toEqual({ status: 200, body: { text: LOG } });
+  });
+
+  test("a Send of the paste alone with a stale clear_draft (or none) still clears the draft holding only that paste", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_u");
+    const file = await upload(server, "pasted-text-g.txt", LOG);
+    const first = (await draftOf(await save(server, thread_id, { body: "Log", base: null, files: [pasted(file.upload_id, 3)] })))!;
+    // The window's last save (the words emptied, the paste kept) landed without its answer: it still knows the first updated_at.
+    expect((await save(server, thread_id, { body: "", base: first.updated_at, files: [pasted(file.upload_id, 0)] })).status).toBe(200);
+    const sent = await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-u", words: "", uploads: [file.upload_id], clear_draft: first.updated_at });
+    expect(sent.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+    expect((await rowOf(server, thread_id)).unsent ?? null).toBeNull();
+    // No updated_at known at all (''), words beside the paste.
+    const other = await upload(server, "pasted-text-h.txt", LOG);
+    await save(server, thread_id, { body: "Here:", base: null, files: [pasted(other.upload_id, 5)] });
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "paste-v", words: "Here:", uploads: [other.upload_id], clear_draft: "" })).status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toBeNull();
+  });
+
+  test("a stale Send of the same words leaves a draft holding a paste another window added, and its words still read", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_w");
+    // Window A saves "Yes". Window B adds a long paste beside the same words.
+    const mine = (await draftOf(await save(server, thread_id, { body: "Yes", base: null })))!;
+    const file = await upload(server, "pasted-text-i.txt", LOG);
+    const theirs = (await draftOf(await save(server, thread_id, { body: "Yes", base: mine.updated_at, files: [pasted(file.upload_id, 3)] })))!;
+    // A, before it hears of B's save, sends "Yes" naming its own old updated_at, without the paste.
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "w1", words: "Yes", clear_draft: mine.updated_at })).status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toEqual(theirs);
+    expect(await textOf(server, file.upload_id)).toEqual({ status: 200, body: { text: LOG } });
+    // A Send carrying another paste, not B's, leaves it too.
+    const another = await upload(server, "pasted-text-j.txt", `${LOG}j\n`);
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "w2", words: "Yes", uploads: [another.upload_id], clear_draft: "" })).status).toBe(200);
+    expect(server.store.replyDraft(thread_id)).toEqual(theirs);
+  });
+
+  test("a Send carrying some of a draft's pastes drops them from every reply draft (a new updated_at, a draft left empty goes) and says so in `event: drafts`", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_x");
+    const { thread_id: elsewhere } = await send("The deploy failed too.", "ses_y");
+    expect(elsewhere).not.toBe(thread_id);
+    const p = await upload(server, "pasted-text-p.txt", LOG);
+    const q = await upload(server, "pasted-text-q.txt", `${LOG}q\n`);
+    // Window A saves "Yes" and P; window B adds Q beside them. Another thread's draft holds P alone.
+    const mine = (await draftOf(await save(server, thread_id, { body: "Yes", base: null, files: [pasted(p.upload_id, 3)] })))!;
+    const theirs = (await draftOf(await save(server, thread_id, { body: "Yes", base: mine.updated_at, files: [pasted(p.upload_id, 3), pasted(q.upload_id, 3)] })))!;
+    expect((await save(server, elsewhere, { body: "", base: null, files: [pasted(p.upload_id, 0)] })).status).toBe(200);
+
+    const controller = new AbortController();
+    const stream = await fetch(url(server, `/api/inbox/events?cursor=${server.store.cursor()}&window=window-test-x&permission=granted`), { signal: controller.signal });
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+    // A, before it hears of B's save, sends "Yes" and P naming its own old updated_at: B's draft stays, without P.
+    expect((await post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "x1", words: "Yes", uploads: [p.upload_id], clear_draft: mine.updated_at })).status).toBe(200);
+    const left = server.store.replyDraft(thread_id)!;
+    expect(left.body).toBe("Yes");
+    expect(left.files?.map((f) => f.upload_id)).toEqual([q.upload_id]);
+    expect(left.updated_at).not.toBe(theirs.updated_at);
+    expect(server.store.replyDraft(elsewhere)).toBeNull();
+    // Both threads' windows hear it.
+    const deadline = Date.now() + 3000;
+    const heard = () => text.includes(`event: drafts\ndata: {"thread_id":"${thread_id}"}`) && text.includes(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
+    while (!heard() && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
+    controller.abort();
+    expect(text).toContain(`event: drafts\ndata: {"thread_id":"${elsewhere}"}`);
+    expect(text).toContain(`event: drafts\ndata: {"thread_id":"${thread_id}"}`);
+    // What the windows read back names no gone upload.
+    const read = (await (await fetch(url(server, `/api/inbox/threads/${thread_id}/draft`))).json()) as { draft: InboxReplyDraft };
+    expect(read.draft).toEqual(left);
+    // B, typing before it heard: its save names the base it knew and the pastes it saved last (P and Q). P is a
+    // sent paste now, so it does not tell B's draft apart: the save of Q alone beside B's words is B's own and lands.
+    const fromB = await save(server, thread_id, { body: "Yes, see Q", base: theirs.updated_at, base_body: "Yes", base_files: [p.upload_id, q.upload_id], files: [pasted(q.upload_id, 3)] });
+    expect(fromB.status).toBe(200);
+    expect(server.store.replyDraft(thread_id)?.body).toBe("Yes, see Q");
+  });
+
+  test("the upload sweep keeps a reply draft's paste a day on, and forgets one no draft names", async () => {
+    const { dataDir, server, send } = await setup();
+    const { thread_id } = await send("The nightly import failed.", "ses_t");
+    const kept = await upload(server, "pasted-text-e.txt", LOG);
+    const loose = await upload(server, "pasted-text-f.txt", `${LOG}loose\n`);
+    expect((await save(server, thread_id, { body: "Log:", base: null, files: [pasted(kept.upload_id, 4)] })).status).toBe(200);
+    // Both two days old, as the sweep sees them.
+    const pending = join(server.store.dir, "uploads", "pending");
+    for (const id of [kept.upload_id, loose.upload_id]) {
+      const path = join(pending, `${id}.json`);
+      const record = JSON.parse(readFileSync(path, "utf8")) as InboxUpload;
+      writeFileSync(path, JSON.stringify({ ...record, created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }));
+    }
+    server.stop();
+    servers.splice(servers.indexOf(server), 1);
+    // The Inbox sweeps as it starts.
+    const again = await start(dataDir);
+    expect(await textOf(again.server, kept.upload_id)).toEqual({ status: 200, body: { text: LOG } });
+    expect((await textOf(again.server, loose.upload_id)).status).toBe(404);
+    expect(again.server.store.replyDraft(thread_id)?.files?.map((f) => f.upload_id)).toEqual([kept.upload_id]);
   });
 });

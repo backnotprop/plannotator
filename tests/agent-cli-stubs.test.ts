@@ -117,6 +117,8 @@ const OWN_FAKES = new Set([
   "inbox-tailnet-owner.spec.ts",
   "inbox.spec.ts",
   "voice-inbox.ts",
+  "inbox-accounts.spec.ts",
+  "inbox-accounts-peek.spec.ts",
   "inbox-launch-claude.spec.ts",
   "inbox-launch-codex.spec.ts",
   "inbox-launch-permission.spec.ts",

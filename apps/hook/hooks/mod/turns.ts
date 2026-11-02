@@ -93,9 +93,54 @@ function takeoverTurn(prompt: Omit<EnteredPrompt, 'text'>): string | null {
   return TAKEOVER_ORIGINS.has(prompt.originKind) ? prompt.turnId : null
 }
 
+/**
+ * A question's `$.prompt.submit` that the engine may still hold. A pending submit
+ * can't be withdrawn, so its turn is aborted when it starts unless a live question
+ * owns it, by whichever tracker holds this then (the one it was asked in, or the
+ * next session's after `/clear` or a resume: `PlannotatorMod.carryQueued`).
+ * The submit settling bounds it, so a prompt the engine never runs can't
+ * shadow the same words asked again: rejected, it never runs and is
+ * forgotten at once; resolved, the engine took it, so its turn has started by
+ * the end of any turn that started after that, and it is forgotten then (never
+ * at the end of the turn it waited behind: the engine may resolve the submit
+ * before that turn's `turn.complete` hook runs). A prompt the engine drops
+ * without ever settling its submit stays armed: the same words asked again
+ * would have their turn aborted (no engine is known to do this).
+ */
+export class QueuedPrompt {
+  state: 'waiting' | 'taken' | 'failed' = 'waiting'
+  /** `mainTurnStarts` when the submit resolved. */
+  takenAt = 0
+  constructor(readonly text: string) {}
+
+  follow(submit: Promise<unknown>): void {
+    submit.then(
+      () => {
+        if (this.state !== 'waiting') return
+        this.state = 'taken'
+        this.takenAt = mainTurnStarts
+      },
+      () => {
+        this.state = 'failed'
+      },
+    )
+  }
+}
+
+/**
+ * Main-loop turn starts seen by any tracker in this process: orders a prompt's
+ * taking against the turns (one process, so it spans the trackers of every session it moved through).
+ */
+let mainTurnStarts = 0
+
+/** Prompts to drop kept at most (each is a question nobody owns any more). */
+const MAX_DROPS = 16
+
 interface ActiveAsk {
   askId: string
   text: string
+  /** Its submit, while its turn has not started. */
+  prompt: QueuedPrompt
   sink: AskSink
   turnId: string | null
   cancelled: boolean
@@ -118,8 +163,14 @@ export class TurnTracker {
   /** The main-loop turn running now, if any. */
   runningTurnId: string | null = null
   private ask: ActiveAsk | null = null
-  /** A question cancelled while still queued: its turn is aborted when it starts. */
-  private dropText: string | null = null
+  /**
+   * Questions no live ask owns whose prompts may still wait in the engine (one
+   * cancelled while queued, or carried from another session): each one's turn
+   * is aborted when it starts.
+   */
+  private drops: QueuedPrompt[] = []
+  /** The running main turns' start numbers (`mainTurnStarts`), as this tracker saw them start. */
+  private startedAt = new Map<string, number>()
   /**
    * Prompts that entered the session from anyone but this plugin (the user's
    * Enter, a notification, another plugin), as `prompt.submit` saw them. The
@@ -238,6 +289,7 @@ export class TurnTracker {
     this.ask = {
       askId,
       text,
+      prompt: new QueuedPrompt(text),
       sink,
       turnId: null,
       cancelled: false,
@@ -252,6 +304,42 @@ export class TurnTracker {
     return true
   }
 
+  /** `askId`'s `$.prompt.submit`, so its prompt is forgotten once the engine settles it. */
+  followSubmit(askId: string, submit: Promise<unknown>): void {
+    if (this.ask?.askId === askId) this.ask.prompt.follow(submit)
+  }
+
+  /**
+   * Every question prompt that may still wait in the engine, which can't withdraw
+   * it: a live question whose turn has not started, and those already
+   * to be dropped (cancelled while queued, or carried here from an earlier session).
+   */
+  queuedPrompts(): QueuedPrompt[] {
+    this.prune('failed')
+    const ask = this.ask
+    const live = ask && !ask.finished && ask.turnId === null && !this.drops.includes(ask.prompt) ? [ask.prompt] : []
+    return [...this.drops, ...live]
+  }
+
+  /**
+   * Another instance's queued prompts (`/clear` or a resume moved the process to
+   * another session under them): each one's turn is aborted when it starts, as
+   * a cancelled queued question's is. Those already held here are kept.
+   */
+  dropQueued(prompts: readonly QueuedPrompt[]): void {
+    for (const prompt of prompts) this.addDrop(prompt)
+  }
+
+  private addDrop(prompt: QueuedPrompt): void {
+    if (prompt.state === 'failed' || this.drops.includes(prompt)) return
+    this.drops.push(prompt)
+    if (this.drops.length > MAX_DROPS) this.drops.shift()
+  }
+
+  private prune(...states: QueuedPrompt['state'][]): void {
+    this.drops = this.drops.filter((prompt) => !states.includes(prompt.state))
+  }
+
   isActiveAsk(askId: string): boolean {
     return this.ask?.askId === askId && !this.ask.finished
   }
@@ -259,13 +347,19 @@ export class TurnTracker {
   /** A turn started. Returns the turn to abort at once (a cancelled question's). */
   onTurnStart(turnId: string, text: string): string | null {
     this.runningTurnId = turnId
+    mainTurnStarts += 1
+    this.startedAt.set(turnId, mainTurnStarts)
+    if (this.startedAt.size > MAX_DROPS) this.startedAt.delete(this.startedAt.keys().next().value!)
     const foreign = this.takeForeign(text)
     if (foreign) {
       if (foreign.originKind === OTHER_PLUGIN_ORIGIN) this.otherPluginTurns.add(turnId)
       return null
     }
-    if (this.dropText !== null && sameQuestion(text, this.dropText)) {
-      this.dropText = null
+    this.prune('failed')
+    // The engine runs prompts in order, so a dropped prompt of the same words runs before a new ask's.
+    const drop = this.drops.findIndex((prompt) => sameQuestion(text, prompt.text))
+    if (drop >= 0) {
+      this.drops.splice(drop, 1)
       return turnId
     }
     const ask = this.ask
@@ -323,6 +417,12 @@ export class TurnTracker {
     if (this.runningTurnId === turnId) this.runningTurnId = null
     this.takenOverTurns.delete(turnId)
     this.otherPluginTurns.delete(turnId)
+    // A prompt the engine took before this turn STARTED has had its turn start: one still held never runs.
+    // A turn this tracker never saw start (it began before a /clear) proves nothing.
+    const started = this.startedAt.get(turnId)
+    this.startedAt.delete(turnId)
+    this.prune('failed')
+    if (started !== undefined) this.drops = this.drops.filter((prompt) => !(prompt.state === 'taken' && prompt.takenAt < started))
     const ask = this.ask
     if (!ask || ask.finished || ask.turnId !== turnId) return
     ask.finished = true
@@ -374,7 +474,7 @@ export class TurnTracker {
     if (ask.turnId) return ask.turnId
     // Still queued behind another turn: confirm now, abort its turn when it starts.
     ask.finished = true
-    this.dropText = ask.text
+    this.addDrop(ask.prompt)
     ask.sink.error('aborted')
     return null
   }

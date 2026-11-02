@@ -301,9 +301,10 @@ test.skipIf(!hasDom)("the header ⋯ menu's Pin thread pins and Unpin thread unp
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // First in the menu, in its own group, as the row menu leads with it.
+  // First, in its own group with a separator after it: off a phone Snooze is the header's clock (approval
+  // "inbox-thread-header"), no longer in this menu.
   const first = await openThreadMenu();
-  expect(threadMenu()!.querySelector('[role="menuitem"]')).toBe(first);
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 2).map((el) => el.textContent?.trim())).toEqual(['Pin thread', 'Copy thread']);
   expect(first.nextElementSibling?.getAttribute('role')).toBe('separator');
   await act(async () => first.click());
   await until(() => !threadMenu(), 'the menu to close');
