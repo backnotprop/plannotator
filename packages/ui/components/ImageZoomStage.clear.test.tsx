@@ -35,7 +35,7 @@ afterEach(async () => {
 const CLEAR: ZoomClear = { top: 100, bottom: 200 };
 const CLEAR_BOTTOM = 600 - 200;
 
-function Stage({ start, clear, onMode }: { start: ZoomMode; clear?: ZoomClear; onMode?: (mode: ZoomMode) => void }) {
+function Stage({ start, clear, onMode, fitAxis }: { start: ZoomMode; clear?: ZoomClear; onMode?: (mode: ZoomMode) => void; fitAxis?: 'width' }) {
   const [mode, setMode] = React.useState<ZoomMode>(start);
   return (
     <ImageZoomStage
@@ -49,16 +49,17 @@ function Stage({ start, clear, onMode }: { start: ZoomMode; clear?: ZoomClear; o
       }}
       padding={0}
       clear={clear}
+      fitAxis={fitAxis}
     />
   );
 }
 
-async function mount(start: ZoomMode, clear: ZoomClear | undefined, width = 2000, height = 1000) {
+async function mount(start: ZoomMode, clear: ZoomClear | undefined, width = 2000, height = 1000, fitAxis?: 'width') {
   host = document.createElement('div');
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(<Stage start={start} clear={clear} />);
+    root.render(<Stage start={start} clear={clear} fitAxis={fitAxis} />);
   });
   const img = host.querySelector<HTMLImageElement>('[data-lightbox-image]')!;
   const stage = img.parentElement as HTMLElement;
@@ -71,9 +72,9 @@ async function mount(start: ZoomMode, clear: ZoomClear | undefined, width = 2000
   return { stage, img };
 }
 
-async function setClear(start: ZoomMode, clear: ZoomClear | undefined) {
+async function setClear(start: ZoomMode, clear: ZoomClear | undefined, fitAxis?: 'width') {
   await act(async () => {
-    root!.render(<Stage start={start} clear={clear} />);
+    root!.render(<Stage start={start} clear={clear} fitAxis={fitAxis} />);
   });
 }
 
@@ -178,6 +179,27 @@ describe.if(hasDom)('the stage keeps clear of the rows a host floats things over
     expect(view(img).y).toBe(CLEAR.top);
     await setClear('actual', undefined);
     expect(view(img).y).toBe(0);
+  });
+
+  test('a tall picture panned at Fit stays where it is on screen when the rows come or go; resting at Fit it refits', async () => {
+    // 1000 × 3000 fitted to the stage's width: it reads from the top, 3000 px tall under a 300 px clear space.
+    const { stage, img } = await mount('fit', CLEAR, 1000, 3000, 'width');
+    const resting = view(img);
+    expect(resting.scale).toBe(1);
+    await panBy(stage, 0, -400);
+    const panned = view(img);
+    expect(panned.y).toBeLessThan(resting.y);
+    // Hide, minimize, a second typed line: the rows go, and the place the person panned to holds.
+    await setClear('fit', undefined, 'width');
+    expect(view(img).y).toBe(panned.y);
+    await setClear('fit', CLEAR, 'width');
+    expect(view(img).y).toBe(panned.y);
+    // Resting at Fit it still eases to the new space.
+    await act(async () => root!.unmount());
+    root = null;
+    const again = await mount('fit', CLEAR, 1000, 3000, 'width');
+    await setClear('fit', undefined, 'width');
+    expect(view(again.img).y).toBe(0);
   });
 
   test('a host that passes no rows keeps the whole stage', async () => {
