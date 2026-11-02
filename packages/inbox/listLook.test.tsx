@@ -29,7 +29,7 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { TourMain } = (hasDom ? await import('./tour/Tour') : {}) as typeof import('./tour/Tour');
 const { parseTourFixture, tourStateAt, TOUR_THREAD } = await import('./tour/model');
-const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
+const { LIST_LOOK_COOKIES, LIST_LOOK_OFF, ROWS_COOKIE, adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, resetListLookForTests, writeListLookOption, writeListLookOptions, writeMenuLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 // This browser's cookies (Plannotator's storage); a map stands in for them here.
@@ -372,13 +372,63 @@ describe('the saved look', () => {
   });
 
   // Review of #2516: the one-time list dialog's Done saved all eleven options from the look it opened with.
-  test("the list dialog's Done saves its four options only: the others keep what was saved while it was open", async () => {
+  test("the list dialog's Done saves what it changed only: the others keep what was saved while it was open", async () => {
     const opened = readListLook();
     adoptSavedRows(['previewTwo', 'relativeTime', 'titleFirst'], 1);
-    void writeMenuLook({ ...opened, compact: true, highlight: true });
+    void writeMenuLook({ ...opened, compact: true, highlight: true }, opened);
     await answer();
     expect(saves).toEqual([['highlight', 'compact', 'previewTwo', 'relativeTime', 'titleFirst']]);
     expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true, previewTwo: true, relativeTime: true, titleFirst: true });
+  });
+
+  // Delta review of #2516: the dialog's "smaller names" as it opened (off) turned off a Dot saved meanwhile.
+  test("the list dialog's Done keeps a Dot another window turned on while it was open; nothing changed saves nothing", async () => {
+    const opened = readListLook();
+    adoptSavedRows(['smallNames', 'unreadDot'], 1);
+    void writeMenuLook({ ...opened, hideAgents: true }, opened);
+    await answer();
+    expect(saves).toEqual([['hideAgents', 'smallNames', 'unreadDot']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, hideAgents: true, smallNames: true, unreadDot: true });
+    void writeMenuLook(opened, opened);
+    await answer();
+    expect(saves).toHaveLength(1);
+  });
+
+  // Delta review of #2516: config.json reset, restored or hand-edited takes the count back to 0.
+  test('the count gone back (config.json reset): a change stays on screen, and reads and events are taken again', async () => {
+    adoptSavedRows(['highlight'], 9);
+    void writeListLookOption('compact', true);
+    await answer();
+    // The server counted the save 1, below the 9 this page had heard: still Compact, and counting starts from 1.
+    expect(saves).toEqual([['highlight', 'compact']]);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, highlight: true, compact: true });
+
+    // A window that only reads: a settings read answers below what it had heard when it was sent.
+    reload();
+    adoptSavedRows(['highlight'], 9);
+    const mark = listLookReadMark();
+    adoptSavedRows(['roomy'], 2, mark);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+    // An event below the last event: the stream counts up one by one, so the count went back.
+    hearRowsEvent(['highlight'], 7);
+    hearRowsEvent(['titleFirst'], 1);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, titleFirst: true });
+  });
+
+  test('a read is old, not gone back, when it answers at least the count heard when it was sent', () => {
+    adoptSavedRows(['highlight'], 5);
+    const mark = listLookReadMark();
+    hearRowsEvent(['roomy'], 6);
+    adoptSavedRows(['highlight'], 5, mark);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, roomy: true });
+  });
+
+  test("an event older than this page's own save's answer, arriving after it, is old, not gone back", async () => {
+    serverRev = 2;
+    void writeListLookOption('compact', true);
+    await answer();
+    hearRowsEvent(['roomy'], 2);
+    expect(readListLook()).toEqual({ ...LIST_LOOK_OFF, compact: true });
   });
 
   test('an older Inbox (no `rows`) or not a list changes nothing; a name no build knows is dropped', () => {

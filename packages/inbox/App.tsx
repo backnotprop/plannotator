@@ -105,7 +105,7 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
 import { VoiceIntro } from './components/VoiceIntro';
 import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
-import { adoptSavedRows, readListLook, writeMenuLook } from './listLook';
+import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -1308,10 +1308,11 @@ function Inbox() {
 
   const refreshSettings = useCallback(async () => {
     try {
+      const mark = listLookReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
-      adoptSavedRows(next.rows, next.rows_rev);
+      adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffStyle(next.diff_style);
       adoptVoiceSettings(next.voice);
       setSettings(next);
@@ -1597,7 +1598,7 @@ function Inbox() {
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
-        onRows: adoptSavedRows,
+        onRows: hearRowsEvent,
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
@@ -5056,8 +5057,8 @@ function Inbox() {
           awayMachines={machines.away}
           projectNames={projectNames}
           phone={phone}
-          onDone={(look) => {
-            void writeMenuLook(look);
+          onDone={(look, opened) => {
+            void writeMenuLook(look, opened);
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}

@@ -144,6 +144,8 @@ let current: ListLook | null = null;
  */
 let serverRev = -1;
 let serverLook: ListLook | null = null;
+/** The last count `event: rows` brought: the stream sends every save once, in order, so the next is always above it. */
+let eventRev = -1;
 /** One save on its way at a time; a change meanwhile waits as `queued` (only the latest one), sent when it answers. */
 let inFlight = false;
 let queued: ListLook | null = null;
@@ -182,6 +184,9 @@ async function sendQueued(): Promise<void> {
     try {
       const answer = await inboxApi.saveRows(rowsFromLook(look));
       const rows = inboxRowsRead(answer.rows);
+      // A save sent after this page heard count `before` is counted above it, unless the count went back (config.json
+      // reset, restored or hand-edited): then this answer is the server's look, and counting starts again from it.
+      if (typeof answer.rows_rev === 'number' && answer.rows_rev <= before) serverRev = -1;
       if (rows) hear(rows, answer.rows_rev);
       heard = true;
     } catch {
@@ -218,11 +223,19 @@ export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void
 }
 
 /**
- * The one-time list options dialog's Done (approval "inbox-list-options-intro"): its four options only, so the
- * others keep whatever they are now, even when another window changed them while the dialog was open.
+ * The one-time list options dialog's Done (approval "inbox-list-options-intro"): only the options the person changed
+ * in it (`look` against `opened`), on top of the look now, so every other keeps whatever it is now, even when another
+ * window changed it while the dialog was open (a stale "smaller names off" would turn its Dot off). Nothing changed:
+ * nothing saved.
  */
-export function writeMenuLook(look: Pick<ListLook, MenuLookKey>): Promise<void> {
-  return writeListLookOptions(Object.fromEntries(LIST_LOOK_OPTIONS.map(({ key }) => [key, look[key]])));
+export function writeMenuLook(look: Pick<ListLook, MenuLookKey>, opened: Pick<ListLook, MenuLookKey>): Promise<void> {
+  const changed = LIST_LOOK_OPTIONS.filter(({ key }) => look[key] !== opened[key]).map(({ key }) => [key, look[key]]);
+  return changed.length ? writeListLookOptions(Object.fromEntries(changed)) : Promise.resolve();
+}
+
+/** Taken when a settings read is sent, and given back with its answer (`adoptSavedRows`'s `sentAt`). */
+export function listLookReadMark(): number {
+  return serverRev;
 }
 
 /**
@@ -233,9 +246,28 @@ export function writeMenuLook(look: Pick<ListLook, MenuLookKey>): Promise<void> 
  * never once the server told this page of a look (a null read sent before it is old). Only a save that failed is
  * offered again by the next read. One older than the newest this page heard is dropped; while this page has a
  * save to make, it is kept and shown once every save answered. A name no build knows is dropped.
+ *
+ * The count only goes up, unless config.json is reset, restored or hand-edited. A read answers a count at least the
+ * one this page had heard when it was sent (`sentAt`, from `listLookReadMark`), and the stream's events count up one
+ * by one; one below that means the count went back, so the page takes it and counts again from there.
  */
-export function adoptSavedRows(rows: unknown, rev?: unknown): void {
+export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): void {
   if (rows === undefined) return;
+  if (typeof rev === 'number' && sentAt !== undefined && rev < sentAt) serverRev = -1;
+  adopt(rows, rev);
+}
+
+/** Another save, here or in another window (`event: rows`): see `adoptSavedRows`. */
+export function hearRowsEvent(rows: unknown, rev?: unknown): void {
+  if (rows === undefined) return;
+  if (typeof rev === 'number') {
+    if (rev <= eventRev) serverRev = -1;
+    eventRev = rev;
+  }
+  adopt(rows, rev);
+}
+
+function adopt(rows: unknown, rev: unknown): void {
   if (rows === null) {
     if (serverRev >= 0 || inFlight || queued) return;
     const mine = shown();
@@ -275,6 +307,7 @@ export function resetListLookForTests(): void {
   current = null;
   serverRev = -1;
   serverLook = null;
+  eventRev = -1;
   inFlight = false;
   queued = null;
   drained = Promise.resolve();

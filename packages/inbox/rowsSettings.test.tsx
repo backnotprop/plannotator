@@ -4,7 +4,7 @@
  * packages/server/inbox.test.ts's).
  * What this catches: a three-way choice that leaves its rival on (Compact and Roomy together, no preview and two
  * lines together, Dot without bold) or takes two saves to change; a preset that is not exactly its look, or that is
- * not shown as chosen when the look matches it, or that an arrow key applies; "Custom" missing once the look matches
+ * not shown as chosen when the look matches it, or that is a radio again (an arrow key would apply it); "Custom" missing once the look matches
  * none, or not tied to the presets for a screen reader; a Show switch without its words, or that reads
  * backwards; pictures that do not follow the look, or a phone that draws the full-width picture.
  *
@@ -159,23 +159,18 @@ describe.if(hasDom)('Settings → Rows', () => {
   });
 
   // Review of #2516: as radios, an arrow key in the presets chose the next one and wiped a Custom look unseen.
-  test('the presets are buttons a key moves through without choosing; a screen reader hears "Custom" with them', async () => {
+  // Buttons have no arrow-key choosing at all, so the guard is their shape: no radio, no radio group, each a button.
+  test('the presets are buttons, never radios, so a key moves through them without choosing; "Custom" goes with them', async () => {
     const el = render();
     await pick(el, 'preset', 'Minimal');
     await pick(el, 'time', 'Clock');
-    const custom = readListLook();
     const group = el.querySelector<HTMLElement>('.ib-rws-presets [role="group"]')!;
-    expect(group.querySelector('input, [role="radio"]')).toBeNull();
-    expect([...group.querySelectorAll('button')].map((b) => [b.type, b.getAttribute('aria-pressed')])).toEqual([
-      ['button', 'false'],
-      ['button', 'false'],
-      ['button', 'false'],
+    expect(el.querySelector('.ib-rws-presets :is(input, [role="radio"], [role="radiogroup"])')).toBeNull();
+    expect([...group.children].map((b) => [b.tagName, (b as HTMLButtonElement).type, b.getAttribute('aria-pressed')])).toEqual([
+      ['BUTTON', 'button', 'false'],
+      ['BUTTON', 'button', 'false'],
+      ['BUTTON', 'button', 'false'],
     ]);
-    const first = group.querySelector<HTMLButtonElement>('button')!;
-    act(() => first.focus());
-    for (const key of ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'Home', 'End']) act(() => void first.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
-    await settle();
-    expect(readListLook()).toEqual(custom);
     // "Custom" describes the group while the look matches no preset.
     const describedBy = group.getAttribute('aria-describedby')!;
     expect(el.querySelector(`#${describedBy}`)!.textContent).toBe('Custom');
