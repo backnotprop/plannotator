@@ -252,6 +252,7 @@ test('picking a chat moves to its thread and shows that chat', async () => {
   await expect(chip()).toContainText('Invoice rounding rule');
   await expect(frame()).toContainText('Only invoices issued from now on round per line.');
   await expect(agentRow()).toContainText('Codex');
+  await expect(box()).toBeFocused();
   await expect(page.locator('section.ib-pane')).toContainText('Rounding now happens per line');
   await shot(page, '3-after-switching-light', 'light');
 

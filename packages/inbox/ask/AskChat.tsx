@@ -23,8 +23,9 @@ export interface AskChatProps {
   /** The row picked in the dropdown: its header until the read arrives. */
   picked: InboxAskChat | null;
   phone: boolean;
-  /** Each press of the top bar icon: the box takes focus. */
+  /** Moves with each press that asks for the box's focus; `takeFocus` says whether it was for this chat. */
   focusRequest: number;
+  takeFocus: () => boolean;
   onPick: (chat: InboxAskChat) => void;
   onLeave: () => void;
   onConversation: (conversation: InboxAskConversationWire) => void;
@@ -43,7 +44,7 @@ export interface AskChatProps {
  * shortcuts. The window sits outside the thread's section and wears
  * `data-popover-layer`, so its keys reach neither the reply nor the ladder.
  */
-export function AskChat({ threadId, store, model, picked, phone, focusRequest, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
+export function AskChat({ threadId, store, model, picked, phone, focusRequest, takeFocus, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
   const chat = useAIChat({ context: ASK_CONTEXT });
   const [words, setWords] = useState(() => readAskWords(threadId));
   const [posting, setPosting] = useState(false);
@@ -95,9 +96,13 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, o
     });
   }, [threadId, unseen, windowOpen]);
 
+  // The box is disabled until the chat is read, and a disabled field takes no focus.
+  const canFocus = model !== null;
   useLayoutEffect(() => {
-    if (focusRequest > 0) composerRef.current?.focus();
-  }, [focusRequest]);
+    if (canFocus && takeFocus()) composerRef.current?.focus();
+    // takeFocus is read once per request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest, canFocus]);
 
   /** Start, or restart, the answer of a turn POST /ask accepted. */
   const answer = (turnId: string, question: string, providerId: string, policy?: SessionAskAction) => {

@@ -50,6 +50,12 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
+  const wantsFocus = useRef<string | null>(null);
+  const askForFocus = (threadId: string) => {
+    wantsFocus.current = threadId;
+    setFocusRequest((count) => count + 1);
+  };
   // Newest wins: a slow read must not paint over a later one, or over a send's own answer.
   const readSeq = useRef(0);
 
@@ -98,13 +104,14 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
     }
     openChats.current.add(askFor);
     store.setMinimized(false);
-    setFocusRequest((count) => count + 1);
+    askForFocus(askFor);
   };
 
   const pick = (chat: InboxAskChat) => {
     if (chat.thread_id === askFor) return;
     openChats.current.add(chat.thread_id);
     setPicked(chat);
+    askForFocus(chat.thread_id);
     openThread(chat.thread_id);
   };
 
@@ -141,6 +148,11 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
           picked={picked?.thread_id === askFor ? picked : null}
           phone={phone}
           focusRequest={focusRequest}
+          takeFocus={() => {
+            if (wantsFocus.current !== askFor) return false;
+            wantsFocus.current = null;
+            return true;
+          }}
           onPick={pick}
           onLeave={() => {
             openChats.current.delete(askFor);
