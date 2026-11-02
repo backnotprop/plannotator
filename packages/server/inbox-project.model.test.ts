@@ -13,7 +13,13 @@
  *     holding everything, its subfolders, a git repository inside it and a
  *     subfolder of that, a linked worktree of the repository outside it,
  *     another repository and a scratch folder;
- *   - the person's New message through the window's own route.
+ *   - the person's New message through the window's own route;
+ *   - the session's shell: `plannotator inbox call` and `plannotator card`
+ *     (their real commands, in this process) run from wherever the shell
+ *     stands, with the environment the mod exports (PLANNOTATOR_SESSION_TAG
+ *     and PLANNOTATOR_SESSION_PROJECT, `inboxSessionProjectEnvValue` over the
+ *     link's own `projectFolder()`, as `exportSessionProject` sets it before
+ *     each Bash call).
  *
  * After every action the projects the Inbox has, and where each send, New
  * message and thread list landed (its project, the folder its relative
@@ -29,8 +35,11 @@ import fc from 'fast-check'
 import { startInboxServer, type InboxServer } from './inbox'
 import type { InboxGitRunner } from './inbox-project-root'
 import { NO_BROWSER } from '../../tests/helpers/no-browser'
-import { discoverInboxTools, INBOX_PROJECT_FOLLOWS_SLASH_CD, InboxLink } from '../../apps/hook/hooks/mod/inbox'
+import { discoverInboxTools, INBOX_PROJECT_FOLLOWS_SLASH_CD, InboxLink, inboxSessionProjectEnvValue } from '../../apps/hook/hooks/mod/inbox'
 import { realHost } from '../../apps/hook/hooks/mod/testing/claude-session'
+import { runInboxCallCommand } from '../../apps/hook/server/inbox-call-command'
+import { runCardCommand } from '../../apps/hook/server/card-command'
+import type { InboxRegistryEntry } from '@plannotator/shared/inbox/registry'
 
 const RUNS = Number(process.env.PLANNOTATOR_MODEL_RUNS) || 20
 
@@ -264,8 +273,63 @@ class ReadList implements Cmd {
   toString = () => 'read_thread list'
 }
 
+/** What a Bash call of the session inherits: the tag and, as the mod exports it before the call, the session's project. */
+async function shellEnv(r: Real): Promise<Record<string, string>> {
+  const project = await r.link.projectFolder()
+  return {
+    PLANNOTATOR_SESSION_TAG: 'claude-code:model-session',
+    ...(project ? { PLANNOTATOR_SESSION_PROJECT: inboxSessionProjectEnvValue('model-session', project) } : {}),
+  }
+}
+
+/** One shell command of the session (`inbox call` or `card`), run where the shell stands; its stdout. */
+async function shell(r: Real, run: typeof runInboxCallCommand, argv: string[], env?: Record<string, string>): Promise<string> {
+  let out = ''
+  let err = ''
+  const code = await run(argv, {
+    cwd: r.session.cwd,
+    env: env ?? (await shellEnv(r)),
+    ensureRunning: async () => ({ port: r.server.port }) as InboxRegistryEntry,
+    out: (text: string) => void (out += text),
+    err: (text: string) => void (err += text),
+  })
+  if (code !== 0) throw new Error(`${argv[0]} exited ${code}: ${err}`)
+  return out
+}
+
+/** `plannotator inbox call send_message` from the session's shell, wherever it stands: no project_path. */
+class ShellSend implements Cmd {
+  check = () => true
+  async run(m: Model, r: Real) {
+    const landed = rootOf(projectFolder(m))
+    m.projects.add(landed)
+    const out = await shell(r, runInboxCallCommand, ['send_message', JSON.stringify({ body: `From the shell ${++r.sequence}.`, attachments: ['here.txt'] })])
+    const { message, project } = messageOf(r, out)
+    expect(project.root).toBe(abs(landed))
+    expect(message.author).toMatchObject({ kind: 'agent', host: 'claude-code', session: 'model-session' })
+    // Relative paths are the shell's folder's, as for the tool.
+    expect(message.attachments?.[0]?.path).toBe(join(abs(m.cwd), 'here.txt'))
+  }
+  toString = () => 'shell: inbox call send_message'
+}
+
+/** `plannotator card create` from the session's shell, wherever it stands: no --project. A card makes no project, so only once the session's has one. */
+class ShellCard implements Cmd {
+  check = (m: Readonly<Model>) => m.projects.has(rootOf(projectFolder(m as Model)))
+  async run(m: Model, r: Real) {
+    const landed = rootOf(projectFolder(m))
+    const out = await shell(r, runCardCommand as typeof runInboxCallCommand, ['create', `Work ${++r.sequence}`, '--json'])
+    const id = /"(crd_[0-9A-Z]{26})"/.exec(out)?.[1]
+    if (!id) throw new Error(`no card id in: ${out.slice(0, 300)}`)
+    expect(r.server.store.project(r.server.store.card(id)!.project_id)!.root).toBe(abs(landed))
+  }
+  toString = () => 'shell: card create'
+}
+
 const folder = fc.constantFrom(...FOLDERS)
 const commands = [
+  fc.constant(new ShellSend() as Cmd),
+  fc.constant(new ShellCard() as Cmd),
   folder.map((f) => new ShellCd(f) as Cmd),
   folder.map((f) => new SlashCd(f) as Cmd),
   fc.constant(new Poll() as Cmd),
@@ -279,7 +343,7 @@ let runs = 0
 async function setup(start: Folder): Promise<{ model: Model; real: Real; done: () => void }> {
   const dataDir = join(base, 'runs', String(++runs), 'data')
   mkdirSync(dataDir, { recursive: true })
-  const server = await startInboxServer({ dataDir, version: 'test', binaryPath: null, phones: false, projectRootGit: quietGit })
+  const server = await startInboxServer({ dataDir, version: 'test', binaryPath: null, phones: false, board: true, projectRootGit: quietGit })
   const session = { cwd: abs(start), root: abs(start) }
   const host = realHost({ env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME!, PLANNOTATOR_DATA_DIR: dataDir }, cwd: abs(start), store: new Map() })
   const tools = await discoverInboxTools(host, dataDir)
@@ -351,6 +415,43 @@ describe('Inbox project of a Claude Code session that moves (spec/inbox-project.
         await new NewMessage().run(model, real)
       }
       expect(realProjects(real)).toEqual([abs('top')])
+    } finally {
+      done()
+    }
+  }, 120_000)
+
+  // Audit D1: a session started above a repository that cd's into it. Main filed its tool's sends under the start
+  // folder and its shell's `inbox call` and `card` under the repository: two default threads in two projects.
+  test('every client of one session lands in one project across a shell cd', async () => {
+    const { model, real, done } = await setup('top')
+    try {
+      await new ShellCd('top/repo/src').run(model, real)
+      await new Send().run(model, real)
+      await new ShellSend().run(model, real)
+      await new ShellCard().run(model, real)
+      await new Poll().run(model, real)
+      await new NewMessage().run(model, real)
+      expect(realProjects(real)).toEqual([abs('top')])
+      // A project_path the agent names on purpose still names that project.
+      const named = await shell(real, runInboxCallCommand, ['send_message', JSON.stringify({ body: 'About the repository.', project_path: '.' })])
+      expect(messageOf(real, named).project.root).toBe(abs('top/repo'))
+      // A variable inherited from another session (a nested agent's shell) is not this call's: its own folder.
+      const nested = { PLANNOTATOR_SESSION_TAG: 'claude-code:nested-session', PLANNOTATOR_SESSION_PROJECT: inboxSessionProjectEnvValue('model-session', abs('top')) }
+      const other = await shell(real, runInboxCallCommand, ['send_message', JSON.stringify({ body: 'From a nested agent.' })], nested)
+      expect(messageOf(real, other).project.root).toBe(abs('top/repo'))
+      // The same id under another host is another session: its own folder.
+      const otherHost = { PLANNOTATOR_SESSION_TAG: 'claude-code:model-session', PLANNOTATOR_SESSION_PROJECT: `pi:model-session:${abs('top')}` }
+      const piValue = await shell(real, runInboxCallCommand, ['send_message', JSON.stringify({ body: 'Pi value, Claude Code tag.' })], otherHost)
+      expect(messageOf(real, piValue).project.root).toBe(abs('top/repo'))
+      // `--session <id>` (a Tidy's wake carries a bare id too) is this session: its project.
+      const bare = await shell(real, runInboxCallCommand, ['--session', 'model-session', 'send_message', JSON.stringify({ body: 'From the Tidy.' })], {
+        PLANNOTATOR_SESSION_PROJECT: inboxSessionProjectEnvValue('model-session', abs('top')),
+      })
+      expect(messageOf(real, bare).project.root).toBe(abs('top'))
+      // `card --project` names its project, whatever the session's is.
+      const card = await shell(real, runCardCommand as typeof runInboxCallCommand, ['create', 'For the repository', '--project', '.', '--json'])
+      const cardId = /"(crd_[0-9A-Z]{26})"/.exec(card)?.[1]
+      expect(real.server.store.project(real.server.store.card(cardId!)!.project_id)!.root).toBe(abs('top/repo'))
     } finally {
       done()
     }
