@@ -8,9 +8,10 @@
  *    its own checked), Shipped, Cancel…; it never opens the card;
  *  - a lane picked moves the card (the store too), with no toast, focus
  *    following the card into its new lane;
- *  - Shipped and a Cancel the menu started each show the one toast; its
- *    Undo (and `Z`) puts the card back where it was, in the store too, and
- *    focus on the card in its lane; a card moved on while the toast is up:
+ *  - Shipped and a Cancel the menu started each show the one toast (a
+ *    shipped card moves to the Shipped lane, focus with it); its Undo (and
+ *    `Z`) puts the card back where it was, in the store too, and focus on
+ *    the card in its lane; a card moved on while the toast is up:
  *    Undo sends nothing;
  *  - links in the Board body keep the platform's long-press callout;
  *  - Cancel… opens the card with the reason field focused;
@@ -244,10 +245,10 @@ test('Shipped from the menu: the toast, then Undo (and Z) put the card back in i
   await menu(page).locator('[data-card-menu-to="shipped"]').click();
   await expect(toast(page)).toContainText('Shipped');
   await expect(toast(page)).toContainText('“Slack bridge”');
-  await expect(cardEl(page, ids.slack)).toHaveCount(0);
+  // It moves to the Shipped lane (its last seven days), and focus follows it there.
+  await expect(laneCard(page, 'shipped', ids.slack)).toBeVisible();
   expect((await stored(page, ids.slack))?.column).toBe('shipped');
-  // The card left the lane: focus goes to the card now in its slot there.
-  await expect(cardButton(page, ids.qr)).toBeFocused();
+  await expect(cardButton(page, ids.slack)).toBeFocused();
   await page.mouse.move(5, 5);
   await shot(page, '04-after-shipped-toast-light.png');
   await toast(page).locator('[data-toast-undo]').click();
@@ -259,7 +260,7 @@ test('Shipped from the menu: the toast, then Undo (and Z) put the card back in i
   await openMenu(page, ids.slack);
   await menu(page).locator('[data-card-menu-to="shipped"]').click();
   await expect(toast(page)).toContainText('Shipped');
-  await expect(cardEl(page, ids.slack)).toHaveCount(0);
+  await expect(laneCard(page, 'shipped', ids.slack)).toBeVisible();
   await page.keyboard.press('z');
   await expect(toast(page)).toHaveCount(0);
   await expect(laneCard(page, 'in_progress', ids.slack)).toBeVisible();
@@ -273,7 +274,7 @@ test('Shipped from the menu, another card: Undo moves it back to the lane it cam
   await menu(page).locator('[data-card-menu-to="shipped"]').click();
   await expect(toast(page)).toContainText('Shipped');
   await expect(toast(page)).toContainText('“Board card menu”');
-  await expect(cardEl(page, ids.menu)).toHaveCount(0);
+  await expect(laneCard(page, 'shipped', ids.menu)).toBeVisible();
   expect((await stored(page, ids.menu))?.column).toBe('shipped');
   await toast(page).locator('[data-toast-undo]').click();
   await expect(laneCard(page, 'todo', ids.menu)).toBeVisible();

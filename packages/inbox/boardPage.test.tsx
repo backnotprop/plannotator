@@ -200,10 +200,10 @@ test.if(hasDom)('the lanes in order, the title row, bold while unread, no "on yo
   scriptFetch();
   draw();
   await settle();
-  expect($$('.ib-blanes [data-lane]').map((lane) => lane.dataset.lane)).toEqual(['backlog', 'todo', 'in_progress', 'in_review']);
+  expect($$('.ib-blanes [data-lane]').map((lane) => lane.dataset.lane)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'shipped']);
   // In flight leaves out Backlog (nobody has started it); on you is In review.
   expect($('[data-board-summary]')!.textContent).toBe('5 in flight · 2 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
+  expect($('[data-board-link="shipped"]')!.textContent).toBe('All shipped');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 1');
   expect($('[data-board-link="icebox"]')).toBeNull();
   expect(cardEl('crd_price')!.querySelector('.ib-bc-line')!.textContent).toBe('You: Read the copy, then say go');
@@ -449,9 +449,79 @@ test.if(hasDom)('a phone: one stacked list, Shipped and Cancelled folded at the 
     const el = cardEl('crd_tab');
     return el === null ? 'absent' : el.closest('[hidden]') ? 'hidden' : 'shown';
   };
-  expect(shown()).toBe('hidden');
+  // Shipped long ago: not in the fold's last seven days; All shipped shows it.
+  expect(shown()).toBe('absent');
   act(() => $('[data-board-fold="shipped"]')!.click());
+  expect(shown()).toBe('absent');
+  act(() => ($('[data-board-shipped-all]') as HTMLButtonElement).click());
   expect(shown()).toBe('shown');
+  expect($('[data-board-shipped-all]')).toBeNull();
+});
+
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+
+test.if(hasDom)('the Shipped lane: cards shipped in the last seven days, the rest behind All shipped; a lane card can be dragged out of it', async () => {
+  scriptFetch();
+  const cards = [
+    card('crd_fresh', { title: 'Shipped this week', column: 'shipped', moved_at: daysAgo(2) }),
+    card('crd_stale', { title: 'Shipped last month', column: 'shipped', moved_at: daysAgo(30) }),
+    card('crd_work', { title: 'Still going', column: 'in_progress' }),
+  ];
+  const drawn = draw({ model: { serverSession: 's', cursor: 1, cards, dropped_unseen: 0, seen_seq: LOOK } });
+  await settle();
+  const lane = (column: string) => $(`.ib-blanes [data-lane="${column}"]`)!;
+  expect([...lane('shipped').querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId)).toEqual(['crd_fresh']);
+  expect(lane('shipped').querySelector('.ib-lane-n')!.textContent).toBe('1');
+  expect(cardEl('crd_stale')).toBeNull();
+  // A Board whose only lane cards shipped this week is not empty.
+  expect($('[data-board-empty]')).toBeNull();
+  // The person moves a shipped card back as any other: drag it to a lane.
+  const transfer = { effectAllowed: '', dropEffect: '', setData() {} };
+  act(() => {
+    cardEl('crd_fresh')!.dispatchEvent(Object.assign(new Event('dragstart', { bubbles: true }), { dataTransfer: transfer }));
+  });
+  act(() => {
+    lane('in_progress').dispatchEvent(Object.assign(new Event('drop', { bubbles: true, cancelable: true }), { dataTransfer: transfer }));
+  });
+  expect(drawn.moves).toEqual([{ id: 'crd_fresh', move: { op: 'move', column: 'in_progress' } }]);
+});
+
+test.if(hasDom)('"Waiting on you": a card before In review whose thread waits on the person says so and opens it; it counts as on you and never moves', async () => {
+  scriptFetch();
+  const threads: { card: string; thread: string }[] = [];
+  const cards = [
+    card('crd_q', { title: 'Pager fix', column: 'in_progress', threads: ['msg_quiet', 'msg_ask'] }),
+    card('crd_r', { title: 'Ready PR', column: 'in_review', you: 'Merge #42', threads: ['msg_ask2'] }),
+    card('crd_n', { title: 'Nothing asked', column: 'todo', threads: ['msg_quiet'] }),
+    card('crd_s', { title: 'Done', column: 'shipped', moved_at: daysAgo(1), threads: ['msg_ask3'] }),
+  ];
+  const rows: Record<string, { section: string; subject: string }> = {
+    msg_quiet: { section: 'quiet', subject: 'Old chat' },
+    msg_ask: { section: 'waiting', subject: 'Page numbers in pager' },
+    msg_ask2: { section: 'stopped', subject: 'Merge?' },
+    msg_ask3: { section: 'holding', subject: 'Follow-up' },
+  };
+  const drawn = draw({
+    model: { serverSession: 's', cursor: 1, cards, dropped_unseen: 0, seen_seq: LOOK },
+    rowOf: (id) => (rows[id] ? ({ thread_id: id, project: { id: 'prj_1', name: 'web' }, ...rows[id] } as unknown as InboxListRow) : null),
+    onOpenThread: (target, thread) => threads.push({ card: target.id, thread }),
+  });
+  await settle();
+  const second = (id: string) => cardEl(id)!.querySelector('.ib-bc-bot .ib-bc-line')?.textContent ?? null;
+  expect(second('crd_q')).toBe('Waiting on you: Page numbers in pager');
+  // In review keeps its own "You: …"; nothing waiting, or shipped: no line.
+  expect(second('crd_r')).toBe('You: Merge #42');
+  expect(second('crd_n')).toBeNull();
+  expect(second('crd_s')).toBeNull();
+  // The waiting card is on you beside the In review one; the card stays in its lane.
+  expect($('[data-board-summary]')!.textContent).toBe('3 in flight · 2 on you');
+  expect(cardEl('crd_q')!.closest('[data-lane]')!.getAttribute('data-lane')).toBe('in_progress');
+  const link = cardEl('crd_q')!.querySelector<HTMLButtonElement>('[data-card-waiting]')!;
+  expect(link.getAttribute('aria-label')!.startsWith(link.textContent!)).toBe(true);
+  act(() => link.click());
+  expect(threads).toEqual([{ card: 'crd_q', thread: 'msg_ask' }]);
+  expect(drawn.opened).toEqual([]);
+  expect(drawn.moves).toEqual([]);
 });
 
 /** An IntersectionObserver that sees every card it is given (happy-dom never scrolls). */

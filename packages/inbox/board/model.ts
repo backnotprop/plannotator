@@ -3,8 +3,9 @@
  * "inbox-board-look", the unread signal in "inbox-board-signal").
  *
  * - Lanes (approval "inbox-board-columns-v2"): Backlog, To do, In progress,
- *   In review. Shipped and Cancelled (the Dropped column) are links to their
- *   own lists; the Icebox folded into Backlog.
+ *   In review, and Shipped with the cards shipped in the last seven days.
+ *   "All shipped" and Cancelled (the Dropped column) are links to their own
+ *   lists; the Icebox folded into Backlog.
  * - A card (variant C "Lean") is two lines: the title, then "You: …" in the
  *   person's columns or the agent's last word otherwise, and its last-heard
  *   age on the right ("2d ago"). No counts on a card, no amber.
@@ -62,7 +63,20 @@ export function boardProjects<P extends { id: string }>(cards: readonly Pick<Inb
   return projects.filter((project) => withCards.has(project.id) || project.id === chosen);
 }
 
-/** One lane: a live column and its cards, latest move first (the server's order). */
+/** The Board's lanes: the live columns, then Shipped (its last week; "All shipped" lists the rest). */
+export const BOARD_LANE_COLUMNS: readonly InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'shipped'];
+
+/** How long a shipped card stays in the Shipped lane, from when it shipped. */
+export const SHIPPED_LANE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Whether a shipped card is still in the Shipped lane at `now` (shipped in the last seven days). */
+export function inShippedLane(card: Pick<InboxCardWire, 'column' | 'moved_at'>, now: number): boolean {
+  if (card.column !== 'shipped') return false;
+  const at = Date.parse(card.moved_at);
+  return !Number.isNaN(at) && now - at < SHIPPED_LANE_MS;
+}
+
+/** One lane: a column and its cards, latest move first (the server's order). */
 export interface BoardLane {
   column: InboxCardColumn;
   label: string;
@@ -71,18 +85,33 @@ export interface BoardLane {
   cards: InboxCardWire[];
 }
 
-export function boardLanes(cards: readonly InboxCardWire[]): BoardLane[] {
-  return INBOX_CARD_LIVE_COLUMNS.map((column) => ({
+export function boardLanes(cards: readonly InboxCardWire[], now: number = Date.now()): BoardLane[] {
+  return BOARD_LANE_COLUMNS.map((column) => ({
     column,
     label: INBOX_CARD_COLUMN_LABELS[column],
     onYou: isInboxCardPersonColumn(column),
     // A card the person sent to an agent sits at the top of To do until it moves (step 2 amendment).
     cards: cards
-      .filter((card) => card.column === column)
+      .filter((card) => (column === 'shipped' ? inShippedLane(card, now) : card.column === column))
       .map((card, index) => ({ card, index }))
       .sort((a, b) => Number(isInboxCardSentWaiting(b.card)) - Number(isInboxCardSentWaiting(a.card)) || a.index - b.index)
       .map(({ card }) => card),
   }));
+}
+
+/** The Inbox sections that say a thread waits on the person (Stopped on you, Holding up work, Waiting on you). */
+const WAITING_SECTIONS: ReadonlySet<string> = new Set(['stopped', 'holding', 'waiting']);
+
+/**
+ * "Waiting on you" (display only): a card on the lanes before In review with a
+ * linked thread the Inbox already lists as waiting on the person (an agent's
+ * question, unanswered). It never moves the card: In review stays the agent's
+ * deliberate hand-over, and a card already there shows its "You: …". The
+ * thread to open, or null.
+ */
+export function waitingThread(card: Pick<InboxCardWire, 'column' | 'threads'>, rowOf: (threadId: string) => { section?: string } | null | undefined): string | null {
+  if (!INBOX_CARD_LIVE_COLUMNS.includes(card.column) || isInboxCardPersonColumn(card.column)) return null;
+  return card.threads.find((threadId) => WAITING_SECTIONS.has(rowOf(threadId)?.section ?? '')) ?? null;
 }
 
 /**
@@ -109,7 +138,7 @@ export const BOARD_LANE_GAP = 10;
 
 /** How many whole lanes fit a width (at least one, at most the five). */
 export function lanesThatFit(width: number): number {
-  return Math.max(1, Math.min(INBOX_CARD_LIVE_COLUMNS.length, Math.floor((width + BOARD_LANE_GAP) / (BOARD_LANE_MIN + BOARD_LANE_GAP))));
+  return Math.max(1, Math.min(BOARD_LANE_COLUMNS.length, Math.floor((width + BOARD_LANE_GAP) / (BOARD_LANE_MIN + BOARD_LANE_GAP))));
 }
 
 /** The first lane of the window of `fit` lanes that shows lane `index`: centred on it, held at the ends. */
@@ -117,15 +146,19 @@ export function laneWindowStart(index: number, fit: number, total: number): numb
   return Math.max(0, Math.min(total - fit, index - Math.floor(fit / 2)));
 }
 
-/** The header's facts: cards in flight (To do, In progress, In review: Backlog is not started by anyone), those on the person, and the two links' counts. */
-export function boardCounts(cards: readonly InboxCardWire[]) {
+/**
+ * The header's facts: cards in flight (To do, In progress, In review: Backlog is
+ * not started by anyone), those on the person (In review, and a card "Waiting
+ * on you" when `rowOf` is given), and the Cancelled link's count.
+ */
+export function boardCounts(cards: readonly InboxCardWire[], rowOf?: (threadId: string) => { section?: string } | null | undefined) {
   let inFlight = 0;
   let onYou = 0;
   let shipped = 0;
   let dropped = 0;
   for (const card of cards) {
     if (INBOX_CARD_LIVE_COLUMNS.includes(card.column) && card.column !== 'backlog') inFlight += 1;
-    if (isInboxCardPersonColumn(card.column)) onYou += 1;
+    if (isInboxCardPersonColumn(card.column) || (rowOf && waitingThread(card, rowOf))) onYou += 1;
     if (card.column === 'shipped') shipped += 1;
     if (card.column === 'dropped') dropped += 1;
   }
@@ -272,6 +305,11 @@ export function youThread(card: Pick<InboxCardWire, 'threads' | 'sent'>, rowOf: 
 /** The "You: …" link's accessible name: its visible words first (WCAG 2.5.3), then where it goes: "You: Merge #14, open the thread". */
 export function youLinkLabel(you: string): string {
   return `You: ${you}, open the thread`;
+}
+
+/** The "Waiting on you" link's name, its words first (WCAG 2.5.3): "Waiting on you: Page numbers, open the thread". */
+export function waitingLinkLabel(subject: string | null): string {
+  return `Waiting on you: ${subject ?? 'a question'}, open the thread`;
 }
 
 /** The agent a sent card went to, while it waits in To do: "Sent to Codex". */

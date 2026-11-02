@@ -282,13 +282,15 @@ test("an agent's cards appear live as it makes and moves them, bold until opened
   // The agent hands Delivery ticks over: In review.
   await claude.card({ op: 'move', card_id: ids.ticks, column: 'in_review', you: 'Look at the screenshots, then merge #14', project_path: projects.plannotator });
   await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.ticks}"]`)).toBeVisible();
-  // The card whose every PR merged leaves the lanes for Shipped by itself, once its mark is read.
-  await expect(card(page, ids.icon)).toHaveCount(0);
+  // The card whose every PR merged moves to the Shipped lane by itself, once its mark is read.
+  await expect(lane(page, 'shipped').locator(`[data-card-id="${ids.icon}"]`)).toBeVisible();
   // The agent's last word is not on the lane card (approval board-lane-card, r1): its title row alone.
   await expect(card(page, ids.herdr).locator('.ib-bc-line')).toHaveCount(0);
   await expect(card(page, ids.herdr)).not.toContainText('Triage the open PRs first');
   await expect(page.locator('[data-board-summary]')).toHaveText('12 in flight · 5 on you');
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 2');
+  // The Shipped lane holds this week's (both shipped just now); the header links to every shipped card.
+  await expect(lane(page, 'shipped').locator('.ib-lane-n')).toHaveText('2');
+  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('All shipped');
   // No "on you" pill on a lane, no counts on a card.
   await expect(page.locator('.ib-onyou')).toHaveCount(0);
   // Each lane card with a link carries its state as a mark, read for the cards on screen in
@@ -423,14 +425,41 @@ test('dragging a card to another lane moves it', async () => {
   await expect(card(page, ids.herdr)).toHaveAttribute('data-column', 'in_review');
 });
 
+test('"Waiting on you": an agent asks in a thread linked to its card; the card says so and opens it, and stays in its lane', async () => {
+  const { page, claude, projects, ids } = world;
+  const before = await page.locator('[data-board-summary]').textContent();
+  const asked = await claude.send({
+    project_path: projects.plannotator,
+    subject: 'Hero easing: which curve',
+    thread: 'hero-easing',
+    body: ['Two easings rendered.', '', ':::question', 'Which easing for the hero scene?', '', '- [ ] Spring', '- [ ] Ease out', ':::'].join('\n'),
+  });
+  await claude.card({ op: 'link', card_id: ids.hero, thread_id: asked.thread_id, project_path: projects.plannotator });
+  const link = card(page, ids.hero).locator('[data-card-waiting]');
+  await expect(link).toHaveText(/Waiting on you: Hero easing: which curve/);
+  await expect(card(page, ids.hero)).toHaveAttribute('data-column', 'in_progress');
+  // Counted on you, beside the In review cards.
+  const onYou = (text: string | null) => Number(/(\d+) on you/.exec(text ?? '')?.[1]);
+  await expect.poll(async () => onYou(await page.locator('[data-board-summary]').textContent())).toBe(onYou(before) + 1);
+  await both(page, 'waiting-on-you-1440');
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`thread=${asked.thread_id}`));
+  await page.goBack();
+  await expect(card(page, ids.hero)).toBeVisible();
+  // The agent's question goes, and so does the line: the card never moved.
+  await claude.send({ project_path: projects.plannotator, thread: 'hero-easing', body: 'Never mind: going with the spring.', supersedes: [asked.message_id as string] });
+  await expect(link).toHaveCount(0);
+  await expect(lane(page, 'in_progress').locator(`[data-card-id="${ids.hero}"]`)).toBeVisible();
+});
+
 test('Ship, park in Backlog, Cancel with a reason, and Restore; the Shipped and Cancelled pages', async () => {
   const { page, pi, projects, ids } = world;
   // Ship.
   await card(page, ids.caret).locator('[data-card-open]').click();
   let panel = page.locator(`[data-card-panel="${ids.caret}"]`);
   await panel.locator('[data-card-ship]').click();
-  await expect(card(page, ids.caret)).toHaveCount(0);
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 3');
+  await expect(lane(page, 'shipped').locator(`[data-card-id="${ids.caret}"]`)).toBeVisible();
+  await expect(lane(page, 'shipped').locator('.ib-lane-n')).toHaveText('3');
   // Park an agent's card in Backlog (the Icebox's job now): the agent may say, never take it out.
   await page.keyboard.press('Escape');
   await card(page, ids.polylane).locator('[data-card-open]').click();

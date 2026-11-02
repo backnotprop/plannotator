@@ -197,7 +197,7 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(chipWords()).toBe('All projects');
   expect(shownCards()).toEqual(['api_build', 'api_review', 'web_backlog', 'web_design', 'web_look']);
   expect($('[data-board-summary]')!.textContent).toBe('5 in flight · 2 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 3');
+  expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 2');
   expect($('[data-dropped-notice]')!.getAttribute('data-dropped-notice')).toBe('1');
   // The button is the Board header's, beside the counts.
   expect($('.ib-bhead [data-board-project-chip]')).not.toBeNull();
@@ -217,7 +217,6 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(laneIds('in_progress')).toEqual(['api_build']);
   expect(laneIds('todo')).toEqual([]);
   expect($('[data-board-summary]')!.textContent).toBe('2 in flight · 1 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 0');
   // web's drop is not api's news.
   expect($('[data-dropped-notice]')).toBeNull();
@@ -307,8 +306,9 @@ test.if(hasDom)('a phone: the Project button on its own row under the header, it
   expect($('.ib-bhead [data-board-project-chip]')).toBeNull();
   expect($('.ib-bfbar [data-board-project-chip]')).not.toBeNull();
   expect(chipWords()).toBe('web');
-  // The stacked list holds only web's cards.
-  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design', 'web_look', 'web_shipped'].sort());
+  // The stacked list holds only web's cards (its shipped one, older than a week, behind All shipped).
+  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design', 'web_look'].sort());
+  expect($('[data-board-shipped-all]')!.textContent).toBe('All shipped (1)');
   await press($('[data-board-project-chip]')!);
   expect($('[data-board-project-menu]')).not.toBeNull();
   expect($('.ib-pm-pos[data-phone] [data-board-project-menu]')).not.toBeNull();
