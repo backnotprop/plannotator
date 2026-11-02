@@ -547,7 +547,7 @@ export function BoardPage(props: BoardPageProps) {
             </a>
           </nav>
         )}
-        {(view === 'lanes' || phone) && <NewCardButton disabled={props.projects.length === 0 && !(live && live.length > 0)} phone={phone} onOpen={() => openCreate('backlog')} />}
+        {(view === 'lanes' || phone) && <NewCardButton disabled={props.projects.length === 0 && !(live && live.length > 0)} phone={phone} compact={phone || narrowHead} onOpen={() => openCreate('backlog')} />}
         {props.tidy && (view === 'lanes' || phone) && (
           <TidyMenu tidy={props.tidy} phone={phone} className="ib-bhead-more" onRefresh={() => props.onChanged()} />
         )}
@@ -664,14 +664,16 @@ interface CardCommon {
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
 }
 
-function NewCardButton({ disabled, phone, onOpen }: { disabled: boolean; phone: boolean; onOpen: () => void }) {
+/** New card; `compact` (a phone, or a narrow header): the + alone, its name in the label and the tip. */
+function NewCardButton({ disabled, phone, compact, onOpen }: { disabled: boolean; phone: boolean; compact: boolean; onOpen: () => void }) {
   const button = (
-    <button type="button" className="ib-btn ib-sm ib-bnew" data-board-new="" disabled={disabled} aria-haspopup="dialog" onClick={onOpen} aria-label={phone ? 'New card' : undefined}>
+    <button type="button" className="ib-btn ib-sm ib-bnew" data-board-new="" disabled={disabled} aria-haspopup="dialog" onClick={onOpen} aria-label={compact ? 'New card' : undefined}>
       <Icon name="plus" size={15} />
-      {!phone && 'New card'}
+      {!compact && 'New card'}
     </button>
   );
-  return disabled ? <Tip content="A card needs a project: an agent's first message makes one.">{button}</Tip> : button;
+  if (disabled) return <Tip content="A card needs a project: an agent's first message makes one.">{button}</Tip>;
+  return compact && !phone ? <Tip content="New card">{button}</Tip> : button;
 }
 
 function Lanes({

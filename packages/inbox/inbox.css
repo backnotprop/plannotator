@@ -5750,6 +5750,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* A narrow page: tighter gaps, so the counts stay whole beside the Tidy ⋮ (the Project chip has its own row). */
 .ib-bhead[data-narrow] { gap: 8px; }
 .ib-bhead[data-narrow] .ib-blinks { gap: 4px; }
+/* A narrow header: New card is its + alone (its name in the tip), so the counts are never cut. */
+.pn-inbox .ib-bhead[data-narrow] .ib-bnew { aspect-ratio: 1; padding: 0; justify-content: center; }
 .ib-blinks { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-blinks a { color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; font-variant-numeric: tabular-nums; }
 .ib-blinks a:hover { color: var(--foreground); background: var(--ib-hover); }

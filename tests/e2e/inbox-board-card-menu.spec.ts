@@ -142,7 +142,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   ids.slack = await make(claude, 'Slack bridge', { column: 'in_progress' });
   ids.dark = await make(pi, 'Dark mode for guides');
   ids.retry = await make(codex, 'Retry on a flaky relay');
-  ids.menu = await make(claude, 'Board card menu', { column: 'in_progress' });
+  ids.menu = await make(claude, 'Board card menu', { column: 'todo' });
   ids.search = await make(codex, 'Settings search', { column: 'in_review', you: 'Pick a layout' });
   ids.export = await make(pi, 'Export a guided review', { column: 'in_progress' });
   ids.qr = await make(claude, 'Phone pairing QR', { column: 'in_progress', thread_id: ticks.thread_id });
@@ -276,8 +276,8 @@ test('Shipped from the menu, another card: Undo moves it back to the lane it cam
   await expect(cardEl(page, ids.menu)).toHaveCount(0);
   expect((await stored(page, ids.menu))?.column).toBe('shipped');
   await toast(page).locator('[data-toast-undo]').click();
-  await expect(laneCard(page, 'in_progress', ids.menu)).toBeVisible();
-  expect((await stored(page, ids.menu))?.column).toBe('in_progress');
+  await expect(laneCard(page, 'todo', ids.menu)).toBeVisible();
+  expect((await stored(page, ids.menu))?.column).toBe('todo');
   await expect(cardButton(page, ids.menu)).toBeFocused();
 });
 
@@ -302,8 +302,8 @@ test('a card moved on while its toast is up: Undo sends nothing and says it has 
   expect(posts).toEqual([]);
   expect((await stored(page, ids.menu))?.column).toBe('in_review');
   await toast(page).locator('[data-toast-dismiss]').click();
-  await personMove(page, ids.menu, { op: 'move', column: 'in_progress' });
-  await expect(laneCard(page, 'in_progress', ids.menu)).toBeVisible();
+  await personMove(page, ids.menu, { op: 'move', column: 'todo' });
+  await expect(laneCard(page, 'todo', ids.menu)).toBeVisible();
 });
 
 test('links in the Board body keep the platform’s long-press callout (Base UI’s trigger turns it off)', async () => {
