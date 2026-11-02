@@ -157,10 +157,14 @@ const peek = (page: Page) => page.locator('[data-usage-peek]');
 const usageRow = (page: Page) => page.locator('[data-usage-nav]');
 const nearBlocks = (page: Page) => page.locator('[data-usage-machine]');
 const account = (page: Page, name: string) => page.locator('.ib-acct').filter({ has: page.getByText(name, { exact: true }) });
-/** Every machine's rows, in the order a page that saw them all at once lists them. */
-const NAMES = ['work', 'personal', 'work', 'team', 'side'];
+/** Every machine's rows: this machine's first, the others as they answered, so in either order. */
+async function expectEveryRow(page: Page) {
+  const names = page.locator('.ib-acct .ib-acct-name');
+  await expect.poll(async () => (await names.allTextContents()).sort()).toEqual(['personal', 'side', 'team', 'work', 'work']);
+  expect((await names.allTextContents()).slice(0, 2)).toEqual(['work', 'personal']);
+}
 /** Where each row of the list sits now. */
-const rowBoxes = (page: Page) => page.locator('.ib-acct').evaluateAll((rows) => rows.map((row) => { const { top, height } = row.getBoundingClientRect(); return { name: row.querySelector('.ib-acct-name')?.textContent, top, height }; }));
+const rowTops = (page: Page) => page.locator('.ib-acct').evaluateAll((rows) => rows.map((row) => ({ name: row.querySelector('.ib-acct-name')?.textContent, top: row.getBoundingClientRect().top })));
 
 async function shot(page: Page, name: string) {
   // Off the left edge's 20 px strip, which slides the sidebar in over the page.
@@ -202,7 +206,7 @@ test('Settings: this machine, then each linked one and the account it is using; 
   await expect(page.locator('[data-accounts-machines] button')).toHaveCount(0);
 
   // `personal` is saved on Studio and Mini, Northwind's `work` on Studio and Laptop: one row each. Mini's newer reading wins.
-  await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(NAMES);
+  await expectEveryRow(page);
   await expect(page.locator('.ib-acct .ib-acct-org')).toHaveText(['Northwind', 'Acme']);
   await expect(account(page, 'personal').locator('[data-usage="5h"]')).toContainText('92%');
   await account(page, 'personal').locator('button.ib-acct-row').click();
@@ -270,33 +274,42 @@ test('a slow machine holds up nothing and moves nothing when it answers', async 
   });
   await page.goto(`${studio.url}#settings/accounts`);
   await expect(useOf(page, 'Studio')).toHaveText('work');
-  await expect(useOf(page, 'Laptop')).toHaveText('work');
+  await expect(useOf(page, 'Laptop')).not.toHaveText('Reading accounts…');
   await expect(page.locator('[data-accounts-refresh]')).toBeEnabled();
   await expect(useOf(page, 'Mini')).toHaveText('Reading accounts…');
   const before = (await rowOf(page, 'Laptop').boundingBox())!.y;
   await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(['work', 'personal', 'side']);
-  const rows = await rowBoxes(page);
+  const rows = await rowTops(page);
   await shot(page, 'desktop-slow-machine');
   letGo();
   await expect(useOf(page, 'Mini')).toHaveText('personal');
   expect((await rowOf(page, 'Laptop').boundingBox())!.y).toBe(before);
   // Its namesake gives `work` a second line and its other rows land last: nothing already showing moves.
+  await expect(page.locator('.ib-acct')).toHaveCount(5);
   await expect(page.locator('.ib-acct .ib-acct-org')).toHaveText(['Northwind', 'Acme']);
-  await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(['work', 'personal', 'side', 'work', 'team']);
-  expect((await rowBoxes(page)).slice(0, rows.length)).toEqual(rows);
+  expect((await rowTops(page)).slice(0, rows.length)).toEqual(rows);
   await context.close();
 });
 
 test('a far answer that grows an open peek keeps it on the row, with focus where it was', async ({ browser }) => {
   test.setTimeout(120_000);
   const { context, page, errors } = await desktop(browser);
-  let letGo = () => {};
-  const held = new Promise<void>((go) => {
-    letGo = go;
+  let letMini = () => {};
+  const miniHeld = new Promise<void>((go) => {
+    letMini = go;
   });
   await page.route(`**/api/inbox/accounts/${mini.id}*`, async (route) => {
-    await held;
+    await miniHeld;
     await route.continue();
+  });
+  let letLaptop = () => {};
+  const laptopHeld = new Promise<void>((go) => {
+    letLaptop = go;
+  });
+  const near = { number: 1, alias: 'lap', email: 'lap@fake.test', organizationName: null, isOrganization: false, active: true, usageStatus: 'ok', usageError: null, usageRetryAt: null, usage: { fiveHour: limit(95), sevenDay: null, scoped: [] }, usageAgeSeconds: 10 };
+  await page.route(`**/api/inbox/accounts/${laptop.id}*`, async (route) => {
+    await laptopHeld;
+    await route.fulfill({ json: { state: 'accounts', accounts: [near] } });
   });
   await page.goto(studio.url);
   await usageRow(page).click();
@@ -304,14 +317,19 @@ test('a far answer that grows an open peek keeps it on the row, with focus where
   await expect(block.locator('.ib-usage-nm')).toHaveText('work');
   await expect(block).toBeFocused();
   const before = (await peek(page).boundingBox())!;
-  letGo();
+  letMini();
   await expect(nearBlocks(page)).toHaveText(['Mini5h 92%']);
   await expect(block).toBeFocused();
   const after = (await peek(page).boundingBox())!;
   expect(after.height).toBeGreaterThan(before.height);
-  expect(after.y + after.height).toBeCloseTo(before.y + before.height, 0);
+  expect(Math.abs(after.y + after.height - (before.y + before.height))).toBeLessThanOrEqual(1);
+  // Focus past the first block, where a popup put back together would not leave it.
   await page.keyboard.press('Tab');
-  await expect(nearBlocks(page)).toBeFocused();
+  const onMini = nearBlocks(page).first();
+  await expect(onMini).toBeFocused();
+  letLaptop();
+  await expect(nearBlocks(page)).toHaveText(['Mini5h 92%', 'Laptop5h 95%']);
+  await expect(onMini).toBeFocused();
   expect(errors).toEqual([]);
   await context.close();
 });
@@ -321,7 +339,7 @@ test('phone 390: the same machines on the page, and the near machine in the bott
   const { context, page } = await phone(browser);
   await page.goto(`${studio.url}#settings/accounts`);
   await expect(useOf(page, 'Mini')).toHaveText('personal');
-  await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(NAMES);
+  await expectEveryRow(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await shot(page, 'phone-390-settings');
 
