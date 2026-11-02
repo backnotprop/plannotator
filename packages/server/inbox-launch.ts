@@ -72,6 +72,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
+import { createPiLaunchHost } from "./inbox-launch-pi";
 import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
@@ -349,6 +350,7 @@ export function createInboxLaunch(options: {
   /** The agents the Inbox can start, one per line. */
   const ownHosts: LaunchHost[] = [
     claude,
+    createPiLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));

@@ -120,6 +120,7 @@ const OWN_FAKES = new Set([
   "inbox-launch-claude.spec.ts",
   "inbox-launch-permission.spec.ts",
   "inbox-launch-scratch.spec.ts",
+  "inbox-launch-pi.spec.ts",
 ]);
 
 describe("an e2e spec that builds its own PATH", () => {
