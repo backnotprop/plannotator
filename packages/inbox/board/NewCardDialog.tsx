@@ -209,14 +209,14 @@ export function NewCardDialog({
                   data-compose-to={target ? target.session : 'choose'}
                   aria-haspopup="listbox"
                   aria-expanded={picker}
-                  aria-label={target ? `To: ${hostLabel(target.host)} in ${target.project.name}. Change` : sessions ? 'To: choose an agent' : 'To: looking for live agents'}
+                  aria-label={target ? `To: ${hostLabel(target.host)}${target.label ? `, ${target.label},` : ''} in ${target.project.name}. Change` : sessions ? 'To: choose an agent' : 'To: looking for live agents'}
                   onClick={() => sessions && setPicker((open) => !open)}
                 >
                   {target ? (
                     <>
                       <HostMark host={target.host} />
                       <b>{hostLabel(target.host)}</b>
-                      <SessionDetail name={target.project.name} root={target.project.root} />
+                      <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
                     </>
                   ) : (
                     <span className="ib-cp-tod">{sessions ? 'Choose an agent' : 'Looking for live agents…'}</span>

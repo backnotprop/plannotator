@@ -2217,6 +2217,8 @@ export interface InboxComposeSession {
   last_thread: { id: string; subject: string | null; at: string } | null;
   /** Where it works, when that is another folder of a combined project than the group's `root`. */
   root?: string;
+  /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
+  label?: string;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
