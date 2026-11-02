@@ -630,8 +630,14 @@ for (const phone of [
       await expect(pane.getByRole('heading', { name: /Install page/ })).toBeVisible();
       // A phone's Mark read leads the ⋯ sheet (approval "inbox-thread-header"); the bar has no read button.
       await expect(pane.locator('.ib-phead [data-mark-read]')).toHaveCount(0);
-      await pane.locator('[data-thread-more]').click();
-      await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+      // Read is the body's read line (its Move back puts the thread back); the sheet has no pressed Read.
+      const readLine = pane.locator('[data-read-line]');
+      const markRead = async () => {
+        await pane.locator('[data-thread-more]').click();
+        await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+      };
+      const moveBack = () => readLine.locator('[data-move-back]').click();
+      await markRead();
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
       await expect(toast.getByRole('button', { name: 'Undo' })).toBeVisible();
@@ -674,36 +680,36 @@ for (const phone of [
       // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(readLine).toHaveCount(0);
 
       // With the reply box open the foot is much taller: the toast still sits above it.
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).click();
       await expect(pane.locator('.ib-pfoot textarea')).toBeVisible();
-      await read.click();
+      await markRead();
       await expect(toast).toBeVisible();
       const [tallFoot, tallToast] = await Promise.all([pane.locator('.ib-pfoot').boundingBox(), toast.boundingBox()]);
       expect(tallFoot!.height).toBeGreaterThan(120);
       expect(tallToast!.y + tallToast!.height).toBeLessThanOrEqual(tallFoot!.y);
       await shot(page, '14b-toast-reply-open');
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(readLine).toHaveCount(0);
 
       // Undo and the × are 8 px apart and their 44 px targets meet in the middle: a tap 2 px past the Undo pill
       // is still Undo (the thread moves back); one 6 px past it is the × (the toast goes, the thread stays read).
       const tapPast = async (px: number) => {
-        await read.click();
-        await expect(read).toHaveAttribute('aria-pressed', 'true');
+        await markRead();
+        await expect(readLine).toBeVisible();
         await expect(toast).toBeVisible();
         const undoBox = (await toast.locator('[data-toast-undo]').boundingBox())!;
         await page.touchscreen.tap(undoBox.x + undoBox.width + px, undoBox.y + undoBox.height / 2);
       };
       await tapPast(2);
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(readLine).toHaveCount(0);
       await tapPast(6);
       await expect(toast).toHaveCount(0);
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(readLine).toBeVisible();
+      await moveBack();
+      await expect(readLine).toHaveCount(0);
 
       // Swipe it away with a finger (touch pointer events): a short drag springs back, one past 40% of its
       // width dismisses it, and its Undo goes with it (the thread stays read).
@@ -729,8 +735,8 @@ for (const phone of [
           fire('pointerup', x0 + distance);
           return mid;
         }, distance);
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
+      await markRead();
+      await expect(readLine).toBeVisible();
       await expect(toast).toBeVisible();
       const short = await swipe(60);
       expect(short.translate).toBe('60px');
@@ -742,11 +748,11 @@ for (const phone of [
       await swipe(Math.round(width * 0.55));
       await expect(toast).toHaveCount(0);
       await expect(page.locator('[data-toast-ghost]')).toHaveCount(0);
-      await expect(read).toHaveAttribute('aria-pressed', 'true');
+      await expect(readLine).toBeVisible();
       // Back for the tests after this one.
       await page.emulateMedia({ reducedMotion: 'reduce' });
-      await read.click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await moveBack();
+      await expect(readLine).toHaveCount(0);
     });
 
     test('Settings fits the window', async () => {

@@ -250,7 +250,7 @@ for (const vp of VIEWPORTS) {
         expect(await overlapsToast(page, 'section.ib-pane .ib-pfoot')).toEqual([]);
       }
       await toast.getByRole('button', { name: /Undo/ }).click();
-      await expect(read).toHaveAttribute('aria-pressed', 'false');
+      await expect(pane(page).locator('[data-read-line]')).toHaveCount(0);
 
       if (!vp.phone) {
         // A row's Mark read while another thread is open names the row's thread: its 120 characters held to two lines.
@@ -399,7 +399,7 @@ test('a narrow desktop window (the phone layout, a mouse and keys) keeps Reply a
     await page.screenshot({ path: join(proofDir, '600-narrow-window.png') });
     // Z undoes, as the hint says.
     await page.keyboard.press('z');
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
+    await expect(pane(page).locator('[data-read-line]')).toHaveCount(0);
     await expect(toast).toHaveCount(0);
   } finally {
     await page.context().close();
