@@ -468,11 +468,11 @@ export function createInboxLaunch(options: {
       }
       case "open": {
         if (via === "tailnet") return localOnly();
-        if (options.platform !== "darwin") throw new InboxError("open_unavailable", "Open in Terminal is for macOS; copy the command instead.");
-        const command = launch.session_ref && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : claudeTrustCommand(launch.folder);
         const e = await environment();
+        // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too.
         const osascript = e.which("osascript");
-        if (!osascript) throw new InboxError("open_unavailable", "osascript is not on PATH; copy the command instead.");
+        if (!osascript) throw new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
+        const command = launch.session_ref && !launch.error ? claudeAttachCommand(launch.folder, launch.session_ref) : claudeTrustCommand(launch.folder);
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
