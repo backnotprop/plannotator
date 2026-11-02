@@ -19,6 +19,7 @@
  */
 import { useMemo } from 'react';
 import type { InboxAttachment, InboxProjectRepo } from '@plannotator/core/inbox-types';
+import { parseSettingsHash } from './settingsRoute';
 
 export type LinkableAttachment = Pick<InboxAttachment, 'id' | 'path' | 'named_path' | 'name' | 'kind'>;
 
@@ -131,6 +132,63 @@ export function attachmentDeepLink(threadId: string, attachmentId: string, versi
 
 /** The tooltip of a local link that names no attachment of the message. */
 export const NOT_ATTACHED_TITLE = 'Not attached to this message';
+
+/** Where this window is: its origin, and the addresses this Inbox advertises (rowMenu.ts `threadLink`, the tailnet's). */
+export interface InboxHere {
+  origin: string;
+  addresses: readonly (string | null | undefined)[];
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** The pages `routeOf` (App.tsx) reads ahead of a thread or a project: not a route a link opens in place. */
+const OTHER_PAGES = ['whats-new', 'tour', 'drafts', 'board'];
+
+function urlOf(href: string, base?: string): URL | null {
+  try {
+    return new URL(href, base);
+  } catch {
+    return null;
+  }
+}
+
+/** One Inbox: the same origin, or the same port under another spelling of this computer. */
+function sameInbox(a: URL, b: URL): boolean {
+  if (a.origin === b.origin) return true;
+  return a.protocol === b.protocol && a.port === b.port && LOOPBACK_HOSTS.has(a.hostname) && LOOPBACK_HOSTS.has(b.hostname);
+}
+
+/**
+ * Whether a hash names a thread, a project or Settings. A bare `#settings`
+ * is left out: in a document that is a link to its Settings heading, and the
+ * window's own `#settings/…` links work as they are.
+ */
+function namesRoute(hash: string, bare: boolean): boolean {
+  if (parseSettingsHash(hash)) return !bare;
+  const params = new URLSearchParams(hash);
+  if (OTHER_PAGES.some((page) => params.has(page))) return false;
+  return !!params.get('thread') || !!params.get('project');
+}
+
+/**
+ * The hash a link opens in this window, or null when it stays the browser's
+ * (a linked machine, the web, an address with no route in it). A bare hash
+ * (`#thread=…`) is this Inbox by being on this page; any other link must be
+ * this window's address, or one the Inbox advertises, at its root.
+ */
+export function inboxLinkHash(href: string, here: InboxHere): string | null {
+  const target = href.trim();
+  const bare = target.startsWith('#');
+  const link = urlOf(target, here.origin);
+  if (!link || !namesRoute(link.hash.slice(1), bare)) return null;
+  if (bare) return link.hash;
+  if (link.pathname !== '/') return null;
+  const addresses = [here.origin, ...here.addresses].flatMap((address) => {
+    const url = address ? urlOf(address) : null;
+    return url ? [url] : [];
+  });
+  return addresses.some((address) => sameInbox(link, address)) ? link.hash : null;
+}
 
 /**
  * Bare `#123` / `@user` refs (#1840): the project's `origin` as the Viewer's
