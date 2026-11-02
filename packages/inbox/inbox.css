@@ -1122,12 +1122,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Reduced motion: the same wait, then no fade. */
 @media (prefers-reduced-motion: reduce) { .ib-pwait-line { animation-duration: 1ms; } }
 /* The thread panel view's place with no thread open (threadPanel.ts): the pane a thread fills, so opening one moves nothing. */
-.ib-pempty { align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
-/* The button holds the box and the ring; the piece is a child so its mask cannot cut the ring. Painted in the line's color, so every theme tints it. */
-.ib-pempty-art { flex: none; width: 96px; height: 96px; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; cursor: pointer; }
-.ib-pempty-piece { display: block; width: 96px; height: 96px; background: currentColor; -webkit-mask: var(--ib-pempty-mask) center / 96px 96px no-repeat; mask: var(--ib-pempty-mask) center / 96px 96px no-repeat; }
-/* Forced colors turn `currentColor` backgrounds into Canvas, which would paint the piece on itself. */
-@media (forced-colors: active) { .ib-pempty-piece { forced-color-adjust: none; background: CanvasText; } }
+.ib-pempty { align-items: center; justify-content: center; padding: 24px; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 /* Answers held for an asleep machine, under the line, as the thread draws them. */
 .ib-pwait-held { width: 100%; max-width: 640px; margin-top: 20px; text-align: left; }
 /* A full-screen file covers the window: no card of its own. */
