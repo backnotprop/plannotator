@@ -4,7 +4,9 @@
  * The order is pure and lives here; AttachmentPane reads the pane's state
  * into it and acts on the rung it names.
  *
- *  1. `popover`   ⋯ or the file list (the peek, a phone's sheet of files) closes.
+ *  1. `popover`   ⋯, the file list (the peek, a phone's sheet of files) or the
+ *                 card's list of comments closes. That list takes a key from
+ *                 this window itself; the rung is for one from inside the page.
  *  2. `composer`  a comment being written closes: a comment popover (text,
  *                 HTML pinpoint, code lines) or a diagram's composer. Typed
  *                 words are never lost: the pane asks first (the question
@@ -36,7 +38,7 @@ export const ESCAPE_LADDER: readonly EscapeRung[] = ['popover', 'composer', 'fie
 export interface EscapeLadderState {
   /** The file is full screen. */
   full: boolean;
-  /** ⋯ or the file list is open. */
+  /** ⋯, the file list or the card's list of comments is open. */
   popoverOpen: boolean;
   /** A comment popover or a diagram composer of the file is open. */
   composerOpen: boolean;

@@ -215,6 +215,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [conflict, setConflict] = useState<DraftView | null>(null);
   const [busy, setBusy] = useState<null | 'send' | 'save' | 'delete'>(null);
 
+  // The draft question or a phone's To sheet takes the row, status and Cancel with it: no microphone stays open behind
+  // it. Choosing an agent is part of writing, so To ends a take and keeps what was said; a take already on its way isn't
+  // a recording, and its words still land.
+  const footCovered = question || (picker && phone);
+  useEffect(() => {
+    if (!footCovered) return;
+    if (!question) voice.session.stop();
+    if (voice.session.view().phase !== 'sending') voice.session.covered();
+  }, [footCovered, question, voice.session]);
+
   // The idempotency key of one Send: new whenever what would be sent changes.
   const sendKey = useRef(crypto.randomUUID());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
@@ -371,6 +381,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   };
 
   const keepDraft = async () => {
+    // As Send: the words of a running take are not in yet, and leaving would lose them.
+    if (voice.busy) return;
     const result = await save(conflict ? conflict.updated_at : (draft?.updated_at ?? null));
     if (result) props.onSaved(result);
     else setQuestion(false);
@@ -537,7 +549,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             <h2 id={titleId}>{title}</h2>
             {/* Only when nothing can be sent, and a saved draft that has not changed has nothing to save. */}
             {saveOffered && (!draft || dirty) && (
-              <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
+              <button type="button" className="ib-cp-barb ib-strong" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
                 Save draft
               </button>
             )}
@@ -705,7 +717,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           <button type="button" className="ib-btn" onClick={props.onClose} data-compose-discard="">
             Discard
           </button>
-          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-keep="" autoFocus>
+          <button type="button" className="ib-btn ib-pri" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-keep="" autoFocus>
             Keep draft
           </button>
         </div>
@@ -728,7 +740,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
               <span className="ib-sr"> attached</span>
             </span>
           )}
-          <VoiceFoot voice={voice} phone={phone} lead />
           {/* On a desktop the To line already says "Draft · saved". A phone's row drops the time, then the word; the check stays. */}
           {draft && !dirty && phone && (
             <span className="ib-cp-savedline" role="img" aria-label={`Saved as a draft ${whenTime(draft.updated_at)}`} data-compose-saved="">
@@ -750,11 +761,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
               {status}
             </span>
           )}
-          {saveOffered && !phone && (
-            <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null} data-compose-save="">
-              Save draft
-            </button>
-          )}
+          {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
+          <VoiceFoot voice={voice} phone={phone}>
+            {saveOffered && !phone && (
+              <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
+                Save draft
+              </button>
+            )}
+          </VoiceFoot>
           <button
             type="button"
             className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
