@@ -116,10 +116,10 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     expect(link.getAttribute('rel')).toContain('noopener');
     expect(link.getAttribute('aria-label')).toBe('YouTrack issue PROJ-123');
     const mark = li.querySelector('svg[data-ref-mark="youtrack"]');
-    expect(mark).not.toBeNull();
+    expect(mark !== null).toBe(true);
     expect(mark!.getAttribute('aria-hidden')).toBe('true');
     expect(mark!.querySelector('path')!.getAttribute('fill')).toBe('currentColor');
-    expect(li.querySelector('[data-icon="link"]')).toBeNull();
+    expect(li.querySelector('[data-icon="link"]') === null).toBe(true);
     expect(li.querySelector('.ib-crdp-rref')!.textContent).toBe('acme.youtrack.cloud');
   });
 
@@ -130,7 +130,7 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toContain('noopener');
     expect(li.getAttribute('data-ref-source')).toBe('web');
-    expect(li.querySelector('[data-ref-kind]')).toBeNull();
+    expect(li.querySelector('[data-ref-kind]') === null).toBe(true);
     // A long URL: cut in the middle, the full URL still the link.
     const long = row(host, LONG.url).link;
     expect(long.textContent!.length).toBeLessThanOrEqual(44);
@@ -143,15 +143,15 @@ describe('opened card links: YouTrack and any web link (user feedback #10)', () 
     const host = panel();
     const img = (url: string) => row(host, url).row.querySelector('img');
     const mine = img(MINE.url);
-    expect(mine).not.toBeNull();
+    expect(mine !== null).toBe(true);
     expect(mine!.getAttribute('src')).toBe(`/api/inbox/cards/crd_1/favicon?url=${encodeURIComponent(MINE.url)}`);
     expect(mine!.getAttribute('referrerpolicy')).toBe('no-referrer');
     expect(mine!.getAttribute('loading')).toBe('lazy');
     // While it loads, the link icon is what shows.
-    expect(row(host, MINE.url).row.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(row(host, MINE.url).row.querySelector('[data-icon="link"]') !== null).toBe(true);
     for (const url of [AGENTS.url, LOCAL.url]) {
-      expect(img(url)).toBeNull();
-      expect(row(host, url).row.querySelector('[data-icon="link"]')).not.toBeNull();
+      expect(img(url) === null).toBe(true);
+      expect(row(host, url).row.querySelector('[data-icon="link"]') !== null).toBe(true);
     }
     // Never a remote address: the window's CSP would block it.
     for (const each of host.querySelectorAll('img')) expect(each.getAttribute('src')).toStartWith('/api/inbox/');
@@ -171,24 +171,24 @@ describe('LinkFavicon', () => {
     const src = '/api/inbox/cards/crd_1/favicon?url=https%3A%2F%2Fbroken.example%2F';
     const host = mount(createElement(LinkFavicon, { src }));
     const box = host.querySelector('[data-ref-mark="web"]')!;
-    expect(box.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(box.querySelector('[data-icon="link"]') !== null).toBe(true);
     act(() => {
       box.querySelector('img')!.dispatchEvent(new Event('error'));
     });
-    expect(box.querySelector('img')).toBeNull();
-    expect(box.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(box.querySelector('img') === null).toBe(true);
+    expect(box.querySelector('[data-icon="link"]') !== null).toBe(true);
     act(() => root!.unmount());
     // Drawn again (the card reopened), the same address is not asked a second time.
     const again = mount(createElement(LinkFavicon, { src }));
-    expect(again.querySelector('img')).toBeNull();
-    expect(again.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(again.querySelector('img') === null).toBe(true);
+    expect(again.querySelector('[data-icon="link"]') !== null).toBe(true);
   });
 
   test.if(hasDom)('a blank 1×1 favicon falls back too; a real one replaces the link icon in the same box', () => {
     const blank = mount(createElement(LinkFavicon, { src: '/api/inbox/cards/crd_1/favicon?url=blank' }));
     load(blank.querySelector('img')!, 1, 1);
-    expect(blank.querySelector('img')).toBeNull();
-    expect(blank.querySelector('[data-icon="link"]')).not.toBeNull();
+    expect(blank.querySelector('img') === null).toBe(true);
+    expect(blank.querySelector('[data-icon="link"]') !== null).toBe(true);
     act(() => root!.unmount());
 
     const real = mount(createElement(LinkFavicon, { src: '/api/inbox/cards/crd_1/favicon?url=real' }));
@@ -196,7 +196,7 @@ describe('LinkFavicon', () => {
     expect(img.hasAttribute('data-shown')).toBe(false);
     load(img, 16, 16);
     expect(real.querySelector('img')!.hasAttribute('data-shown')).toBe(true);
-    expect(real.querySelector('[data-icon="link"]')).toBeNull();
+    expect(real.querySelector('[data-icon="link"]') === null).toBe(true);
     expect(real.querySelector('[data-ref-mark="web"]')!.getAttribute('data-favicon')).toBe('shown');
   });
 });
