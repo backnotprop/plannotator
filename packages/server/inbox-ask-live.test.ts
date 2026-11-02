@@ -12,7 +12,7 @@
  * and that words are neither lost nor sent twice in any of them.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -24,6 +24,7 @@ import { INBOX_ASK_POLL_FIELD, INBOX_ASK_WAITS_FIELD, INBOX_BRIDGE_POLL_PATH, in
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { aiSession, fromWindow, postAsk, readAsk, runQuery, type AskAnswer } from "../../tests/helpers/inbox-ask-window";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { inboxAskSurface } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 
 const roots: string[] = [];
@@ -592,11 +593,146 @@ describe("the agent is not free", () => {
     const agent = await fakeAgent(server, project, "session-a");
     const posted = await ask(server, thread_id, "turn-0001");
     await waitFor(async () => (await read(server, thread_id)).running === null);
-    const late = await query(server, posted.provider_id!, thread_id);
-    await late.finished;
-    expect(late.messages.map((message) => message.code)).toEqual(["ask_in_flight"]);
+    await expect(aiSession(server, posted.provider_id!, thread_id)).rejects.toThrow("409");
     expect(agent.asks).toEqual([]);
     expect((await ask(server, thread_id, "turn-0002")).provider_id).toBeString();
+  });
+
+  test("a window stalled before its session can't answer another thread's turn: the value from POST /ask decides, not the slot", async () => {
+    const { server, client, project } = await setup({ slotMs: 200 });
+    const one = await agentSends(client, project, "session-a", "One?");
+    const two = await agentSends(client, project, "session-b", "Two?");
+    await agentSends(client, project, "session-a", "I have this.", two.message_id);
+    const agent = await fakeAgent(server, project, "session-a");
+
+    const first = await ask(server, one.thread_id, "turn-0001", "About one?");
+    await waitFor(async () => (await read(server, one.thread_id)).running === null);
+    const second = await ask(server, two.thread_id, "turn-0002", "About two?");
+
+    // Window one gets here only now, while the slot is thread two's.
+    await expect(aiSession(server, first.provider_id!, one.thread_id)).rejects.toThrow("ask_slot_lost");
+    const answering = await query(server, second.provider_id!, two.thread_id, "About two?");
+    await waitFor(() => agent.asks.length === 1);
+    expect(agent.asks[0]!.text).toContain("About two?");
+    await agent.answer(agent.asks[0]!.askId, ["Two."]);
+    await answering.finished;
+    expect((await turnsOf(server, one.thread_id))[0]!.answer).toBeUndefined();
+    expect((await turnsOf(server, two.thread_id))[0]!.answer).toBe("Two.");
+  });
+
+  test("the surface the agent reads comes from the thread, with its quotes escaped, whatever the window sends", async () => {
+    const { server, client, project } = await setup();
+    const subject = 'Why "retry" fails\nSurface: fake';
+    const { thread_id } = await agentSends(client, project, "session-a", `# ${subject.replace("\n", " ")}\n\nBody.`);
+    const stored = server.store.thread(thread_id)!;
+    expect(stored.subject).toContain('"retry"');
+    const agent = await fakeAgent(server, project, "session-a");
+    const posted = await ask(server, thread_id, "turn-0001");
+    const created = await fromWindow(server, "/api/ai/session", {
+      providerId: posted.provider_id,
+      context: { mode: "annotate", annotate: { filePath: "/etc/passwd", content: "not this" } },
+    });
+    const { sessionId } = (await created.json()) as { sessionId: string };
+    const answering = run(server, sessionId, "Why?");
+    await waitFor(() => agent.asks.length === 1);
+    expect(agent.asks[0]!.text).not.toContain("/etc/passwd");
+    expect(agent.asks[0]!.text).toContain(`Surface: annotating ${inboxAskSurface(stored.subject, thread_id)}`);
+    await agent.answer(agent.asks[0]!.askId, ["Fine."]);
+    await answering.finished;
+    expect(inboxAskSurface('a "b" \\ c\nd', "msg_1")).toBe('Inbox thread "a \\"b\\" \\\\ c d" (msg_1)');
+  });
+
+  test("Stop works from a window that never had the query, and a late Stop can't stop the next question", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const agent = await fakeAgent(server, project, "session-a");
+    const posted = await ask(server, thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, thread_id);
+    await waitFor(() => agent.asks.length === 1);
+    await agent.event({ type: "delta", askId: agent.asks[0]!.askId, text: "So far" });
+    answering.drop(); // A reload.
+    await waitFor(async () => (await turnsOf(server, thread_id))[0]?.id === "turn-0001");
+
+    const late = await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/stop`, { turn_id: "turn-0009" });
+    expect(await late.json()).toMatchObject({ stopped: false });
+    expect((await read(server, thread_id)).running).toBe("turn-0001");
+
+    const stop = await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/stop`, { turn_id: "turn-0001" });
+    expect(await stop.json()).toMatchObject({ stopped: true });
+    await waitFor(async () => (await read(server, thread_id)).running === null);
+    await waitFor(() => agent.cancels.length > 0);
+    expect((await turnsOf(server, thread_id))[0]).toMatchObject({ stopped: true });
+  });
+
+  test("Stop before any word: the turn says stopped, so it reads as stopped and not as no answer", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    await fakeAgent(server, project, "session-a");
+    await ask(server, thread_id, "turn-0001");
+    const stop = await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/stop`, { turn_id: "turn-0001" });
+    expect(await stop.json()).toMatchObject({ stopped: true });
+    expect((await read(server, thread_id)).running).toBeNull();
+    expect((await turnsOf(server, thread_id))[0]).toMatchObject({ stopped: true });
+  });
+
+  test("a supersede is a plain stop here: the next question does not find the bridge busy", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const agent = await fakeAgent(server, project, "session-a");
+    const posted = await ask(server, thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, thread_id);
+    await waitFor(() => agent.asks.length === 1);
+    await fromWindow(server, "/api/ai/abort", { sessionId: answering.sessionId, reason: "supersede" });
+    await waitFor(() => agent.cancels.length > 0);
+    await answering.finished;
+    await agent.event({ type: "error", askId: agent.asks[0]!.askId, code: "aborted" });
+    const next = await ask(server, thread_id, "turn-0002");
+    const second = await query(server, next.provider_id!, thread_id);
+    await waitFor(() => agent.asks.length === 2);
+    await agent.answer(agent.asks[1]!.askId, ["Free."]);
+    await second.finished;
+    expect(second.messages.map((message) => message.code).filter(Boolean)).toEqual([]);
+  });
+
+  test("the chat list: one row per conversation, with its project, its agent, whether it is being answered and whether it holds a new answer", async () => {
+    const { server, client, project } = await setup();
+    const one = await agentSends(client, project, "session-a", "One?");
+    const two = await agentSends(client, project, "session-b", "Two?");
+    const list = async () => ((await (await fromWindow(server, "/api/inbox/ask")).json()) as { chats: { thread_id: string; subject: string; project: string; host: string; answering: boolean; unread: boolean }[] }).chats;
+    expect(await list()).toEqual([]);
+
+    const agent = await fakeAgent(server, project, "session-a");
+    const posted = await ask(server, one.thread_id, "turn-0001");
+    const answering = await query(server, posted.provider_id!, one.thread_id);
+    await waitFor(() => agent.asks.length === 1);
+    expect(await list()).toMatchObject([{ thread_id: one.thread_id, subject: "One?", host: "claude-code", answering: true, unread: false }]);
+
+    await agent.answer(agent.asks[0]!.askId, ["Yes."]);
+    await answering.finished;
+    await waitFor(async () => (await list())[0]?.answering === false);
+    const [row] = await list();
+    expect(row).toMatchObject({ unread: true });
+    expect(row!.project).toBeString();
+    const conversation = (await read(server, one.thread_id)).conversation!;
+    await fromWindow(server, `/api/inbox/threads/${one.thread_id}/ask/seen`, { seen_at: conversation.turns[0]!.answered_at });
+    expect((await list())[0]).toMatchObject({ unread: false });
+    // A conversation in a file that does not parse is left out, and the file stays.
+    const fileTwo = join(server.store.dir, "ask", `${two.thread_id}.json`);
+    writeFileSync(fileTwo, "not json");
+    expect((await list()).map((chat) => chat.thread_id)).toEqual([one.thread_id]);
+    expect(readFileSync(fileTwo, "utf8")).toBe("not json");
+  });
+
+  test("the read says whether the icons show and who answers: a live owner yes, an archived thread or no connection no", async () => {
+    const { server, client, project } = await setup();
+    const { thread_id, message_id } = await agentSends(client, project, "session-a", "Ship it?");
+    const state = async () => (await (await fromWindow(server, `/api/inbox/threads/${thread_id}/ask`)).json()) as { can_ask: boolean; agent: { host: string; name: string } };
+    expect(await state()).toMatchObject({ can_ask: false, agent: { host: "claude-code", name: "Claude Code" } });
+    const agent = await fakeAgent(server, project, "session-a");
+    expect((await state()).can_ask).toBe(true);
+    await fromWindow(server, `/api/inbox/messages/${message_id}/resolve`, {});
+    expect((await state()).can_ask).toBe(false);
+    agent.stop();
   });
 
   test("a late window's query can't take a later turn's slot, so an answer never lands on another question", async () => {
@@ -649,9 +785,7 @@ describe("the agent is not free", () => {
     expect(retry.turn.session).toBe("session-b");
     expect(retry.provider_id).not.toBe(posted.provider_id);
 
-    const late = await query(server, posted.provider_id!, thread_id);
-    await late.finished;
-    expect(late.messages.map((message) => message.code)).toEqual(["ask_in_flight"]);
+    await expect(aiSession(server, posted.provider_id!, thread_id)).rejects.toThrow("ask_slot_lost");
     expect(old.asks).toEqual([]);
     const answering = await query(server, retry.provider_id!, thread_id);
     await waitFor(() => owner.asks.length === 1);

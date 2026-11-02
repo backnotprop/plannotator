@@ -1854,6 +1854,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
+    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
+    ...(askOn && !guest ? { ask_ai: true } : {}),
   });
 
   /** Save the knob for the hosts named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
