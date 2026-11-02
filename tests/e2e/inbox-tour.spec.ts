@@ -583,7 +583,11 @@ test('"Make it yours": no ring on its title after a click; the keyboard picks an
   await page.keyboard.press('ArrowRight');
   await expect(page.locator('[data-tour-palette="catppuccin"] input')).toBeChecked();
   await expect(html).toHaveClass(/theme-catppuccin/);
+  // Under the colour sets, the "N more in Settings" link, then the text size.
   await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-settings-link]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-settings] input[name="ib-tset-size"][value="14"]')).toBeFocused();
   await page.keyboard.press('ArrowRight');
   await expect(html).toHaveCSS('--inbox-text-size', '15');
   await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('dark catppuccin catppuccin 15');
@@ -591,9 +595,7 @@ test('"Make it yours": no ring on its title after a click; the keyboard picks an
   await page.waitForTimeout(400);
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, 'make-it-yours-picked.png') });
-  // Then the Settings link, Skip and "Connect agents next", in that order.
-  await page.keyboard.press('Tab');
-  await expect(page.locator('[data-tour-settings-link]')).toBeFocused();
+  // Then Skip and "Connect agents next", in that order.
   await page.keyboard.press('Tab');
   await expect(page.locator('[data-tour-skip]')).toBeFocused();
   await page.keyboard.press('Enter');
@@ -825,16 +827,26 @@ test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and 
       const buttons = await page.locator('[data-tour-skip], [data-tour-next]').evaluateAll((els) =>
         els.map((el) => {
           const r = el.getBoundingClientRect();
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          const lines = new Set([...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0).map((q) => Math.round(q.top)));
-          return { text: el.textContent, top: Math.round(r.top), right: r.right, width: r.width, height: r.height, lines: lines.size, clipped: el.scrollWidth > el.clientWidth + 0.5 };
+          // The words' line boxes (text nodes only), and the drawn arrow beside them, not under them.
+          const rects: DOMRect[] = [];
+          for (const node of el.childNodes) {
+            if (node.nodeType !== Node.TEXT_NODE) continue;
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            rects.push(...[...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0));
+          }
+          const lines = new Set(rects.map((q) => Math.round(q.top))).size;
+          const icon = el.querySelector('svg')?.getBoundingClientRect();
+          const mid = icon ? icon.top + icon.height / 2 : null;
+          const besideWords = mid === null || rects.some((q) => mid >= q.top && mid <= q.bottom && icon!.left >= q.right - 0.5);
+          return { text: el.textContent, top: Math.round(r.top), right: r.right, width: r.width, height: r.height, lines, besideWords, clipped: el.scrollWidth > el.clientWidth + 0.5 };
         }),
       );
       expect(buttons.map((b) => b.text), `${width}`).toEqual(['Skip', 'Connect agents next']);
       expect(new Set(buttons.map((b) => b.top)).size, `${width}: one row`).toBe(1);
       for (const b of buttons) {
         expect(b.lines, `${width}: ${b.text} on one line`).toBe(1);
+        expect(b.besideWords, `${width}: ${b.text}'s arrow on the words' line`).toBe(true);
         expect(b.clipped, `${width}: ${b.text} not cut`).toBe(false);
         expect(b.height, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
         expect(b.width, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
