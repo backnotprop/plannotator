@@ -43,7 +43,7 @@ import {
 } from './api';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { hasMovingDelivery } from './rowDelivery';
 import {
@@ -111,7 +111,7 @@ import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
-import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
+import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import type { PinnedAction } from './components/PinnedRow';
@@ -693,6 +693,21 @@ function Inbox() {
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);
   shownRef.current = shown;
+  /**
+   * The threads whose opening look is on its way (sent, the list not read
+   * again since): their rows on screen and the header read them as looked at
+   * (held.ts `lookedRow`), so both offer Mark unread at once. A set: opening
+   * A then B before A's look lands keeps A read too.
+   */
+  const [looking, setLooking] = useState<ReadonlySet<string>>(() => new Set());
+  const stopLooking = useCallback((threadId: string) => {
+    setLooking((current) => {
+      if (!current.has(threadId)) return current;
+      const next = new Set(current);
+      next.delete(threadId);
+      return next;
+    });
+  }, []);
   const [thread, setThread] = useState<InboxThread | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
@@ -1758,9 +1773,17 @@ function Inbox() {
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
       // The look covers what this read showed, not a message that lands before the server takes it.
+      // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
+      setLooking((current) => (current.has(threadId) ? current : new Set(current).add(threadId)));
       const look = (async () => {
-        await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
-        if (!cancelled) await refreshList(false);
+        try {
+          await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
+          // Read the list even when another thread opened meanwhile: this row leaves `looking` next, and must
+          // then show the server's row (read), not the one from before the look (bold).
+          await refreshList(false);
+        } finally {
+          stopLooking(threadId);
+        }
       })();
       trackLook(threadId, look);
       await look;
@@ -1772,7 +1795,7 @@ function Inbox() {
       // Closed or changed: a failed re-read of this thread is not tried again.
       stopLiveThreadRetry();
     };
-  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry]);
+  }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry, stopLooking]);
   // The thread landed while focus was in its place: focus goes to its subject, never to the page.
   useLayoutEffect(() => {
     if (!focusThreadSubject.current || !thread || thread.thread_id !== route.thread) return;
@@ -2487,6 +2510,21 @@ function Inbox() {
   };
 
   /**
+   * The looks this tab sent on the thread and the server has not taken yet,
+   * waited for (never longer than MARK_READ_LOOK_WAIT_MS), so Mark read and
+   * Mark unread decide on the state the look gives the thread whenever they
+   * are pressed. Undefined: none was on its way.
+   */
+  const awaitLooks = async (threadId: string): Promise<Set<Promise<unknown>> | undefined> => {
+    const looks = looksInFlight.current.get(threadId);
+    if (!looks) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all(looks), new Promise<void>((done) => (timer = setTimeout(done, MARK_READ_LOOK_WAIT_MS)))]);
+    clearTimeout(timer);
+    return looks;
+  };
+
+  /**
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
    * reopens them as they were. An agent stopped or held up on it makes the
@@ -2496,12 +2534,7 @@ function Inbox() {
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
-    const looks = read ? looksInFlight.current.get(threadId) : undefined;
-    if (looks) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([Promise.all(looks), new Promise<void>((done) => (timer = setTimeout(done, MARK_READ_LOOK_WAIT_MS)))]);
-      clearTimeout(timer);
-    }
+    const looks = read ? await awaitLooks(threadId) : undefined;
     const before = rowOf(threadId);
     if (read && before) {
       const drawn = drawnSection(shownRef.current, threadId);
@@ -2591,19 +2624,50 @@ function Inbox() {
    * in New. Undo is a look capped at the message Mark unread took back, so it
    * puts back exactly what was there and leaves anything that arrived since
    * new. When the server wrote nothing (a stale row: the thread was new
-   * already) the row just shows what is true: no toast, nothing to undo.
+   * already, an agent having written there behind "N new") the row on screen
+   * takes the server's row in place, bold with Mark read: no toast, nothing to
+   * undo, and no dead click left behind.
    */
   const markUnread = async (threadId: string) => {
+    // The row and the header read as looked at from the moment the look goes out (`looking`), so Mark unread can come
+    // first: the server would find the message new still and write nothing, and the look landing after would read
+    // the thread again.
+    await awaitLooks(threadId);
     const before = rowOf(threadId);
     let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
     try {
       written = await inboxApi.markUnread(threadId);
+      // The look was slower than the wait (a slow network, a linked machine), so the server had nothing to make
+      // unread yet: once the look lands, try once more, or the click is lost and the look reads the thread anyway.
+      const slowLooks = written.wrote ? undefined : looksInFlight.current.get(threadId);
+      if (slowLooks) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([Promise.all(slowLooks), new Promise<void>((done) => (timer = setTimeout(done, MARK_UNREAD_RETRY_WAIT_MS)))]);
+        clearTimeout(timer);
+        const stalled = looksInFlight.current.has(threadId);
+        written = await inboxApi.markUnread(threadId);
+        if (!written.wrote && stalled) {
+          await afterWrite();
+          showToast({ lead: 'Not marked unread', detail: 'This thread’s read has not reached the Inbox yet. Try again in a moment.', icon: 'warn' });
+          return;
+        }
+      }
     } catch (cause) {
       showError(cause);
       return;
     }
+    if (!written.wrote) {
+      // Nothing to make unread: the thread is new already. The row and the header show that, not a look.
+      stopLooking(threadId);
+      await afterWrite();
+      // The held list may keep the old row (an agent wrote there: its news waits behind "N new"): show the server's
+      // row in its place, bold with Mark read, so the click is not offered again for nothing.
+      const now = rowOf(threadId) ?? written.thread;
+      setShown((current) => (current ? replaceHeldRow(current, now) : current));
+      say('Already unread.');
+      return;
+    }
     await afterWrite();
-    if (!written.wrote) return;
     if (routeRef.current.thread === threadId) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
@@ -3518,9 +3582,13 @@ function Inbox() {
   const pinRows = latest?.pins;
   const pinnedIds = useMemo(() => new Set((pinRows ?? []).map((pin) => pin.thread_id)), [pinRows]);
   // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
-  const openThreadRow = thread
+  const listedOpenRow = thread
     ? (latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null))
     : null;
+  // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
+  const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
+  /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
+  const listShown = useMemo(() => (shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
   // a snooze lives on the thread's home machine and goes there through the forward and the outbox, so a linked
   // machine's row offers it only when that machine keeps snoozes too (`rowSnoozes`).
@@ -4632,7 +4700,7 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={filterList(shown)}
+          sections={filterList(listShown ?? shown)}
           filtered={filterProject !== null}
           projectNames={projectNames}
           machines={machines}
