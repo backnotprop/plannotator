@@ -25,6 +25,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { inboxSnoozeChoices } from '@plannotator/core/inbox-snooze';
 import { fitPhoneHead, SUBJECT_FLOOR } from './headFit';
 import { PHONE_QUERY } from './phone';
 import { sized, tooltipOf, unhover } from './testing/tooltip';
@@ -318,7 +319,9 @@ test.skipIf(!hasDom)("a phone's Snooze swaps the sheet for ‹ Snooze until and 
   const menu = await openMore();
   await press(menu.querySelector('[data-thread-snooze-item]')!);
   await until(() => !!threadMenu()?.querySelector('[data-snooze-back]'), 'the times');
-  expect(menuItems(threadMenu()!)).toEqual(['Snooze until', 'Later today', 'Tomorrow', 'In 3 days', 'Next week', '—', 'Pick a time…'].map((label, i) => (i > 0 && i < 5 ? expect.stringContaining(label) : label)) as never);
+  // The times come from the menu's own rule: Later today is gone from 6 PM, and a choice on the time of one above it is dropped.
+  const labels = inboxSnoozeChoices(new Date()).map((choice) => choice.label);
+  expect(menuItems(threadMenu()!)).toEqual(['Snooze until', ...labels.map((label) => expect.stringContaining(label)), '—', 'Pick a time…'] as never);
   // The sheet keeps the thread's subject as its title.
   expect(threadMenu()!.querySelector('.ib-pm-title')?.textContent).toBe(SUBJECT);
   await press(threadMenu()!.querySelector('[data-snooze-back]')!);
@@ -335,7 +338,7 @@ test.skipIf(!hasDom)("desktop: the clock opens the times, titled Snooze until; a
   expect(snoozeMenu()!.querySelector('[data-snooze-title]')?.textContent).toBe('Snooze until');
   // Nothing to go back to: the times are this menu.
   expect(snoozeMenu()!.querySelector('[data-snooze-back]')).toBeNull();
-  expect([...snoozeMenu()!.querySelectorAll('[data-snooze-choice]')].map((el) => el.getAttribute('data-snooze-choice'))).toHaveLength(4);
+  expect([...snoozeMenu()!.querySelectorAll('[data-snooze-choice]')].map((el) => el.getAttribute('data-snooze-choice'))).toHaveLength(inboxSnoozeChoices(new Date()).length);
   await press(snoozeMenu()!.querySelector('[data-snooze-choice]')!);
   expect(snoozed).toHaveLength(1);
   expect(Number.isNaN(Date.parse(snoozed[0]!))).toBe(false);
