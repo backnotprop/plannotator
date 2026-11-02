@@ -4,7 +4,7 @@
  * Done / Can't do it / Undo go through `POST /api/inbox/messages/:id/actions/:key`
  * on a running Inbox (temp data dir, loopback, the Undo window shortened), and
  * the answer comes back as the person's reply: over the bridge with the exact
- * wake text, and through wait_for_reply. The window stages its marks
+ * wake text, and in read_thread. The window stages its marks
  * (`staged: true`, approval "inbox-action-items-in-reply"): they go only with
  * the person's Send (`actions` on the reply route). Failures to catch:
  * anything sent inside the Undo window, or a staged mark sent on a timer; a wake text that drifts; `done` accepted for another
@@ -124,7 +124,7 @@ describe("an agent sends an action item", () => {
 });
 
 describe("the person's Done", () => {
-  test("nothing goes inside the Undo window; then one reply, delivered over the bridge with the exact wake text and returned by wait_for_reply", async () => {
+  test("nothing goes inside the Undo window; then one reply, delivered over the bridge with the exact wake text and shown by read_thread", async () => {
     const { server, client, sent } = await setup();
     const key = sent.actions![0]!.key;
     const answer = await mark(server, sent.message_id, key, { outcome: "done", note: "Approved. I also fixed the preview env var while I was there." });
@@ -153,13 +153,13 @@ describe("the person's Done", () => {
     expect(command).toMatchObject({ type: "reply", reply_to: sent.message_id, body });
     expect(inboxWakeText(command)).toBe(`Plannotator Inbox: a reply (${command.id})\n${INBOX_WAKE_INSTRUCTION}\n\n${body}\n\n[thread ${command.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
 
-    const replied = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.thread_id, agent_session: SESSION, timeout_seconds: 1 } })) as {
+    const replied = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: SESSION } })) as {
       content: { text: string }[];
-      structuredContent: { status: string; reply: { body: string } };
+      structuredContent: { thread: { messages: { body: string }[] } };
     };
-    expect(replied.structuredContent).toMatchObject({ status: "replied", reply: { body } });
-    // The action item reads A1 in the facts line, not Q1, under a label that names action items, with its result.
-    expect(replied.content[0]!.text).toContain(`questions and action items of ${sent.message_id}: A1 ${key} done ·`);
+    expect(replied.structuredContent.thread.messages.at(-1)!.body).toBe(body);
+    // The action item reads A1, not Q1, with its result.
+    expect(replied.content[0]!.text).toContain(`A1 ${key} done`);
     expect((await actionOf(server, sent.thread_id, sent.message_id)).state).toBe("sent");
     expect((await rowOf(server, sent.thread_id)).section).not.toBe("stopped");
     // Sent: no Undo.
@@ -188,11 +188,11 @@ describe("the person's Done", () => {
     const [a1, a2] = two.actions!;
     expect((await mark(server, two.message_id, a1!.key, { outcome: "cant", note: "No security key here." })).status).toBe(200);
     await sleep(DELAY + 250);
-    const replied = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: two.thread_id, agent_session: SESSION, timeout_seconds: 1 } })) as {
+    const replied = (await client.callTool({ name: "read_thread", arguments: { thread_id: two.thread_id, agent_session: SESSION } })) as {
       content: { text: string }[];
-      structuredContent: { reply: { body: string } };
+      structuredContent: { thread: { messages: { body: string }[] } };
     };
-    expect(replied.structuredContent.reply.body).toBe(
+    expect(replied.structuredContent.thread.messages.at(-1)!.body).toBe(
       [
         "Couldn't do 1 action item.",
         "",
@@ -206,7 +206,7 @@ describe("the person's Done", () => {
         "Still open: A2. Approve the 2FA prompt for the npm org — the person will do it in the Inbox; don't ask again.",
       ].join("\n"),
     );
-    expect(replied.content[0]!.text).toContain(`questions and action items of ${two.message_id}: A1 ${a1!.key} can't do it; A2 ${a2!.key} open ·`);
+    expect(replied.content[0]!.text).toContain(`A1 ${a1!.key} can't do it: "No security key here."; A2 ${a2!.key} open`);
   });
 
   test("the route's guards: a stale tab, another site, a question's key, an unknown message", async () => {

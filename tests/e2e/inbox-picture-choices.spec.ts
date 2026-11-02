@@ -10,7 +10,7 @@
  * the Shows chip and Why; the choices are picture tiles whose pictures load
  * from the message image route; the zoom button opens the thread's viewer
  * without picking; a click on a picture picks it; Send; the agent's
- * wait_for_reply gets the plain label. Then an iPhone 15 in WebKit does the
+ * read_thread gets the plain label. Then an iPhone 15 in WebKit does the
  * same on a second question. Last, images the Inbox refuses to serve (a
  * hidden folder of the home folder: 403 image_hidden; a missing file: 404)
  * show as their alt text, never a broken-image icon, and a card whose
@@ -122,6 +122,13 @@ function registry(): { port: number } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
+/** What the person sent on the thread's newest answered question, as the agent reads it. */
+async function sentSelection(agent: SimAgent, threadId: string): Promise<string[]> {
+  const thread = await agent.readThread(threadId);
+  const questions = (thread.messages as { questions?: { state: string; answer?: { selected?: string[] } }[] }[]).flatMap((m) => m.questions ?? []);
+  return questions.findLast((q) => q.state === 'sent')!.answer!.selected!;
+}
+
 async function shot(page: Page, name: string, target?: ReturnType<Page['locator']>): Promise<void> {
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
@@ -209,14 +216,11 @@ test('desktop: tiles pick, zoom is separate, the contract lines show, and the ag
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 pick');
   await shot(page, 'desktop-picked', card);
 
-  const waiting = claude.waitForReply(threadId, 40);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await waiting;
-  const body = String((answer.reply as { body: string }).body);
+  const body = String((await claude.nextReply(threadId, 40)).body);
   expect(body).toContain('Answer: B · Total pinned with Pay (your recommendation)');
   expect(body).not.toContain('![');
-  const questions = answer.questions as { answer: { selected: string[] } }[];
-  expect(questions[0]!.answer.selected).toEqual(['B · Total pinned with Pay']);
+  expect(await sentSelection(claude, threadId)).toEqual(['B · Total pinned with Pay']);
   expect(world.errors).toEqual([]);
 });
 
@@ -262,12 +266,10 @@ test('iPhone (WebKit): two tiles across, a tap picks, Send, the agent gets the l
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(proofDir, `phone-picked-${scheme}.png`) });
     }
-    const waiting = claude.waitForReply(threadId, 40);
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).tap();
-    const answer = await waiting;
-    const questions = answer.questions as { answer: { selected: string[] } }[];
-    expect(questions[0]!.answer.selected).toEqual(['Tabs', 'Sidebar']);
-    expect(String((answer.reply as { body: string }).body)).not.toContain('![');
+    const answer = await claude.nextReply(threadId, 40);
+    expect(await sentSelection(claude, threadId)).toEqual(['Tabs', 'Sidebar']);
+    expect(String(answer.body)).not.toContain('![');
     await context.close();
   } finally {
     await own.close();

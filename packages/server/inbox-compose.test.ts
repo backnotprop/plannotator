@@ -228,7 +228,7 @@ describe("a thread the person starts", () => {
     expect(((await late.json()) as { code: string }).code).toBe("already_delivered");
   });
 
-  test("more words before the agent answered reach only its session: another agent's read_thread or wait_for_reply settles nothing", async () => {
+  test("more words before the agent answered reach only its session: another agent's read_thread settles nothing", async () => {
     const { server, client, billing } = await setup();
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
@@ -237,19 +237,10 @@ describe("a thread the person starts", () => {
     const follow = ((await more.json()) as { reply: InboxMessage }).reply;
     expect(follow.to).toMatchObject({ session: "ses-a" });
 
-    // An unrelated agent reads the thread and waits on it.
+    // An unrelated agent reads the thread.
     await client.callTool({ name: "read_thread", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x" } });
-    const waited = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-x", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string };
-    };
-    expect(waited.structuredContent.status).toBe("waiting");
 
     expect((await poll(server, "ses-a", "claude-code", billing)).map((c) => c.id)).toEqual([sent.message.id, follow.id]);
-    // Its own wait_for_reply gets the words (and settles them).
-    const mine = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sent.message.thread_id, agent_session: "ses-a", timeout_seconds: 1 } })) as {
-      structuredContent: { status: string; reply: { message_id: string } };
-    };
-    expect(mine.structuredContent).toMatchObject({ status: "replied" });
   });
 
   test("more words moved to a session that has seen nothing of the thread wake it with the line to read the thread first", async () => {

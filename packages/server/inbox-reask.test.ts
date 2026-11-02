@@ -1,7 +1,7 @@
 /**
  * Re-ask (approval "inbox-reask") through the server's real doors: the
  * window's route and its guards, the connection's poll (the wake's own
- * line), an MCP agent that receives the note with wait_for_reply and
+ * line), an MCP agent that reads the note with read_thread and
  * supersedes its old questions through send_message, and the phone's door.
  * Every test uses its own temp data dir.
  */
@@ -141,12 +141,12 @@ describe("Re-ask reaches the agent", () => {
     expect((await row(server, t.thread)).section).toBe("sent");
   });
 
-  test("an MCP agent reads the note with wait_for_reply, re-asks with Replaces: lines and drops one with supersedes", async () => {
+  test("an MCP agent reads the note with read_thread, re-asks with Replaces: lines and drops one with supersedes", async () => {
     const { server, client, project } = await setup();
     const t = await seed(client, project);
     const note = (await (await reask(server, t.second, { idempotency_key: "k1" })).json()) as { reply: { id: string; reask: string[] } };
-    const waited = await client.callTool({ name: "wait_for_reply", arguments: { thread_id: t.thread, agent_session: "ses-a", timeout_seconds: 1 } });
-    const text = JSON.stringify(waited.content);
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: t.thread, agent_session: "ses-a" } });
+    const text = JSON.stringify(read.content);
     expect(text).toContain("Please ask your 3 open questions in this thread again");
     expect(text).toContain(`reply_to ${note.reply.id}`);
     // The agent re-asks the first two and drops the third, as the note says.

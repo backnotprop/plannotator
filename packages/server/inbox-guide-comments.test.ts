@@ -1,7 +1,7 @@
 /**
  * Comments on a guided review's diffs in the Plannotator Inbox, proved through
  * the server's real doors: a running Inbox on loopback, the MCP SDK client
- * over streamable HTTP for the agent (submit_guide, wait_for_reply), and real
+ * over streamable HTTP for the agent (submit_guide, read_thread), and real
  * `fetch` for the window. Every test has its own temp data dir. The browser
  * side (the guide reader's line comments, the panel, the chip, Send) is
  * proved in tests/e2e/inbox-guides.spec.ts.
@@ -186,7 +186,7 @@ test("a resolved thread takes no new comment and no edit (409) until it is reope
   expect((await post(server, route, { annotation: comment({ text: "An edit." }) })).status).toBe(200);
 });
 
-test("Send carries the comments as the review app's export under the guided review's heading; the agent's wait_for_reply returns it, and a sent comment is closed", async () => {
+test("Send carries the comments as the review app's export under the guided review's heading; the agent's read_thread returns it, and a sent comment is closed", async () => {
   const { project, dataDir } = world();
   let server = await start(dataDir);
   let client = await agent(server);
@@ -226,7 +226,7 @@ test("Send carries the comments as the review app's export under the guided revi
   expect((await post(server, `/api/inbox/annotations/ann-guide-1/remove`, {})).status).toBe(409);
 
   // The agent that sent the guide reads the reply with the comments.
-  const answer = await call(client, "wait_for_reply", { thread_id: sent.thread_id, agent_session: "ses_guide", timeout_seconds: 5 });
+  const answer = await call(client, "read_thread", { thread_id: sent.thread_id, agent_session: "ses_guide", format: "full" });
   expect(JSON.stringify(answer)).toContain("Refresh before it expires, not after.");
   expect(JSON.stringify(answer)).toContain("src/auth.ts");
 });
