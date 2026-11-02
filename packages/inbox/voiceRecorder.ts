@@ -5,7 +5,17 @@
  * The worklet comes from the Inbox's own origin (`/api/inbox/voice/worklet.js`): the window's CSP refuses one from
  * `blob:` or `data:`, on purpose.
  */
+import { debugNote } from './debugLog';
 import { inboxUrl } from './inboxUrl';
+
+/** One step of opening, for the opt-in debug log: its name, the time since the press, the AudioContext's state. Never audio. */
+export type VoiceOpenNote = (fields: { step: 'context' | 'stream' | 'worklet' | 'ready'; ok: boolean; ms: number; audio?: string; error?: string }) => void;
+
+const noteOpen: VoiceOpenNote = (fields) => debugNote('voice_open', fields);
+const errorName = (cause: unknown): string => {
+  const name = (cause as { name?: unknown } | null)?.name;
+  return typeof name === 'string' ? name : 'Error';
+};
 
 export interface VoiceRecorder {
   rate: number;
@@ -40,23 +50,42 @@ export async function microphoneWillPrompt(): Promise<boolean> {
  * Open the microphone. Called inside the press: the AudioContext is made before the first await, or iOS leaves it
  * suspended. The browser's own echo, noise and gain handling stay on.
  */
-export function openVoiceRecorder(): Promise<VoiceRecorder> {
-  const context = new AudioContext();
+export function openVoiceRecorder(note: VoiceOpenNote = noteOpen): Promise<VoiceRecorder> {
+  const started = performance.now();
+  const ms = () => Math.max(0, Math.round(performance.now() - started));
+  let context: AudioContext;
+  try {
+    context = new AudioContext();
+  } catch (cause) {
+    note({ step: 'context', ok: false, ms: ms(), error: errorName(cause) });
+    throw cause;
+  }
+  note({ step: 'context', ok: true, ms: ms(), audio: context.state });
   void context.resume().catch(() => {});
-  return record(context).catch((cause: unknown) => {
+  return record(context, (step, ok, error) => note({ step, ok, ms: ms(), audio: context.state, error })).catch((cause: unknown) => {
     void context.close().catch(() => {});
     throw cause;
   });
 }
 
-async function record(context: AudioContext): Promise<VoiceRecorder> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+async function record(context: AudioContext, step: (name: 'stream' | 'worklet' | 'ready', ok: boolean, error?: string) => void): Promise<VoiceRecorder> {
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  } catch (cause) {
+    step('stream', false, errorName(cause));
+    throw cause;
+  }
+  step('stream', true);
   const release = () => {
     for (const track of stream.getTracks()) track.stop();
     void context.close().catch(() => {});
   };
+  let at: 'worklet' | 'ready' = 'worklet';
   try {
     await context.audioWorklet.addModule(inboxUrl('/voice/worklet.js'));
+    step('worklet', true);
+    at = 'ready';
     await context.resume();
     const source = context.createMediaStreamSource(stream);
     const analyser = context.createAnalyser();
@@ -73,6 +102,7 @@ async function record(context: AudioContext): Promise<VoiceRecorder> {
     // The tap writes nothing to its output, so this plays silence: it only keeps the node pulled in every browser.
     tap.connect(context.destination);
     const level = new Float32Array(analyser.fftSize);
+    step('ready', true);
     return {
       rate: context.sampleRate,
       db: () => {
@@ -97,6 +127,7 @@ async function record(context: AudioContext): Promise<VoiceRecorder> {
       onEnded: (listener) => stream.getAudioTracks()[0]?.addEventListener('ended', listener, { once: true }),
     };
   } catch (cause) {
+    step(at, false, errorName(cause));
     release();
     throw cause;
   }

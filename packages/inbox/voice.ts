@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { InboxVoiceSettings, InboxVoiceStatus } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
+import { debugNote } from './debugLog';
 import { useTouchScreen } from './phone';
 import { microphoneUsable, microphoneWillPrompt, openVoiceRecorder } from './voiceRecorder';
 import { createVoiceSession, type VoiceDeps, type VoiceSession, type VoiceView } from './voiceSession';
@@ -99,8 +100,11 @@ export function useVoiceBlock(shown: boolean): VoiceBlock | null {
   return shown ? voiceBlock(known?.state, microphoneUsable()) : null;
 }
 
-const browserDeps: VoiceDeps = {
-  open: openVoiceRecorder,
+/** Exported for the debug log's test: what a composer's dictation runs on in the browser. */
+export const browserDeps: VoiceDeps = {
+  open: () => openVoiceRecorder(),
+  // The opt-in debug log; a no-op while debug is off.
+  note: debugNote,
   prompts: microphoneWillPrompt,
   transcribe: (clip, signal) => inboxApi.transcribeVoice(clip, signal),
   notReady: (state) => {

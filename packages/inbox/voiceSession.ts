@@ -95,6 +95,8 @@ export interface VoiceDeps {
   now(): number;
   every(ms: number, run: () => void): () => void;
   after(ms: number, run: () => void): () => void;
+  /** The opt-in debug log (`debugNote`): phases, modes and inputs only, never audio or words. */
+  note?(ev: 'voice_press' | 'voice_phase', fields: Record<string, unknown>): void;
 }
 
 export interface VoiceSession extends VoicePressTarget {
@@ -158,8 +160,20 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
   let stopWatching: (() => void) | null = null;
   let washTimers: (() => void)[] = [];
 
+  const note = (ev: 'voice_press' | 'voice_phase', fields: Record<string, unknown>) => {
+    try {
+      deps.note?.(ev, fields);
+    } catch {
+      // The log never changes a take.
+    }
+  };
+
   const set = (next: Partial<VoiceView>) => {
+    const was = view;
     view = { ...view, ...next };
+    if (was.phase !== view.phase || was.mode !== view.mode || was.prompting !== view.prompting || was.slow !== view.slow || was.trouble !== view.trouble) {
+      note('voice_phase', { phase: view.phase, mode: view.mode ?? undefined, prompting: view.prompting, slow: view.slow, trouble: view.trouble ?? undefined });
+    }
     const wanted = view.phase !== 'idle' || view.wash !== null || view.trouble !== null;
     if (wanted && !stopWatching && field) stopWatching = field.watch(onCaret, onInput);
     if (!wanted && stopWatching) {
@@ -382,6 +396,9 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     set({ ...IDLE, trouble: known.trouble, engine: answer.engine ?? null, kept: known.keeps, clipMs: view.clipMs, said: 'Dictation failed' });
   };
 
+  /** Each input with the state it met, so a tap that did nothing shows in the log. */
+  const pressNote = (input: 'press' | 'release' | 'lost' | 'toggle') => note('voice_press', { input, phase: view.phase, mode: view.mode ?? undefined });
+
   const session: VoiceSession = {
     view: () => view,
     meter: () => meter,
@@ -405,6 +422,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       };
     },
     press: () => {
+      pressNote('press');
       if (view.phase === 'listening' && view.mode === 'tap') {
         secondPress = true;
         return;
@@ -421,6 +439,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       start(false);
     },
     release: () => {
+      pressNote('release');
       if (secondPress) {
         secondPress = false;
         stop();
@@ -434,12 +453,14 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       else stop();
     },
     lost: () => {
+      pressNote('lost');
       secondPress = false;
       if (!pressed) return;
       pressed = false;
       if (view.phase === 'listening' && view.mode !== 'tap') cancel();
     },
     toggle: () => {
+      pressNote('toggle');
       if (view.phase === 'listening') stop();
       else if (view.phase === 'idle') start(true);
     },
