@@ -99,13 +99,22 @@ function asPlainText(source: string): string {
  * host's own stylesheet (a full-page `fixed` link), and `data-*` or `aria-*`
  * would let it pose as the anchors hosts read off a text part.
  *
+ * That list is the default. A host that passes `richMarkdown` opts in to images,
+ * so to text that loads a remote address, plus what else `marked` writes for
+ * GFM: `del`, a task's checkbox, a link's `title`, a list's `start`. `class`,
+ * `style`, `data-*`, `aria-*` and handlers stay out of both.
+ *
  * Read when the sanitizer is built, not on load, so this file and the one that
  * holds the list can import each other.
  */
-function chatPurifyConfig() {
+function chatPurifyConfig(rich: boolean) {
+  const tags = [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS, 'wbr'];
+  const attributes = ['href', 'align'];
   return {
-    ALLOWED_TAGS: [...CHAT_SANITIZE_CONFIG.ALLOWED_TAGS, 'wbr'],
-    ALLOWED_ATTR: ['href', 'align'],
+    ALLOWED_TAGS: rich ? [...tags, 'del', 'img', 'input'] : tags,
+    ALLOWED_ATTR: rich
+      ? [...attributes, 'title', 'start', ...RAW_IMAGE_ATTRIBUTES, 'type', 'checked', 'disabled']
+      : attributes,
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
   };
@@ -119,37 +128,51 @@ const PROOF_INPUT =
   '<img src="x" onerror="alert(3)"><script>alert(4)</script>';
 const PROOF_FAILED = /javascript:|class=|data-c|onclick|onerror|<img|<script/i;
 
+/** The rich mode's proof: an image may stay, stripped, and nothing else changes.
+ * It also has to take out a text field and disable a checkbox. */
+const RICH_PROOF_INPUT = `${PROOF_INPUT}<img src="javascript:alert(5)" class="c" data-c="1"><input type="text"><input type="checkbox">`;
+const RICH_PROOF_FAILED = /javascript:|class=|data-c|onclick|onerror|<script|type="text"|<input(?![^>]*\bdisabled)/i;
+
 type Sanitize = (html: string) => string;
 
-function buildSanitizer(): Sanitize | null {
+function buildSanitizer(rich: boolean): Sanitize | null {
   if (typeof window === 'undefined') return null;
   // A private instance: a hook on the shared one would reach every other caller.
   const purifier = DOMPurify(window);
-  // Links open in a new tab: a host must not lose its page to a link in a
-  // message. Set after the allowlist has run, so only this code writes them.
   purifier.addHook('afterSanitizeAttributes', (node) => {
+    // No form control a message can write: a checkbox only, and never a live one.
+    if (node.nodeName === 'INPUT') {
+      if (node.getAttribute('type')?.toLowerCase() === 'checkbox') node.setAttribute('disabled', '');
+      else node.remove();
+      return;
+    }
+    // Links open in a new tab: a host must not lose its page to a link in a
+    // message. Set after the allowlist has run, so only this code writes them.
     if (node.nodeName !== 'A') return;
     node.setAttribute('target', '_blank');
     node.setAttribute('rel', 'noopener noreferrer');
   });
-  const config = chatPurifyConfig();
-  const proof = purifier.sanitize(PROOF_INPUT, config);
-  if (PROOF_FAILED.test(proof) || !proof.includes('kept')) return null;
+  const config = chatPurifyConfig(rich);
+  const proof = purifier.sanitize(rich ? RICH_PROOF_INPUT : PROOF_INPUT, config);
+  if ((rich ? RICH_PROOF_FAILED : PROOF_FAILED).test(proof) || !proof.includes('kept')) return null;
   return (html) => purifier.sanitize(html, config);
 }
 
-let provenSanitizer: Sanitize | null | undefined;
+/** One proof per mode: passing one says nothing about the other's allowlist. */
+const provenSanitizers = new Map<boolean, Sanitize | null>();
 
 /** The sanitizer, once it has shown it works here. Null: nothing may go out as HTML. */
-function sanitizerThatWorks(): Sanitize | null {
-  if (provenSanitizer === undefined) {
+function sanitizerThatWorks(rich: boolean): Sanitize | null {
+  let sanitizer = provenSanitizers.get(rich);
+  if (sanitizer === undefined) {
     try {
-      provenSanitizer = buildSanitizer();
+      sanitizer = buildSanitizer(rich);
     } catch {
-      provenSanitizer = null;
+      sanitizer = null;
     }
+    provenSanitizers.set(rich, sanitizer);
   }
-  return provenSanitizer;
+  return sanitizer;
 }
 
 /**
@@ -328,6 +351,72 @@ function rawHtmlAsText(token: Tokens.HTML | Tokens.Tag): string {
   return 'block' in token && token.block ? `<p>${text}</p>` : text;
 }
 
+/** CommonMark's open tag, which is what `marked` calls a tag. A tag spelled any
+ * other way is text to `marked`, so it never gets here. */
+const RAW_DRAWN_TAG = /<(img|input)((?:\s+[a-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>/gi;
+const RAW_ATTRIBUTE = /([a-z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gi;
+
+/** All an image in a message can say, in the order it is written. */
+const RAW_IMAGE_ATTRIBUTES = ['src', 'alt', 'title', 'width', 'height'];
+
+/** The first spelling of each attribute wins, as in an HTML parser. */
+function rawAttributes(text: string): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const [, name, double, single, bare] of text.matchAll(RAW_ATTRIBUTE)) {
+    const key = name.toLowerCase();
+    if (!found.has(key)) found.set(key, double ?? single ?? bare ?? '');
+  }
+  return found;
+}
+
+/** A value for double quotes. `&` stays: it is the author's own entity, and the
+ * sanitizer reads the value once the parser has decoded it. */
+function asAttributeValue(value: string): string {
+  return value.replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+function freshTag(tag: string, attributeText: string): string {
+  const attributes = rawAttributes(attributeText);
+  if (tag.toLowerCase() === 'input') {
+    if (attributes.get('type')?.toLowerCase() !== 'checkbox') return '';
+    return `<input type="checkbox" disabled${attributes.has('checked') ? ' checked' : ''}>`;
+  }
+  const kept = RAW_IMAGE_ATTRIBUTES.filter((name) => attributes.has(name)).map(
+    (name) => ` ${name}="${asAttributeValue(attributes.get(name)!)}"`,
+  );
+  return `<img${kept.join('')}>`;
+}
+
+function isComment(text: string): boolean {
+  const comment = text.trim();
+  return comment.startsWith('<!--') && comment.indexOf('-->') === comment.length - 3;
+}
+
+/**
+ * The rich mode's raw HTML. An image and a checkbox draw, each written fresh from
+ * the attributes it may have, so nothing of the source reaches the parser and a
+ * browser's reading of the tag cannot differ from this one. `marked`'s pattern
+ * accepted the tag first. Any other `<input>` goes, and a comment draws nothing.
+ * The rest stays the text it is, which is what keeps `MAX_HTML_CHARS` a limit on
+ * the nodes: void tags are one node each, and an unclosed `<b>` never gets here.
+ * A block that is only images and checkboxes gets no `<p>`, so it takes no
+ * paragraph's margin.
+ */
+function rawHtmlWithMedia(token: Tokens.HTML | Tokens.Tag): string {
+  checkBlock(token.text);
+  if (isComment(token.text)) return '';
+  const asText = (text: string): string => withBreaks(text) ?? escapeHtml(text);
+  let html = '';
+  let from = 0;
+  for (const match of token.text.matchAll(RAW_DRAWN_TAG)) {
+    html += asText(token.text.slice(from, match.index)) + freshTag(match[1], match[2]);
+    from = match.index + match[0].length;
+  }
+  html += asText(token.text.slice(from));
+  const hasWords = token.text.replace(RAW_DRAWN_TAG, '').trim() !== '';
+  return 'block' in token && token.block && hasWords ? `<p>${html}</p>` : html;
+}
+
 /**
  * Raw HTML never reaches an HTML parser here: it goes out escaped, by this
  * renderer and by the `text` one in `budgetExtension`. A browser rebuilds every
@@ -349,7 +438,22 @@ const agentMarkdown = new Marked(
   budgetExtension,
 );
 
-/** A person's HTML, every tag of it, stays the literal text they typed. */
+/** `agentMarkdown` for a host that passes `richMarkdown`. */
+const richAgentMarkdown = new Marked(
+  {
+    gfm: true,
+    breaks: false,
+    renderer: {
+      html(token) {
+        return LINE_BREAK_TAG.test(token.text) ? '<br>' : rawHtmlWithMedia(token);
+      },
+    },
+  },
+  budgetExtension,
+);
+
+/** A person's HTML, every tag of it, stays the literal text they typed, in both
+ * modes. Markdown image syntax is what the rich mode's sanitizer lets them draw. */
 const personMarkdown = new Marked(
   {
     gfm: true,
@@ -377,8 +481,13 @@ interface RenderedMessage {
 
 /** The one way out to the DOM. It never throws: a render that throws would take
  * the host's whole React root with it. */
-function renderMessage(markdown: Marked, source: string, streaming: boolean): RenderedMessage {
-  const sanitize = sanitizerThatWorks();
+function renderMessage(
+  markdown: Marked,
+  source: string,
+  streaming: boolean,
+  rich = false,
+): RenderedMessage {
+  const sanitize = sanitizerThatWorks(rich);
   if (sanitize === null || source.length > MAX_TEXT_CHARS) {
     return { html: asPlainText(source), spent: true };
   }
@@ -393,9 +502,20 @@ function renderMessage(markdown: Marked, source: string, streaming: boolean): Re
   }
 }
 
+function markdownFor(literalHtml: boolean, rich: boolean): Marked {
+  if (literalHtml) return personMarkdown;
+  return rich ? richAgentMarkdown : agentMarkdown;
+}
+
 /** An agent's text as sanitized HTML. */
 export function chatMarkdownHtml(markdown: string): string {
   return renderMessage(agentMarkdown, markdown, false).html;
+}
+
+/** {@link chatMarkdownHtml} or, with `literalHtml`, {@link personMarkdownHtml}, in
+ * the mode `richMarkdown` turns on. Images load remote addresses from this text. */
+export function richMarkdownHtml(markdown: string, { literalHtml = false } = {}): string {
+  return renderMessage(markdownFor(literalHtml, true), markdown, false, true).html;
 }
 
 /** A held text redraws once it has grown by an eighth. */
@@ -409,8 +529,11 @@ const HELD_TEXT_GROWTH = 1.125;
  * or on a block. Call with `streaming` false when the stream ends: that always renders in full,
  * so an honest message held for a moment comes back whole and formatted.
  */
-export function chatTextRenderer(literalHtml: boolean): (text: string, streaming: boolean) => string {
-  const markdown = literalHtml ? personMarkdown : agentMarkdown;
+export function chatTextRenderer(
+  literalHtml: boolean,
+  rich = false,
+): (text: string, streaming: boolean) => string {
+  const markdown = markdownFor(literalHtml, rich);
   let held: { readonly text: string; readonly html: string } | null = null;
   return (text, streaming) => {
     if (streaming && held !== null && text.startsWith(held.text)) {
@@ -418,7 +541,7 @@ export function chatTextRenderer(literalHtml: boolean): (text: string, streaming
       held = { text, html: asPlainText(text) };
       return held.html;
     }
-    const { html, spent } = renderMessage(markdown, text, streaming);
+    const { html, spent } = renderMessage(markdown, text, streaming, rich);
     held = streaming && spent ? { text, html } : null;
     return html;
   };
