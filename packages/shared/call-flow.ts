@@ -17,6 +17,7 @@ import runtimePackageJson from "./call-flow-runtime/package.json" with { type: "
 import runtimePackageLock from "./call-flow-runtime/package-lock.json" with { type: "json" };
 import { CALL_FLOW_PACK_LOCKS } from "./call-flow-pack-locks";
 import { withCallFlowInstallLock } from "./call-flow-install-lock";
+import { callFlowTypeScriptCommand, resolveCallFlowNpmCommand, type CallFlowInstallCommand } from "./call-flow-install-command";
 import {
   CALL_FLOW_CORE_LANGUAGE_ID,
   CALL_FLOW_LANGUAGES,
@@ -484,7 +485,7 @@ async function downloadVerifiedLockArtifacts(
 }
 
 async function seedVerifiedNpmCache(
-  npmPath: string,
+  npmPath: CallFlowInstallCommand,
   installDir: string,
   artifacts: readonly string[],
 ): Promise<string> {
@@ -848,6 +849,8 @@ async function installCallFlowRuntimeUnlocked(
   if (!nodePath || !npmPath) {
     return { ok: false, status: "failed", runtimeDir, message: `Call flow needs ${CALL_FLOW_NODE_REQUIREMENT} and npm on PATH.` };
   }
+  const npm = resolveCallFlowNpmCommand(nodePath, npmPath);
+  if (!npm.ok) return { ok: false, status: "failed", runtimeDir, message: npm.message };
   const nodeCheck = await checkCallFlowNode(nodePath);
   if (!nodeCheck.ok) return { ok: false, status: "failed", runtimeDir, message: nodeCheck.message };
 
@@ -865,7 +868,7 @@ async function installCallFlowRuntimeUnlocked(
     await downloadVerifiedCallDiffArchive(join(installDir, CALLDIFF_ARCHIVE_FILE), onStage);
 
     onStage("installing-deps");
-    const install = await runCommand(npmPath, [
+    const install = await runCommand(npm.command, [
       "ci", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", "--legacy-peer-deps",
     ], { cwd: installDir, timeoutMs: 240_000, maxOutputBytes: 4 * 1024 * 1024 });
     if (install.exitCode !== 0) {
@@ -874,7 +877,7 @@ async function installCallFlowRuntimeUnlocked(
 
     // npm ci intentionally ran with every lifecycle script disabled. Only the
     // integrity-locked parser packages are rebuilt, as one explicit step.
-    const rebuild = await runCommand(npmPath, [
+    const rebuild = await runCommand(npm.command, [
       "rebuild", "--no-audit", "--no-fund", "--legacy-peer-deps",
       "tree-sitter", ...CORE_GRAMMAR_PACKAGES,
     ], {
@@ -893,10 +896,7 @@ async function installCallFlowRuntimeUnlocked(
 
     onStage("building");
     const packageRoot = join(installDir, "node_modules", "calldiff");
-    const tscPath = process.platform === "win32"
-      ? join(installDir, "node_modules", ".bin", "tsc.cmd")
-      : join(installDir, "node_modules", ".bin", "tsc");
-    const build = await runCommand(tscPath, ["-p", "tsconfig.json"], {
+    const build = await runCommand(callFlowTypeScriptCommand(nodePath, installDir), ["-p", "tsconfig.json"], {
       cwd: packageRoot,
       timeoutMs: 120_000,
       maxOutputBytes: 4 * 1024 * 1024,
@@ -979,6 +979,8 @@ async function installCallFlowLanguagePackUnlocked(
   if (!nodePath || !npmPath) {
     return { ok: false, status: "failed", runtimeDir, message: `Call flow language support needs ${CALL_FLOW_NODE_REQUIREMENT} and npm on PATH.` };
   }
+  const npm = resolveCallFlowNpmCommand(nodePath, npmPath);
+  if (!npm.ok) return { ok: false, status: "failed", runtimeDir, message: npm.message };
   const runtime = await resolveCallFlowRuntime();
   if (!runtime.ok || !runtime.runtime.managed || runtime.runtime.runtimeDir !== runtimeDir) {
     return { ok: false, status: "failed", runtimeDir, message: runtime.ok
@@ -1004,9 +1006,9 @@ async function installCallFlowLanguagePackUnlocked(
       join(installDir, ".verified-artifacts"),
       onStage,
     );
-    const npmCacheDir = await seedVerifiedNpmCache(npmPath, installDir, verifiedArtifacts);
+    const npmCacheDir = await seedVerifiedNpmCache(npm.command, installDir, verifiedArtifacts);
     onStage("installing-deps");
-    const install = await runCommand(npmPath, [
+    const install = await runCommand(npm.command, [
       "ci", "--offline", "--cache", npmCacheDir,
       "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund", "--legacy-peer-deps",
     ], {
@@ -1027,7 +1029,7 @@ async function installCallFlowLanguagePackUnlocked(
     }
 
     onStage("building");
-    const rebuild = await runCommand(npmPath, [
+    const rebuild = await runCommand(npm.command, [
       "rebuild", "--no-audit", "--no-fund", "--legacy-peer-deps", language.packageName ?? "",
     ], {
       cwd: installDir,
@@ -1070,13 +1072,14 @@ async function installCallFlowLanguagePackUnlocked(
 }
 
 async function runCommand(
-  executable: string,
+  executable: string | CallFlowInstallCommand,
   args: readonly string[],
   options: { cwd?: string; input?: string; timeoutMs?: number; maxOutputBytes?: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {},
 ): Promise<CommandResult> {
   const maxOutputBytes = options.maxOutputBytes ?? MAX_PROCESS_OUTPUT_BYTES;
   return await new Promise((resolvePromise) => {
-    const child = spawn(executable, [...args], {
+    const command: CallFlowInstallCommand = typeof executable === "string" ? [executable] : executable;
+    const child = spawn(command[0], [...command.slice(1), ...args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
