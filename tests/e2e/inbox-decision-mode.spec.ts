@@ -197,7 +197,16 @@ test('off by default: nothing of decision mode until Settings â†’ Capabilities â
   await shot(page, 'settings-experimental');
   await sw.click();
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  expect(JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).experimental).toEqual({ decisionMode: true });
+  // The switch shows on before the save lands; poll the file (a read between the two sees no config yet).
+  await expect
+    .poll(() => {
+      try {
+        return JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')).experimental;
+      } catch {
+        return undefined;
+      }
+    })
+    .toEqual({ decisionMode: true });
 
   await page.goto(url);
   // On, and still no global way in: no sidebar row, no list-header button.

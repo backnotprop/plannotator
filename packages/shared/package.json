@@ -155,6 +155,7 @@
     "./inbox/video": "./inbox/video.ts",
     "./inbox/message-images": "./inbox/message-images.ts",
     "./inbox/inline-images": "./inbox/inline-images.ts",
+    "./inbox/attached-images": "./inbox/attached-images.ts",
     "./inbox/markups": "./inbox/markups.ts",
     "./inbox/uploads": "./inbox/uploads.ts",
     "./inbox/drafts": "./inbox/drafts.ts",

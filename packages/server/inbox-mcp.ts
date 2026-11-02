@@ -20,10 +20,11 @@ import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { INBOX_AGENT_RULES, INBOX_PEEK_META_KEY, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
+import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
@@ -59,16 +60,19 @@ export const INBOX_DEFAULT_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[numbe
 /**
  * Under Claude Code's 2,048-character cap on server instructions. Room for
  * INBOX_THREAD_RULE (in INBOX_AGENT_RULES) came from the attachments line's
- * examples, which the field's own description gives.
+ * examples, which the field's own description gives. Room for the pictures
+ * clause of INBOX_USE_RULE and the attachments line's "pictures go in the
+ * body" (2026-11-02) came from the first line's "without blocking your
+ * session" and the result line's "with your work".
  */
 export const INBOX_MCP_INSTRUCTIONS = [
-  "Plannotator Inbox: a local window where the person reads what you send and answers later, without blocking your session.",
+  "Plannotator Inbox: a local window where the person reads what you send and answers later; nothing blocks.",
   "",
   INBOX_AGENT_RULES,
   "",
   "- send_message posts markdown. Messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to (an id from the Inbox, never from memory) to answer a message. Question syntax: send_message's description.",
-  "- attachments: files to show the person; link one from the body (`[the mock](mock.html)`) to open it beside the thread.",
-  "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on with your work and read the thread later.",
+  "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
+  "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
   "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
   "- A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
   "",
@@ -159,12 +163,13 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   INBOX_STOP_EXAMPLE,
   "",
+  INBOX_PICTURES_RULE,
+  "",
   "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
   "- `Stakes: <one sentence>`: what the choice affects, in product terms. Give one whenever you write `Stopped:` or `Holds up:`.",
   "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
-  "- A picture choice, when the options are visual: `- [ ] Label — ![alt](path) consequence`. The picture picks it; the label is the answer you get back.",
   "",
   INBOX_CONTRACT_EXAMPLE,
   "",
@@ -641,7 +646,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -706,6 +711,15 @@ export async function sendAgentMessage(
   const superseded = store.supersededBy(message.id);
   const markedDone = result.done ?? [];
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
+  // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
+  // the result advises the next message; the send and what the person sees are unchanged.
+  // The message is already stored: advice that fails is left out, never an error for a sent message.
+  let attachedOnly: string[] = [];
+  try {
+    attachedOnly = attachedImagesNotInBody(input.body, input.attachments, here && isAbsolute(here) ? here : project.root, basePath ?? project.root);
+  } catch {
+    attachedOnly = [];
+  }
   // A question the agent is stopped or held up on, with no `Stakes:` line:
   // the result nudges (never refuses), so the person can decide in one look.
   const noStakes = (message.questions ?? [])
@@ -716,6 +730,7 @@ export async function sendAgentMessage(
   const recommendedInLabel = inboxQuestionKeysWithRecommendedMarker(message.body);
   return {
     imagesNotShown: notShown,
+    attachedImagesNotInBody: attachedOnly,
     noStakes: noStakes.length,
     recommendedInLabel: recommendedInLabel.length,
     superseded: superseded.length,
@@ -750,6 +765,8 @@ export async function sendAgentMessage(
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
+      /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
+      ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
       /** Keys of the Stopped / Holds up questions with no `Stakes:` line (a nudge; the message was sent). */
       ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
       /** Keys of the questions that marked their recommendation in a choice label, not a `Recommended:` line (a nudge; the message was sent). */
@@ -920,7 +937,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              "Files to show the person beside your message, e.g. [\"docs/plan.md\", \"/tmp/checkout.png\", \"src/retry.mjs\"]: absolute (anywhere you can read) or relative to project_path. For something visual, a screenshot or image usually reads fastest; attach the HTML or source too when they should open or click through it. Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show in the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.",
+              `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
             ),
         })
         .strict(),
@@ -945,6 +962,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // The hints after the sent line, in this order, each "" when it has nothing to say.
         const hints = [
           imagesNotShownText(sent.imagesNotShown),
+          attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
         ];

@@ -16,13 +16,14 @@ export interface VoiceLine {
   bars?: 'voice' | 'quiet';
 }
 
-/** Nothing to say while idle, or in the moment the mic opens with no prompt. */
+/** Nothing to say while idle, or in the first moment the mic opens with no prompt (the button shows it then). */
 export function voiceLine(view: VoiceView, meter: VoiceMeter, phone: boolean): VoiceLine | null {
   const { elapsedMs, voice, voiceSeen, quietMs } = meter;
   const time = voiceClock(elapsedMs);
   if (view.phase === 'opening') {
-    if (view.prompting) return { state: 'asking', word: 'Asking for the microphone', hint: phone ? '' : 'Answer the browser’s prompt' };
-    return view.slow ? { state: 'opening', word: 'Opening the microphone', hint: '' } : null;
+    // Short words: a phone's row has room for them whole beside Cancel and Send.
+    if (view.prompting) return { state: 'asking', word: 'Asking for the mic…', hint: phone ? '' : 'Answer the browser’s prompt' };
+    return view.slow ? { state: 'opening', word: 'Opening the mic…', hint: '' } : null;
   }
   if (view.phase === 'sending') return { state: 'sending', word: 'Transcribing', hint: phone ? '' : `${voiceClock(view.clipMs)} clip` };
   if (view.phase !== 'listening') return null;

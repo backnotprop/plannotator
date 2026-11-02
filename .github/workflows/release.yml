@@ -1325,12 +1325,11 @@ jobs:
 
   # PRs and manual dry-runs stop here. This job executes repository build code,
   # so it must never receive an npm token or permission to mint an OIDC token.
+  # It packs from the commit, not from the smoked binaries, so it runs beside
+  # the smokes; npm-publish (and attest) wait for them instead.
   npm-package:
     needs:
       - build
-      - smoke-binaries
-      - pi-extension-ai-runtime-windows
-      - install-script-smoke
     runs-on: ubuntu-24.04
     outputs:
       viewer-js: ${{ steps.viewer-pin.outputs.js }}
@@ -1366,12 +1365,15 @@ jobs:
           bun run build:viewer-pin
           jq -r '"js=\(.js)", "css=\(.css)"' apps/guides-show/dist/viewer/manifest.json >> "$GITHUB_OUTPUT"
 
+      # Review, then hook (the hook build copies review's HTML), then the
+      # packages that copy from them. `build:pi` would build review and hook
+      # a second time; the Pi package's own build only copies and vendors.
       - name: Build packages
         run: |
           bun run build:review
           bun run build:hook
           bun run build:opencode
-          bun run build:pi
+          bun run --cwd apps/pi-extension build
           bun run build:dsh
 
       - name: Create package artifact directory
@@ -1476,12 +1478,17 @@ jobs:
 
   # Publish only the tarballs produced by the credential-free job. Automatic
   # tag releases are unchanged; a manual publish must also target a v* tag.
+  # The smokes are named here (npm-package no longer waits for them), so
+  # nothing reaches npm before every smoke has passed, as with attest.
   npm-publish:
     needs:
       - release-eligibility
       - npm-package
       - release-security
       - viewer-pin-live
+      - smoke-binaries
+      - pi-extension-ai-runtime-windows
+      - install-script-smoke
     if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs['dry-run'] == 'false'))
     runs-on: ubuntu-24.04
     environment: npm-publish

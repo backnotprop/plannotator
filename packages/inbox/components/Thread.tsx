@@ -118,6 +118,7 @@ import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutC
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
+import { newUuid } from '../uuid';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
@@ -980,8 +981,10 @@ export interface ThreadPaneProps {
   onMarkRead?: (read: boolean) => void;
   /**
    * Mark unread (markRead.ts `canMarkUnread`): on a thread read by opening it
-   * (not marked read) the header's disabled Mark read becomes Mark unread.
-   * Absent: the button stays Mark read.
+   * (not marked read) the header's Mark read becomes Mark unread, the moment
+   * `row` reads it as looked at (its look on its way included) and while the
+   * list still holds its row in New (the owner, 2026-11-02). It closes the
+   * thread, which stays unread. Absent: the button stays Mark read.
    */
   onMarkUnread?: () => void;
   /**
@@ -1347,6 +1350,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
   const restoringRef = useRef(false);
+  /** The box as the focus effect last saw it, and the thread it was in: Reply takes focus only when that box closes. */
+  const boxSeen = useRef({ open: false, thread: thread.thread_id });
   /** The thread whose draft was put back already (once per visit). */
   const restoredFor = useRef<string | null>(null);
   /**
@@ -2804,6 +2809,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
   useEffect(() => {
+    const before = boxSeen.current;
+    boxSeen.current = { open: box.open, thread: thread.thread_id };
     if (restoringRef.current) {
       restoringRef.current = false;
       return;
@@ -2811,7 +2818,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (box.open) textRef.current?.focus();
     // The box closed (Escape, Cancel, a Send that did not go) and took focus with it: the foot's Reply (or Edit
     // draft) has it next. A Send that went gives focus to the reply in the thread instead (send, `focusSent`).
-    else if (!focusSent.current && !sendingFromComposer.current) {
+    // Only a box that was open in THIS thread: a thread opening (this effect's first run) or another thread
+    // closing the last one's box leaves focus where the person put it, so a click or a tap that opens a thread
+    // never rings Reply (the browser draws a ring for a script's focus that no key or click of the page's came
+    // before, as on the first thread after a load).
+    else if (before.open && before.thread === thread.thread_id && !focusSent.current && !sendingFromComposer.current) {
       const active = document.activeElement;
       if (!active || active === document.body || !active.isConnected) {
         requestAnimationFrame(() => {
@@ -2821,6 +2832,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         });
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the box opens or closes, never on a thread change alone
   }, [box.open]);
 
   // The update control's restart guard: an unsent reply is the one thing a
@@ -3482,7 +3494,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       );
       if (!sendKeys.current) sendKeys.current = new Map();
       // One key per session's reply, kept for a retry.
-      for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), crypto.randomUUID());
+      for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), newUuid());
       // A retry whose words, files or annotations changed, or that carries a pick or skip the last try did
       // not: each reply carrying them is a new one (a replay of the old key would drop the new answer). A pick
       // that went with the last try and is now sent only leaves the list, which keeps the key.
@@ -3499,7 +3511,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           },
         ]),
       );
-      for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, crypto.randomUUID());
+      for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, newUuid());
       sendContents.current = contents;
       // The words and the annotations ride the last reply, after its picks;
       // a comment on another session's message rides the reply to it. The
@@ -3514,7 +3526,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(target.message.id) ?? [];
         requests.push({ messageId: target.message.id, input: {
-          idempotency_key: sendKeys.current.get(replyKeyOf(target.message)) ?? crypto.randomUUID(),
+          idempotency_key: sendKeys.current.get(replyKeyOf(target.message)) ?? newUuid(),
           words: last ? words : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
@@ -3907,7 +3919,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       total = targets.reduce((n, t) => n + (t.kind === 'picks' ? t.replies.length : 1), 0);
       if (!reaskKeys.current) reaskKeys.current = new Map();
       const keyFor = (id: string) => {
-        const key = reaskKeys.current!.get(id) ?? crypto.randomUUID();
+        const key = reaskKeys.current!.get(id) ?? newUuid();
         reaskKeys.current!.set(id, key);
         return key;
       };
@@ -4204,12 +4216,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const readAt = row?.read_at ?? null;
   const markReadOffered = !resolved && row != null && onMarkRead !== undefined;
   const markReadEnabled = markReadOffered && canToggleRead(row!, drawn);
-  // Mark unread takes the place of the disabled Mark read ("Nothing here waits on you") on a thread the person
-  // read by opening it, an agent having written last (markRead.ts `canMarkUnread`). A thread marked read keeps
-  // the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
-  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!, drawn);
-  // The header's ⋯ More offers it where that button does not: a thread the list still holds in New, one marked read.
-  // A phone keeps it there too, since its header gives way when short of room (headFit.ts).
+  // Mark unread takes Mark read's place on a thread the person read by opening it, an agent having written last
+  // (markRead.ts `canMarkUnread`), as the row's hover action does: the list still holding the row in New
+  // (`seenHeldInNew`) and the look still on its way (App.tsx `looking`) included (the owner, 2026-11-02: "If I open
+  // a thread, and it transitions to [read] because there's no questions or anything, then I need the ability to
+  // mark unread"). Mark read stays only while the thread is unread or waits on the person. A thread marked read
+  // keeps the pressed Read button, which moves it back (design record "inbox-mark-read"). `E` stays Mark read's.
+  const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
+  // The header's ⋯ More offers it where that button does not: a thread marked read. A phone keeps it there too,
+  // since its header gives way when short of room (headFit.ts).
   const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 

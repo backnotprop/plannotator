@@ -55,6 +55,7 @@ import {
   type BoardMove,
   type BoardView,
 } from './model';
+import { newUuid } from '../uuid';
 
 export type { BoardMove } from './model';
 
@@ -235,7 +236,7 @@ export function BoardPage(props: BoardPageProps) {
   /** The message that sends the dialog's card, as first tried: a retry sends the same words, so never twice. */
   const sendTry = useRef<{ session: string; body: string } | null>(null);
   const resetDialog = () => {
-    dialogKey.current = crypto.randomUUID();
+    dialogKey.current = newUuid();
     dialogCard.current = null;
     madeTry.current = null;
     madeFrom.current = null;
@@ -264,7 +265,7 @@ export function BoardPage(props: BoardPageProps) {
 
   /** One try at making the dialog's card, with its own key and these words; replayable as it is. */
   const makeTry = (input: NewCardInput): { key: string; run: () => Promise<InboxCardWire> } => {
-    const key = crypto.randomUUID();
+    const key = newUuid();
     const column = 'backlog' as const;
     if (input.mode === 'send' && input.to && !input.to.project.id) {
       // A folder the Inbox has not seen has no project yet: the thread makes it, and the card is
@@ -342,7 +343,7 @@ export function BoardPage(props: BoardPageProps) {
    * for a card that does not exist; a retry reuses the card and the key.
    */
   const create = async (input: NewCardInput): Promise<string | null> => {
-    const key = dialogKey.current || crypto.randomUUID();
+    const key = dialogKey.current || newUuid();
     dialogKey.current = key;
     try {
       const card = await dialogCardFor(input);
@@ -368,7 +369,7 @@ export function BoardPage(props: BoardPageProps) {
   /** Send a card nobody was asked about: a new thread to the agent (its notes the message), then the card is sent. */
   const sendExisting = async (card: InboxCardWire, input: NewCardInput): Promise<string | null> => {
     if (!input.to) return 'Choose an agent to send it to.';
-    const key = dialogKey.current || crypto.randomUUID();
+    const key = dialogKey.current || newUuid();
     dialogKey.current = key;
     try {
       const next = await sendCardTo(card, input.to, key);
@@ -1259,8 +1260,8 @@ function OpenedCard({
    */
   // One key per action on this opened card, kept across retries (a lost answer replays the message
   // instead of sending a second one), and fresh after it went (a later Ask is a new message).
-  const startKey = useRef(crypto.randomUUID());
-  const askKey = useRef(crypto.randomUUID());
+  const startKey = useRef(newUuid());
+  const askKey = useRef(newUuid());
   const tellAgent = async (body: string, key: string, link: boolean): Promise<string> => {
     if (!askTarget) throw new Error('No agent is running in this project.');
     const idempotency = messageKey(key, askTarget.session, body);
@@ -1306,7 +1307,7 @@ function OpenedCard({
         try {
           const messageId = await tellAgent(startBody(card), startKey.current, false);
           onChanged((await inboxApi.editCard(card.id, { op: 'send', thread_id: messageId })).card);
-          startKey.current = crypto.randomUUID();
+          startKey.current = newUuid();
           return null;
         } catch (cause) {
           return cause instanceof Error ? cause.message : 'Nothing was sent.';
@@ -1316,7 +1317,7 @@ function OpenedCard({
         if (!askTarget) return 'No agent is running in this project.';
         try {
           await tellAgent(askWhereBody(card), askKey.current, true);
-          askKey.current = crypto.randomUUID();
+          askKey.current = newUuid();
           return null;
         } catch (cause) {
           return cause instanceof Error ? cause.message : 'Nothing was sent.';
