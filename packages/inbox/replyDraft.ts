@@ -222,9 +222,10 @@ export function useReplyDraft(threadId: string) {
           );
         } catch (cause) {
           if (cause instanceof InboxApiError && cause.code === 'validation_error') {
-            // Refused for its size (the Inbox's own limit): not saved, and the line above the box says so.
+            // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
+            // says so; any other refusal is not "too long", and the next pause in typing tries again.
             unsend();
-            if (generation === generationOf(target)) markTooLong(target, true);
+            if (generation === generationOf(target) && cause.message.startsWith('body:')) markTooLong(target, true);
             return;
           }
           if (cause instanceof InboxApiError && cause.code === 'upload_not_found' && files.length > 0) {

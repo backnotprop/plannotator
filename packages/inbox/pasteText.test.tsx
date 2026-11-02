@@ -8,12 +8,16 @@
  *  - Undo (its first 10 s) and Put back in box (after them) put the exact text
  *    back where it was pasted, after edits around it, with the caret after it;
  *    a selection the paste would have replaced goes, as a paste takes it;
+ *    focus on Undo stays on the control at the 10 s swap, whose name says
+ *    which paste; CRLF text goes back with `\n` line ends (the file keeps
+ *    its bytes); a named file pasted beside long text leaves the text a tile;
  *  - the browser's own undo (`historyUndo`) puts it back as the field's very
  *    next edit, and stands down after any other edit;
  *  - Send carries it as an ordinary upload with the paste's bytes;
  *  - New message: a tile alone is sent (words or files), Put back works there,
  *    and 32 KB pasted into the thread-name chip becomes a tile, not words;
- *  - a reply too long for a draft says so above the box, and is never posted.
+ *  - a reply too long for a draft says so above the box, and is never posted;
+ *    any other refusal of a save never says "too long".
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -30,6 +34,7 @@ import { NO_BROWSER } from '../../tests/helpers/no-browser';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const { ComposeFileTiles } = (hasDom ? await import('./compose/ComposeFiles') : {}) as typeof import('./compose/ComposeFiles');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 const PASTED = /^pasted-text-\d{4}-\d\d-\d\d-\d{4}(-\d+)?\.txt$/;
@@ -48,6 +53,10 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedXhr: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
+/** The reply draft's next save is refused with this (422), then saves go on as usual. */
+let refuseDraft: { code: string; error: string; field?: string } | null = null;
+/** The window's uploads, as they start (their paths). */
+let uploadsStarted: string[] = [];
 
 function loopback(path: string, method = 'GET', body?: string | Buffer, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -86,6 +95,7 @@ class LoopbackXhr {
   private aborted = false;
   open(_method: string, path: string) {
     this.path = path;
+    uploadsStarted.push(path);
   }
   setRequestHeader() {}
   abort() {
@@ -109,7 +119,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-text-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '7'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '10'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -145,6 +155,12 @@ beforeEach(() => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? String(init.body) : undefined;
     if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+    // A refusal the test asks for, once: the reply draft's next save.
+    if (refuseDraft && method === 'POST' && path.endsWith('/draft')) {
+      const refusal = refuseDraft;
+      refuseDraft = null;
+      return new Response(JSON.stringify(refusal), { status: 422, headers: { 'Content-Type': 'application/json' } });
+    }
     const answer = await loopback(path, method, body);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -156,6 +172,8 @@ beforeEach(() => {
   savedXhr = (globalThis as Record<string, unknown>).XMLHttpRequest;
   (globalThis as Record<string, unknown>).XMLHttpRequest = LoopbackXhr;
   posted = [];
+  refuseDraft = null;
+  uploadsStarted = [];
   window.location.hash = '';
 });
 
@@ -294,12 +312,103 @@ test.skipIf(!hasDom)('after 10 s the tile offers Put back in box; a selection th
   await wait(10_200);
   expect(tile().querySelector('[data-pasted-undo]')).toBeNull();
   expect(tile().querySelector('[data-pasted-line]')?.textContent).toContain('Put back in box');
+  const back = tile().querySelector('[data-pasted-put-back]') as HTMLButtonElement;
+  // Its name says which paste (two tiles never give two identical buttons), and holds the words it shows.
+  const name = tile().getAttribute('data-compose-file-name')!;
+  expect(back.getAttribute('aria-label')).toContain(name);
+  expect(back.getAttribute('aria-label')).toContain('Put back in box');
   // Typed after the paste's place: those words stay after it.
   type(text, `${BEFORE} ${AFTER} Thanks.`, `${BEFORE} ${AFTER} Thanks.`.length);
   act(() => (tile().querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
   expect(text.value).toBe(`${BEFORE} ${LOG}${AFTER} Thanks.`);
   expect(text.selectionStart).toBe(`${BEFORE} ${LOG}`.length);
 }, 40_000);
+
+test.skipIf(!hasDom)('a keyboard user on Undo as its 10 s pass: focus stays on the same control, which now reads Put back in box', async () => {
+  // The tile alone, pasted 9.8 s ago: the swap comes in 0.2 s.
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const file = { key: 'k1', name: 'pasted-text-2026-11-02-0109.txt', size: LOG.length, state: 'done' as const, progress: 1, upload: null, error: null, preview: null, pasted: { text: LOG, preview: 'The log', at: Date.now() - 9_800 } };
+  act(() => {
+    root = createRoot(host!);
+    root.render(<ComposeFileTiles files={[file]} onRemove={() => {}} onPutBack={() => {}} />);
+  });
+  const undo = host.querySelector('[data-pasted-undo]') as HTMLButtonElement;
+  act(() => undo.focus());
+  expect(document.activeElement).toBe(undo);
+  await until(() => host!.querySelector('[data-pasted-put-back]') !== null, 'the swap');
+  expect(host.querySelector('[data-pasted-undo]')).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector('[data-pasted-put-back]'));
+  expect(document.activeElement?.textContent).toBe('Put back in box');
+}, 30_000);
+
+test.skipIf(!hasDom)('CRLF line ends: Undo puts back the words as the box holds them (\\n), the caret after them; the file keeps the bytes', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  const crlf = LOG.replace(/\n/g, '\r\n');
+  type(text, BEFORE + AFTER, BEFORE.length);
+  expect(paste(text, crlf)).toBe(true);
+  await until(() => pastedTiles(el).length === 1, 'the tile');
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-undo]') as HTMLButtonElement).click());
+  expect(text.value).toBe(BEFORE + LOG + AFTER);
+  expect(text.selectionStart).toBe((BEFORE + LOG).length);
+
+  // Two pastes: each control names its own tile.
+  type(text, BEFORE + AFTER, BEFORE.length);
+  expect(paste(text, crlf)).toBe(true);
+  expect(paste(text, `${LOG}second\n`)).toBe(true);
+  await until(() => pastedTiles(el).length === 2, 'two tiles');
+  const labels = pastedTiles(el).map((tile) => tile.querySelector('[data-pasted-undo]')!.getAttribute('aria-label'));
+  expect(new Set(labels).size).toBe(2);
+  pastedTiles(el).forEach((tile, i) => expect(labels[i]).toContain(tile.getAttribute('data-compose-file-name')!));
+  // The second goes (×); the CRLF one is sent with its bytes as pasted.
+  act(() => (pastedTiles(el)[1]!.querySelector('.ib-cp-fx') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
+  act(() => button(el, 'Send').click());
+  await until(() => el.querySelector('.ib-rbox') === null, 'the Send');
+  expect(posted.find((p) => p.path.endsWith('/reply'))!.body).toMatchObject({ words: BEFORE + AFTER });
+  const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
+  expect(readFileSync(model.thread.messages.at(-1)!.attachments![0]!.path, 'utf8')).toBe(crlf);
+}, 30_000);
+
+test.skipIf(!hasDom)('a paste of a named file beside 32 KB of text: the file attaches and the text is a tile, not words', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, BEFORE + AFTER, BEFORE.length);
+  const file = new File(['%PDF-1.4 notes'], 'notes.pdf', { type: 'application/pdf' });
+  const items = [
+    { kind: 'string', type: 'text/plain', getAsFile: () => null },
+    { kind: 'file', type: file.type, getAsFile: () => file },
+  ];
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { files: [file], items, types: items.map((i) => i.type), getData: (t: string) => (t === 'text/plain' ? LOG : '') } });
+  act(() => {
+    text.dispatchEvent(event);
+  });
+  expect(event.defaultPrevented).toBe(true);
+  await until(() => el.querySelectorAll('[data-compose-file]').length === 2, 'the file and the tile');
+  expect(pastedTiles(el)).toHaveLength(1);
+  expect(el.querySelector('[data-compose-file-name="notes.pdf"]')).not.toBeNull();
+  expect(text.value).toBe(BEFORE + AFTER);
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-undo]') as HTMLButtonElement).click());
+  expect(text.value).toBe(BEFORE + LOG + AFTER);
+  expect(text.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+test.skipIf(!hasDom)('a reply draft refused for anything but its length never says "too long"', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  refuseDraft = { code: 'validation_error', error: 'base_body: a string.', field: 'base_body' };
+  type(text, 'Ship it.');
+  await until(() => refuseDraft === null, 'the refused save');
+  await wait(300);
+  const saidTooLong = el.querySelector('[data-draft-too-long]') !== null;
+  // The next pause in typing saves (and leaves no "too long" behind for the next test, whatever was said).
+  type(text, 'Ship it today.');
+  await until(() => posted.some((p) => p.path.endsWith('/draft') && p.body.body === 'Ship it today.'), 'the save');
+  expect(saidTooLong).toBe(false);
+  expect(el.querySelector('[data-draft-too-long]')).toBeNull();
+}, 30_000);
 
 test.skipIf(!hasDom)("the browser's undo puts the paste back as the very next edit, stands down after another edit, and Send carries the file", async () => {
   const el = await renderApp(`#thread=${world.waiting}`);

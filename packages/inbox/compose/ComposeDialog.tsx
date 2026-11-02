@@ -621,8 +621,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
           onOverflow={(text) => {
             setError(null);
             const lead = body.trim() ? (/[\r\n]/.test(text) ? '\n' : ' ') : '';
-            if (isLongPaste(text)) {
-              // 32 KB or more goes to the message as a pasted text tile, at its end, as the words would have.
+            if (takesFiles && isLongPaste(text)) {
+              // 32 KB or more goes to the message as a pasted text tile, at its end, as the words would have
+              // (never where the dialog takes no files, the tour: the words go to the message as before).
               files.takeText(text, body.trim() ? body.replace(/\s+$/, '').length : body.length, { field: textRef.current, lead });
               requestAnimationFrame(() => {
                 const area = textRef.current;

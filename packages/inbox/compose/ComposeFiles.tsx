@@ -7,7 +7,7 @@ import { FileName } from '../components/FileName';
 import { Tip } from '../components/Tip';
 import { isPhone } from '../phone';
 import { chosenFiles, clipboardHasText, pastedFiles, pastedImageOwnLink } from './paste';
-import { PASTED_UNDO_MS, isLongPaste, mapAnchor, pastedPreview, pastedTextName, putTextBack } from './pastedText';
+import { PASTED_UNDO_MS, boxText, isLongPaste, mapAnchor, pastedPreview, pastedTextName, putTextBack } from './pastedText';
 
 /**
  * Compose's files, and the reply box's: each one the person picked, dropped
@@ -202,12 +202,14 @@ export function useComposeFiles(
   /**
    * A long text attached as a pasted text tile, to go back at `at` in the box's
    * words (`lead` before it). `field`: the box it was pasted into, whose next
-   * edit may be the browser's undo of it.
+   * edit may be the browser's undo of it. The file keeps the pasted bytes; the
+   * words Put back returns have `\n` line ends (`boxText`), as the box holds
+   * them and a plain paste would give them.
    */
   const takeText = useCallback((words: string, at: number, options: { field?: HTMLTextAreaElement | null; lead?: string } = {}) => {
     const name = pastedTextName(new Date(), namesRef.current);
     namesRef.current = [...namesRef.current, name];
-    const key = addOne(new File([words], name, { type: 'text/plain' }), { text: words, preview: pastedPreview(words), at: Date.now() });
+    const key = addOne(new File([words], name, { type: 'text/plain' }), { text: boxText(words), preview: pastedPreview(words), at: Date.now() });
     anchors.current.set(key, { at, lead: options.lead ?? '' });
     undoArm.current = options.field ? { key, field: options.field } : null;
     onPasted.current?.([name]);
@@ -221,11 +223,14 @@ export function useComposeFiles(
       const phone = isPhone();
       const list = pastedFiles(data, namesRef.current, new Date(), { phone });
       if (list.length === 0) return pasteLongText(event);
-      // Text the person meant still pastes natively; on a phone an image's own link (paste.ts) is not inserted.
-      if (!clipboardHasText(data) || pastedImageOwnLink(data, phone)) event.preventDefault();
+      // Text the person meant still pastes natively, unless it is 32 KB or more: a tile beside the files then.
+      // On a phone an image's own link (paste.ts) is not inserted.
+      const ownLink = pastedImageOwnLink(data, phone);
       namesRef.current = [...namesRef.current, ...list.map((file) => file.name)];
       add(list);
       onPasted.current?.(list.map((file) => file.name));
+      const long = !ownLink && pasteLongText(event);
+      if (!long && (!clipboardHasText(data) || ownLink)) event.preventDefault();
       return true;
     },
     [add],
@@ -287,7 +292,8 @@ export function useComposeFiles(
       .then(({ text: words }) => {
         if (!filesRef.current.some((f) => f.key === key)) return;
         if (field?.readOnly) return;
-        insertBack(key, words, field);
+        // The upload holds the pasted bytes; the box takes them with `\n` line ends, as a fresh tile's.
+        insertBack(key, boxText(words), field);
       })
       .catch(() => patch(key, { error: 'That pasted text could not be read back. It is still attached.' }))
       .finally(() => reading.current.delete(key));
@@ -639,18 +645,21 @@ function PastedTextTile({ file, pasted, onRemove, onPutBack }: { file: ComposeFi
         ) : (
           <span className="ib-kd ib-pt-line" data-pasted-line="">
             <span className="ib-pt-size">{size}</span>
-            {fresh ? (
-              <span className="ib-pt-undo">
-                Pasted text ·{' '}
-                <button type="button" className="ib-pt-act" data-pasted-undo="" onClick={() => onPutBack(file.key)}>
-                  Undo
-                </button>
-              </span>
-            ) : (
-              <button type="button" className="ib-pt-act ib-pt-back" data-pasted-put-back="" onClick={() => onPutBack(file.key)}>
-                Put back in box
+            {/* One button in both states, only its words change: focus on Undo stays on it at the 10 s swap.
+                Its name says which paste, so two tiles never give two identical buttons. */}
+            <span className={fresh ? 'ib-pt-undo' : 'ib-pt-back'}>
+              {fresh ? 'Pasted text · ' : null}
+              <button
+                type="button"
+                className="ib-pt-act"
+                data-pasted-undo={fresh ? '' : undefined}
+                data-pasted-put-back={fresh ? undefined : ''}
+                aria-label={fresh ? `Undo paste of ${file.name}` : `Put back in box: ${file.name}`}
+                onClick={() => onPutBack(file.key)}
+              >
+                {fresh ? 'Undo' : 'Put back in box'}
               </button>
-            )}
+            </span>
           </span>
         )}
         {file.state === 'uploading' && (
@@ -659,7 +668,13 @@ function PastedTextTile({ file, pasted, onRemove, onPutBack }: { file: ComposeFi
           </span>
         )}
       </span>
-      <button type="button" className="ib-pt-side" data-pasted-side="" onClick={() => onPutBack(file.key)}>
+      <button
+        type="button"
+        className="ib-pt-side"
+        data-pasted-side=""
+        aria-label={fresh ? `Undo paste of ${file.name}` : `Put back: ${file.name}`}
+        onClick={() => onPutBack(file.key)}
+      >
         {fresh ? 'Undo' : 'Put back'}
       </button>
       <button type="button" className="ib-cp-fx" aria-label={file.state === 'uploading' ? `Stop uploading ${file.name}` : `Remove ${file.name}`} onClick={() => onRemove(file.key)}>

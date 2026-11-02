@@ -60,6 +60,15 @@ export function pastedPreview(text: string): string {
 }
 
 /**
+ * Pasted text as a text box holds it: `\r\n` and `\r` line ends become `\n`
+ * (a field's value never keeps a CR, so the words put back, the caret and the
+ * words sent all count what the box shows).
+ */
+export function boxText(text: string): string {
+  return text.replace(/\r\n?/g, '\n');
+}
+
+/**
  * Where an anchor at `at` in `before` is in `after`, for one edit between them
  * (typing, a deletion, a paste, a replace). The edit is the span between the
  * texts' common start and common end. An anchor before it stays; one after it

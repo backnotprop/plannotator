@@ -14,7 +14,8 @@
  *  - a paste still uploading stays when another window saves the draft;
  *  - one paste's upload gone: the draft keeps the others, and the restart
  *    guard asks for the paste no draft holds (and for one still uploading);
- *  - a Put back that cannot read the paste says so and keeps the tile.
+ *  - a Put back that cannot read the paste says so and keeps the tile;
+ *  - a CRLF paste read back goes into the box with `\n` line ends.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -117,7 +118,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '7'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '8'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -462,4 +463,20 @@ test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the til
   expect(pastedTiles(el)[0]!.querySelector('[role="alert"]')!.textContent).toContain('could not be read back');
   expect(pastedTiles(el).length).toBe(1);
   expect(replyText(el)!.value).toBe(BEFORE + AFTER);
+}, 30_000);
+
+test.skipIf(!hasDom)('a draft brought back with a CRLF paste: Put back gives the box `\\n` line ends, the caret right after them', async () => {
+  const upload = await uploadAsOther('pasted-text-crlf.txt', LOG.replace(/\n/g, '\r\n'));
+  const saved = await loopback(
+    `/api/inbox/threads/${world.waiting}/draft`,
+    'POST',
+    JSON.stringify({ serverSession: await serverSession(), body: BEFORE + AFTER, base: null, files: [{ upload_id: upload.upload_id, pasted: { at: BEFORE.length, preview: 'The CRLF log' } }] }),
+  );
+  expect(saved.status).toBe(200);
+  const el = await renderApp(`#thread=${world.waiting}`);
+  await until(() => replyBox(el) !== null && pastedTiles(el).length === 1, 'the box and its tile');
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el).length === 0, 'the words back');
+  expect(replyText(el)!.value).toBe(BEFORE + LOG + AFTER);
+  expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
 }, 30_000);
