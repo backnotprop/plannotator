@@ -532,7 +532,7 @@ describe('markHeldRowLooked', () => {
 
   test('a row in New for its news alone reads seen and not bold; every other row is untouched', () => {
     const list: InboxListSection[] = [{ id: 'new', label: 'New since you looked', threads: [news('a'), news('b')] }];
-    const looked = markHeldRowLooked(list, 'a');
+    const looked = markHeldRowLooked(list, new Set(['a']));
     expect(rowIn(looked, 'a')).toMatchObject({ unseen: 0, unread: false, section: 'new' });
     expect(rowIn(looked, 'b')).toMatchObject({ unseen: 1, unread: true });
   });
@@ -542,7 +542,7 @@ describe('markHeldRowLooked', () => {
       { id: 'waiting', label: 'Waiting on you', threads: [news('q', { section: 'waiting' })] },
       { id: 'new', label: 'New since you looked', threads: [news('p', { answered_not_sent: true })] },
     ];
-    expect(rowIn(markHeldRowLooked(list, 'q'), 'q')).toMatchObject({ unseen: 0, unread: true, section: 'waiting' });
-    expect(rowIn(markHeldRowLooked(list, 'p'), 'p')).toMatchObject({ unseen: 0, unread: true });
+    expect(rowIn(markHeldRowLooked(list, new Set(['q'])), 'q')).toMatchObject({ unseen: 0, unread: true, section: 'waiting' });
+    expect(rowIn(markHeldRowLooked(list, new Set(['p'])), 'p')).toMatchObject({ unseen: 0, unread: true });
   });
 });

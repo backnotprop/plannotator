@@ -20,6 +20,13 @@ export const MARK_READ_UNDO_MS = 7_000;
  */
 export const MARK_READ_LOOK_WAIT_MS = 1_500;
 
+/**
+ * Mark unread that the server answered with nothing to do while this tab's
+ * look was still on its way (slower than MARK_READ_LOOK_WAIT_MS): how long it
+ * waits for that look before it tries once more (App.tsx `markUnread`).
+ */
+export const MARK_UNREAD_RETRY_WAIT_MS = 10_000;
+
 /** Something here waits on the person: a question, or news they have not looked at. */
 export const waitsOnPerson = inboxRowWaitsOnPerson;
 

@@ -367,11 +367,25 @@ export function lookedRow(row: InboxListRow): InboxListRow {
   return { ...row, unseen: 0, unread: row.unread && !(row.section === 'new' && !row.answered_not_sent) };
 }
 
-/** The list on screen with `threadId`'s row read as looked at (`lookedRow`); the group it is drawn in never changes. */
-export function markHeldRowLooked(shown: readonly InboxListSection[], threadId: string): InboxListSection[] {
+/** The list on screen with the rows of `threadIds` read as looked at (`lookedRow`); the group each is drawn in never changes. */
+export function markHeldRowLooked(shown: readonly InboxListSection[], threadIds: ReadonlySet<string>): InboxListSection[] {
   return shown.map((section) => ({
     ...section,
-    threads: section.threads.map((row) => (row.thread_id === threadId ? lookedRow(row) : row)),
+    threads: section.threads.map((row) => (threadIds.has(row.thread_id) ? lookedRow(row) : row)),
+  }));
+}
+
+/**
+ * The server's row for a thread in place of the one on screen, in the group it
+ * is drawn in (the list holds still). For a write that found the row on screen
+ * out of date (Mark unread answering `wrote: false`: an agent wrote there and
+ * the held list kept the old row behind "N new"): the row shows what is true
+ * now, bold with Mark read, instead of offering the same dead click again.
+ */
+export function replaceHeldRow(shown: readonly InboxListSection[], next: InboxListRow): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => (row.thread_id === next.thread_id ? next : row)),
   }));
 }
 
