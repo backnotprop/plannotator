@@ -3817,7 +3817,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const permWaiting = permMessages.some((m) => (m.questions ?? []).some((q) => q.state === 'open' || q.state === 'picked'));
   const runInCard = permWaiting && runLine?.state === 'waiting_answer';
   const newestId = thread.messages.at(-1)?.id ?? null;
-  const permFollowUp = (m: InboxMessageWire): string | null => {
+  // The messages this thread opened with: a permission card among them never takes focus (PermissionCard `arrived`).
+  const openedWith = useRef<{ thread: string; ids: ReadonlySet<string> } | null>(null);
+  if (openedWith.current?.thread !== thread.thread_id) openedWith.current = { thread: thread.thread_id, ids: new Set(thread.messages.map((m) => m.id)) };
+  const openedIds = openedWith.current.ids;
+  const permFollowUp =(m: InboxMessageWire): string | null => {
     const by = m.questions?.[0]?.superseded_by?.message_id;
     return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
   };
@@ -4962,7 +4966,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={!openedIds.has(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );
