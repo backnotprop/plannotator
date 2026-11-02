@@ -1,8 +1,8 @@
 /**
  * A long paste is a file (approval "inbox-paste-attachment", option A), proved
  * in a real browser against the compiled binary. The binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (and temp
- * agent config dirs), an agent writes through `plannotator inbox mcp`
+ * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and HOME
+ * (and temp agent config dirs), an agent writes through `plannotator inbox mcp`
  * (scripts/inbox-sim.ts), a connection's long-poll keeps one session live for
  * compose, and Chromium pastes real ClipboardEvents carrying 40 KB of text.
  *
@@ -10,8 +10,11 @@
  *     (a real ⌘Z / Ctrl+Z) puts it back where it was, caret after it; after
  *     another edit it stands down; after 10 s hover shows Put back in box,
  *     which puts it back; Send carries the file, the agent reads its bytes.
- *  2. New message: a tile and no words sends; the thread shows the file.
- *  3. A phone (390 and 320 px): Undo, then Put back, beside the ×; the tile
+ *  2. CRLF text: ⌘Z puts back what the box shows (`\n` line ends), the caret
+ *     right after it, the next key in place, and Send carries those words;
+ *     focus on Undo stays on the control at the 10 s swap, named for its tile.
+ *  3. New message: a tile and no words sends; the thread shows the file.
+ *  4. A phone (390 and 320 px): Undo, then Put back, beside the ×; the tile
  *     fits; Put back works.
  *
  * Build the binary first (see inbox.spec.ts). PNGs land in
@@ -123,8 +126,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-paste-text-e2e-');
   const dataDir = join(root, 'data');
   for (const dir of ['claude', 'codex', 'opencode']) mkdirSync(join(root, dir), { recursive: true });
+  // The Inbox child's HOME is the scratch root too (as the other Inbox specs), so nothing it resolves from
+  // the home (~/.pi, ~/.config, ~/.gemini, ~/.cursor) is the real account's.
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -211,11 +217,13 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   // After 10 s the line is the size; hover swaps it in place for Put back in box, with no layout shift.
   await expect(tile).not.toHaveAttribute('data-pasted-fresh', /.*/, { timeout: 15_000 });
   await page.mouse.move(0, 0);
-  await expect(tile.locator('[data-pasted-put-back]')).toHaveCSS('opacity', '0');
+  // The control's cell (`.ib-pt-back`, around the one Undo / Put back button) is what fades in.
+  const backCell = tile.locator('.ib-pt-back:has([data-pasted-put-back])');
+  await expect(backCell).toHaveCSS('opacity', '0');
   const rest = await tile.boundingBox();
   await shot(page, '02-reply-tile');
   await tile.hover();
-  await expect(tile.locator('[data-pasted-put-back]')).toHaveCSS('opacity', '1');
+  await expect(backCell).toHaveCSS('opacity', '1');
   expect(await tile.boundingBox()).toEqual(rest);
   await shot(page, '03-reply-tile-hover');
   // What the browser's undo left of the typing stays after the paste's place: words typed at the
@@ -243,6 +251,55 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   const attached = answer.attachments as { name: string; path: string }[];
   expect(attached.map((a) => a.name)).toEqual([name]);
   expect(readFileSync(attached[0]!.path, 'utf8')).toBe(LOG);
+  expect(world.errors).toEqual([]);
+});
+
+test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, the next key in place, and Send carries those words; focus on Undo stays at the 10 s swap', async () => {
+  const { page, agent } = world;
+  const threadId = await newThread('Windows log');
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  const box = pane.locator('.ib-rbox');
+  const text = box.getByRole('textbox');
+  await expect(text).toBeFocused();
+  await text.pressSequentially(`${BEFORE}${AFTER}`);
+  await caretAt(page, BOX, BEFORE.length);
+  const crlf = LOG.replace(/\n/g, '\r\n');
+  expect(await pasteText(page, crlf)).toBe(true);
+  const tile = box.locator('[data-pasted-text]');
+  await expect(tile).toHaveCount(1);
+  await page.keyboard.press(UNDO_KEY);
+  await expect(tile).toHaveCount(0);
+  const now = await field(page, BOX);
+  expect(now.value).toBe(`${BEFORE}${LOG}${AFTER}`);
+  expect(now.caret).toBe(BEFORE.length + LOG.length);
+  // The next key lands right after the paste, and is in what Send carries.
+  await page.keyboard.type('Z');
+  expect((await field(page, BOX)).value).toBe(`${BEFORE}${LOG}Z${AFTER}`);
+  await pane.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(box).toHaveCount(0);
+  const answer = await agent.nextReply(threadId, 10);
+  expect(answer.body).toContain(`${LOG}Z${AFTER}`);
+  expect(answer.body).not.toContain('\r');
+
+  // A keyboard user on Undo as its 10 s pass: focus stays on that control, now Put back in box, named for its tile.
+  await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  await expect(text).toBeFocused();
+  expect(await pasteText(page, LOG)).toBe(true);
+  await expect(tile).toHaveCount(1);
+  const name = (await tile.getAttribute('data-compose-file-name'))!;
+  await tile.locator('[data-pasted-undo]').focus();
+  await expect(tile).not.toHaveAttribute('data-pasted-fresh', /.*/, { timeout: 15_000 });
+  await expect(tile.locator('[data-pasted-put-back]')).toBeFocused();
+  await expect(tile.getByRole('button', { name: `Put back in box: ${name}` })).toBeFocused();
+  await tile.locator('[data-pasted-put-back]').click();
+  await expect(tile).toHaveCount(0);
+  expect((await field(page, BOX)).value).toBe(LOG);
+  // Leave nothing behind for the next test: the box emptied and closed.
+  await text.fill('');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
   expect(world.errors).toEqual([]);
 });
 

@@ -483,6 +483,52 @@ test.skipIf(!hasDom)('Fast-forward through every step writes nothing and ends ea
   expect((await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '')).toBe(before);
 }, 120_000);
 
+test.skipIf(!hasDom)('step 9: 32 KB pasted into the thread name goes to the message as words, never an upload (the tour takes no files)', async () => {
+  const el = await openOnEntry();
+  const uploads: string[] = [];
+  const savedXhr = (globalThis as Record<string, unknown>).XMLHttpRequest;
+  (globalThis as Record<string, unknown>).XMLHttpRequest = class {
+    upload = { onprogress: null };
+    open(_method: string, path: string) {
+      uploads.push(path);
+    }
+    setRequestHeader() {}
+    send() {}
+    abort() {}
+  };
+  try {
+    await click($(el, '[data-tour-start]'));
+    await pastIntro(el);
+    for (const key of ['2', '3', '4', '5', '6', '7', '8-open', '9']) {
+      await click($(el, '[data-tour-forward]'));
+      await until(() => coachKey(el) === key, `step ${key} fast-forwarded`);
+    }
+    await click([...el.querySelectorAll<HTMLElement>('[data-open-compose]')][0]);
+    await until(() => document.querySelector('[data-compose] [data-compose-to]') !== null, 'compose');
+    await click(document.querySelector('[data-compose] [data-compose-to]'));
+    await until(() => document.querySelector('[data-compose] [role="option"]') !== null, 'the picker');
+    await click(document.querySelector('[data-compose] [role="option"]'));
+    await until(() => document.querySelector('[data-compose] input[aria-label="Thread name"]') !== null, 'the thread-name chip');
+    const area = document.querySelector('[data-compose] textarea') as HTMLTextAreaElement;
+    const words = area.value;
+    const log = Array.from({ length: 800 }, (_, i) => `2026-11-01T21:10:${String(i % 60).padStart(2, '0')}Z worker retry ${i} charged`).join('\n') + '\n';
+    const chip = document.querySelector('[data-compose] input[aria-label="Thread name"]') as HTMLInputElement;
+    const items = [{ kind: 'string', type: 'text/plain', getAsFile: () => null }];
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [], items, types: ['text/plain'], getData: (t: string) => (t === 'text/plain' ? log : '') } });
+    await act(async () => {
+      chip.dispatchEvent(event);
+    });
+    await until(() => area.value.length > words.length, 'the words in the message');
+    expect(area.value.endsWith(log)).toBe(true);
+    expect(document.querySelectorAll('[data-compose] [data-pasted-text]')).toHaveLength(0);
+    await wait(200);
+    expect(uploads).toEqual([]);
+  } finally {
+    (globalThis as Record<string, unknown>).XMLHttpRequest = savedXhr;
+  }
+}, 120_000);
+
 test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send answer a click; the card itself points again', async () => {
   const el = await openOnEntry();
   await walkTo(el, 3);
