@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { perfFirstList, perfThreadOpenDrawn, perfThreadOpenDropped, perfThreadOpenStart, perfUntilNextFrame } from './perfMarks';
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -1159,6 +1160,7 @@ function Inbox() {
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
+        perfFirstList(next.sections.reduce((n, section) => n + section.threads.length, 0));
       }
       // Linked machines: the merged list names every machine and its state (an older Inbox names none).
       if (next.machines) setMachineViews(next.machines);
@@ -1279,6 +1281,8 @@ function Inbox() {
 
   const refreshThread = useCallback(async (threadId: string) => {
     const mine = ++threadReadSeq.current;
+    // A thread being opened (not a re-read of the one on screen): pn:thread-open runs until its messages are drawn.
+    if (threadLoaded.current?.thread_id !== threadId) perfThreadOpenStart(threadId);
     // The machine this read goes to: null is this Inbox (or an owner not learned yet).
     const askedOwner = machineOf(threadId);
     try {
@@ -1292,12 +1296,14 @@ function Inbox() {
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadLoad(null);
+        perfThreadOpenDrawn(threadId, { messages: next.thread.messages.length });
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
       }
       return next.thread;
     } catch (cause) {
+      perfThreadOpenDropped(threadId);
       // Not on this Inbox, asked before the list named each id's machine: once the first list is read (it may have landed
       // while this read was out; else wait a few seconds at most), read the thread on the machine it names.
       let waiting: string | null = null;
@@ -1560,11 +1566,16 @@ function Inbox() {
     let cancelled = false;
     const readAfterRecord = () => {
       if (timer) clearTimeout(timer);
+      const heard = performance.now();
       timer = setTimeout(() => {
-        void refreshList(false).then((next) => next && flushNotifications(next));
+        const listRead = refreshList(false).then((next) => {
+          if (next) flushNotifications(next);
+        });
         void refreshDecisions();
         const open = routeRef.current.thread;
-        if (open) void refreshThread(open);
+        const threadRead = open ? refreshThread(open) : Promise.resolve(null);
+        // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
+        void Promise.allSettled([listRead, threadRead]).then(() => perfUntilNextFrame('record-refresh', heard));
         // Picks and comments are unsent work too: the Drafts row follows them.
         void refreshDrafts();
       }, 80);

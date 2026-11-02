@@ -123,7 +123,8 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
-import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { perfPhase, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -483,7 +484,7 @@ const JSON_HEADERS = {
 };
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+  return new Response(perfPhase("json", () => JSON.stringify(body)), { status, headers: JSON_HEADERS });
 }
 
 const ERROR_STATUS: Record<string, number> = {
@@ -760,7 +761,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   try {
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
+  const storeLoadStarted = performance.now();
   const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
+  // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
+  const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
@@ -1933,7 +1937,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
     prompts: promptsState(!guest),
-    store: store.diskUsage(),
+    store: perfPhase("disk", () => store.diskUsage()),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
     /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
@@ -2854,7 +2858,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url))));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -3340,7 +3344,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The window's thread: each message's seq (what is new since the last look) and a reply's sent annotations.
         // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
         if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
-        const thread = store.windowThread(threadMatch[1]!);
+        const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
@@ -3724,7 +3728,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  const served = debugLog ? debugLog.wrap(handle, debugOwner) : handle;
+  // Server-Timing on every API answer; with the debug log on, slow requests and a stalled loop are noted too (inbox-perf.ts).
+  // The store's load time and the loop watch start with the first request the log keeps, so the log stays empty until then.
+  let stopLoopWatch: (() => void) | null = null;
+  const isLoggedApiPath = (req: Request): boolean => {
+    try {
+      const pathname = new URL(req.url, "http://127.0.0.1").pathname;
+      return pathname.startsWith("/api/inbox/") && pathname !== INBOX_DEBUG_PATH;
+    } catch {
+      return false;
+    }
+  };
+  const logged = debugLog
+    ? debugLog.wrap(async (req: Request, via: RequestVia) => {
+        if (!stopLoopWatch && isLoggedApiPath(req)) {
+          stopLoopWatch = watchLoopStalls((ms) => debugLog.note("loop_stall", { ms }));
+          let messages = 0;
+          const threadIds = store.threadIds();
+          for (const id of threadIds) messages += store.threadMessageIds(id).length;
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
+        }
+        return handle(req, via);
+      }, debugOwner)
+    : handle;
+  const served = withServerTiming(logged, debugRoute, debugLog ? (slow) => debugLog.note("slow_req", { ...slow }) : null);
 
   /**
    * The window's own port: everything here came from this computer. A
@@ -3891,6 +3918,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    stopLoopWatch?.();
     clearInterval(dataCheck);
     windows.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);
