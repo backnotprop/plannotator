@@ -118,6 +118,7 @@ import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutC
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
+import { newUuid } from '../uuid';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/guards';
@@ -3482,7 +3483,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       );
       if (!sendKeys.current) sendKeys.current = new Map();
       // One key per session's reply, kept for a retry.
-      for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), crypto.randomUUID());
+      for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), newUuid());
       // A retry whose words, files or annotations changed, or that carries a pick or skip the last try did
       // not: each reply carrying them is a new one (a replay of the old key would drop the new answer). A pick
       // that went with the last try and is now sent only leaves the list, which keeps the key.
@@ -3499,7 +3500,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           },
         ]),
       );
-      for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, crypto.randomUUID());
+      for (const id of replyKeysToRenew(sendContents.current, contents)) sendKeys.current.set(id, newUuid());
       sendContents.current = contents;
       // The words and the annotations ride the last reply, after its picks;
       // a comment on another session's message rides the reply to it. The
@@ -3514,7 +3515,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(target.message.id) ?? [];
         requests.push({ messageId: target.message.id, input: {
-          idempotency_key: sendKeys.current.get(replyKeyOf(target.message)) ?? crypto.randomUUID(),
+          idempotency_key: sendKeys.current.get(replyKeyOf(target.message)) ?? newUuid(),
           words: last ? words : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
@@ -3907,7 +3908,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       total = targets.reduce((n, t) => n + (t.kind === 'picks' ? t.replies.length : 1), 0);
       if (!reaskKeys.current) reaskKeys.current = new Map();
       const keyFor = (id: string) => {
-        const key = reaskKeys.current!.get(id) ?? crypto.randomUUID();
+        const key = reaskKeys.current!.get(id) ?? newUuid();
         reaskKeys.current!.set(id, key);
         return key;
       };
