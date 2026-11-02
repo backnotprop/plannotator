@@ -583,7 +583,10 @@ test('"Make it yours": no ring on its title after a click; the keyboard picks an
   await page.keyboard.press('ArrowRight');
   await expect(html).toHaveCSS('--inbox-text-size', '15');
   await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('dark catppuccin catppuccin 15');
-  await shoot(page, 'make-it-yours-picked', ['light']);
+  // Dark was picked, so the shot is as it is on screen (shoot() switches the OS scheme, which an explicit Dark ignores).
+  await page.waitForTimeout(400);
+  mkdirSync(shots, { recursive: true });
+  await page.screenshot({ path: join(shots, 'make-it-yours-picked.png') });
   // Then the Settings link, Skip and Done, in that order.
   await page.keyboard.press('Tab');
   await expect(page.locator('[data-tour-settings-link]')).toBeFocused();

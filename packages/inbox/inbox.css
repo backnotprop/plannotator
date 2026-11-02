@@ -6235,7 +6235,7 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-tset-pal { padding: 10px 4px 8px; }
   .ib-tset-mode .ib-tset-cap { flex-direction: column; gap: 2px; }
   .ib-tset-pic, .ib-tset-split { height: 44px; }
-  .ib-tset .ib-seg-o { height: 40px; padding: 0 13px; }
+  .ib-tset .ib-seg-o { height: 44px; min-width: 44px; justify-content: center; padding: 0 12px; }
 }
 /* Full screen in the tour starts under the tour bar, so Exit tour and the file's own toolbar both stay in reach. */
 .pn-inbox[data-tour] .ib-view.ib-full { top: var(--ib-tour-bar-h, 45px); }
