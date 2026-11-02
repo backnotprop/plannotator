@@ -44,17 +44,25 @@ export function useWindowPinched(enabled: boolean): boolean {
   return useSyncExternalStore(enabled ? subscribe : never, read, () => false);
 }
 
-/** Ask the browser to take a zoomed window back to its full view (see the header for how far that goes). */
+/** A release whose two frames have not run yet: the tag as it was before the clamp. */
+let pending: { meta: HTMLMetaElement; original: string } | null = null;
+
+/**
+ * Ask the browser to take a zoomed window back to its full view (see the header for how far that goes). A second
+ * call while one is pending does nothing: it would read the clamped tag as the original and keep pinch off.
+ */
 export function releaseWindowZoom(): void {
-  if (!isWindowPinched()) return;
+  if (pending || !isWindowPinched()) return;
   const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
   if (!meta) return;
-  const content = meta.content;
-  meta.content = `${content}, maximum-scale=1`;
+  const release = { meta, original: meta.content };
+  pending = release;
+  meta.content = `${release.original}, maximum-scale=1`;
   // Two frames: the browser reads the clamp at its next layout, and pinch comes back right after.
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      meta.content = content;
+      release.meta.content = release.original;
+      pending = null;
     }),
   );
 }
