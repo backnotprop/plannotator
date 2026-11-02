@@ -213,6 +213,7 @@ export interface Block {
   directiveKind?: string; // For directive containers (e.g. ':::note' → 'note')
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
+  blankLinesBefore?: number; // Paragraph only, with parse option keepBlankLines: the blank lines (2+) typed before it
   sourceLineCount?: number; // Number of source lines consumed when it differs from content lines
   /**
    * Line offset a diagram comment's `sourceLine` is measured from, when it

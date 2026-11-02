@@ -2128,10 +2128,26 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
  * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
  * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
+ * Measured again before the next change (the generated entry plus Pi's fixed
+ * 45-byte wrapper, which the cost test matches exactly): main was 9,946
+ * bytes, not the 9,842 estimated above.
+ * Then pictures inline (the owner, 2026-11-02: INBOX_PICTURES_RULE on
+ * `body`, the attachments line, the lead's "with its pictures inline"):
+ * measured on Pi with the cost test, 10,096 bytes (+150; tokens scaled from
+ * 2,650 and stated high). With the Board on, measured the same way from a
+ * real Inbox's Board-on tool list: 11,514 bytes.
+ * Board columns v2 (the card action's `column` lists the v2 ids, the
+ * hand-over rule and the automatic ship; Done in place of Shipped, and the
+ * ship line saying the agent ships on a merge it sees, review of #2522):
+ * the Board-on entry before this change 11,318 → 11,260 bytes, 2,733 →
+ * 2,719 o200k tokens (-58 bytes, -14 tokens); Board off unchanged. On top of
+ * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
+ * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
+ * inbox-board-switch.test.ts).
  */
-const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
+const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,

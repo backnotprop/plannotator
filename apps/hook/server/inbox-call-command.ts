@@ -40,6 +40,7 @@ import { resolve } from "node:path";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
@@ -237,6 +238,9 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // A Tidy that waited for this session's next call rides this result: a script keeps only what it prints, so the agent reads it here.
   const tidy = result?.structuredContent?.tidy as (Pick<InboxTidyMark, "id"> & { text: string }) | undefined;
   if (tidy) err(`${inboxTidyMcpLine(tidy.id)}\n\n${tidy.text}\n`);
+  // Pictures sent only as attachments: the result text's advice, on stderr so stdout stays one JSON value.
+  const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
+  if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }

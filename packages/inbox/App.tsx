@@ -109,6 +109,8 @@ import { readListLook, writeListLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
+import { reloadOntoInbox, useStalePage } from './stalePage';
+import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
@@ -212,6 +214,8 @@ const REFRESH_SPIN_MS = 600;
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
 const RESTART_NOT_BACK_MS = 20_000;
+/** How long "Not reloaded: something you wrote is not saved yet" stays, with its Reload anyway (the stale page notice). */
+const STALE_NOT_SAVED_MS = 12_000;
 /** Settings → Agents re-reads the agents this often while open, so "Open sessions" follows the sessions as they restart. */
 const AGENTS_SESSIONS_REFRESH_MS = 5_000;
 /** A look seen on sight that the server did not take is sent again this many times, 1 s, 2 s, 4 s… apart. */
@@ -253,7 +257,7 @@ interface ThreadLoad {
 
 interface Route {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board';
-  /** The Board's list (`#board`, `#board=shipped`, `#board=icebox`; approval "inbox-board", step 2). */
+  /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
   card?: string | null;
@@ -327,7 +331,7 @@ function routeOf(fullHash: string): Route {
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     card: thread ? params.get('card') : null,
-    // The Board list the card was opened from (Shipped, Icebox): the way back goes there.
+    // The Board list the card was opened from (Done, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
     boardProject: thread && params.get('card') ? params.get('board-project') || null : null,
   };
@@ -901,6 +905,18 @@ function Inbox() {
   const [streamDead, setStreamDead] = useState(false);
   /** When the live region last said "Reconnecting…": said once, and not again for a while (a flaky network). */
   const reconnectSaidAt = useRef<number | null>(null);
+  /**
+   * This page is older than the Inbox it talks to (stalePage.ts): "Inbox updated to X · Reload". Checked with the
+   * first list, on every (re)connect, and when the tab comes back (useStalePage).
+   */
+  /** The person's own Restart is on its way (it reloads the page by itself): the notice neither shows nor reads. */
+  const stalePaused = useRef(false);
+  stalePaused.current = restarting;
+  const stalePage = useStalePage(undefined, () => stalePaused.current);
+  const stalePageRef = useRef(stalePage);
+  stalePageRef.current = stalePage;
+  /** Reload was pressed: what the person wrote is being saved first. */
+  const [staleReloading, setStaleReloading] = useState(false);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
@@ -1006,6 +1022,10 @@ function Inbox() {
       const from = routeRef.current;
       onHash();
       if (lastInput() === 'pointer') return;
+      // A traversal that lands on the screen already shown (the same address) replaced nothing, so it took no focus
+      // away: focus that is on the page stays there, as the person left it (opening a thread puts none in it). Moving
+      // it here put keyboard focus on the thread's row, whose card then opened over a list the thread was covering.
+      if (hashOf(from) === hashOf(readRoute())) return;
       const mark = inputMark();
       // Focus left in what the traversal replaced moves too (focusKept says what stays). Checked again a beat later: a thread drawn again may drop it then.
       // On a slow machine the page may not have drawn its targets by the first check: until one has taken focus,
@@ -1560,6 +1580,8 @@ function Inbox() {
       }
       // The threads already here: a later line of one of their roots is never a new thread (notify.ts).
       flushNotifications(first);
+      // A page older than this Inbox (a phone's tab restored from its cache): the stale page notice.
+      stalePageRef.current.saw(first.version);
       unsubscribe = subscribeInboxEvents(first.cursor, {
         onRecord: (event) => {
           // A Board card (approval "inbox-board"): only the Board reads it; it never changes the list or a thread.
@@ -1631,6 +1653,8 @@ function Inbox() {
         onConnect: () => {
           reportWindow();
           emitAskChange(null);
+          // The Inbox may have restarted onto a newer release while this page stayed open.
+          stalePageRef.current.recheck();
         },
         // The stream went silent past its window (or the tab came back after it): read what a record would make the
         // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
@@ -2389,6 +2413,11 @@ function Inbox() {
     say('Reconnecting…');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
   }, [streamDead]);
+  // The stale page notice is said as it shows (again after a dismiss), never as it goes.
+  useEffect(() => {
+    if (stalePage.inbox && !restarting) say(`Inbox updated to ${stalePage.inbox}. Reload the page to use it.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `say` is a fresh closure each render; only the change matters.
+  }, [stalePage.inbox]);
   /**
    * Click Inbox to refresh (the owner, 2026-10-20: "Just click inbox, it
    * refreshes"): clicking Inbox, or the project folder the list shows, or the
@@ -3320,6 +3349,33 @@ function Inbox() {
     notBack();
   };
 
+  /**
+   * The stale page notice's Reload: what the person wrote is saved first (stalePage.ts flushBeforeReload), then the
+   * page reloads onto the Inbox's own. Anything not saved stops it, said in a toast that offers to reload anyway.
+   */
+  const reloadOntoUpdate = async () => {
+    if (staleReloading) return;
+    setStaleReloading(true);
+    // Saves first (the running Inbox's session for them only, when it restarted under this page), then reloads.
+    if (await reloadOntoInbox()) return;
+    setStaleReloading(false);
+    showToast(
+      {
+        icon: 'warn',
+        lead: 'Not reloaded: something you wrote is not saved yet.',
+        wrap: true,
+        action: {
+          label: 'Reload anyway',
+          onPress: () => {
+            leaveOnPurpose();
+            window.location.reload();
+          },
+        },
+      },
+      STALE_NOT_SAVED_MS,
+    );
+  };
+
   /** Restart onto the binary on disk, after saying what an unsent reply would lose. */
   const requestRestart = () => {
     if (unsentReply()) setUpdateDialog('restart');
@@ -3634,7 +3690,12 @@ function Inbox() {
   );
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
-  const notice = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames).text : null;
+  const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  const notice = heldNews?.text ? { count: heldNews.count, project: heldNews.project ?? null } : null;
+  // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
+  const staleNotice = stalePage.inbox && !restarting ? (
+    <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />
+  ) : null;
   const firstRun = latest !== null && projects.length === 0;
 
   // The one-time list options dialog (listIntro.ts): after this load's sound and agent-note dialogs are decided, never
@@ -4713,6 +4774,7 @@ function Inbox() {
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
+          stale={staleNotice}
           ask={
             // The first real thread's inline ask (the tour's, once) stands in for this line while it shows.
             notifications.ask && linesFree && !(notifyAgain && notifyAgainThread !== null) ? (
@@ -4794,7 +4856,11 @@ function Inbox() {
         {route.thread && thread && thread.thread_id === route.thread && (
           <ThreadPane
             notice={
-              notifyAgain && notifyAgainThread === thread.thread_id ? (
+              <>
+                {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
+                    the stale page notice is here instead. */}
+                {(phone || stack.thread || full || fromCard || fileOpen) && staleNotice}
+                {notifyAgain && notifyAgainThread === thread.thread_id ? (
                 <div className="ib-tour-notify-again" data-tour-notify-again="">
                   <NotificationAsk
                     kind={notifications.ask!}
@@ -4808,7 +4874,8 @@ function Inbox() {
                     onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
                   />
                 </div>
-              ) : null
+                ) : null}
+              </>
             }
             thread={thread}
             sent={openThreadRow?.sent ?? null}

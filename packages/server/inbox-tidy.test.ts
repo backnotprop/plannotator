@@ -142,9 +142,9 @@ describe("Tidy: who gets asked", () => {
     await poll(server, "ses-b", docs);
     await poll(server, "ses-c", billing);
     const lane = await send(client, billing, "ses-a", { subject: "Ledger", thread: "Ledger", body: "Starting the ledger lane." });
-    await call(client, "card", { op: "create", title: "Ledger lane", column: "building", say: "lane started", thread_id: lane.thread_id, project_path: billing, agent_session: "ses-a", agent_host: "claude-code" });
+    await call(client, "card", { op: "create", title: "Ledger lane", column: "in_progress", say: "lane started", thread_id: lane.thread_id, project_path: billing, agent_session: "ses-a", agent_host: "claude-code" });
     await send(client, docs, "ses-b", { subject: "Docs", thread: "Docs", body: "Docs lane." });
-    await call(client, "card", { op: "create", title: "Docs lane", column: "designing", project_path: docs, agent_session: "ses-b", agent_host: "claude-code" });
+    await call(client, "card", { op: "create", title: "Docs lane", column: "in_progress", project_path: docs, agent_session: "ses-b", agent_host: "claude-code" });
     // A session with an old open question but no card: the list asks it, the Board does not.
     await send(client, billing, "ses-c", { subject: "Refunds", thread: "Refunds", body: block("Move refunds now?") });
     clock.behind = 0;

@@ -8,12 +8,22 @@
  * runs past its time limit filing a folder into a home project for good.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxProjectRoots, inboxGitRunner, resolveInboxProjectRoot, type InboxGitRunner } from "./inbox-project-root";
+import { INBOX_CHECKOUT_FOLDS_FILE } from "./inbox-checkout-folders";
+import { createInboxProjectRoots, inboxGitRunner, isHomeOrRootFolder, resolveCheckoutsFolder, resolveInboxProjectRoot, type InboxGitRunner } from "./inbox-project-root";
+
+async function until(check: () => boolean): Promise<void> {
+  const end = Date.now() + 5_000;
+  while (!check()) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
 
 const scratch: string[] = [];
 const servers: InboxServer[] = [];
@@ -86,6 +96,67 @@ describe("a home folder that is a git work tree (dotfiles)", () => {
     expect((await resolveInboxProjectRoot(w.dotWorktree, { home: w.home })).root).toBe(w.dotWorktree);
     // The same layout when that folder is not the home folder: a repository, which holds its subfolders.
     expect((await resolveInboxProjectRoot(w.notes, { home: null })).root).toBe(w.home);
+  });
+});
+
+// #2526 delta review, D5: the dotfiles check answers "not a work tree", so rule 4 (a folder holding one
+// repository's checkouts) and the startup fold still run for a person whose home folder is a git repository.
+describe("a dotfiles home and rule 4", () => {
+  function appnotesUnder(home: string) {
+    const folder = join(home, "workspaces", "appnotes");
+    mkdirSync(join(folder, "notes"), { recursive: true });
+    const main = repository(join(folder, "worktrees", "main"));
+    return { folder, main };
+  }
+
+  test("a checkouts folder under a dotfiles home files under its repository, and the startup fold folds its old project", async () => {
+    const w = dotfilesHome();
+    const { folder, main } = appnotesUnder(w.home);
+    expect((await resolveInboxProjectRoot(folder, { home: w.home })).root).toBe(main);
+    expect((await resolveInboxProjectRoot(join(folder, "notes"), { home: w.home })).root).toBe(main);
+    expect(await resolveCheckoutsFolder(folder, { home: w.home })).toEqual({ root: main, settled: true });
+    // An Inbox from before made a folder project for it beside the repository's: folded at startup.
+    const before = InboxStore.open(w.dataDir);
+    const repo = before.ensureProject({ name: "main", root: main });
+    const old = before.ensureProject({ name: "appnotes", root: folder });
+    const server = await startInboxServer({ dataDir: w.dataDir, phones: false, projectRootHome: w.home });
+    servers.push(server);
+    await until(() => server.store.canonicalProjectId(old.id) === repo.id);
+  });
+
+  test("a home folder with a worktrees folder is never a holder nor folded, with the home the server was given", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
+    scratch.push(root);
+    const home = join(root, "me");
+    const main = repository(join(home, "worktrees", "main"));
+    expect((await resolveInboxProjectRoot(home, { home })).root).toBe(home);
+    expect(await resolveCheckoutsFolder(home, { home })).toEqual({ root: null, settled: true });
+    const dataDir = join(root, "data");
+    const before = InboxStore.open(dataDir);
+    before.ensureProject({ name: "main", root: main });
+    const atHome = before.ensureProject({ name: "me", root: home });
+    const server = await startInboxServer({ dataDir, phones: false, projectRootHome: home });
+    servers.push(server);
+    // The pass ran (its marker) and left the home project alone.
+    await until(() => existsSync(join(server.store.dir, INBOX_CHECKOUT_FOLDS_FILE)));
+    expect(server.store.project(atHome.id)?.merged_into).toBeUndefined();
+  });
+
+  test("only the exact home and `/` stop a git toplevel: a repository at a home-shaped path stays a repository", () => {
+    expect(isHomeOrRootFolder("/home/dev", null, { shape: false })).toBe(false);
+    expect(isHomeOrRootFolder("/home/dev", "/home/dev", { shape: false })).toBe(true);
+    expect(isHomeOrRootFolder("/", null, { shape: false })).toBe(true);
+    // Rule 4's walk and Tidy's plain folders keep the shape.
+    expect(isHomeOrRootFolder("/home/dev", null)).toBe(true);
+  });
+
+  // A home-shaped folder that exists on every Mac, read only: git (a stand-in) names it as the toplevel.
+  test.if(existsSync("/Users/Shared"))("the resolver keeps a repository whose toplevel only looks like a home folder", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
+    scratch.push(root);
+    const shaped = realpathSync("/Users/Shared");
+    const git: InboxGitRunner = async () => ({ exitCode: 0, stdout: `${shaped}\n${shaped}/.git\n${shaped}/.git\n` });
+    expect((await resolveInboxProjectRoot(root, { git, home: null })).root).toBe(shaped);
   });
 });
 
