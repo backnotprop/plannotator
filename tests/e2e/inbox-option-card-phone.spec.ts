@@ -26,7 +26,7 @@
  * PNGs land in PLANNOTATOR_OPTION_CARD_SHOTS (default .local/proof/option-card-phone).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -235,17 +235,78 @@ async function doubleTap(page: Page, at: Point) {
   await settled(page);
 }
 
+interface TapSeen {
+  /** The tap's click reached the button. */
+  click: boolean;
+  /** Where the tap's click went instead, if anywhere. */
+  elsewhere: string | null;
+  /** A touch or pointer event of the tap that the page cancelled. */
+  cancelled: string | null;
+  /** Every touch, pointer and click event the page got, for the log. */
+  events: string[];
+}
+
+/**
+ * A real tap on a button, proved by the click it makes. On a busy CI runner Chromium now and then makes no click from a
+ * tap that reached the button (Playwright saw the touch land on it, and Fit and the tools' buttons act on any click they
+ * get), so the state the tap should bring never came. That tap is sent again. What a person would feel is never sent
+ * again: the page cancelling the tap's touch, or its click landing on something else, fails here. Counted in frames, as
+ * `atRest` is: a click comes in the frames after the touch ends.
+ */
+async function tapButton(button: Locator) {
+  for (let attempt = 1; ; attempt++) {
+    await button.evaluate((el) => {
+      const w = window as unknown as { __tap?: { target: Element; seen: TapSeen }; __tapOn?: boolean };
+      w.__tap = { target: el, seen: { click: false, elsewhere: null, cancelled: null, events: [] } };
+      if (w.__tapOn) return;
+      w.__tapOn = true;
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'click'])
+        window.addEventListener(
+          type,
+          (event) => {
+            const tap = w.__tap!;
+            const target = event.target as Element;
+            const name = target.getAttribute?.('aria-label') ?? (target.className?.toString() || target.nodeName);
+            tap.seen.events.push(`${type} ${name}`);
+            if (type === 'click') {
+              if (tap.target.contains(target)) tap.seen.click = true;
+              else tap.seen.elsewhere ??= name;
+            } else if (!type.endsWith('cancel')) {
+              // Asked once the event has been through every listener: whether the page cancelled it.
+              setTimeout(() => {
+                if (event.defaultPrevented) tap.seen.cancelled ??= `${type} on ${name}`;
+              });
+            }
+          },
+          true,
+        );
+    });
+    await button.tap();
+    const seen = await button.page().evaluate(async () => {
+      const tap = (window as unknown as { __tap: { seen: TapSeen } }).__tap;
+      for (let frame = 0; frame < 60 && !tap.seen.click && !tap.seen.elsewhere; frame++) await new Promise(requestAnimationFrame);
+      return tap.seen;
+    });
+    if (seen.click) return;
+    const trail = seen.events.join(', ') || 'no event at all';
+    expect(seen.cancelled, `the page cancelled the tap (${trail})`).toBeNull();
+    expect(seen.elsewhere, `the tap's click landed on something else (${trail})`).toBeNull();
+    expect(attempt, `taps on the button that made no click (${trail})`).toBeLessThan(3);
+    console.log(`A tap on the button made no click (${trail}): tapping again.`);
+  }
+}
+
 /** The size bar's button (Fit to Actual size, anything else to Fit), once the picture has got there. */
 async function tapFit(page: Page) {
   const was = await zoomStage(page).getAttribute('data-image-zoom-stage');
-  await page.locator('[data-image-fit]').tap();
+  await tapButton(page.locator('[data-image-fit]'));
   await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', was === 'fit' ? 'actual' : 'fit');
   await atRest(page);
 }
 
 /** A tap that moves the tools to `state`, once the pane is there and what fades or refits with it has finished. */
 async function tapTools(page: Page, button: string, state: 'tucked' | 'revealed' | 'pinned') {
-  await page.locator(button).tap();
+  await tapButton(page.locator(button));
   await expect(page.locator(`[data-tools="${state}"]`)).toHaveCount(1);
   await atRest(page);
 }
@@ -364,7 +425,7 @@ for (const { name, width, height } of [
       // Minimizing the comment box takes the card (the owner: "I also want that options panel to go away"):
       // the picture refits above the toolbar, a pinch and a swipe still work, and restoring brings the card and the picture back.
       const beforeMinimize = await layout(page);
-      await page.locator('.ib-fcomp-min').tap();
+      await tapButton(page.locator('.ib-fcomp-min'));
       await atRest(page);
       const minimized = await layout(page);
       expect(minimized.card, 'the card goes with the comment box').toBeNull();
@@ -380,18 +441,18 @@ for (const { name, width, height } of [
       await spread(page, middle(minimized), 200, 60);
       await settled(page);
       same((await layout(page)).image, minimized.image);
-      await page.locator('.ib-fcomp-pill').tap();
+      await tapButton(page.locator('.ib-fcomp-pill'));
       await atRest(page);
       same((await layout(page)).image, beforeMinimize.image);
       same((await layout(page)).card!, beforeMinimize.card!);
       // A swipe while it is minimized steps to the next option, and the card is there with the box.
-      await page.locator('.ib-fcomp-min').tap();
+      await tapButton(page.locator('.ib-fcomp-min'));
       await atRest(page);
       const hiddenAt = await layout(page);
       await touch.down(hiddenAt.stage.right - 60, middle(hiddenAt).y, -hiddenAt.stage.width * 0.5, 0);
       await touch.up();
       await settled(page, 600);
-      await page.locator('.ib-fcomp-pill').tap();
+      await tapButton(page.locator('.ib-fcomp-pill'));
       await atRest(page);
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
 
@@ -461,7 +522,7 @@ for (const { name, width, height } of [
       same((await layout(page)).image, tools.image);
 
       // A plain picture gets the same: the toolbar is the floor.
-      await pill(page).tap();
+      await tapButton(pill(page));
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^plain\.png/ }).click();
       await expect(caption(page)).toHaveCount(0);
       await expect(pane(page)).toHaveAttribute('aria-label', /^plain\.png/);
@@ -726,7 +787,7 @@ test('under reduced motion a phone\'s Hide and minimize take the card with no fa
     expect(await fade()).toBe('0s');
     await tapTools(page, '[data-full-view-handle]', 'revealed');
     await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
-    await page.locator('.ib-fcomp-min').tap();
+    await tapButton(page.locator('.ib-fcomp-min'));
     await atRest(page);
     expect(await fade()).toBe('0s');
     await context.close();

@@ -145,6 +145,9 @@ async function openSheet(page: Page, url: string, thread: string, sheet: string)
   await expect(pane).toHaveAttribute('data-full-view', '');
   const frame = page.frameLocator('.ib-htmlframe iframe');
   await expect(frame.locator('h1')).toHaveText('Guided narrative: contact sheet');
+  // On a phone the pen starts off (approval "inbox-html-attachments-phone"): these tests are about Annotate, so it goes on.
+  const interact = page.locator('[data-full-view-pen][aria-pressed="false"]');
+  if (await interact.isVisible()) await interact.click();
   // No mode switch: the page stays in Annotate, where a plain click on a link follows it.
   await expect(page.getByRole('button', { name: 'Annotate mode' })).toBeVisible();
   return { pane, frame };
@@ -491,8 +494,10 @@ for (const phone of [
       // Press and hold: the comment composer opens on the link, and the release follows nothing.
       const before = page.url();
       await holdLink(page, link, phone.browserName);
-      const composer = page.locator('[data-comment-popover]');
+      // A phone's comment is the bottom card's (approval "inbox-html-attachments-phone"), on the link.
+      const composer = page.locator('[data-html-comment="compose"]');
       await expect(composer).toBeVisible();
+      await expect(composer.locator('[data-html-comment-target]')).toHaveText('A: Story page');
       await page.waitForTimeout(600);
       await expect(page.locator('[data-linked-page]')).toHaveCount(0);
       expect(page.url()).toBe(before);

@@ -52,6 +52,16 @@ export function rowMachine(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
 }
 
 /**
+ * Whether Snooze is offered on a row (approval "inbox-snooze"): this machine's own row always (the caller checks
+ * that this Inbox keeps snoozes), a linked machine's only when that machine's Inbox keeps them too. A snooze sent to
+ * an older one would never land.
+ */
+export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesModel): boolean {
+  const id = rowMachine(row, model);
+  return id === null || model.linked.some((machine) => machine.id === id && machine.snoozes === true);
+}
+
+/**
  * The line for a machine that cannot show its threads now: "MacBook asleep since 10:42 AM", or what to do when it
  * runs an older Plannotator (rule 22: "update", never "reconnecting"). Null for a machine that is there.
  */

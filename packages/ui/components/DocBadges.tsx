@@ -22,6 +22,8 @@ import { hostnameOrFallback } from '@plannotator/core/project';
 import { basenameFromPath } from '@plannotator/core/source-save';
 import { OpenInAppButton } from './OpenInAppButton';
 import { HostTitle } from './HostTitle';
+import { useConfigValue } from '../config';
+import { repoLabel } from '../utils/repoLabel';
 
 export interface LinkedDocBadgeInfo {
   filepath: string;
@@ -72,6 +74,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   sourceInfo,
   openInAppPath,
 }) => {
+  const hideRepoOwner = useConfigValue('hideRepoOwner');
   const isRow = layout === 'row';
   const isHorizontal = layout !== 'column';
   const canOpenInApp =
@@ -117,7 +120,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
                   repoInfo.branch ? 'flex-shrink-0 max-w-[calc(100%_-_4.5em_-_0.375rem)]' : 'min-w-0'
                 }`}
               >
-                {repoInfo.display}
+                {repoLabel(repoInfo.display, hideRepoOwner)}
               </span>
             </HostTitle>
             {repoInfo.branch && (

@@ -325,11 +325,14 @@ describe("the conversation file", () => {
     const truncated = whole.slice(0, whole.length - 20);
     writeFileSync(file, truncated);
 
-    // Reading and marking seen report it and move nothing.
-    for (const response of [await fromWindow(server, askPath(thread_id)), await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" })]) {
-      expect(response.status).toBe(409);
-      expect(await code(response)).toBe("ask_damaged");
-    }
+    // The read says so and keeps the window's way in: the next question is what sets the file aside.
+    const read = await fromWindow(server, askPath(thread_id));
+    expect(read.status).toBe(200);
+    expect(await read.json()).toMatchObject({ conversation: null, damaged: true, subject: "Ship it?" });
+    // Marking seen reports it. Neither moves anything.
+    const seen = await fromWindow(server, askPath(thread_id, "/seen"), { seen_at: "2026-11-01T10:00:00.000Z" });
+    expect(seen.status).toBe(409);
+    expect(await code(seen)).toBe("ask_damaged");
     expect(readFileSync(file, "utf8")).toBe(truncated);
 
     const refused = await ask(server, thread_id, "turn-0003", "Three?");

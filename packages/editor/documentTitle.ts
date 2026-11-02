@@ -45,6 +45,8 @@ export interface DocumentTitleInput {
 export interface DocumentHeaderName {
   name: string;
   title?: string;
+  /** `name` is a path: cut from the start when the header runs short, so its last name stays whole. */
+  cutsFromStart?: boolean;
 }
 
 const URL_PATTERN = /^https?:\/\//i;
@@ -183,10 +185,19 @@ export function documentTabTitle(input: DocumentTitleInput): string {
  * The name beside the logo in the desktop header, or null when it shows
  * none: plan review, archive, goal setup, share links, and a review of
  * several files (its switcher already names the open file).
+ *
+ * A folder session's header names its folder, as a path, whichever file is
+ * open, a document linked from one included: the folder is what the session
+ * is about, and the open file is named by the file list's selected row and the
+ * chip at the top of the document. The tab title still names the open file,
+ * so several tabs stay apart (#2061).
  */
 export function documentHeaderName(input: DocumentTitleInput): DocumentHeaderName | null {
   if (!input.apiMode || !input.annotateMode || input.archiveMode || input.goalSetupMode) return null;
   if (input.bundle) return null;
+  if (input.annotateSource === 'folder' && input.folderPath) {
+    return { name: input.folderPath, title: input.folderPath, cutsFromStart: true };
+  }
   const named = documentName(input);
   if (!named) return null;
   return named.title ? { name: named.name, title: named.title } : { name: named.name };

@@ -8,14 +8,15 @@
  *    prompt; a reload does not show it again; the "?" opens it again;
  *  - an empty Board says "No cards yet";
  *  - cards an agent makes and moves through the `card` tool appear live, bold
- *    until opened; "You: …" in Your look and Your review;
+ *    until opened, in the v2 columns; "You: …" in In review; a card whose
+ *    every PR merged ships by itself, one with a PR still open stays;
  *  - an agent's drop shows above the lanes until "Got it";
  *  - the opened card: the panel beside the lanes, its links' live state read
  *    only when it opens, the column menu moving it;
  *  - dragging a card to another lane;
- *  - Ship, Icebox, Drop with a reason, and Restore, with the Shipped and
- *    Icebox pages;
- *  - New card into Backlog (with notes) and into Icebox;
+ *  - Ship, park in Backlog (an agent may not take it out), Cancel with a
+ *    reason, and Restore, with the Done and Cancelled pages;
+ *  - New card into Backlog (with notes);
  *  - 1280, and an iPhone in WebKit: the stacked list, an opened card full screen.
  *
  * Screenshots land in PLANNOTATOR_BOARD_SHOTS (default /tmp/board-step2-built).
@@ -134,6 +135,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const forge = fakeForge(join(root, 'bin'));
   forge.github(12, pull(12, 'vite 8 for the review app', { state: 'MERGED', mergedAt: hoursAgo(30) }));
   forge.github(14, pull(14, 'Delivery ticks on list rows', {}));
+  forge.github(15, pull(15, 'electron-forge 7', {}));
   forge.github(11, githubItem({ __typename: 'Issue', number: 11, title: 'Electron forge drops the icon', url: 'https://github.com/acme/widgets/issues/11', state: 'OPEN', stateReason: null, createdAt: hoursAgo(80), updatedAt: hoursAgo(3), closedAt: null, body: '', author: person('sam'), labels: { nodes: [] }, assignees: { nodes: [] }, comments: { totalCount: 0, nodes: [] }, closedByPullRequestsReferences: { nodes: [] } }));
   const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -223,7 +225,7 @@ test('the first visit shows "Your Board" once; Copy prompt copies the Board prom
   await expect(intro.locator('[data-board-intro-close]')).toHaveText('Done');
   await expect(intro.locator('[data-board-intro-live]')).toHaveText('Board prompt copied.');
   const prompt = await page.evaluate(() => navigator.clipboard.readText());
-  for (const words of ['card', 'backlog', 'your_look', 'your_review', 'ref', 'link']) expect(prompt).toContain(words);
+  for (const words of ['card', 'todo', 'in_progress', 'in_review', 'backlog', 'ref', 'link']) expect(prompt).toContain(words);
   await shot(page, 'intro-copied-1440-light.png');
   await intro.locator('[data-board-intro-close]').click();
   await expect(intro).toHaveCount(0);
@@ -235,9 +237,9 @@ test('the first visit shows "Your Board" once; Copy prompt copies the Board prom
   await expect(page.locator('[data-board-page]')).toBeVisible();
   await page.waitForTimeout(800);
   await expect(intro).toHaveCount(0);
-  // The "?" sits left of Shipped and Icebox (the intro mock); the sidebar's Board row has no count.
+  // The "?" sits left of Done and Cancelled (the intro mock); the sidebar's Board row has no count.
   const order = await page.locator('.ib-bhead').evaluate((head) => [...head.querySelectorAll('[data-board-about], [data-board-link]')].map((el) => el.getAttribute('data-board-link') ?? 'about'));
-  expect(order).toEqual(['about', 'shipped', 'icebox']);
+  expect(order).toEqual(['about', 'done', 'cancelled']);
   await expect(page.locator('[data-board-nav] .ib-n')).toHaveCount(0);
   await page.locator('[data-board-about]').click();
   await expect(intro).toBeVisible();
@@ -251,35 +253,43 @@ test("an agent's cards appear live as it makes and moves them, bold until opened
   // Agents fill the Board while it is open.
   ids.auto = await make(claude, projects.plannotator, 'Auto-update for users', { say: 'Pick it up: read the issue first' });
   await expect(card(page, ids.auto)).toBeVisible();
-  await expect(lane(page, 'backlog').locator(`[data-card-id="${ids.auto}"]`)).toBeVisible();
+  // An agent's card starts in Todo (work it was asked for).
+  await expect(lane(page, 'todo').locator(`[data-card-id="${ids.auto}"]`)).toBeVisible();
   await expect(card(page, ids.auto)).toHaveAttribute('data-unread', '');
   ids.polylane = await make(pi, projects.machine, 'Polylane plan evaluation', { say: 'Not picked up yet' });
-  ids.company = await make(claude, projects.plannotator, 'Company agents and approvals', { column: 'designing', say: 'Write up where it lands' });
-  ids.hero = await make(claude, projects.plannotator, 'Hero scene timers, easing', { column: 'designing', say: 'Option 3 of 6 rendered' });
-  ids.address = await make(claude, projects.plannotator, 'One fixed address for the Inbox', { column: 'your_look', you: 'Pick a dialog (two options)' });
-  ids.design = await make(codex, projects.workspaces, 'A design system like Linear’s', { column: 'your_look', you: 'Answer 11 questions in the thread' });
+  ids.company = await make(claude, projects.plannotator, 'Company agents and approvals', { column: 'in_progress', say: 'Write up where it lands' });
+  ids.hero = await make(claude, projects.plannotator, 'Hero scene timers, easing', { column: 'in_progress', say: 'Option 3 of 6 rendered' });
+  ids.address = await make(claude, projects.plannotator, 'One fixed address for the Inbox', { column: 'in_review', you: 'Pick a dialog (two options)' });
+  ids.design = await make(codex, projects.workspaces, 'A design system like Linear’s', { column: 'in_review', you: 'Answer 11 questions in the thread' });
   ids.pricing = await make(claude, projects.plannotator, 'Pricing page', { say: 'Copy drafted' });
-  ids.herdr = await make(claude, projects.plannotator, 'Herdr: PR triage, diffs', { column: 'building', say: 'Triage the open PRs first' });
+  ids.herdr = await make(claude, projects.plannotator, 'Herdr: PR triage, diffs', { column: 'in_progress', say: 'Triage the open PRs first' });
   await claude.card({ op: 'link', card_id: ids.herdr, ref: 'https://github.com/acme/widgets/issues/11', project_path: projects.plannotator });
-  ids.vite = await make(codex, projects.workspaces, 'vite 8 and electron-forge', { column: 'building', say: 'vite 8 merged; forge next', pr: 'acme/widgets#12' });
+  // vite 8 merged, the forge PR still open: it stays where it is (auto-ship wants every PR merged).
+  ids.vite = await make(codex, projects.workspaces, 'vite 8 and electron-forge', { column: 'in_progress', say: 'vite 8 merged; forge next', pr: 'acme/widgets#15' });
   await codex.card({ op: 'link', card_id: ids.vite, ref: 'acme/widgets#11', project_path: projects.workspaces });
-  ids.session = await make(pi, projects.machine, 'machine: session list', { column: 'building', say: 'Writing the store' });
-  ids.ticks = await make(claude, projects.plannotator, 'Delivery ticks on list rows', { column: 'building', say: 'Ticks drawn on Sent rows; screenshots next', pr: 'acme/widgets#14', thread_id: ids.ticksThread });
-  ids.caret = await make(claude, projects.plannotator, 'Caret anywhere in the reply box', { column: 'your_review', you: 'Merge #1960' });
-  ids.tab = await make(claude, projects.plannotator, 'Unread count on the tab', { column: 'building', say: 'PR open' });
+  await codex.card({ op: 'link', card_id: ids.vite, pr: 'acme/widgets#12', project_path: projects.workspaces });
+  // Its one PR merged: the Board's own read of the marks ships it (columns v2, Q3).
+  ids.icon = await make(claude, projects.plannotator, 'Review app on vite 8', { column: 'in_review', you: 'Merge #12', pr: 'acme/widgets#12' });
+  ids.session = await make(pi, projects.machine, 'machine: session list', { column: 'in_progress', say: 'Writing the store' });
+  ids.ticks = await make(claude, projects.plannotator, 'Delivery ticks on list rows', { column: 'in_progress', say: 'Ticks drawn on Sent rows; screenshots next', pr: 'acme/widgets#14', thread_id: ids.ticksThread });
+  ids.caret = await make(claude, projects.plannotator, 'Caret anywhere in the reply box', { column: 'in_review', you: 'Merge #1960' });
+  ids.tab = await make(claude, projects.plannotator, 'Unread count on the tab', { column: 'in_progress', say: 'PR open' });
   await claude.card({ op: 'ship', card_id: ids.tab, say: 'merged', project_path: projects.plannotator });
-  // A move by the agent shows live: Pricing goes to Your look with what the person owes.
-  await claude.card({ op: 'move', card_id: ids.pricing, column: 'your_look', you: 'Read the copy, then say go', project_path: projects.plannotator });
-  await expect(lane(page, 'your_look').locator(`[data-card-id="${ids.pricing}"]`)).toBeVisible();
+  // A move by the agent shows live: Pricing goes to In review with what the person owes.
+  await claude.card({ op: 'move', card_id: ids.pricing, column: 'in_review', you: 'Read the copy, then say go', project_path: projects.plannotator });
+  await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.pricing}"]`)).toBeVisible();
   await expect(card(page, ids.pricing).locator('.ib-bc-line')).toHaveText('You: Read the copy, then say go');
-  // The agent moves Delivery ticks to Your review.
-  await claude.card({ op: 'move', card_id: ids.ticks, column: 'your_review', you: 'Look at the screenshots, then merge #14', project_path: projects.plannotator });
-  await expect(lane(page, 'your_review').locator(`[data-card-id="${ids.ticks}"]`)).toBeVisible();
+  // The agent hands Delivery ticks over: In review.
+  await claude.card({ op: 'move', card_id: ids.ticks, column: 'in_review', you: 'Look at the screenshots, then merge #14', project_path: projects.plannotator });
+  await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.ticks}"]`)).toBeVisible();
+  // The card whose every PR merged leaves the lanes for Done by itself, once its mark is read.
+  await expect(card(page, ids.icon)).toHaveCount(0);
   // The agent's last word is not on the lane card (approval board-lane-card, r1): its title row alone.
   await expect(card(page, ids.herdr).locator('.ib-bc-line')).toHaveCount(0);
   await expect(card(page, ids.herdr)).not.toContainText('Triage the open PRs first');
-  await expect(page.locator('[data-board-summary]')).toHaveText('12 in flight · 5 on you');
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 1');
+  // No counts in the header: the lane counts say it.
+  await expect(page.locator('[data-board-summary]')).toHaveCount(0);
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 2');
   // No "on you" pill on a lane, no counts on a card.
   await expect(page.locator('.ib-onyou')).toHaveCount(0);
   // Each lane card with a link carries its state as a mark, read for the cards on screen in
@@ -297,10 +307,10 @@ test("an agent's cards appear live as it makes and moves them, bold until opened
   await expect(card(page, ids.herdr).locator('[data-card-open]')).toHaveAttribute('aria-label', /Issue #11, open$/);
   const markCalls = world.forge.calls();
   expect(markCalls.every((line) => line.startsWith('gh marks ')), markCalls.join('\n')).toBe(true);
-  expect(markCalls.flatMap((line) => line.slice('gh marks '.length).split(',')).sort()).toEqual(['11', '12', '14']);
-  // A mark never moves a card: the merged PR's card stays in Building.
-  await expect(lane(page, 'building').locator(`[data-card-id="${ids.vite}"]`)).toBeVisible();
-  // The five lanes fit the window: nothing scrolls sideways.
+  expect([...new Set(markCalls.flatMap((line) => line.slice('gh marks '.length).split(',')))].sort()).toEqual(['11', '12', '14', '15']);
+  // A merged PR with another still open never moves a card: vite stays in In progress.
+  await expect(lane(page, 'in_progress').locator(`[data-card-id="${ids.vite}"]`)).toBeVisible();
+  // The lanes fit the window: nothing scrolls sideways.
   expect(await page.locator('.ib-blanes').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await blur(page);
   await both(page, 'board-1440');
@@ -343,32 +353,34 @@ test('the opened card: the panel beside the lanes, its links read once it opens,
   await expect(panel.locator('[data-card-ref="acme/widgets#12"]')).toHaveAttribute('data-ref-state', 'merged');
   await expect(panel.locator('[data-card-ref="acme/widgets#12"]')).toContainText('vite 8 for the review app');
   await expect(panel.locator('[data-card-ref="acme/widgets#11"]')).toContainText('Electron forge drops the icon');
-  expect(world.forge.calls().filter((line) => line.startsWith('gh number=')).sort()).toEqual(['gh number=11', 'gh number=12']);
+  expect(world.forge.calls().filter((line) => line.startsWith('gh number=')).sort()).toEqual(['gh number=11', 'gh number=12', 'gh number=15']);
   await expect(panel).toContainText('Codex');
   // History reads the mock's short ref.
   await expect(panel.locator('section[aria-label="History"]')).toContainText('Linked #11');
   // Whole lanes beside the panel: none is cut at either edge of the lanes' box.
   await expectWholeLanes(page);
   await both(page, 'open-1440');
-  // The column menu: Your review.
+  // The column menu: In review.
   await panel.locator('[data-card-column]').click();
   await expect(page.locator(`[data-card-menu="${ids.vite}"]`)).toBeVisible();
   // One choice: radio items, the card's column checked.
-  await expect(page.locator('[data-card-move-to="building"]')).toHaveAttribute('role', 'menuitemradio');
-  await expect(page.locator('[data-card-move-to="building"]')).toHaveAttribute('aria-checked', 'true');
-  await expect(page.locator('[data-card-move-to="your_review"]')).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('[data-card-move-to="in_progress"]')).toHaveAttribute('role', 'menuitemradio');
+  await expect(page.locator('[data-card-move-to="in_progress"]')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('[data-card-move-to="in_review"]')).toHaveAttribute('aria-checked', 'false');
+  // The v2 columns only: no Icebox.
+  await expect(page.locator(`[data-card-menu="${ids.vite}"] [data-card-move-to]`)).toHaveCount(5);
   await both(page, 'open-move-1440');
-  await page.locator('[data-card-move-to="your_review"]').click();
-  await expect(lane(page, 'your_review').locator(`[data-card-id="${ids.vite}"]`)).toBeVisible();
-  await expect(panel.locator('[data-card-column]')).toHaveAttribute('data-card-column', 'your_review');
-  await expect(page.locator('[data-board-live]')).toContainText('Your review');
+  await page.locator('[data-card-move-to="in_review"]').click();
+  await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.vite}"]`)).toBeVisible();
+  await expect(panel.locator('[data-card-column]')).toHaveAttribute('data-card-column', 'in_review');
+  await expect(page.locator('[data-board-live]')).toContainText('In review');
   // History names the person's move.
-  await expect(panel.locator('section[aria-label="History"]')).toContainText('Your review');
+  await expect(panel.locator('section[aria-label="History"]')).toContainText('In review');
   await panel.locator('[data-card-close]').click();
   await expect(panel).toHaveCount(0);
 });
 
-test("Start: an agent's Backlog card goes to its live session, once; the lane card says Sent to", async () => {
+test("Start: an agent's Todo card goes to its live session, once; the lane card says Sent to", async () => {
   const { page, ids, dataDir } = world;
   await page.keyboard.press('Escape');
   // The card's session connects (its connection polls the bridge, as the Claude Code mod does): it is live.
@@ -394,7 +406,7 @@ test("Start: an agent's Backlog card goes to its live session, once; the lane ca
   // The lane card says who it went to; nothing moved.
   await expect(card(page, ids.auto)).toHaveAttribute('data-sent', '');
   await expect(card(page, ids.auto).locator('.ib-bc-sent')).toContainText('Sent to Claude Code');
-  await expect(lane(page, 'backlog').locator(`[data-card-id="${ids.auto}"]`)).toBeVisible();
+  await expect(lane(page, 'todo').locator(`[data-card-id="${ids.auto}"]`)).toBeVisible();
   await both(page, 'open-sent-1440');
   await panel.locator('[data-card-close]').click();
   await expect(panel).toHaveCount(0);
@@ -407,27 +419,32 @@ test("Start: an agent's Backlog card goes to its live session, once; the lane ca
 
 test('dragging a card to another lane moves it', async () => {
   const { page, ids } = world;
-  await card(page, ids.herdr).dragTo(lane(page, 'your_look'));
-  await expect(lane(page, 'your_look').locator(`[data-card-id="${ids.herdr}"]`)).toBeVisible();
-  await expect(card(page, ids.herdr)).toHaveAttribute('data-column', 'your_look');
+  await card(page, ids.herdr).dragTo(lane(page, 'in_review'));
+  await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.herdr}"]`)).toBeVisible();
+  await expect(card(page, ids.herdr)).toHaveAttribute('data-column', 'in_review');
 });
 
-test('Ship, Icebox, Drop with a reason, and Restore; the Shipped and Icebox pages', async () => {
-  const { page, ids } = world;
+test('Ship, park in Backlog, Cancel with a reason, and Restore; the Done and Cancelled pages', async () => {
+  const { page, pi, projects, ids } = world;
   // Ship.
   await card(page, ids.caret).locator('[data-card-open]').click();
   let panel = page.locator(`[data-card-panel="${ids.caret}"]`);
   await panel.locator('[data-card-ship]').click();
   await expect(card(page, ids.caret)).toHaveCount(0);
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 2');
-  // Icebox.
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 3');
+  // Park an agent's card in Backlog (the Icebox's job now): the agent may say, never take it out.
   await page.keyboard.press('Escape');
   await card(page, ids.polylane).locator('[data-card-open]').click();
   panel = page.locator(`[data-card-panel="${ids.polylane}"]`);
-  await panel.locator('[data-card-icebox]').click();
-  await expect(card(page, ids.polylane)).toHaveCount(0);
-  await expect(page.locator('[data-board-link="icebox"]')).toHaveText('Icebox 1');
-  // Drop with a reason.
+  await expect(panel.locator('[data-card-icebox]')).toHaveCount(0);
+  await panel.locator('[data-card-column]').click();
+  await page.locator('[data-card-move-to="backlog"]').click();
+  await expect(lane(page, 'backlog').locator(`[data-card-id="${ids.polylane}"]`)).toBeVisible();
+  await expect(pi.card({ op: 'move', card_id: ids.polylane, column: 'in_progress', project_path: projects.machine })).rejects.toThrow(/card_backlog_person_only: /);
+  await pi.card({ op: 'say', card_id: ids.polylane, say: 'Parked, noted', project_path: projects.machine });
+  await expect(lane(page, 'backlog').locator(`[data-card-id="${ids.polylane}"]`)).toBeVisible();
+  await page.keyboard.press('Escape');
+  // Cancel with a reason.
   await card(page, ids.company).locator('[data-card-open]').click();
   panel = page.locator(`[data-card-panel="${ids.company}"]`);
   await panel.locator('[data-card-drop]').click();
@@ -435,33 +452,36 @@ test('Ship, Icebox, Drop with a reason, and Restore; the Shipped and Icebox page
   await both(page, 'open-drop-1440');
   await panel.locator('[data-drop-confirm]').click();
   await expect(card(page, ids.company)).toHaveCount(0);
-  // The Shipped page.
-  await page.locator('[data-board-link="shipped"]').click();
-  await expect(page.locator('[data-board-view="shipped"]')).toBeVisible();
+  await expect(page.locator('[data-board-link="cancelled"]')).toHaveText('Cancelled 2');
+  // The Done page, with the card the Inbox moved there by itself, its history saying so.
+  await page.locator('[data-board-link="done"]').click();
+  await expect(page.locator('[data-board-view="done"]')).toBeVisible();
   await expect(card(page, ids.caret)).toBeVisible();
   await expect(card(page, ids.tab)).toBeVisible();
-  await both(page, 'shipped-1440');
+  await card(page, ids.icon).locator('[data-card-open]').click();
+  await expect(page.locator(`[data-card-panel="${ids.icon}"] section[aria-label="History"]`)).toContainText('Done automatically');
+  await both(page, 'done-1440');
+  await page.keyboard.press('Escape');
   await page.locator('[data-board-back]').click();
-  // The Icebox page: the iced card, and Dropped with date and reason.
-  await page.locator('[data-board-link="icebox"]').click();
-  await expect(page.locator('[data-board-view="icebox"]')).toBeVisible();
-  await expect(card(page, ids.polylane)).toBeVisible();
+  // The Cancelled page: date, who and reason, with Restore.
+  await page.locator('[data-board-link="cancelled"]').click();
+  await expect(page.locator('[data-board-view="cancelled"]')).toBeVisible();
   const dropped = page.locator('[data-dropped-list]');
   await expect(dropped.locator(`[data-dropped-row="${ids.company}"]`)).toContainText('Folded into the Workspaces plan');
   await expect(dropped.locator(`[data-dropped-row="${ids.sqlite}"]`)).toContainText('Superseded by the JSONL store');
-  await both(page, 'icebox-1440');
-  // Restore the drop: back to Designing.
+  await both(page, 'cancelled-1440');
+  // Restore: back to In progress.
   await dropped.locator(`[data-card-restore="${ids.company}"]`).click();
   await expect(dropped.locator(`[data-dropped-row="${ids.company}"]`)).toHaveCount(0);
-  // Restore the iced card from its panel.
-  await card(page, ids.polylane).locator('[data-card-open]').click();
-  await page.locator(`[data-card-panel="${ids.polylane}"] [data-card-restore="${ids.polylane}"]`).click();
   await page.locator('[data-board-back]').click();
-  await expect(lane(page, 'designing').locator(`[data-card-id="${ids.company}"]`)).toBeVisible();
-  await expect(lane(page, 'backlog').locator(`[data-card-id="${ids.polylane}"]`)).toBeVisible();
+  await expect(lane(page, 'in_progress').locator(`[data-card-id="${ids.company}"]`)).toBeVisible();
+  // An address from before v2 still opens the list.
+  await page.goto(`${world.url}#board=icebox`);
+  await expect(page.locator('[data-board-view="cancelled"]')).toBeVisible();
+  await page.goto(`${world.url}#board`);
 });
 
-test('New card: into Backlog with notes, and into Icebox', async () => {
+test('New card: into Backlog with notes', async () => {
   const { page } = world;
   await page.keyboard.press('Escape');
   await page.locator('[data-board-new]').click();
@@ -472,6 +492,8 @@ test('New card: into Backlog with notes, and into Icebox', async () => {
   // Where it goes: one radio group, Backlog first.
   await expect(dialog.locator('[role="radiogroup"]')).toHaveAttribute('aria-label', 'Where it goes');
   await expect(dialog.locator('[data-new-card-mode="backlog"] input')).toBeChecked();
+  // Two places: Backlog or straight to an agent (the Icebox folded into Backlog).
+  await expect(dialog.locator('[data-new-card-mode]')).toHaveCount(2);
   await expect(dialog.locator('.ib-ncd-acts [data-new-card-add], [data-new-card-add]').last()).toHaveText('Add to Backlog');
   await both(page, 'new-card-1440');
   await dialog.locator('[data-new-card-add]').last().click();
@@ -485,14 +507,6 @@ test('New card: into Backlog with notes, and into Icebox', async () => {
   await expectWholeLanes(page);
   await both(page, 'open-backlog-1440');
   await page.keyboard.press('Escape');
-  // Icebox.
-  await page.locator('[data-board-new]').click();
-  await dialog.locator('[data-new-card-title]').fill('Themes for the Board');
-  await dialog.locator('[data-new-card-mode="icebox"]').click();
-  await expect(dialog.locator('[data-new-card-add]').last()).toHaveText('Add to Icebox');
-  await shot(page, 'new-card-icebox-1440-light.png');
-  await dialog.locator('[data-new-card-add]').last().click();
-  await expect(page.locator('[data-board-link="icebox"]')).toHaveText('Icebox 1');
   expect(world.errors).toEqual([]);
 });
 
@@ -500,7 +514,7 @@ test('1280: the lanes fit, and an opened card keeps its lane in view', async () 
   const { page, ids } = world;
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.keyboard.press('Escape');
-  // The five lanes fit the window: nothing scrolls sideways.
+  // The lanes fit the window: nothing scrolls sideways.
   expect(await page.locator('.ib-blanes').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await blur(page);
   await both(page, 'board-1280');
@@ -509,7 +523,7 @@ test('1280: the lanes fit, and an opened card keeps its lane in view', async () 
   await expect(panel).toBeVisible();
   await expect(panel.locator('[data-card-you]')).toContainText('Look at the screenshots, then merge #14');
   await expect(panel.locator('[data-card-ref="acme/widgets#14"]')).toHaveAttribute('data-ref-state', 'open');
-  const laneBox = await lane(page, 'your_review').boundingBox();
+  const laneBox = await lane(page, 'in_review').boundingBox();
   const panelBox = await panel.boundingBox();
   expect(laneBox!.x + laneBox!.width).toBeLessThanOrEqual(panelBox!.x + 1);
   expect(laneBox!.x).toBeGreaterThanOrEqual(0);
@@ -524,18 +538,20 @@ test('1280: the lanes fit, and an opened card keeps its lane in view', async () 
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 
-test('a thread opened from a card on the Shipped page goes back to the Shipped page', async () => {
+test('a thread opened from a card on the Done page goes back to the Done page', async () => {
   const { page, claude, projects, ids } = world;
-  ids.old = await make(claude, projects.plannotator, 'Old ticks', { column: 'shipped', say: 'merged', thread_id: ids.ticksThread });
+  ids.old = await make(claude, projects.plannotator, 'Old ticks', { column: 'done', say: 'merged', thread_id: ids.ticksThread });
+  // The address from before the rename still opens the Done page.
   await page.goto(`${world.url}#board=shipped`);
+  await expect(page.locator('[data-board-view="done"]')).toBeVisible();
   await card(page, ids.old).locator('[data-card-open]').click();
   const panel = page.locator(`[data-card-panel="${ids.old}"]`);
   await expect(panel).toBeVisible();
   await panel.locator('[data-card-thread]').first().click();
   await expect(page.locator('[data-thread-card]')).toBeVisible();
-  await expect(page).toHaveURL(/from=shipped/);
+  await expect(page).toHaveURL(/from=done/);
   await page.locator('[data-thread-card]').click();
-  await expect(page.locator('[data-board-view="shipped"]')).toBeVisible();
+  await expect(page.locator('[data-board-view="done"]')).toBeVisible();
   await expect(page.locator(`[data-card-panel="${ids.old}"]`)).toBeVisible();
   await page.goto(`${world.url}#board`);
 });
@@ -576,7 +592,7 @@ test.describe('iPhone 15 (WebKit)', () => {
   });
 
   for (const scheme of ['light', 'dark'] as const) {
-    test(`a stacked list with Shipped and Icebox folded; an opened card full screen (${scheme})`, async () => {
+    test(`a stacked list with Done and Cancelled folded; an opened card full screen (${scheme})`, async () => {
       const { ids } = world;
       const context = await browser!.newContext({ ...device, colorScheme: scheme });
       try {
@@ -584,8 +600,8 @@ test.describe('iPhone 15 (WebKit)', () => {
         await page.goto(`${world.url}#board`);
         const board = page.locator('[data-board-view="phone"]');
         await expect(board).toBeVisible();
-        await expect(page.locator('[data-board-fold="shipped"]')).toHaveAttribute('aria-expanded', 'false');
-        await expect(page.locator('[data-board-fold="icebox"]')).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('[data-board-fold="done"]')).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('[data-board-fold="dropped"]')).toHaveAttribute('aria-expanded', 'false');
         // Nothing scrolls sideways.
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
         await page.waitForTimeout(400);
@@ -609,10 +625,10 @@ test.describe('iPhone 15 (WebKit)', () => {
         await page.screenshot({ path: join(shots, `phone-open-${scheme}.png`) });
         await back.tap();
         await expect(board).toBeVisible();
-        await page.locator('[data-board-fold="shipped"]').tap();
+        await page.locator('[data-board-fold="done"]').tap();
         await expect(page.locator(`.ib-bcard[data-card-id="${ids.tab}"]`)).toBeVisible();
         await page.waitForTimeout(300);
-        await page.screenshot({ path: join(shots, `phone-shipped-open-${scheme}.png`), fullPage: true });
+        await page.screenshot({ path: join(shots, `phone-done-open-${scheme}.png`), fullPage: true });
       } finally {
         await context.close();
       }

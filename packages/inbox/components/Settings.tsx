@@ -8,6 +8,7 @@ import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { AccountsSection } from './Accounts';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -24,6 +25,8 @@ import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
+import { RowsSection, rowsSummary } from './RowsSettings';
+import { useListLook } from '../listLook';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -33,7 +36,9 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
+  rows: 'contents',
   agents: 'chip',
+  accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
   machines: 'system',
@@ -677,7 +682,10 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
+  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
+  rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
   machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
@@ -779,6 +787,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
+  const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
     (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
@@ -827,6 +836,10 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'rows':
+        return rowsSummary(look);
+      case 'accounts':
+        return '';
       case 'prompts':
         return settings.prompts ? promptsSummary(settings.prompts) : '';
       case 'devices':
@@ -868,8 +881,14 @@ export function SettingsPage(props: SettingsPageProps) {
           />
         );
         break;
+      case 'rows':
+        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} />;
+        break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'accounts':
+        body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
         break;
       case 'prompts':
         body = settings.prompts ? (
@@ -957,7 +976,7 @@ export function SettingsPage(props: SettingsPageProps) {
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
       <p className="ib-lede">Browsers on your other devices.</p>
-    ) : section ? (
+    ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
 

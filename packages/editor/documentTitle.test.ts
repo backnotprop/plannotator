@@ -6,7 +6,9 @@
  * app tab claiming the repository, the compact title drifting (it is
  * deliberately unchanged), and the tab not following a linked document or
  * a plan revision. The `·` titles are the approved format and are pinned on
- * purpose (option B of the approval for #2061).
+ * purpose (option B of the approval for #2061). A folder session's header
+ * names the folder, as a path cut from the start, whichever file is open; its
+ * tab still names the open file.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -83,15 +85,33 @@ describe('several files (bundle)', () => {
 
 describe('folder', () => {
   const folder = annotate({ annotateSource: 'folder', folderPath: '/repo/docs' });
+  // The header names the folder as a path, cut from the start. Fails if it
+  // shows only the folder's name, or loses the start cut that keeps that name whole.
   test('before a file is chosen: the folder', () => {
     expect(documentTabTitle(folder)).toBe('docs/ · acme/payments');
-    expect(documentHeaderName(folder)).toEqual({ name: 'docs/', title: '/repo/docs' });
+    expect(documentHeaderName(folder)).toEqual({ name: '/repo/docs', title: '/repo/docs', cutsFromStart: true });
     expect(compactDocumentTitle(folder)).toBe('Choose a file');
   });
-  test('the open file once chosen', () => {
+  // Fails if the header goes back to naming the open file, or the tab stops
+  // naming it (several tabs of one folder stay apart only by the file, #2061).
+  test('the open file once chosen: the tab names the file, the header the folder', () => {
     const open = { ...folder, activeFile: '/repo/docs/rollout-plan.md', linkedPath: '/repo/docs/rollout-plan.md' };
     expect(documentTabTitle(open)).toBe('rollout-plan.md · acme/payments');
-    expect(documentHeaderName(open)).toEqual({ name: 'rollout-plan.md', title: '/repo/docs/rollout-plan.md' });
+    expect(documentHeaderName(open)).toEqual({ name: '/repo/docs', title: '/repo/docs', cutsFromStart: true });
+    expect(compactDocumentTitle(open)).toBe('rollout-plan.md');
+  });
+  // Fails if a document linked from a folder file takes the header: the
+  // session is still the folder's.
+  test('a document linked from a folder file: the header still names the folder', () => {
+    const linked = { ...folder, activeFile: '/repo/docs/rollout-plan.md', linkedPath: '/repo/shared/glossary.md' };
+    expect(documentTabTitle(linked)).toBe('glossary.md · acme/payments');
+    expect(documentHeaderName(linked)).toEqual({ name: '/repo/docs', title: '/repo/docs', cutsFromStart: true });
+  });
+  // Fails if Windows separators are rewritten in the header's path.
+  test('Windows separators are kept as given', () => {
+    const windows = annotate({ annotateSource: 'folder', folderPath: 'C:\\repo\\docs', activeFile: 'C:\\repo\\docs\\spec.md' });
+    expect(documentHeaderName(windows)?.name).toBe('C:\\repo\\docs');
+    expect(documentTabTitle(windows)).toBe('spec.md · acme/payments');
   });
 });
 

@@ -102,12 +102,14 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await expect.poll(() => sidebarState(page)).toBe('collapsed');
   expect(await sidebarCookie(context)).toBe(cookieBefore);
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
   await expect(nav.getByRole('link', { name: 'General' })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'general');
 
   // The keyboard: Tab to a section link, Enter follows it, focus lands on the new heading.
   await nav.getByRole('link', { name: 'General' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(nav.getByRole('link', { name: 'Rows' })).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Agents' })).toBeFocused();
   await page.keyboard.press('Enter');
@@ -160,7 +162,7 @@ test('iPhone (WebKit): the list of sections, a section with ‹ Settings, and Pa
     await page.goto(`${world.url}#settings`);
     const list = page.locator('[data-settings-list]');
     await expect(list.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await expect(list.getByRole('link')).toHaveCount(10);
+    await expect(list.getByRole('link')).toHaveCount(12);
     await expect(page.locator('.ib-snav')).toHaveCount(0);
     await shot(page, 'phone-1-list');
 
