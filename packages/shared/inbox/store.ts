@@ -150,6 +150,7 @@ import {
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   type InboxCardRef,
   type InboxCardHistoryEntry,
@@ -5728,7 +5729,10 @@ export class InboxStore {
   /**
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
-   * (card-refs.ts), added to `known` each once (by URL).
+   * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
+   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
+   * Jira sites are two issues.
    */
   private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
     const out = [...known];
@@ -5739,7 +5743,8 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      if (!out.some((k) => k.url === ref.url || k.ref === ref.ref)) out.push(ref);
+      const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
+      if (!out.some(same)) out.push(ref);
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
