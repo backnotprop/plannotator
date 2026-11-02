@@ -1074,6 +1074,13 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-att { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
 .ib-notice { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 12px; width: 100%; text-align: left; }
 .ib-notice b { margin-left: auto; color: var(--primary); font-weight: 550; }
+/* Always one line (the owner, 2026-11-02: a long project name wrapped it onto two): the icon, "N new in" and Show
+   never shrink; the project's name takes what is left and is cut with "…" (the whole line is then its tooltip). */
+.ib-notice { white-space: nowrap; min-width: 0; }
+.ib-notice > svg, .ib-notice b { flex-shrink: 0; }
+.ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
+.ib-notice-n { flex-shrink: 0; }
+.ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }

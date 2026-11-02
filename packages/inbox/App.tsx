@@ -3690,7 +3690,8 @@ function Inbox() {
   );
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
-  const notice = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames).text : null;
+  const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  const notice = heldNews?.text ? { count: heldNews.count, project: heldNews.project ?? null } : null;
   // "Inbox updated to X · Reload": at the list's top, and at the open thread's when no list is beside it.
   const staleNotice = stalePage.inbox && !restarting ? (
     <StalePageNotice version={stalePage.inbox} busy={staleReloading} onReload={() => void reloadOntoUpdate()} onDismiss={stalePage.dismiss} />

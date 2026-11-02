@@ -116,6 +116,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
@@ -3822,6 +3823,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (stopped) return;
     for (const project of store.allProjects()) void repos.refresh(project.root);
     repoReadsBegun = true;
+    // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
+    // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.
+    void foldCheckoutFolderProjects({
+      store,
+      ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+      log: (fold) => debugLog?.note("project_folded", fold),
+    }).catch(() => {});
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
     for (const threadId of store.setAsideDue(setAsideDelayMs)) tellSetAside(threadId);
     for (const threadId of store.setAsideDue(0)) scheduleSetAside(threadId);
