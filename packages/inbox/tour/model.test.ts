@@ -156,10 +156,10 @@ describe('the walk', () => {
     s = tourReducer(s, { type: 'next' });
     expect(tourCoach(s, names)).toMatchObject({ key: '9-also', next: true });
     expect(tourCoach(s, names)!.items!.map((i) => i.title)).toEqual(['Pin a thread', 'Looks good', 'Re-ask', 'Send now']);
-    // "Make it yours" comes after the replay, over the thread with pictures, with Skip and Done; then the person's own Inbox.
+    // "Make it yours" comes after the replay, over the thread with pictures, with Skip and a Next that names what comes next; then the person's own Inbox.
     s = tourReducer(s, { type: 'next' });
     expect(s).toMatchObject({ step: TOUR_SETTINGS_STEP, route: TOUR_THREAD, file: null });
-    expect(tourCoach(s, names)).toMatchObject({ key: '10-yours', picture: 'settings', next: true, skip: true, target: null });
+    expect(tourCoach(s, names)).toMatchObject({ key: '10-yours', picture: 'settings', next: true, nextLabel: 'Connect agents next', nextArrow: true, skip: true, target: null });
     expect(tourCoach(s, names)?.action).toBeUndefined();
     s = tourReducer(s, { type: 'next' });
     expect(s).toMatchObject({ step: TOUR_STEPS, route: 'list' });
@@ -240,7 +240,7 @@ describe('the walk', () => {
       expect(tourReducer(s11, action)).toBe(s11);
   });
 
-  test('"Make it yours" has nothing to fast-forward and no Back; Next (Done or Skip) is the only way on', () => {
+  test('"Make it yours" has nothing to fast-forward and no Back; Next ("Connect agents next" or Skip) is the only way on', () => {
     const s10 = tourStateAt(TOUR_SETTINGS_STEP, REAL, fixture);
     expect(tourReducer(s10, { type: 'forward', realAnswer: REAL, fixture })).toBe(s10);
     expect(tourReducer(s10, { type: 'back' })).toBe(s10);

@@ -7,7 +7,9 @@
  * config.json `theme`, and config.json `inboxTextSize` with its cookie.
  *
  * What the step opened with is kept, so Skip puts it back (`restore`, through
- * the card's handle); Done keeps what was picked. A colour set is picked for
+ * the card's handle); the card's Next ("Connect agents next") keeps what was
+ * picked. Under the colour sets, how many more Settings offers (counted from
+ * the palette registry), with the link to Settings → General. A colour set is picked for
  * both halves at once (the three offered draw both); Settings still picks a
  * palette per half, and offers every palette. No keyboard shortcut: each
  * control is a native radio group, one tab stop, the arrows move the pick.
@@ -24,6 +26,11 @@ import { chooseTextSize, useInboxTextSize } from '../textSize';
 
 /** The colour sets offered, in this order (the owner, 2026-11-02). Each draws both halves. */
 export const TOUR_COLOR_SETS = ['plannotator', 'plannotator-modern', 'catppuccin'] as const;
+
+/** How many palettes Settings offers beyond the step's three: every palette in the registry, never a fixed number. */
+export function tourMoreColorSets(themes: readonly ThemeInfo[] = BUILT_IN_THEMES): number {
+  return themes.filter((theme) => !(TOUR_COLOR_SETS as readonly string[]).includes(theme.id)).length;
+}
 
 const MODES: { id: Mode; label: string; icon: 'sun' | 'moon' | 'system' }[] = [
   { id: 'light', label: 'Light', icon: 'sun' },
@@ -91,6 +98,7 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
     [],
   );
   const shown = theme.shown;
+  const more = tourMoreColorSets();
   const sets = TOUR_COLOR_SETS.map((id) => BUILT_IN_THEMES.find((t) => t.id === id)).filter((t): t is ThemeInfo => !!t);
   return (
     <div className="ib-tset" data-tour-settings="">
@@ -157,6 +165,19 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
             );
           })}
         </div>
+        <p className="ib-tset-more" data-tour-more-colors={more}>
+          {more > 0 ? `${more} more in ` : 'More in '}
+          <a
+            href="#settings/general"
+            data-tour-settings-link=""
+            onClick={(event) => {
+              event.preventDefault();
+              onSettings();
+            }}
+          >
+            Settings
+          </a>
+        </p>
       </div>
       <div className="ib-tset-grp ib-tset-row">
         <span className="ib-tset-l" id="ib-tset-size">
@@ -171,20 +192,6 @@ export const TourSettings = forwardRef<TourSettingsHandle, { onSettings: () => v
           ))}
         </span>
       </div>
-      <p className="ib-tset-note">
-        You can change these any time in{' '}
-        <a
-          href="#settings/general"
-          data-tour-settings-link=""
-          onClick={(event) => {
-            event.preventDefault();
-            onSettings();
-          }}
-        >
-          Settings
-        </a>
-        .
-      </p>
     </div>
   );
 });

@@ -732,6 +732,7 @@ export function TourCoach({
         {coach.next ? (
           <button type="button" className="ib-tc-next" onClick={onNext} data-tour-next="">
             {coach.nextLabel ?? 'Next'}
+            {coach.nextArrow && <Icon name="chevR" size={14} />}
           </button>
         ) : canForward && onForward ? (
           <Tip content="Skip to the end of this step">

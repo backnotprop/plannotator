@@ -743,6 +743,8 @@ export interface TourCoach {
   next?: boolean;
   /** The Next button's words (default "Next"). */
   nextLabel?: string;
+  /** A → after the Next button's words (drawn, not read). */
+  nextArrow?: boolean;
   wait?: boolean;
   target: TourTarget | null;
 }
@@ -785,7 +787,8 @@ export function tourCoach(state: TourState, names: { developer: string; agent: s
   const { step } = state;
   if (step === TOUR_STEPS) return null;
   if (step === TOUR_SETTINGS_STEP)
-    return { key: '10-yours', title: 'Make it yours', text: 'Pick how the Inbox looks. It changes as you tap.', picture: 'settings', next: true, nextLabel: 'Done', skip: true, target: null };
+    // The owner (2026-11-02): the button says what comes next.
+    return { key: '10-yours', title: 'Make it yours', text: 'Pick how the Inbox looks. It changes as you tap.', picture: 'settings', next: true, nextLabel: 'Connect agents next', nextArrow: true, skip: true, target: null };
   if (step === 1 && state.orient)
     return {
       key: '1-orient',

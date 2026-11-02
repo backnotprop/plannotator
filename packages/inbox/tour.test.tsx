@@ -480,7 +480,7 @@ test.skipIf(!hasDom)('Fast-forward through every step writes nothing and ends ea
   await click($(el, '[data-tour-next]'));
   await click($(el, '[data-tour-next]'));
   await until(() => window.location.hash === '#tour=10' && coachKey(el) === '10-yours', 'step 10, Make it yours');
-  // Nothing to fast-forward on "Make it yours": it asks for nothing, Done or Skip go on.
+  // Nothing to fast-forward on "Make it yours": it asks for nothing, its Next or Skip go on.
   expect($(el, '[data-tour-forward]')).toBeNull();
   globalThis.fetch = realFetch;
   expect(writes()).toEqual([]);
@@ -972,8 +972,10 @@ const htmlClass = () => document.documentElement.className;
 /** Dark is the window without the `light` class (ThemeProvider). */
 const shownLight = () => document.documentElement.classList.contains('light');
 
-test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip puts back what the step opened with, Done keeps it, Exit there is finished', async () => {
+test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip puts back what the step opened with, Next keeps it, Exit there is finished', async () => {
   const { resetInboxThemeForTests } = await import('./theme');
+  const { tourMoreColorSets } = await import('./tour/TourSettings');
+  const { BUILT_IN_THEMES } = await import('@plannotator/ui/utils/themeRegistry');
   const { resetInboxTextSizeForTests } = await import('./textSize');
   try {
     const el = await openOnEntry();
@@ -985,6 +987,13 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     expect($(el, '[data-tour-bar]')!.textContent).toContain('Your settings');
     // The three colour sets, in the owner's order.
     expect([...el.querySelectorAll('[data-tour-palette]')].map((n) => n.getAttribute('data-tour-palette'))).toEqual(['plannotator', 'plannotator-modern', 'catppuccin']);
+    // Under them, how many more Settings has, counted from the palette registry (a new palette changes it).
+    expect(tourMoreColorSets()).toBe(BUILT_IN_THEMES.length - 3);
+    expect(tourMoreColorSets([...BUILT_IN_THEMES, { ...BUILT_IN_THEMES[0], id: 'one-more' }])).toBe(BUILT_IN_THEMES.length - 2);
+    expect($(el, '[data-tour-more-colors]')!.textContent).toBe(`${BUILT_IN_THEMES.length - 3} more in Settings`);
+    expect($(el, '[data-tour-more-colors] a[data-tour-settings-link]')!.textContent).toBe('Settings');
+    // The Next button says what comes next.
+    expect($(el, '[data-tour-next]')!.textContent).toBe('Connect agents next');
     // Opened on a fresh machine: Match system, Plannotator, 14.
     expect(yours(el, '[data-tour-mode="system"]')!.checked).toBe(true);
     expect(htmlClass()).toContain('theme-plannotator');
@@ -1004,7 +1013,7 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     expect(htmlClass()).not.toContain('theme-catppuccin');
     expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('');
     await until(() => config().theme?.mode === 'system' && config().theme?.light === 'plannotator' && config().theme?.dark === 'plannotator' && config().inboxTextSize === 14, 'Skip saved');
-    // Done keeps the picks.
+    // Next ("Connect agents next") keeps the picks.
     await act(async () => {
       window.location.hash = '#tour=10';
     });
@@ -1012,10 +1021,10 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     await click(yours(el, '[data-tour-mode="light"]'));
     await click(yours(el, '[data-tour-palette="plannotator-modern"]'));
     await click($(el, '[data-tour-next]'));
-    await until(() => window.location.hash === '#tour=11', 'step 11 after Done');
+    await until(() => window.location.hash === '#tour=11', 'step 11 after Next');
     expect(shownLight()).toBe(true);
     expect(htmlClass()).toContain('theme-plannotator-modern');
-    await until(() => config().theme?.mode === 'light' && config().theme?.light === 'plannotator-modern' && config().theme?.dark === 'plannotator-modern', 'Done saved');
+    await until(() => config().theme?.mode === 'light' && config().theme?.light === 'plannotator-modern' && config().theme?.dark === 'plannotator-modern', 'Next saved');
     // Exit on "Make it yours" (the replay is over) counts as finished, and keeps what was picked.
     // In the tour's own history entry (the tour replaces it step by step), so Exit leaves the tour.
     await act(async () => {

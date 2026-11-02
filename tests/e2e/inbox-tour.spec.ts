@@ -9,7 +9,7 @@
  *    on the question's words, a comment on a line of EVALUATION.md, one Send,
  *    the replay, a circle on a screenshot, Artifacts, the film commented at a
  *    moment, compose to a session, "Make it yours" (step 10: theme, colours,
- *    text size; Done) and the person's own Inbox at step 11. Every
+ *    text size; "Connect agents next") and the person's own Inbox at step 11. Every
  *    comment box opens with the developer's real comment; nothing is written
  *    but the tour setting; the person's list is exactly as it was. Shots light
  *    and dark, one headless video.
@@ -304,7 +304,7 @@ interface WalkOptions {
 
 /**
  * From the tour's first card to step `to` (1 to 11), doing each step's real action and keeping every
- * suggestion the boxes open with. Step 10 is "Make it yours" (left with Done, nothing picked); step 11 is the
+ * suggestion the boxes open with. Step 10 is "Make it yours" (left with its Next, nothing picked); step 11 is the
  * person's own Inbox.
  */
 async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<void> {
@@ -566,6 +566,10 @@ test('"Make it yours": no ring on its title after a click; the keyboard picks an
   await expect(title).toBeFocused();
   await expect(title).toHaveCSS('outline-style', 'none');
   await expect(page.locator('[data-tour-palette]')).toHaveCount(3);
+  // Under the colour sets, how many more Settings has (counted from the palette registry; the DOM test checks the count).
+  await expect(page.locator('[data-tour-more-colors]')).toHaveText(/^[1-9]\d* more in Settings$/);
+  // The Next button says what comes next.
+  await expect(page.locator('[data-tour-next]')).toHaveText('Connect agents next');
   await shoot(page, 'make-it-yours-opened');
   // A fresh machine opens on Match system, Plannotator, 14. The keyboard: one stop per group, the arrows pick.
   await page.keyboard.press('Tab');
@@ -587,7 +591,7 @@ test('"Make it yours": no ring on its title after a click; the keyboard picks an
   await page.waitForTimeout(400);
   mkdirSync(shots, { recursive: true });
   await page.screenshot({ path: join(shots, 'make-it-yours-picked.png') });
-  // Then the Settings link, Skip and Done, in that order.
+  // Then the Settings link, Skip and "Connect agents next", in that order.
   await page.keyboard.press('Tab');
   await expect(page.locator('[data-tour-settings-link]')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -653,7 +657,7 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   await page.locator('[data-tour-next]').click();
   await page.locator('[data-tour-next]').click();
   await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 11');
-  // "Make it yours" asks for nothing: no Fast-forward, Done goes on.
+  // "Make it yours" asks for nothing: no Fast-forward, its Next goes on.
   await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
   await expect(page.locator('[data-tour-forward]')).toHaveCount(0);
   expect(writes.filter((r) => !r.startsWith('POST /api/inbox/settings'))).toEqual([]);
@@ -754,7 +758,7 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
 });
 
 // The keyboard is a stand-in: an iPhone's readings of the visual viewport (see inbox-phone-compose-send.spec.ts), not a real one.
-test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and with it up (a tap on the message) Send is free', async () => {
+test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and with it up (a tap on the message) Send is free; then "Make it yours" fits its buttons on one row', async () => {
   const w = startWorld('phone-send');
   const errors: string[] = [];
   const browser = await webkit.launch({ args: [] });
@@ -811,6 +815,31 @@ test('an iPhone in WebKit, "Press Send": the pick leaves the keyboard down, and 
       await expect(coach(page)).toBeHidden();
       await send.tap();
       await at('9-loop');
+
+      // "Make it yours" at this width: Skip and "Connect agents next" on one row, each one line and 44 px, inside the screen.
+      await press('[data-tour-next]');
+      await at('9-also');
+      await press('[data-tour-next]');
+      await at('10-yours');
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || (a.effect as KeyframeEffect | null)?.getComputedTiming().iterations === Infinity));
+      const buttons = await page.locator('[data-tour-skip], [data-tour-next]').evaluateAll((els) =>
+        els.map((el) => {
+          const r = el.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const lines = new Set([...range.getClientRects()].filter((q) => q.width > 0 && q.height > 0).map((q) => Math.round(q.top)));
+          return { text: el.textContent, top: Math.round(r.top), right: r.right, width: r.width, height: r.height, lines: lines.size, clipped: el.scrollWidth > el.clientWidth + 0.5 };
+        }),
+      );
+      expect(buttons.map((b) => b.text), `${width}`).toEqual(['Skip', 'Connect agents next']);
+      expect(new Set(buttons.map((b) => b.top)).size, `${width}: one row`).toBe(1);
+      for (const b of buttons) {
+        expect(b.lines, `${width}: ${b.text} on one line`).toBe(1);
+        expect(b.clipped, `${width}: ${b.text} not cut`).toBe(false);
+        expect(b.height, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
+        expect(b.width, `${width}: ${b.text}`).toBeGreaterThanOrEqual(44);
+        expect(b.right, `${width}: ${b.text} on the screen`).toBeLessThanOrEqual(width);
+      }
       await context.close();
     }
     expect(errors).toEqual([]);
