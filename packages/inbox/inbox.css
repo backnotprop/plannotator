@@ -2806,6 +2806,12 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
    wraps like text (approval "list-rows-mail-icons"), so a wider time would re-wrap the project and change the row's
    height under the pointer. A long project's end, or its marks, may sit under the action while it shows. */
 .ib-rw:hover:has(.ib-ract) .ib-nrow .ib-l1 .ib-t, .ib-rw:has(:focus-visible):has(.ib-ract) .ib-nrow .ib-l1 .ib-t { visibility: hidden; }
+/* The delivery tick (DeliveryTick.tsx) is the one thing in the time cell that stays reachable while the action shows:
+   the time hides, the tick moves to the cell's right edge (`row-reverse`), and the action stops short of it, so the pointer
+   can reach the tick and its tooltip (since the toggle of #2437 the action also shows on read rows, which carry ticks). */
+.ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tickt { flex-direction: row-reverse; }
+.ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-ract) .ib-t .ib-tick { visibility: visible; }
+.pn-inbox .ib-rw:is(:hover, :has(:focus-visible), [data-action-focus]):has(.ib-tick) > .ib-ract { right: 32px; }
 /* Beside a thread the action sits on line 1, no taller than that line (14 px text at its normal leading, plus
    the 6 px between the action's top and the title's), so at any text size it never reaches the title. */
 .pn-inbox .ib-rw .ib-nrow ~ .ib-ract { top: 8px; transform: none; height: min(26px, calc(var(--ib-fs-14, 14px) * 1.2 + 6px)); }
