@@ -462,7 +462,9 @@ test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its toolti
   expect(heading()!.textContent).toBe(SUBJECT);
   expect(await tooltipOf(title()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
-  expect(host!.textContent!.split('customize row look').length - 1).toBe(1);
+  // Seen words only: the screen-reader line ("Thread name: …") is the one extra, on purpose (threadNameMeta.test).
+  const seen = [...host!.querySelectorAll('.ib-sr')].reduce((t, el) => t.replace(el.textContent!, ''), host!.textContent!);
+  expect(seen.split('customize row look').length - 1).toBe(1);
 });
 
 test.skipIf(!hasDom)('no name: the bar holds the subject (shown once the heading scrolls away: threadNameMeta.test.tsx), its tooltip only when cut; no pill', async () => {
