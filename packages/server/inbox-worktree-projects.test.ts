@@ -258,7 +258,7 @@ test("a store from before the fold replays and routes as it did; only new sends 
   expect(after.sendMessage({ project_id: folded.project.id, author, body: "Main project, replayed." }).message.thread_id).toBe(folded.thread_id);
 });
 
-test("an agent that asked from a worktree before the fold still gets the reply: wait_for_reply and read_thread cover the worktree's earlier project", async () => {
+test("an agent that asked from a worktree before the fold still gets the reply: read_thread covers the worktree's earlier project", async () => {
   const { main, worktree, dataDir } = world();
   // An older Inbox: the question in a project keyed by the worktree, and the person's reply to it.
   const before = InboxStore.open(dataDir);
@@ -274,22 +274,18 @@ test("an agent that asked from a worktree before the fold still gets the reply: 
   const server = await start(dataDir);
   const client = await agent(server);
   // What the stdio shim sends: its working folder as project_path, and the session.
-  const waited = (await client.callTool({
-    name: "wait_for_reply",
-    arguments: { project_path: worktree, agent_session: "ses_codex_wt", timeout_seconds: 1 },
-  })) as { isError?: boolean; structuredContent: Record<string, any> };
-  expect(waited.isError).toBeFalsy();
-  expect(waited.structuredContent.status).toBe("replied");
-  expect(waited.structuredContent.thread_id).toBe(asked.id);
-  expect(waited.structuredContent.reply.body).toContain("Use Postgres.");
-
   const listed = (await client.callTool({
     name: "read_thread",
     arguments: { project_path: worktree, agent_session: "ses_codex_wt", include_resolved: true },
   })) as { isError?: boolean; structuredContent: Record<string, any> };
   expect(listed.isError).toBeFalsy();
-  expect(listed.structuredContent.project.root).toBe(main);
   expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toContain(asked.id);
+  const read = (await client.callTool({
+    name: "read_thread",
+    arguments: { thread_id: asked.id, project_path: worktree, agent_session: "ses_codex_wt" },
+  })) as { isError?: boolean; structuredContent: Record<string, any> };
+  expect(read.isError).toBeFalsy();
+  expect(read.structuredContent.thread.messages.at(-1).body).toContain("Use Postgres.");
 
   // From the main checkout, the worktree's earlier project is not in the read: the scope is that worktree's alone.
   const fromMain = (await client.callTool({

@@ -230,11 +230,10 @@ describe("what a script gets", () => {
     expect(existsSync(join(box.dataDir, "inbox", "inbox.json"))).toBe(false);
   });
 
-  test("every action the command takes is one a real Inbox serves, and its wait is not", async () => {
+  test("every action the command takes is one a real Inbox serves", async () => {
     const box = await world();
     const { tools } = await box.client.listTools();
     expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining([...INBOX_CALL_ACTIONS]));
-    expect(INBOX_CALL_ACTIONS).not.toContain("wait_for_reply");
   });
 });
 

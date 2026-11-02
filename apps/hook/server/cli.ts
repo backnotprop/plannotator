@@ -289,8 +289,8 @@ export const INBOX_PROJECTS_USAGE = [
   "Run 'plannotator inbox --help' for when to use it.",
 ].join("\n");
 
-/** What `plannotator inbox call` runs: the Inbox tool's actions, without the wait a script has no use for. */
-export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS.filter((action: string) => action !== "wait_for_reply");
+/** What `plannotator inbox call` runs: the Inbox tool's actions. */
+export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
 /** `plannotator inbox call …` (inbox-call-command.ts): the Inbox tool from a script. */
 export const INBOX_CALL_USAGE = [

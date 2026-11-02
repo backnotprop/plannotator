@@ -18,7 +18,7 @@ import { INBOX_WAKE_INSTRUCTION } from "@plannotator/shared/inbox/connection";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_WAITS_TEXT } from "./inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import { ensureQwenTrust, qwenWakeToken, readQwenTrust, setQwenTrust } from "./inbox-qwen-trust";
 import { qwenRecordLive, qwenSettingsKeepOut, type QwenAgentsSettings } from "./inbox-qwen-wake";
 
@@ -223,7 +223,7 @@ describe("a reply to a running Qwen Code session", () => {
   test("goes in once over the session's socket: the trusted token's auth line, then one frame naming the session; never twice across sweeps and restarts; delivered at its next tool call", async () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship the worker today?");
-    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect(sent.text).toContain(`${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}`);
     expect((await thread(w.server, sent.thread_id)).messages[0]!).toMatchObject({ author: { host: "qwen", session: SESSION }, wakes: true });
 
     const replyId = await reply(w.server, sent.message_id, "Yes, ship it.");
@@ -277,10 +277,10 @@ describe("a reply to a running Qwen Code session", () => {
     expect(content).not.toContain("Quota 93% used");
   });
 
-  test("with no trusted-sender token nothing wakes: the agent is told to wait, and nothing is sent", async () => {
+  test("with no trusted-sender token nothing wakes: the agent is told to read later, and nothing is sent", async () => {
     const w = await world({ trust: false });
     const sent = await qwenSends(w.client, w.project, "Ship it?");
-    expect(sent.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     await reply(w.server, sent.message_id, "Yes.");
     await w.server.qwenWake.sweep();
     await Bun.sleep(100);
@@ -292,15 +292,15 @@ describe("a reply to a running Qwen Code session", () => {
     const w = await world();
     w.session.unregister();
     w.session.register({ file: `${process.pid}-0a1b2c3d.json` });
-    expect((await qwenSends(w.client, w.project, "A?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "A?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     w.session.unregister();
     w.session.register({ kind: "headless" });
     await w.server.qwenWake.sweep(); // reads the registry and settings again
-    expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     w.session.unregister();
     w.session.register();
     await w.server.qwenWake.sweep(); // reads the registry and settings again
-    expect((await qwenSends(w.client, w.project, "C?", SESSION, { "qwen-code/invocation": { version: 1, sessionId: SESSION, promptId: "p1" } })).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "C?", SESSION, { "qwen-code/invocation": { version: 1, sessionId: SESSION, promptId: "p1" } })).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect((await qwenSends(w.client, w.project, "D?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
   });
 
@@ -310,22 +310,22 @@ describe("a reply to a running Qwen Code session", () => {
     try {
       // An administrator's system settings hold them: so does every session.
       writeFileSync(system, JSON.stringify({ agents: { crossSessionInbound: "hold" } }));
-      expect((await qwenSends(w.client, w.project, "S?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+      expect((await qwenSends(w.client, w.project, "S?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
       // A value this Qwen does not know is held too (Qwen fails closed).
       writeFileSync(system, JSON.stringify({ agents: { crossSessionInbound: "review-later" } }));
       await w.server.qwenWake.sweep(); // reads the registry and settings again
-      expect((await qwenSends(w.client, w.project, "U?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+      expect((await qwenSends(w.client, w.project, "U?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     } finally {
       rmSync(join(system, ".."), { recursive: true, force: true });
     }
     await w.server.qwenWake.sweep();
     writeFileSync(join(w.qwenHome, "settings.json"), '{\n  // mine\n  "agents": { "crossSessionInbound": "hold" }\n}\n');
-    expect((await qwenSends(w.client, w.project, "A?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "A?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     writeFileSync(join(w.qwenHome, "settings.json"), "{}");
     mkdirSync(join(w.project, ".qwen"), { recursive: true });
     writeFileSync(join(w.project, ".qwen", "settings.json"), JSON.stringify({ agents: { crossSessionMessaging: false } }));
     await w.server.qwenWake.sweep(); // reads the registry and settings again
-    expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "B?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     rmSync(join(w.project, ".qwen"), { recursive: true });
     await w.server.qwenWake.sweep(); // reads the registry and settings again
     expect((await qwenSends(w.client, w.project, "C?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
@@ -399,6 +399,60 @@ describe("a reply to a running Qwen Code session", () => {
     expect(w.session.received).toHaveLength(2);
   });
 
+  test("no receipt on a message addressed to the session: a tool call changes nothing, its own read delivers it and the claim goes", async () => {
+    const w = await world();
+    const sent = await qwenSends(w.client, w.project, "Working on the ledger.");
+    w.session.answer = null;
+    const response = await fetch(`${base(w.server)}/api/inbox/threads/${sent.thread_id}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: w.server.serverSession, session: SESSION, body: "Also bump the version.", idempotency_key: "m1" }),
+    });
+    expect(response.status).toBe(200);
+    const words = ((await response.json()) as { message: { id: string } }).message.id;
+    await w.server.qwenWake.sweep();
+    await until(() => w.server.qwenWake.uncertain(SESSION, words));
+    expect(w.server.qwenWake.uncertain(SESSION, words)).toBe(true);
+    const listed = async () =>
+      ((await w.client.callTool({ name: "read_thread", arguments: { project_path: w.project, agent_session: SESSION } })).structuredContent as { threads: { thread_id: string; unread: boolean }[] }).threads.find((row) => row.thread_id === sent.thread_id)!;
+    expect((await listed()).unread).toBe(true);
+    expect((await thread(w.server, sent.thread_id)).messages.find((m) => m.id === words)!.delivery ?? null).toBeNull();
+
+    await w.client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: SESSION } });
+    await w.server.qwenWake.sweep();
+    expect((await thread(w.server, sent.thread_id)).messages.find((m) => m.id === words)!.delivery).toMatchObject({ host: "qwen", session: SESSION });
+    expect(w.server.qwenWake.uncertain(SESSION, words)).toBe(false);
+    expect(readdirSync(join(w.dataDir, "inbox", "qwen-wake"))).toEqual([]);
+    expect((await listed()).unread).toBe(false);
+    expect(w.session.received).toHaveLength(1);
+  });
+
+  test("a session Qwen refused holds no claim for what comes next: its own read still settles it", async () => {
+    const w = await world();
+    const sent = await qwenSends(w.client, w.project, "Working on the ledger.");
+    const message = async (words: string) => {
+      const response = await fetch(`${base(w.server)}/api/inbox/threads/${sent.thread_id}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: w.server.serverSession, session: SESSION, body: words, idempotency_key: words }),
+      });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { message: { id: string } }).message.id;
+    };
+    w.session.answer = "refused";
+    const first = await message("First.");
+    await w.server.qwenWake.sweep();
+    await until(() => w.server.qwenWake.uncertain(SESSION, first));
+    const second = await message("Second.");
+    await w.server.qwenWake.sweep();
+    expect(w.session.received).toHaveLength(1);
+    expect(w.server.qwenWake.uncertain(SESSION, second)).toBe(false);
+
+    await w.client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: SESSION } });
+    const messages = (await thread(w.server, sent.thread_id)).messages;
+    for (const id of [first, second]) expect(messages.find((m) => m.id === id)!.delivery).toMatchObject({ session: SESSION });
+  });
+
   test("refused: saved, and that session is not woken again", async () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship it?");
@@ -407,7 +461,7 @@ describe("a reply to a running Qwen Code session", () => {
     await w.server.qwenWake.sweep();
     await until(() => w.server.qwenWake.uncertain(SESSION, replyId));
     expect(w.server.qwenWake.uncertain(SESSION, replyId)).toBe(true);
-    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
   });
 
   test("dropped by Qwen's rate limit: sent again later with a new id", async () => {
@@ -429,19 +483,19 @@ describe("a reply to a running Qwen Code session", () => {
     expect(w.session.received[1]!.frame.msgId).not.toBe(w.session.received[0]!.frame.msgId);
   });
 
-  test("Qwen Code turned off while Qwen will not revoke the grant: the running Inbox stops waking at once, and agents are told to wait", async () => {
+  test("Qwen Code turned off while Qwen will not revoke the grant: the running Inbox stops waking at once, and agents are told to read later", async () => {
     const w = await world();
     expect((await qwenSends(w.client, w.project, "Ship it?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
     const refusing = createAgentEnvironmentFor({ platform: process.platform, homeDir: w.fake.home, env: { ...w.fake.env, FAKE_QWEN_CONTROLLERS_FAIL: "1" } });
     expect(await setQwenTrust(false, w.dataDir, refusing)).toContain("tries again at the next start");
     await until(() => !w.server.qwenWake.canWake());
-    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
   });
 
-  test("Qwen stops confirming because the grant was revoked in Qwen: the token is dropped, and later agents are told to wait", async () => {
+  test("Qwen stops confirming because the grant was revoked in Qwen: the token is dropped, and later agents are told to read later", async () => {
     const w = await world();
     const sent = await qwenSends(w.client, w.project, "Ship it?");
-    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect(sent.text).toContain(`${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}`);
     // The person runs `qwen sessions controllers remove <id>`: Qwen now drops Plannotator's frames without a word.
     writeFileSync(join(w.qwenHome, "peer-controllers.json"), JSON.stringify({ schemaVersion: 1, controllers: [] }));
     const replyId = await reply(w.server, sent.message_id, "Yes.");
@@ -451,7 +505,7 @@ describe("a reply to a running Qwen Code session", () => {
     await until(() => qwenWakeToken(w.dataDir, w.qwenHome) === null, 5_000);
     expect(readQwenTrust(w.dataDir)).toMatchObject({ revoked_outside_at: expect.any(String) });
     await until(() => !w.server.qwenWake.canWake());
-    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await qwenSends(w.client, w.project, "Again?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
   });
 
   test("a malformed receipt (a token of the right length in characters, not in bytes; a line that is not JSON) ends only its own connection", async () => {

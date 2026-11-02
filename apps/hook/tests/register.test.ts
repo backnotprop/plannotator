@@ -532,7 +532,6 @@ describe('register', () => {
   const TOOLS = [
     tool('send_message', { body: { type: 'string', description: 'The message.' }, project_path: { type: 'string' }, agent_session: { type: 'string' }, agent_host: { type: 'string' }, agent_name: { type: 'string' }, reply_to: { type: 'string' } }),
     tool('read_thread', { thread_id: { type: 'string' }, project_path: { type: 'string' }, agent_session: { type: 'string' } }),
-    tool('wait_for_reply', { thread_id: { type: 'string' }, timeout_seconds: { type: 'number' }, agent_session: { type: 'string' } }),
     tool('resolve_message', { message_id: { type: 'string' } }),
   ]
   const GUIDE_TOOL = tool('submit_guide', { patch: { type: 'string' }, project_path: { type: 'string' } })
@@ -564,7 +563,7 @@ describe('register', () => {
     expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'wait_for_reply', 'resolve_message', 'submit_guide', 'get_guide_brief'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
     expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
@@ -1139,7 +1138,7 @@ describe('register', () => {
     await $.session.start(SESSION)
 
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message', 'submit_guide'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message', 'submit_guide'])
     expect(Object.keys(registered?.inputSchema.properties)).not.toContain('agent_session')
     // project_path is the one filled argument the agent may set (optional): the folder a call is about.
     expect(registered?.inputSchema.properties.project_path?.type).toBe('string')
@@ -1151,9 +1150,21 @@ describe('register', () => {
     await $.session.start(SESSION)
 
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'wait_for_reply', 'resolve_message'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message'])
     const refused = await $.tool.call({ tool: INBOX_TOOL, action: 'submit_guide', patch: 'x' })
     expect(refused.deny).toContain('update Plannotator')
+  })
+
+  test('an older Inbox whose /mcp still lists wait_for_reply: the tool does not offer it, and a call that names it is told what to do, reaching nothing', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    const w = world(on, { files: withRegistry(), fetch: inbox([...TOOLS, tool('wait_for_reply', { thread_id: { type: 'string' } })], calls) })
+    await $.session.start(SESSION)
+
+    const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'resolve_message'])
+    const refused = await $.tool.call({ tool: INBOX_TOOL, action: 'wait_for_reply', thread_id: 'msg_1' })
+    expect(refused.deny).toStartWith('action_removed: ')
+    expect(calls.filter((c) => c.body?.method === 'tools/call')).toEqual([])
   })
 
   test('PLANNOTATOR_INBOX_TOOL=0: no plannotator_inbox even with an Inbox found', async ($: any, on: any) => {
@@ -1179,7 +1190,7 @@ describe('register', () => {
       name: 'send_message',
       arguments: { body: 'Ship it?', project_path: '/work', agent_session: 'session-1', agent_host: 'claude-code', agent_name: 'Claude Code' },
       // The mod's wake delivers the reply as a turn, so it marks the call (#1771):
-      // the send tools then say to end the turn instead of waiting with wait_for_reply.
+      // the send tools then say to end the turn instead of reading the thread later.
       _meta: { 'ai.plannotator/inbox-wakes': true },
     })
 

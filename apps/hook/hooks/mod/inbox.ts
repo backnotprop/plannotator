@@ -273,12 +273,6 @@ export const STORE_INBOX_TOOLS = 'inboxTools'
 export const INBOX_POLL_WAIT_MS = 20_000
 /** After a failed poll: 5 s, doubling to 60 s while the Inbox stays away, never giving up. */
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
-/**
- * wait_for_reply's longest hold through this tool: `$.http.fetch` gives up at
- * 30 s, so the call asks the Inbox for at most 25 s (the Inbox's own default
- * is 50 s, for MCP hosts with a 60 s tool timeout).
- */
-export const INBOX_WAIT_MAX_SECONDS = 25
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
 /** How often the lease is renewed or re-read. */
@@ -631,10 +625,6 @@ export class InboxLink {
       if (Array.isArray(attachments)) {
         call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
       }
-    }
-    if (call.name === 'wait_for_reply') {
-      const asked = typeof call.arguments.timeout_seconds === 'number' ? call.arguments.timeout_seconds : INBOX_WAIT_MAX_SECONDS
-      call.arguments.timeout_seconds = Math.max(1, Math.min(asked, INBOX_WAIT_MAX_SECONDS))
     }
     const running = await this.ensureRunning()
     if ('error' in running) return { deny: running.error }

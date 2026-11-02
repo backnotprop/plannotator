@@ -9,7 +9,7 @@
  * through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *  - the foot says "10 questions stay open · Skip them" by default; a Send
  *    with the one pick is ONE reply, the other 10 stay open, and the agent's
- *    wait_for_reply gets "You have 10 other questions open in this thread…";
+ *    read_thread gets "You have 10 other questions open in this thread…";
  *  - "Skip them" turns it into "10 questions will be skipped · Keep open";
  *    that Send is still ONE reply, skipping exactly those 10;
  *  - the same on a phone (390 by 844, touch).
@@ -140,8 +140,7 @@ test("desktop: answer 1 of 11 and Send: one reply, the other 10 stay open, and t
     const states = model.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.state));
     expect(states.filter((s) => s === 'open')).toHaveLength(10);
     expect(states.filter((s) => s === 'sent')).toHaveLength(1);
-    const waited = await world.claude.waitForReply(threadId, 5);
-    const body = (waited.reply as { body: string }).body;
+    const body = (await world.claude.nextReply(threadId, 5)).body as string;
     expect(body.split('\n\n').slice(0, 2)).toEqual([
       'Answered 1 question.',
       "You have 10 other questions open in this thread. They stay open; the person will answer them in the Inbox. Don't re-ask them.",

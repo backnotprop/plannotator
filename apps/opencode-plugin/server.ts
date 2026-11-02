@@ -241,7 +241,7 @@ const serverPlugin = {
       if (inboxConfig && resolveInboxReminder(inboxConfig, process.env, "opencode")) {
         try {
           // A host without session.prompt registers the tool without the wake
-          // (registerInboxOpenCode2): its line names wait_for_reply instead.
+          // (registerInboxOpenCode2): its line says to read the thread instead.
           // The person's own line (config.json prompts.inbox) replaces either.
           const reminder = openCode2InboxReminder(v2, inboxConfig);
           await ctx.session.hook("context", async (event) => {
