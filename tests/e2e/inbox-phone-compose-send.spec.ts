@@ -14,7 +14,7 @@
  *   buttons on its left; a tap on it with the keyboard up sends.
  * - To is on screen in every state, in the top bar's line with the keyboard up, clear of Cancel and Save draft.
  * - No gap: the message field runs to the foot, and the foot to the keyboard (or the sheet's bottom).
- * - The head steps aside for the words, but a Thread row in use or saying something, and a refused file, do not.
+ * - The notes and tiles step aside for the words, but a refused file does not; the Thread row always stays.
  * - Save draft is at the top right only while nothing can be sent. Delete draft is off the sheet and on the Drafts page.
  * - A draft to an ended session keeps To's chevron clear of Save draft and says "ended" whole.
  * - Under the fold's threshold Send still stays on screen: a strip of 78 px, and a browser that resizes the layout.
@@ -385,7 +385,10 @@ for (const engine of ENGINES) {
         sendInReach(open, 'keyboard open');
         headFolded(open, 'keyboard open');
         noGap(open, 'keyboard open');
-        expect(open.thread, 'Thread stepped aside').toBeNull();
+        // Thread stays with the keyboard up (the owner, 2026-11-02: hiding it lost the subject line).
+        expect(open.thread, 'Thread stays').toBeTruthy();
+        expect(open.thread!.top, 'Thread is under the folded head').toBeGreaterThanOrEqual(open.bar.bottom - 0.5);
+        expect(open.thread!.bottom, 'Thread is over the foot').toBeLessThanOrEqual(open.foot.top + 0.5);
         await shot(page, `${engine.name}-${size.width}-keyboard-open`, true);
 
         // Back as it was.
@@ -656,7 +659,7 @@ for (const engine of ENGINES) {
       headFolded(typing, 'typing the name');
       await chip.fill(name);
       await field.focus();
-      await expect(sheet.locator('.ib-cp-thread')).toBeHidden();
+      await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
       await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
       await expect(sheet.locator('[data-compose-thread-name-error]')).toBeVisible();
       const refused = await read(page);

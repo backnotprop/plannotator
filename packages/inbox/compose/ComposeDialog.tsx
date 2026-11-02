@@ -37,6 +37,7 @@ import { Tip } from '../components/Tip';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { registerReloadFlush } from '../stalePage';
 import {
   DRAFT_TOO_LONG,
   NOTHING_SENT_NO_AGENT,
@@ -58,6 +59,7 @@ import {
   type ThreadNameState,
   type ComposeTarget,
 } from './model';
+import { newUuid } from '../uuid';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -232,7 +234,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [footCovered, question, voice.session]);
 
   // The idempotency key of one Send: new whenever what would be sent changes.
-  const sendKey = useRef(crypto.randomUUID());
+  const sendKey = useRef(newUuid());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
   // The chip's suggestion, worked out a moment after typing stops; the same name again changes nothing on screen.
   const fileNames = files.files.map((file) => file.name).join('\n');
@@ -243,7 +245,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [body, fileNames]);
   const threadName = draftThreadName(nameState);
   useEffect(() => {
-    sendKey.current = crypto.randomUUID();
+    sendKey.current = newUuid();
   }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
@@ -403,6 +405,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (result) props.onSaved(result);
     else setQuestion(false);
   };
+
+  // The stale page notice's Reload (stalePage.ts): what is written here is kept as a draft first, as Close's Save draft
+  // keeps it. A draft another window changed, a file still uploading or a running take stops the reload instead.
+  const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
+  reloadFlush.current = async () => {
+    if (!keepsDrafts || empty || !dirty) return true;
+    if (voice.busy || conflict) return false;
+    return (await save()) !== null;
+  };
+  useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
 
   const deleteDraft = async () => {
     if (!draft) return;

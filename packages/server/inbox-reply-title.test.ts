@@ -176,6 +176,19 @@ describe("a plain reply", () => {
     expect((await poll(server, OWNER, project))[0]).toMatchObject({ id: late, subject: "Worker retry budget" });
   });
 
+  test("a New message (or a Board Ask) to a session already in the thread takes the short name, or `a message`, never the subject", async () => {
+    const { server, client, project } = await setup();
+    await poll(server, OWNER, project);
+    for (const [sent, title] of [[await asked(client, project), NAME], [await askedUnnamed(client, project), "a message"]] as const) {
+      const written = await post(server, `/api/inbox/threads/${sent.thread_id}/message`, { session: OWNER, body: "Where is this now?", idempotency_key: key() });
+      const [command] = await poll(server, OWNER, project);
+      expect(command).toMatchObject({ type: "message", id: written.message.id });
+      expect(firstLine(command!)).toBe(`Plannotator Inbox: ${title} (${written.message.id})`);
+      expect(inboxWakeText(command!)).not.toContain(SUBJECT);
+      await delivered(server, OWNER, written.message.id);
+    }
+  });
+
   test("Send now, and its follow-up, carry the same title", async () => {
     const { server, client, project } = await setup();
     const named = await asked(client, project);
