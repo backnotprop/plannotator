@@ -34,7 +34,7 @@ import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileV
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
 import type { InboxToastModel } from './Toast';
-import { AnnotationsChip } from './AnnotationsChip';
+import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
@@ -81,6 +81,7 @@ import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
+import { createPickQueue, onlyQuestionsChanged } from '../pickQueue';
 import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -373,6 +374,10 @@ export function MessageBody({
     onSave: (annotation: Annotation) => Promise<boolean>;
     onUnanchored?: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
     onPainted?: () => void;
+    /** A press on a comment's highlight: the list of comments, at this one. Null: the press made a selection, the list makes way. */
+    onOpen?: (id: string | null) => void;
+    /** The comment the list is open at: its highlight shows it. */
+    openId?: string | null;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
     suggest?: (selectedText: string) => string | undefined;
     /** The comment on a diagram part the reply box's list just pointed at: the diagram shows it selected (its part panned into view, its ring pulsing). */
@@ -471,6 +476,7 @@ export function MessageBody({
   // A tall screenshot in the body shows its top, cropped like the gallery's
   // (inbox.css); a click still opens it whole.
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pressSelected = useRef(false);
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   useEffect(() => {
@@ -701,11 +707,19 @@ export function MessageBody({
   // person removes elsewhere (the reply box's list) leaves the text.
   const viewerRef = useRef<ViewerHandle>(null);
   const commentList = useMemo<Annotation[]>(() => (comments ? [...comments.annotations] : NO_ANNOTATIONS), [comments?.annotations]);
+  // A diagram's numbered badge, in the message or its popout, shows its comment selected. A text highlight's press is
+  // openHighlight's, and reaches here too, so it is passed over.
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null);
+  const selectBadge = useCallback(
+    (id: string | null) => {
+      if (id !== null && !commentList.find((comment) => comment.id === id)?.diagramAnchor) return;
+      setSelectedBadge((current) => (current === id ? null : id));
+    },
+    [commentList],
+  );
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const painted = useRef<Set<string>>(new Set());
-  const [selectedComment, setSelectedComment] = useState<string | null>(null);
-  const selectComment = useCallback((id: string | null) => setSelectedComment((current) => (current === id ? null : id)), []);
   const addComment = useCallback((annotation: Annotation) => {
     painted.current.add(annotation.id);
     void commentsRef.current?.onSave(annotation).then((saved) => {
@@ -793,9 +807,25 @@ export function MessageBody({
     />
   );
 
+  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
+  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
+  const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
+    const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
+    // A link in the highlight stays a link.
+    if (!id || target.closest('a, button')) return;
+    // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
+    comments?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
+  };
+  // Read on the way down: the highlighter takes the selection away at this mouseup, so the click finds none.
+  const readPress = () => {
+    pressSelected.current = window.getSelection()?.isCollapsed === false;
+  };
+
   return (
     <ImageResolverContext.Provider value={resolveImage}>
-    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef}>
+    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
       <Viewer
@@ -804,8 +834,8 @@ export function MessageBody({
         markdown={shown}
         annotations={commentList}
         onAddAnnotation={comments ? addComment : noop}
-        onSelectAnnotation={comments ? selectComment : noop}
-        selectedAnnotationId={comments ? (comments.revealed ?? selectedComment) : null}
+        onSelectAnnotation={comments ? selectBadge : noop}
+        selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
@@ -892,6 +922,8 @@ export interface ThreadPaneProps {
   sent: { at: string; checked_at: string | null; recipients?: InboxSentRecipient[] } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
   onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
+  /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
+  onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
   /** Something was written (a Send, resolve): read the thread and the list again. */
   onChanged: () => Promise<void>;
   /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
@@ -1224,7 +1256,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1276,7 +1308,17 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
-  const pickChain = useRef<Promise<void>>(Promise.resolve());
+  const onPickSavesNow = useRef(onPickSaves);
+  onPickSavesNow.current = onPickSaves;
+  /** The pane closed: the window holds no read for its saves; a save still out says only when the last has landed. */
+  const paneGone = useRef(false);
+  const [pickQueue] = useState(() =>
+    createPickQueue((ids) => {
+      if (!paneGone.current || ids.size === 0) onPickSavesNow.current?.(ids);
+    }),
+  );
+  /** Questions replaced under an answer being saved, until the person has read that (`acknowledgeStale`). */
+  const replacedSaves = useRef(new Set<string>());
   const revisions = useRef(new Map<string, number>());
   const threadRef = useRef(thread);
   threadRef.current = thread;
@@ -1679,7 +1721,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   );
 
   // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
+  // A saved pick moves neither: only a real read of the thread reads them again.
+  const filesRevision = useRef(thread);
+  if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -2030,7 +2075,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
     }
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
@@ -2038,8 +2083,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       await inboxApi.removeAnnotation(record.id);
       dropRecord(record.id);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
     }
+  };
+  /** The list of comments: open or not, one state for its four ways in (reply box, foot, highlights, full-screen card). */
+  const [commentsList, setCommentsList] = useState<CommentsListAt | null>(null);
+  const [commentEdit, setCommentEdit] = useState<CommentEdit | null>(null);
+  const openListAt = (id: string | null) => {
+    if (id === null) setCommentsList(null);
+    else if (listHome && records.some((record) => record.id === id)) setCommentsList((open) => ({ at: id, press: (open?.press ?? 0) + 1 }));
+  };
+  const commentsListProps: AnnotationsListProps = {
+    records,
+    attachments: allFiles,
+    onEdit: editRecord,
+    onRemove: removeRecord,
+    onOpen: openRecord,
+    messageName: messageCommentName,
+    unanchored: unanchoredComments,
+    editing: commentEdit,
+    onEditing: setCommentEdit,
   };
   /** The annotations as Plannotator's feedback text: each file version's text read now, so line numbers are what the person read. */
   const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
@@ -2605,7 +2668,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           const wasOpen = boxRef.current.open;
           void (async () => {
             await actionSavesSettled();
-            await pickChain.current;
+            // An answer that was not saved says so; the key is spent, never a Send of the older answer.
+            if (!(await pickQueue.settled())) {
+              pickNotSaved();
+              return;
+            }
             for (let i = 0; i < 8 && !ready(sendRef.current); i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             if (boxRef.current.open !== wasOpen || !showingRef.current || modalOpen()) return;
             if (ready(sendRef.current)) press();
@@ -2765,41 +2832,88 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, []);
   useEffect(() => settleHeldPicks(outbox), [outbox, settleHeldPicks]);
 
+  /** An answer left unsaved with no pane to show why: the toast outlives it. Names the thread, as the pane is gone. */
+  const unsavedWhenGone = () => {
+    const subject = threadRef.current.subject ?? 'this thread';
+    onToastNow.current?.({ icon: 'warn', lead: `Pick not saved. Your answer in "${subject}" did not reach the Inbox.`, wrap: true });
+  };
+  useEffect(() => {
+    paneGone.current = false;
+    return () => {
+      paneGone.current = true;
+      // Whatever still saves is no longer the person's run of answers: the window reads as records come.
+      onPickSavesNow.current?.(new Set(), true);
+      if (pickQueue.unsaved() > 0) unsavedWhenGone();
+    };
+    // Only as the pane goes; `unsavedWhenGone` reads refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickQueue]);
+
+  /** A wait said an answer was not saved: its error shows, or (nothing said why) this one. Never a silent stop. */
+  const pickNotSaved = () => setError((current) => current ?? 'The pick was not saved.');
+
   const pick = (messageId: string, key: string, answer: QuestionAnswer | null) => {
     const id = `${messageId}/${key}`;
     setPending((current) => new Map(current).set(id, answer));
     setError(null);
-    pickChain.current = pickChain.current.then(async () => {
+    // Read when the save starts, never when the answer changed: the save running now raises the revision.
+    pickQueue.put(id, async () => {
       const known = questionById(id);
       const revision = Math.max(revisions.current.get(id) ?? 0, known?.revision ?? 0);
-      /** Held for another machine (linked machines): the pick stays drawn as picked; it applies when that machine takes it. */
-      let held = false;
+      /**
+       * The words stay on the card: held for another machine (linked machines), it applies when that machine takes it;
+       * not saved, they are still the person's answer, and the next wait saves them.
+       */
+      let kept = false;
       try {
-        const result = await inboxApi.pick(messageId, key, revision, answer);
+        // `unsentOnly`: a save that lands after its question went with a reply never reopens what the agent has.
+        const result = await inboxApi.pick(messageId, key, revision, answer, { unsentOnly: true });
         for (const q of result.questions) revisions.current.set(`${q.message_id}/${q.key}`, q.revision);
-        // A Send waiting on this chain reads the thread right after it, before
+        // A Send waiting on this save reads the thread right after it, before
         // React draws the saved picks: give it the saved questions now, or it
         // sends a stale revision (refused) or leaves out a note just saved.
         const latest = threadRef.current;
         threadRef.current = { ...latest, messages: latest.messages.map((m) => (m.id === messageId ? { ...m, questions: result.questions } : m)) };
         onQuestions(messageId, result.questions);
+        return true;
       } catch (cause) {
         if (cause instanceof InboxHeldError) {
-          held = true;
+          kept = true;
           heldPicks.current.set(cause.outbox.key, { id, answer, revision });
           // Queued picks on one question apply there in order: the next one goes with the revision this one makes.
           revisions.current.set(id, revision + 1);
           onToastNow.current?.({ icon: 'clock', lead: cause.message, wrap: true });
           // The outbox may have settled it already (its frame came before this answer).
           settleHeldPicks(outboxNow.current);
-          return;
+          return true;
         }
-        // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced.
-        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        const newer = pickQueue.hasNewer(id);
+        // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced. The words have
+        // nowhere to go: the toast says so, and a Send stops at the stale guard, even with no answer saved on it.
+        if (isSuperseded(cause)) {
+          replacedSaves.current.add(id);
+          setStale((current) => (current.includes(id) ? current : [...current, id]));
+          if (answer && !newer) onToastNow.current?.({ icon: 'warn', lead: "Pick not saved. That question was replaced, so this answer won't be sent.", wrap: true });
+          await onChanged();
+          return true;
+        }
+        // It went with a reply while this save waited: that reply stands, and the agent has what was saved before.
+        if (cause instanceof InboxApiError && cause.code === 'question_already_sent') {
+          if (answer && !newer) onToastNow.current?.({ icon: 'warn', lead: 'Pick not saved. That question was already sent, so your last change did not go.', wrap: true });
+          await onChanged();
+          return true;
+        }
+        // Not saved: the words stay, the person is told, and the next Send saves them or stops. A newer answer decides instead.
+        kept = true;
+        if (!newer) {
+          if (paneGone.current) unsavedWhenGone();
+          else setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        }
         await onChanged();
+        return false;
       } finally {
         setPending((current) => {
-          if (held) return current;
+          if (kept) return current;
           if (!current.has(id) || current.get(id) !== answer) return current;
           const next = new Map(current);
           next.delete(id);
@@ -2871,6 +2985,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   );
   /** Acting on the panel: these replacements were seen, so Send goes as asked from now on. */
   const acknowledgeStale = () => {
+    replacedSaves.current.clear();
     setStale([]);
     setGuard(false);
   };
@@ -3200,10 +3315,29 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     let sendWords = '';
     const requests: { messageId: string; input: Parameters<typeof inboxApi.reply>[1] }[] = [];
     let sentUploads: string[] = [];
+    /** Opens the line of saves again once this Send's replies have left. */
+    let releasePicks: (() => void) | null = null;
     try {
       // A Done or a note under an action item still on its way (a note saves on leaving its field): answered first.
       await actionSavesSettled();
-      await pickChain.current;
+      // A reply names its questions by revision and the server sends what is saved, so the newest answers land first.
+      // One that was not saved stops the Send: the older answer would go in its place.
+      releasePicks = await pickQueue.forSend();
+      if (!releasePicks) {
+        pickNotSaved();
+        return;
+      }
+      // A question replaced under an answer during the wait: as a Send pressed after it does, it stops for the guard.
+      if (replacedSaves.current.size > 0 && !options.despiteReplaced) {
+        setGuard(true);
+        // The guard draws once the thread shows the question replaced; until a read brings that, the error says why.
+        const drawn = threadRef.current.messages.some((m) =>
+          (m.questions ?? []).some((q) => q.state === 'superseded' && replacedSaves.current.has(`${q.message_id}/${q.key}`)),
+        );
+        if (!drawn) pickNotSaved();
+        if (options.stayFull) fileToThread();
+        return;
+      }
       const current = threadRef.current;
       // The box's words, or (the box closed) the words kept as its draft: the foot's Send carries them too.
       // Before anything goes, the draft's saves are answered (a save landing after the Send would bring the
@@ -3454,6 +3588,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           if (text.trim() !== '') replyDraft.save(text);
         }
       }
+      releasePicks?.();
       setSending(false);
       if (sendingFromComposer.current) {
         // Back in the card's field once it is drawn (a Send button that went disabled let focus go).
@@ -3684,12 +3819,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setError(null);
     let went = 0;
     let total = 0;
+    /** Opens the line of saves again once this Re-ask has gone. */
+    let releasePicks: (() => void) | null = null;
     try {
       // A pick still being saved goes too: wait for it, then take the targets
       // from the thread as saved (threadRef), not as drawn when Re-ask was
       // pressed: a note just saved has a newer revision, a question just
-      // picked is no longer open.
-      await pickChain.current;
+      // picked is no longer open. One that was not saved stops it, as it stops a Send.
+      releasePicks = await pickQueue.forSend();
+      if (!releasePicks) {
+        pickNotSaved();
+        return;
+      }
       const targets = resolved && !cameBack ? [] : reaskTargets(threadRef.current.messages, liveMessage);
       const freshNotes = targets.filter((t) => t.kind === 'reask');
       // The routed note follows the session the person chose for, wherever its latest message is now.
@@ -3727,6 +3868,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       setError(went > 0 ? `${went} of ${total} went; the rest did not. ${why}` : `Nothing was asked again. ${why}`);
       if (went > 0) await onChanged();
     } finally {
+      releasePicks?.();
       setReasking(false);
     }
   };
@@ -3820,6 +3962,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             canSend: boxWords !== '' || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0),
             picks: picksCount,
             annotations: records.length,
+            comments: {
+              ...commentsListProps,
+              // A comment on a message's text shows in the thread: back to it first, and to the passage once it is drawn.
+              onOpen: (record) => (record.message ? fileToThread(() => requestAnimationFrame(() => requestAnimationFrame(() => openRecord(record)))) : openRecord(record)),
+              list: commentsList?.card ? commentsList : null,
+              onList: (next) => setCommentsList(next && { ...next, card: true }),
+            },
             files: box.open ? replyFiles.files : [],
             onFiles: (list) => attachFromComposer(list, true),
             onDropFiles: (list) => attachFromComposer(list, false),
@@ -3877,6 +4026,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const [rowFit, setRowFit] = useState<{ level: number; max: OpenQuestionsLabelForm } | null>(null);
   const rowLevel = rowFit?.level ?? null;
   const footStatusShown = waiting || draftKept;
+  // What the foot shows in the list's place, in the order the foot draws them. A list opened then would show only later, by itself.
+  const listHome = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && (box.open || !(route.open && asking));
+  // The list lives where it opened: another thread, another view, the box opening or closing, or anything taking the foot's place, takes it away.
+  useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn, listHome]);
+  /** Closes the foot's list. `back`: to the count that shows at this width (the foot's first button once no comment is left). */
+  const closeFootList = (back: boolean) => {
+    setCommentsList(null);
+    if (!back) return;
+    const row = footRowRef.current;
+    const links = [...(row?.querySelectorAll<HTMLElement>('[data-comments-link]') ?? [])];
+    const link = links.find((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
+    (link ?? row?.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true });
+  };
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
@@ -4011,19 +4173,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     else go();
   };
 
-  const archiveButton = (
-    <Tip content={archived ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}>
-      <button
-        type="button"
-        className="ib-iconbtn"
-        onClick={() => void resolve(!archived)}
-        aria-label={archived ? 'Unarchive the thread' : 'Archive the thread'}
-        data-archive=""
-      >
-        <Icon name="archive" />
-      </button>
-    </Tip>
-  );
   // Pin to the sidebar (approval "inbox-pinned-threads"): the header ⋯ menu's first item (Pin thread /
   // Unpin thread), the phone's way to pin.
   // A click shows its state at once and its request waits for the one before it, so a quick
@@ -4144,7 +4293,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         </div>
       )}
       <div className="ib-phead" ref={headRef} data-artifacts-on={artifactsOn ? '' : undefined}>
-        {/* A phone leads with the way back to the list; Archive sits at the right, where the close was. */}
+        {/* A phone leads with the way back to the list; the ⋯ menu (with Archive) sits at the right, where the close was. */}
         {phone && artifactsOn ? (
           // On a phone Artifacts is a screen of its own: its way back is to the thread (the browser's Back, so the swipe agrees).
           <>
@@ -4218,7 +4367,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           </>
         )}
         {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
-            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, Archive, then the close.
+            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close.
             A phone keeps the same order after its way back. */}
         {phone && artifactsOn ? null : (
           <>
@@ -4264,8 +4413,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 </button>
               </Tip>
             )}
-            {archiveButton}
-            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} markUnread={markUnreadInMenu ? onMarkUnread : undefined} />
+            <ThreadMore
+              {...copyHost}
+              pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              markUnread={markUnreadInMenu ? onMarkUnread : undefined}
+              archive={{ archived, onToggle: () => void resolve(!archived) }}
+            />
             {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
@@ -4698,6 +4851,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                           onSave: (annotation) => saveMessageComment(message.id, annotation),
                           onUnanchored: noteUnanchored,
                           onPainted: () => repaintHits(message.id),
+                          onOpen: openListAt,
+                          openId: commentsList?.at ?? null,
                           revealed: revealedComment,
                         }
                       : undefined
@@ -5027,15 +5182,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   </Tip>
                 )}
                 {takesAnnotations && (
-                  <AnnotationsChip
-                    records={records}
-                    attachments={allFiles}
-                    onEdit={editRecord}
-                    onRemove={removeRecord}
-                    onOpen={openRecord}
-                    messageName={messageCommentName}
-                    unanchored={unanchoredComments}
-                  />
+                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
                 )}
                 <VoiceFoot voice={voice} phone={phone} />
               </div>
@@ -5153,7 +5300,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             </div>
             {(waiting || draftKept) && (
               <div className="ib-footstatus" data-foot-status="">
-                <DraftFootNote id={draftNoteId} unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }} />
+                <DraftFootNote
+                  id={draftNoteId}
+                  unsent={{ reply: draftKept, picks: picksCount, comments: records.length, done: draftActions.length - draftCant, cant: draftCant }}
+                  onComments={() => setCommentsList((open) => (open ? null : { at: null }))}
+                  commentsOpen={commentsList !== null && !commentsList.card}
+                />
                 {waiting && unanswered.length > 0 && (
                   <span className={keepOpen ? 'ib-keep' : undefined}>
                     <SkipChip id={skipNoteId} count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
@@ -5167,6 +5319,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 foot instead, never over a button. With Send waiting (picks or kept words), no pill. */}
             {showNew && phone && !waiting && !draftKept && newPill}
           </div>
+          {commentsList && !commentsList.card && (
+            <div className="ib-annat ib-annfoot">
+              <div className="ib-annat-in">
+                <AnnotationsList {...commentsListProps} at={commentsList.at} press={commentsList.press} onClose={closeFootList} />
+              </div>
+            </div>
+          )}
           </>
         )}
         {!archived && (

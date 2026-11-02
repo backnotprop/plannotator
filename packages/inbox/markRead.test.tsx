@@ -319,7 +319,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });
 
-test.skipIf(!hasDom)('the header leads with full screen, then Mark read; Archive, then ⋯ More, sit beside the close at the right, only the hairline before it', async () => {
+test.skipIf(!hasDom)('the header leads with full screen, then Mark read; ⋯ More (which holds Archive) sits beside the close at the right, only the hairline before it', async () => {
   // Owner, 2026-10-16: "the archive button needs to move next to the close button. Mark read should be the furthest."
   // The hairline is approval "inbox-thread-artifacts" (2026-10-23): icons at the right, then | and the close.
   // ⋯ More (the copy menu) after Archive is design record "inbox-copy-message", option B (2026-10-28).
@@ -328,7 +328,6 @@ test.skipIf(!hasDom)('the header leads with full screen, then Mark read; Archive
   const head = el.querySelector('section.ib-pane .ib-phead')!;
   const buttons = [...head.querySelectorAll('button')];
   const markRead = head.querySelector('[data-mark-read]')!;
-  const archive = head.querySelector('[data-archive]')!;
   const more = head.querySelector('[data-thread-more]')!;
   const close = head.querySelector('button[aria-label="Close the thread"]');
   // DOM order is the tab order. A desktop beside the list: the thread's full-screen button leads (approval
@@ -340,13 +339,13 @@ test.skipIf(!hasDom)('the header leads with full screen, then Mark read; Archive
   expect(full!.getAttribute('aria-label')).toBe('Hide the sidebar and the list');
   expect(full!.nextElementSibling?.className).toBe('ib-vsep');
   expect(buttons[1] === markRead).toBe(true);
-  expect(archive.nextElementSibling === more).toBe(true);
+  expect(head.querySelector('[data-archive]')).toBeNull();
+  expect(more.previousElementSibling?.getAttribute('aria-label')).not.toBe('Archive the thread');
   expect(close !== null).toBe(true);
   expect(buttons.at(-1) === close).toBe(true);
   expect(more.nextElementSibling?.className).toBe('ib-vsep');
   expect(more.nextElementSibling?.nextElementSibling === close).toBe(true);
   expect(head.querySelectorAll('.ib-vsep').length).toBe(2);
-  expect(archive.getAttribute('aria-label')).toBe('Archive the thread');
 });
 
 test.skipIf(!hasDom)('the pressed button moves it back; the toast Undo does the same', async () => {

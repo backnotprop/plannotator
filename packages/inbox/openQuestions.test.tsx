@@ -762,6 +762,7 @@ describe('the full-screen composer counts as the foot does', () => {
           canSend: false,
           picks: 0,
           annotations: 0,
+        comments: { records: [], attachments: [], onEdit: async () => {}, onRemove: async () => {}, onOpen: () => {}, editing: null, onEditing: () => {}, list: null, onList: () => {} },
           actions: 0,
           files: [],
           onFiles: () => {},
@@ -1252,13 +1253,13 @@ function spokenText(el: Element): string {
   return (copy.textContent ?? '').replace(/\s+/g, ' ').trim();
 }
 
-async function renderDraftFoot(unsent: { reply: boolean; picks: number; comments: number }) {
+async function renderDraftFoot(unsent: { reply: boolean; picks: number; comments: number }, onComments?: () => void) {
   const { DraftFootNote } = await import('./components/DraftLabel');
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<DraftFootNote id="draft-note" unsent={unsent} />);
+    root.render(<DraftFootNote id="draft-note" unsent={unsent} onComments={onComments} />);
   });
   return host.querySelector<HTMLElement>('[data-draft-foot]')!;
 }
@@ -1274,6 +1275,23 @@ test.skipIf(!hasDom)('the draft status keeps its pick words and its comment coun
   expect(count.querySelector('svg')).not.toBeNull();
   // What Send and Edit draft are described by says everything, whatever step 4 hides.
   expect(spokenText(foot)).toBe('Draft, 1 pick, 3 comments');
+});
+
+test.skipIf(!hasDom)('with a way to the list, the words and the pill are buttons that open it and say the count; with no comments there is no button', async () => {
+  let opened = 0;
+  const foot = await renderDraftFoot({ reply: false, picks: 1, comments: 3 }, () => opened++);
+  const words = foot.querySelector<HTMLButtonElement>('button[data-draft-comments]')!;
+  const pill = foot.querySelector<HTMLButtonElement>('button[data-draft-pill-count]')!;
+  expect(words.textContent).toBe('3 comments');
+  expect(pill.getAttribute('aria-label')).toBe('3 comments');
+  expect(pill.hasAttribute('aria-hidden')).toBe(false);
+  act(() => words.click());
+  act(() => pill.click());
+  expect(opened).toBe(2);
+  act(() => root!.unmount());
+  host!.remove();
+  const none = await renderDraftFoot({ reply: true, picks: 2, comments: 0 }, () => opened++);
+  expect(none.querySelector('button')).toBeNull();
 });
 
 test.skipIf(!hasDom)('with no comments the pill carries no count: step 4 shows "Draft" alone', async () => {
