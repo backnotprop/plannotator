@@ -191,6 +191,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
+import { snoozeIntroDue, snoozeIntroFirstUse, snoozeIntroPageMay, type SnoozeIntroSaved } from "@plannotator/core/inbox-snooze-intro";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -729,6 +730,9 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
     server.stop(true);
   }
 }
+
+/** A snooze write: this machine's thread, or a linked machine's through the forward (`/api/inbox/m/<machine>/…`). */
+const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze$/;
 
 /**
  * Whether an Inbox ran on this machine before this start, from evidence that
@@ -1761,6 +1765,49 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxListIntro?.shownAt === at;
   };
 
+  /**
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; the rules are core's inbox-snooze-intro.ts):
+   * due on a release build for someone who first used the Inbox two days ago or more, never snoozed and never saw it.
+   * Decided live, not at start: the two days pass while the Inbox runs. A dev build reads and writes nothing.
+   */
+  const snoozeIntroRelease = normalizeStableVersion(version) !== null;
+  /** The saved state, with first use filled in from the event log when it is missing (an empty log at the backfill). */
+  const snoozeIntroSaved = (): SnoozeIntroSaved | undefined => {
+    const saved = loadConfig().inboxSnoozeIntro;
+    if (!snoozeIntroRelease || !saved || saved.firstUseAt) return saved;
+    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
+    if (!firstUseAt) return saved;
+    saveConfig({ inboxSnoozeIntro: { ...saved, firstUseAt } });
+    return { ...saved, firstUseAt };
+  };
+  // The backfill, once, at the first release start that knows the key (an upgrade): first use from the event log, and
+  // a snooze running now is a snooze the person made.
+  if (snoozeIntroRelease && loadConfig().inboxSnoozeIntro === undefined) {
+    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
+    saveConfig({ inboxSnoozeIntro: { ...(firstUseAt ? { firstUseAt } : {}), ...(store.snoozes().length > 0 ? { snoozedAt: new Date().toISOString() } : {}) } });
+  }
+  /** Whether it is due, and for this page: a page on this computer, or the owner's over the tailnet with the phone switch on. */
+  const snoozeIntroState = (page: { local: boolean; owner: boolean }) => ({
+    due: snoozeIntroPageMay(page) && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
+  });
+  /** The person snoozed something: the dialog never shows. Once; a release build only. */
+  const markSnoozeUsed = () => {
+    if (!snoozeIntroRelease) return;
+    const saved = loadConfig().inboxSnoozeIntro;
+    if (saved?.snoozedAt) return;
+    saveConfig({ inboxSnoozeIntro: { ...saved, snoozedAt: new Date().toISOString() } });
+  };
+  /**
+   * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
+   * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
+   */
+  const claimSnoozeIntro = (page: { local: boolean; owner: boolean }): boolean => {
+    if (!snoozeIntroState(page).due) return false;
+    const at = new Date().toISOString();
+    saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at } });
+    return loadConfig().inboxSnoozeIntro?.shownAt === at;
+  };
+
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
   const updatesState = () => {
     const config = loadConfig();
@@ -1911,6 +1958,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sound: soundState(),
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
+    /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
+    snooze_intro: snoozeIntroState({ local: via === "local", owner: !guest }),
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -2827,6 +2876,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
     }
+    // Snooze, by any route the person has (the window and the phone here, a linked machine's thread through the
+    // forward, a phone app or a linked machine through the door, which hands its write to this same path): the
+    // one-time Snooze announcement never shows after it (approval "inbox-snooze-announce"). snoozes.json cannot say
+    // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
+    if (req.method === "POST" && INBOX_SNOOZE_WRITE.test(path) && ownerOrLocal(req, via)) {
+      const body = (await req
+        .clone()
+        .json()
+        .catch(() => null)) as { until?: unknown } | null;
+      if (typeof body?.until === "string") markSnoozeUsed();
+    }
     // The window's debug records (inbox-debug-log.ts): off, this falls through to the unknown-route 404.
     if (debugLog && path === INBOX_DEBUG_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -3145,6 +3205,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ show: claimListIntro(via), list_intro: listIntroState() });
+      }
+
+      // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
+      // once per machine. A page on this computer; the owner's over the tailnet only with the phone switch on (core
+      // inbox-snooze-intro.ts `SNOOZE_INTRO_ON_PHONES`); a tailnet guest never.
+      if (path === "/api/inbox/snooze-intro") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const page = { local: via === "local", owner: ownerOrLocal(req, via) };
+        return json({ show: claimSnoozeIntro(page), snooze_intro: snoozeIntroState(page) });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this

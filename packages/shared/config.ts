@@ -443,6 +443,14 @@ export interface PlannotatorConfig {
   /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
   inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
   /**
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in core inbox-snooze-intro.ts). Written
+   * only by a release build. `firstUseAt`: the oldest record of the event log, rebuilt once at the first release start
+   * that knows this key (and filled in later when the log was empty then). `snoozedAt`: the person snoozed something
+   * (the window, the phone, a linked machine's forward), so it never shows. `shownAt`: a page claimed it (`POST
+   * /api/inbox/snooze-intro`, a compare-and-set), once per machine.
+   */
+  inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
+  /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
    * and the Inbox serves the agents' `card` tool. Off: neither, every card
