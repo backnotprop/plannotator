@@ -90,6 +90,12 @@ export interface Host {
   engineVersion?(): Promise<string | null>
   /** `$.session.append` of a notice the transcript shows and the model never reads. */
   appendNotice?(text: string): Promise<void>
+  /**
+   * `$.env.set` of PLANNOTATOR_SESSION_PROJECT (INBOX_SESSION_PROJECT_ENV in
+   * inbox.ts), which every process the session starts from then on inherits.
+   * Optional: a test host without it exports nothing.
+   */
+  setSessionProject?(value: string): Promise<void>
   suggest(text: string): Promise<void>
   status(text: string | undefined): void
   log(text: string): void

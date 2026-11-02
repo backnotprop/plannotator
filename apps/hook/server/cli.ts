@@ -222,7 +222,7 @@ export const CARD_COMMAND_USAGE = [
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
-  "Every command takes [--project <folder>] (default: this folder) and [--json].",
+  "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
   `Columns: ${INBOX_CARD_COLUMNS.join(", ")}. A column is where the work stands: todo (asked, not started; the default),`,
   "in_progress (you are on it), in_review (your part handed over; give --you), done (merged, live or finished), dropped (cancelled), backlog (not asked for yet).",
   "A card the person put in backlog is theirs to move. Ship a card when you see its PR merge (the Board may also move it to done once every --pr PR merged).",
