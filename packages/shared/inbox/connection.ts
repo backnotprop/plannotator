@@ -315,7 +315,7 @@ export const INBOX_SESSION_THREADS_CHANNEL = "Their decisions stay in these thre
 
 /** When to use the Inbox. Fixed text: the agent tool's lead and the Inbox's server instructions carry it whole. */
 export const INBOX_USE_RULE =
-  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary, its pictures in place in the body, other files in `attachments`), or when they ask."
+  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary with its pictures inline, files in `attachments`), or when they ask."
 
 /**
  * Separate work, separate threads (the owner, 2026-10-29: an agent given new
@@ -410,11 +410,11 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * field and `plannotator inbox --help` carry it whole.
  */
 export const INBOX_PICTURES_RULE =
-  'Pictures go where you write about them, never only in `attachments`: `![alt](/abs/path.png)` in the body shows the image at that spot, and the person can open, zoom and comment on it. Visual options are picture choices, one picture per choice: `- [ ] A · Label — ![alt](path) what it means`; the card draws them as tiles to pick, and the label comes back. A question about one picture: `Shows: ![alt](path)` after the prompt. Do not also attach an image the body shows.'
+  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each: `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
 /** The `attachments` field's line on pictures (fixed text, on every copy of the field). */
 export const INBOX_ATTACHMENTS_PICTURES_LINE =
-  'A screenshot or picture goes in the body instead (`![alt](path)`, where you write about it); attach what the person should open or click through.'
+  'Screenshots and pictures go in the body instead (`![alt](path)`); attach what the person should open or click through.'
 
 /**
  * The agent tool's own words for the fields whose Inbox description is long
@@ -447,7 +447,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       '',
       INBOX_PICTURES_RULE,
       '',
-      'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: [name](file)` (the one file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
+      'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
       '',

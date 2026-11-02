@@ -167,7 +167,7 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
   "- `Stakes: <one sentence>`: what the choice affects, in product terms. Give one whenever you write `Stopped:` or `Holds up:`.",
-  "- `Shows: [name](file)`: the one file the decision is about (put long detail in that file, not the block).",
+  "- `Shows: ![alt](path)` or `Shows: [name](file)`: the one picture or file the decision is about (put long detail in that file, not the block).",
   "- `Why: <one line>`, on its own line after `Recommended:`: why you recommend it.",
   "- `Reversible: no — <why>`: only when the answer cannot be taken back.",
   "",
@@ -713,7 +713,13 @@ export async function sendAgentMessage(
   const notShown = imagesNotShown(input.body, captured?.failures ?? []);
   // Pictures sent only as attachments (tiles at the bottom, away from the words about them):
   // the result advises the next message; the send and what the person sees are unchanged.
-  const attachedOnly = attachedImagesNotInBody(input.body, input.attachments, here && isAbsolute(here) ? here : project.root, basePath ?? project.root);
+  // The message is already stored: advice that fails is left out, never an error for a sent message.
+  let attachedOnly: string[] = [];
+  try {
+    attachedOnly = attachedImagesNotInBody(input.body, input.attachments, here && isAbsolute(here) ? here : project.root, basePath ?? project.root);
+  } catch {
+    attachedOnly = [];
+  }
   // A question the agent is stopped or held up on, with no `Stakes:` line:
   // the result nudges (never refuses), so the person can decide in one look.
   const noStakes = (message.questions ?? [])

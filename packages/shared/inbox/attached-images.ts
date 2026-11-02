@@ -9,41 +9,62 @@
  */
 
 import { basename, isAbsolute, resolve } from "node:path";
-import { inboxMessageImageRefsInOrder } from "./message-images";
+import { isReviewImagePath } from "../diff-paths";
+import { inboxMessageImageRefsInOrder, pathCandidates } from "./message-images";
 
-/** The image kinds the advice is about, by the name as the agent wrote it. */
-const PICTURE_PATH_RE = /\.(png|jpe?g|gif|webp|svg)$/i;
+/** The bases a relative path may resolve from, without the missing ones and without repeats. */
+function basesOf(...bases: (string | null)[]): string[] {
+  return [...new Set(bases.filter((base): base is string => !!base))];
+}
 
 /**
- * The attachments (as the agent wrote them) that are pictures the body does
- * not also show with `![alt](path)` or `<img src>`. A body image counts as
- * the attachment when both resolve to the same path, or, since the two may
- * resolve from different folders, when they have the same file name.
+ * The attachments (as the agent wrote them) that are pictures (an image the
+ * window shows: png, jpg, gif, webp, svg, avif, bmp, ico, apng) the body does
+ * not also show with `![alt](path)` or `<img src>`.
  *
- * `attachmentBase` is the folder relative attachments resolve from,
- * `bodyBase` the one relative body images resolve from (each may be null:
- * then a relative path is compared by file name only).
+ * A body image counts as the attachment when it names the same file in any
+ * form the window tries (`pathCandidates`: as written, without a `?query` or
+ * `#fragment`, percent-decoded), compared without case where the file system
+ * ignores it (macOS, Windows). A relative path resolves from either base
+ * (`attachmentBase`, where relative attachments start, and `bodyBase`, where
+ * relative body images start), since the two may differ for one file. Only
+ * when a side has no base to resolve from is the bare file name compared:
+ * two attachments with one name in different folders stay apart.
  */
 export function attachedImagesNotInBody(
   body: string,
   attachments: readonly string[] | undefined,
   attachmentBase: string | null = null,
   bodyBase: string | null = attachmentBase,
+  platform: NodeJS.Platform = process.platform,
 ): string[] {
   if (!attachments || attachments.length === 0) return [];
-  const pictures = attachments.filter((path) => PICTURE_PATH_RE.test(path.trim()));
+  const pictures = attachments.map((path) => path.trim()).filter((path) => isReviewImagePath(path));
   if (pictures.length === 0) return [];
-  const full = (path: string, base: string | null): string | null =>
-    isAbsolute(path) ? resolve(path) : base ? resolve(base, path) : null;
-  const shown = inboxMessageImageRefsInOrder(body);
-  const shownPaths = new Set(shown.map((ref) => full(ref, bodyBase)).filter((path): path is string => path !== null));
-  const shownNames = new Set(shown.map((ref) => basename(ref)));
+  const fold = platform === "darwin" || platform === "win32" ? (path: string) => path.toLowerCase() : (path: string) => path;
+  const bases = basesOf(attachmentBase, bodyBase);
+  /** Every absolute path a src may mean, or null when it is relative and nothing resolves it. */
+  const fullPaths = (src: string): string[] | null => {
+    if (isAbsolute(src)) return [fold(resolve(src))];
+    return bases.length > 0 ? bases.map((base) => fold(resolve(base, src))) : null;
+  };
+  const shownPaths = new Set<string>();
+  const unresolvedNames = new Set<string>();
+  for (const ref of inboxMessageImageRefsInOrder(body)) {
+    for (const candidate of pathCandidates(ref)) {
+      const full = fullPaths(candidate);
+      if (full) for (const path of full) shownPaths.add(path);
+      else unresolvedNames.add(fold(basename(candidate)));
+    }
+  }
+  const shownNames = new Set([...shownPaths].map((path) => basename(path)));
   const out: string[] = [];
   for (const path of pictures) {
-    const trimmed = path.trim();
-    const resolved = full(trimmed, attachmentBase);
-    if ((resolved && shownPaths.has(resolved)) || shownNames.has(basename(trimmed))) continue;
-    if (!out.includes(trimmed)) out.push(trimmed);
+    const full = fullPaths(path);
+    const shown = full
+      ? full.some((candidate) => shownPaths.has(candidate)) || unresolvedNames.has(fold(basename(path)))
+      : shownNames.has(fold(basename(path))) || unresolvedNames.has(fold(basename(path)));
+    if (!shown && !out.includes(path)) out.push(path);
   }
   return out;
 }

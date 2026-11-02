@@ -33,9 +33,34 @@ describe("attachedImagesNotInBody", () => {
       ":::",
     ].join("\n");
     expect(attachedImagesNotInBody(body, ["/work/shots/menu.png", "/tmp/shots/a.png", "shots/b.png"], "/work")).toEqual([]);
-    // Resolved from different folders, the same file name still counts as shown.
-    expect(attachedImagesNotInBody("![menu](../shots/menu.png)", ["/elsewhere/shots/menu.png"], "/work", "/work/sub")).toEqual([]);
+    // A relative path resolves from either base: the attachments' folder and the body's may differ.
+    expect(attachedImagesNotInBody("![menu](shots/menu.png)", ["shots/menu.png"], "/work/sub", "/work")).toEqual([]);
     expect(attachedImagesNotInBodyText(0)).toBe("");
+  });
+
+  test("a picture the window finds through an encoded, queried or differently cased path counts as shown", () => {
+    // macOS names screenshots with spaces; correct CommonMark writes them as %20.
+    expect(attachedImagesNotInBody("![x](shots/Screenshot%202026-11-02%20at%2010.34.12.png)", ["shots/Screenshot 2026-11-02 at 10.34.12.png"], "/work")).toEqual([]);
+    expect(attachedImagesNotInBody("![x](shots/a.png?v=2)", ["shots/a.png"], "/work")).toEqual([]);
+    expect(attachedImagesNotInBody('<img src="shots/a.png#top">', ["/work/shots/a.png"], "/work")).toEqual([]);
+    // One file on a file system that ignores case (macOS, Windows); two files where it does not (Linux).
+    expect(attachedImagesNotInBody("![x](shots/Shot.PNG)", ["shots/shot.png"], "/work", "/work", "darwin")).toEqual([]);
+    expect(attachedImagesNotInBody("![x](shots/Shot.PNG)", ["shots/shot.png"], "/work", "/work", "linux")).toEqual(["shots/shot.png"]);
+  });
+
+  test("two attachments with one name in different folders stay apart: only the one the body shows is left out", () => {
+    const body = "After: ![after](after/home.png)";
+    expect(attachedImagesNotInBody(body, ["before/home.png", "after/home.png"], "/work")).toEqual(["before/home.png"]);
+    expect(attachedImagesNotInBody("![after](/shots/after/home.png)", ["/shots/before/home.png"], "/work")).toEqual(["/shots/before/home.png"]);
+  });
+
+  test("with no base to resolve a relative side, the file name decides", () => {
+    expect(attachedImagesNotInBody("![a](shots/a.png)", ["/anywhere/a.png"], null)).toEqual([]);
+    expect(attachedImagesNotInBody("![a](/anywhere/a.png)", ["a.png"], null)).toEqual([]);
+  });
+
+  test("every image kind the window shows counts, AVIF, BMP and ICO included", () => {
+    expect(attachedImagesNotInBody("No pictures here.", ["a.avif", "b.bmp", "c.ico", "d.apng", "e.svg"], "/work")).toEqual(["a.avif", "b.bmp", "c.ico", "d.apng", "e.svg"]);
   });
 
   test("a picture written only inside code is not shown, so it is still named", () => {

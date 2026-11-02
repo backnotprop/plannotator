@@ -17,6 +17,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { InboxMessage, InboxThread, InboxTidyPlan, InboxTidyRun } from "@plannotator/core/inbox-types";
 import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
+import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -228,7 +229,7 @@ describe("what a script gets", () => {
     const sent = await cli(box, ["send_message", JSON.stringify({ body: "The new look.", thread: "Look", attachments: ["look.png"] })]);
     expect(sent.code).toBe(0);
     expect(JSON.parse(sent.stdout).attached_images_not_in_body).toEqual(["look.png"]);
-    expect(sent.stderr).toContain("1 image is attached but not shown in the text");
+    expect(sent.stderr).toBe(`${attachedImagesNotInBodyText(1).trim()}\n`);
     const shown = await cli(box, ["send_message", JSON.stringify({ body: "The new look: ![look](look.png)", thread: "Look", attachments: ["look.png"] })]);
     expect(shown.code).toBe(0);
     expect(shown.stderr).toBe("");
