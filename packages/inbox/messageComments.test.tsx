@@ -7,7 +7,7 @@
  * no label picker); Comment opens the composer, Save stores the comment
  * (`POST /api/inbox/messages/:id/annotations`), the passage keeps its
  * highlight, and the reply box's chip counts and lists it; Send carries it,
- * and the agent's own `wait_for_reply` (through the Inbox's MCP) returns the
+ * and the agent's own `read_thread` (through the Inbox's MCP) returns the
  * quote and the comment under "Feedback on your message from <time>". A
  * reload draws the saved highlight again; removing it from the chip takes the
  * highlight away. The person's own message and a question card's words open
@@ -341,9 +341,8 @@ test.skipIf(!hasDom)("words selected in an agent's message: the comment-only too
   await until(async () => (await pending(message.id)).length === 0, 'the comment sent');
 
   // The agent that wrote the message reads it through the Inbox's MCP.
-  const { waited } = await command<{ waited: { status: string; reply: { body: string } } }>({ wait: { thread: message.id, session: message.session } });
-  expect(waited.status).toBe('replied');
-  const body = waited.reply.body;
+  const { read } = await command<{ read: { thread: { messages: { body: string; author: { kind: string } }[] } } }>({ read: { thread: message.id, session: message.session } });
+  const body = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.body;
   expect(body).toContain('# Feedback on your messages');
   expect(body).toMatch(new RegExp(`## Feedback on your message from .+ \\(${message.id}\\)`));
   expect(body).toContain('Feedback on: "two, four and eight seconds"');
@@ -457,9 +456,10 @@ test.skipIf(!hasDom)('a click on a diagram part in a message: the composer, the 
 
   act(() => button(el, 'Send').click());
   await until(async () => (await pending(message.id)).length === 0, 'the comment sent');
-  const { waited } = await command<{ waited: { status: string; reply: { body: string } } }>({ wait: { thread: message.id, session: message.session } });
-  expect(waited.reply.body).toContain('# Feedback on your messages');
-  expect(waited.reply.body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
+  const { read } = await command<{ read: { thread: { messages: { body: string; author: { kind: string } }[] } } }>({ read: { thread: message.id, session: message.session } });
+  const body = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!.body;
+  expect(body).toContain('# Feedback on your messages');
+  expect(body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
 }, 30_000);
 
 test.skipIf(!hasDom)('a diagram in the person\'s own message and in an archived message opens no composer', async () => {

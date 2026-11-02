@@ -3,8 +3,8 @@
  * plain reply shows the thread's short name, or `a reply` with none, and
  * everything that is not a plain reply keeps the thread's subject. Proved
  * through the server's real doors: the connections' poll (which Codex and Qwen
- * share through `replyCommand`), wait_for_reply for a client nothing wakes, and
- * the window's routes. Every test uses its own temp data dir.
+ * share through `replyCommand`) and the window's routes. Every test uses its
+ * own temp data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -123,11 +123,6 @@ const firstLine = (command: InboxReplyCommand) => inboxWakeText(command).split("
 const asked = (client: Client, project: string, body = "Quota is climbing.") => agentSends(client, project, OWNER, body, { subject: SUBJECT, thread: NAME });
 const askedUnnamed = (client: Client, project: string, body = "Quota is climbing.") => agentSends(client, project, OWNER, body, { subject: SUBJECT });
 
-async function waitForReply(client: Client, threadId: string, session: string) {
-  const result = (await client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: session, timeout_seconds: 1 } })) as { content: { text: string }[] };
-  return result.content[0]!.text;
-}
-
 describe("a plain reply", () => {
   test("in a thread with a short name shows that name, and only the title changes", async () => {
     const { server, client, project } = await setup();
@@ -235,19 +230,6 @@ describe("a plain reply", () => {
     const command = (await poll(server, OTHER, project)).find((c) => c.id === later)!;
     expect(command).toMatchObject({ added: true, subject: null });
     expect(inboxWakeText(command)).not.toContain(SUBJECT);
-  });
-
-  test("wait_for_reply, for a client nothing wakes, leads with the name, or with no title at all", async () => {
-    const { server, client, project } = await setup();
-    const named = await asked(client, project);
-    await personReplies(server, named.message_id, "Named thread.");
-    expect((await waitForReply(client, named.thread_id, OWNER)).split("\n")[0]).toBe(`The person replied in thread ${named.thread_id} (${NAME}):`);
-
-    const unnamed = await askedUnnamed(client, project, "Another one.");
-    await personReplies(server, unnamed.message_id, "Unnamed thread.");
-    const text = await waitForReply(client, unnamed.thread_id, OWNER);
-    expect(text.split("\n")[0]).toBe(`The person replied in thread ${unnamed.thread_id}:`);
-    expect(text).not.toContain(SUBJECT);
   });
 
   test("read_thread still names the subject: an agent matches it before writing into a thread", async () => {
