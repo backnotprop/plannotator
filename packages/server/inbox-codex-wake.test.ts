@@ -22,7 +22,7 @@ import {
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_WAITS_TEXT } from "./inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import type { LaunchDelivery } from "./inbox-launch-host";
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
@@ -177,7 +177,7 @@ describe("a reply to a Codex thread", () => {
     const w = await world();
     const sent = await codexSends(w.client, w.project, "Ship the worker today?");
     // It wakes: the agent is told to end its turn, and the message says so.
-    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect(sent.text).toContain(`${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}`);
     const asked = (await thread(w.server, sent.thread_id)).messages[0]!;
     expect(asked.author).toMatchObject({ kind: "agent", host: "codex", session: THREAD });
     expect(asked.wakes).toBe(true);
@@ -377,10 +377,10 @@ describe("a reply to a Codex thread", () => {
     expect((await thread(w.server, sent.thread_id)).messages.find((m) => m.id === replyId)!.delivery).toMatchObject({ host: "codex", session: THREAD });
   });
 
-  test("a codex exec run is never woken: its agent is told to wait_for_reply, it is not live, and nothing is queued", async () => {
+  test("a codex exec run is never woken: its agent is told to read the thread later, it is not live, and nothing is queued", async () => {
     const w = await world();
     const sent = await codexSends(w.client, w.project, "Ship it?", THREAD, "exec");
-    expect(sent.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect((await thread(w.server, sent.thread_id)).messages[0]!.wakes).toBeUndefined();
     await Bun.sleep(100);
     const sessions = (await (await fetch(`${base(w.server)}/api/inbox/threads/${sent.thread_id}/sessions`)).json()) as { sessions: { session: string }[] };
@@ -414,9 +414,9 @@ describe("a reply to a Codex thread", () => {
   test("a shell's command never makes a thread wake that was not woken: one the Inbox never woke, a codex exec run", async () => {
     const w = await world();
     const unknown = await fromShell(w.client, w.project, { body: "Who is this?" });
-    expect(unknown.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(unknown.content[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     await codexSends(w.client, w.project, "One turn only.", OTHER_THREAD, "exec");
-    expect((await fromShell(w.client, w.project, { body: "Still one turn." }, OTHER_THREAD)).content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect((await fromShell(w.client, w.project, { body: "Still one turn." }, OTHER_THREAD)).content[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
   });
 
   test("a Tidy a woken thread answers from a script counts: the command says the wake arrived, and its writes are tidied", async () => {
@@ -438,41 +438,10 @@ describe("a reply to a Codex thread", () => {
     expect(await stateOf()).toMatchObject({ state: "tidied", updated: 1 });
   });
 
-  test("an open wait on one thread holds back only that thread's reply; another thread's reply to the same session is queued", async () => {
-    const w = await world();
-    const a = await codexSends(w.client, w.project, "A?");
-    const b = await w.client.callTool({
-      name: "send_message",
-      arguments: { body: "B?", project_path: w.project, agent_session: THREAD, agent_host: "codex", thread: "other work" },
-      _meta: codexMeta(THREAD),
-    });
-    const bSent = b.structuredContent as { message_id: string; thread_id: string };
-    expect(bSent.thread_id).not.toBe(a.thread_id);
-    const waiting = w.client.callTool({ name: "wait_for_reply", arguments: { agent_session: THREAD, thread_id: a.thread_id, timeout_seconds: 3 }, _meta: codexMeta(THREAD) });
-    await Bun.sleep(200);
-    await reply(w.server, bSent.message_id, { idempotency_key: "kb", words: "for B" });
-    await w.server.codexWake.sweep();
-    expect(queues(w.fake)).toHaveLength(1);
-    expect(argOf(queues(w.fake)[0]!.args, "message")).toContain("for B");
-    await waiting;
-  });
-
-  test("a thread blocked in wait_for_reply gets the reply from that call, and it is not queued as a turn as well", async () => {
-    const w = await world();
-    const sent = await codexSends(w.client, w.project, "Ship it?");
-    const waiting = w.client.callTool({ name: "wait_for_reply", arguments: { agent_session: THREAD, thread_id: sent.thread_id, timeout_seconds: 20 }, _meta: codexMeta(THREAD) });
-    await Bun.sleep(200);
-    await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
-    const answer = (await waiting).structuredContent as { status: string };
-    expect(answer.status).toBe("replied");
-    await w.server.codexWake.sweep();
-    expect(queues(w.fake)).toEqual([]);
-  });
-
   test("without a Codex CLI that queues, nothing wakes: the message is MCP-only and nothing is run", async () => {
     for (const w of [await world({ codex: false }), await world({ env: { FAKE_CODEX_VERSION: "codex-cli 0.148.0" } })]) {
       const sent = await codexSends(w.client, w.project, "Ship it?");
-      expect(sent.text).toContain(INBOX_REPLY_WAITS_TEXT);
+      expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
       expect((await thread(w.server, sent.thread_id)).messages[0]!.wakes).toBeUndefined();
       await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Yes." });
       await w.server.codexWake.sweep();
@@ -625,10 +594,10 @@ describe("a Tidy through the Codex wake", () => {
     expect(queues(t.fake).at(-1)!.args.find((arg) => arg.includes(INBOX_TIDY_INSTRUCTION))).toBeDefined();
   });
 
-  test("a codex exec thread a Tidy named is still not a thread that wakes: its shell's message says to wait", async () => {
+  test("a codex exec thread a Tidy named is still not a thread that wakes: its shell's message says to read later", async () => {
     const t = await tidied({ trigger: "exec" });
     const sent = await fromShell(t.client, t.project, { reply_to: t.asked.message_id, body: "From a script." });
-    expect(sent.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(sent.content[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect((await thread(t.server, t.asked.thread_id)).messages.find((m) => m.id === sent.structuredContent.message_id)!.wakes).toBeUndefined();
   });
 
@@ -642,7 +611,7 @@ describe("a Tidy through the Codex wake", () => {
     const wakesOf = async (result: { structuredContent: { message_id: string } }) => (await thread(w.server, sent.thread_id)).messages.find((m) => m.id === result.structuredContent.message_id)!.wakes;
 
     const script = await fromShell(w.client, w.project, { body: "From a script." });
-    expect(script.content[0]!.text).toContain(INBOX_REPLY_WAITS_TEXT);
+    expect(script.content[0]!.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
     expect(await wakesOf(script)).toBeUndefined();
     await w.server.codexWake.sweep();
 
@@ -675,6 +644,124 @@ describe("Settings → Agents: whether the Inbox can wake Codex", () => {
     connectCodex(old.fake);
     expect((await codexRow(old.server)).wakes).toBe(false);
   });
+});
+
+describe("a wake that ran out of time: it is never sent again, so the thread's own read ends it", () => {
+  /** A Codex whose `codex queue` hangs, so every wake is given up on (uncertain, claimed). */
+  async function hung() {
+    const w = await world();
+    w.server.stop();
+    const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: w.fake.home, env: { ...w.fake.env, FAKE_CODEX_QUEUE_DELAY_MS: "20000" } });
+    const server = await startInboxServer({ dataDir: w.dataDir, agentEnvironment: environment, codexWake: { extraClis: [], queueTimeoutMs: 300 } });
+    servers.push(server);
+    const client = await connect(server);
+    const givenUp = async (id: string, session = THREAD) => {
+      await server.codexWake.sweep();
+      expect(server.codexWake.uncertain(session, id)).toBe(true);
+      for (let waited = 0; waited < 2000 && w.fake.live().length > 0; waited += 50) await Bun.sleep(50);
+    };
+    const read = (session: string, threadId: string, extra: Record<string, unknown> = {}) =>
+      client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: session, ...extra }, _meta: codexMeta(session) });
+    const list = async (session = THREAD) =>
+      ((await client.callTool({ name: "read_thread", arguments: { project_path: w.project, agent_session: session }, _meta: codexMeta(session) })).structuredContent as { threads: { thread_id: string; unread: boolean; tagged_you?: true }[] }).threads;
+    const claims = async () => {
+      await server.codexWake.sweep();
+      return readdirSync(join(w.dataDir, "inbox", "codex-queue"));
+    };
+    return { w, server, client, givenUp, read, list, claims };
+  }
+  const addressed = async (server: InboxServer, threadId: string, words: string) => {
+    const response = await fetch(`${base(server)}/api/inbox/threads/${threadId}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, session: THREAD, body: words, idempotency_key: words }),
+    });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { message: { id: string } }).message.id;
+  };
+
+  test("a message addressed to the thread: a turn's tool call changes nothing, its read delivers it, the claim goes and nothing is sent again", async () => {
+    const { w, server, client, givenUp, read, list, claims } = await hung();
+    const sent = await codexSends(client, w.project, "Working on the ledger.");
+    const words = await addressed(server, sent.thread_id, "Also bump the version.");
+    await givenUp(words);
+    await client.callTool({ name: "search", arguments: { query: "ledger", project_path: w.project }, _meta: codexMeta(THREAD, Date.now() + 5) });
+    expect((await list()).find((row) => row.thread_id === sent.thread_id)!.unread).toBe(true);
+
+    await read(THREAD, sent.thread_id);
+    expect((await thread(server, sent.thread_id)).messages.find((m) => m.id === words)!.delivery).toMatchObject({ host: "codex", session: THREAD });
+    expect(await claims()).toEqual([]);
+    expect(server.codexWake.uncertain(THREAD, words)).toBe(false);
+    expect((await list()).find((row) => row.thread_id === sent.thread_id)!.unread).toBe(false);
+    expect(queues(w.fake)).toHaveLength(1);
+  }, 30_000);
+
+  test("a page that does not show it, or another session's read, settles nothing", async () => {
+    const { w, server, client, givenUp, read, list } = await hung();
+    const sent = await codexSends(client, w.project, "Working on the ledger.");
+    const words = await addressed(server, sent.thread_id, "Also bump the version.");
+    await givenUp(words);
+
+    await read(THREAD, sent.thread_id, { before: words });
+    await read(OTHER_THREAD, sent.thread_id);
+    expect((await thread(server, sent.thread_id)).messages.find((m) => m.id === words)!.delivery ?? null).toBeNull();
+    expect(server.codexWake.uncertain(THREAD, words)).toBe(true);
+    expect((await list()).find((row) => row.thread_id === sent.thread_id)!.unread).toBe(true);
+  }, 30_000);
+
+  test("a New message in a thread the session never wrote in: its list shows it, and its read settles it", async () => {
+    const { w, server, client, givenUp, read, list, claims } = await hung();
+    await codexSends(client, w.project, "Working on the ledger.");
+    const response = await fetch(`${base(server)}/api/inbox/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, to: { host: "codex", session: THREAD }, body: "Idea: retry the webhook on a 409.", idempotency_key: "n1" }),
+    });
+    expect(response.status).toBe(200);
+    const root = ((await response.json()) as { message: { id: string } }).message.id;
+    await givenUp(root);
+
+    expect((await list()).find((row) => row.thread_id === root)).toMatchObject({ unread: true });
+    await read(THREAD, root);
+    expect(await claims()).toEqual([]);
+    expect((await list()).map((row) => row.thread_id)).not.toContain(root);
+  }, 30_000);
+
+  test("a waking tag, and a reply the thread owns that tags another: each read settles that session's own copy and no one else's", async () => {
+    const { w, server, client, givenUp, read, list, claims } = await hung();
+    await codexSends(client, w.project, "Working on the ledger.");
+    const claude = (await client.callTool({
+      name: "send_message",
+      arguments: { body: "Which retry policy?", project_path: w.project, agent_session: "ses-claude", agent_host: "claude-code", agent_name: "Claude Code" },
+    })).structuredContent as { message_id: string; thread_id: string };
+    const poll = await fetch(`${base(server)}${INBOX_BRIDGE_POLL_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
+      body: JSON.stringify({ session: "ses-claude", host: "claude-code", project_path: w.project, waitMs: 0, [INBOX_TAGS_POLL_FIELD]: true }),
+    });
+    expect(poll.ok).toBe(true);
+    const tagging = await reply(server, claude.message_id, { idempotency_key: "k1", words: "@Codex check this too.", tags: [{ host: "codex", session: THREAD }] });
+    expect(tagging.status).toBe(200);
+    const tagged = ((await tagging.json()) as { reply: { id: string } }).reply.id;
+    await givenUp(tagged);
+    expect((await list()).find((row) => row.thread_id === claude.thread_id)).toMatchObject({ unread: true, tagged_you: true });
+
+    await read(THREAD, claude.thread_id);
+    expect(await claims()).toEqual([]);
+    expect((await list()).map((row) => row.thread_id)).not.toContain(claude.thread_id);
+    const stored = (await thread(server, claude.thread_id)).messages.find((m) => m.id === tagged)!;
+    expect(stored.tags!.find((t) => t.session === THREAD)!.delivery).toMatchObject({ session: THREAD });
+    expect(stored.delivery ?? null).toBeNull();
+
+    const asked = await codexSends(client, w.project, "Which store?", OTHER_THREAD);
+    const owned = await reply(server, asked.message_id, { idempotency_key: "k2", words: "@Claude this too.", tags: [{ host: "claude-code", session: "ses-claude" }] });
+    expect(owned.status).toBe(200);
+    const ownedId = ((await owned.json()) as { reply: { id: string } }).reply.id;
+    await givenUp(ownedId, OTHER_THREAD);
+    await read(OTHER_THREAD, asked.thread_id);
+    expect(await claims()).toEqual([]);
+    expect((await list(OTHER_THREAD)).find((row) => row.thread_id === asked.thread_id)!.unread).toBe(false);
+  }, 30_000);
 });
 
 describe("tags and New message", () => {
