@@ -6,6 +6,5 @@
     "name": "backnotprop"
   },
   "repository": "https://github.com/backnotprop/plannotator",
-  "keywords": ["planning", "review", "hooks", "ExitPlanMode", "collaboration"],
-  "types": "./types/index.d.ts"
+  "keywords": ["planning", "review", "hooks", "ExitPlanMode", "collaboration"]
 }

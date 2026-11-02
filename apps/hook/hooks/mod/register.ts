@@ -64,14 +64,12 @@
  *   `SessionStart` `compact` command hook (hooks.json) prints the reminder
  *   again from `PLANNOTATOR_INBOX_REMINDER`, which session.start sets and each
  *   `session.compact` sets again with the session's open Inbox threads.
- * - The session's title for the Inbox's To picker: `classic.SessionStart` and
- *   `classic.UserPromptSubmit`, the only inputs that carry `session_title`,
- *   keep it in `$.state`, and each Inbox poll reads it. KNOWN COST, an open
- *   decision on #2467: these are the kind of hook #2243 removed. Under
- *   `cc-plugin-sec-default` both are skipped, so a guarded session gets two
- *   more "hook was skipped" lines and no label. A matcher does not stop the
- *   notice, and `on()` closes before `$` exists, so the mod cannot leave them
- *   out for a guarded session alone.
+ * - The session's name for the Inbox's To picker: a session named with
+ *   `/rename` shows it, an unnamed one reads as it always did (owner's decision
+ *   on #2450, 2026-11-01). No classic hook: `session_title`, the only input that
+ *   carries a title, costs a "hook was skipped" line under
+ *   `cc-plugin-sec-default` (#2243). `command.run` on `/rename` and `/clear` keeps
+ *   the name in `$.store` by session id, and each Inbox poll reads it.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
  *   every process the session starts inherits, so a Plannotator server can be
  *   matched to the session that started it.
@@ -91,11 +89,14 @@ import {
   inboxRegistryPathOf,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
-  inboxSessionTitleOf,
+  INBOX_SESSION_NAME_COMMANDS,
   pluginVersionOf,
   readReminderSessions,
+  readSessionNames,
+  sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
+  STORE_INBOX_SESSION_NAMES,
   withReminderSession,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
@@ -433,30 +434,25 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
 }
 
 /**
- * The session's title for the Inbox's To picker, as the engine last told a
- * hook. Only the classic SessionStart and UserPromptSubmit inputs carry it, and
- * they can come before the instance exists (the engine raises a session's first
- * events before session.start finishes, and session.start does not fire at all
- * for `/clear` or an in-process resume), so it is kept by session id, outside the
- * instance. In `$.state`, not a module variable: a plugin reload keeps it, so a
- * labelled row does not go blank until the next prompt.
+ * Keeps what a `/rename` or `/clear` did to the session's name
+ * (`sessionNamesAfterCommand`), after it ran. By session id and in `$.store`, not
+ * on the instance: `session.start` does not fire for `/clear` or an in-process
+ * resume, and a `--resume` is another process that has to find the name again.
+ * Never fails the command over a label.
  */
-const SESSION_TITLE = { plugin: 'plannotator', key: 'sessionTitle' } as const
-
-async function noteSessionTitle($: Engine, e: { session_id?: unknown; session_title?: unknown; agent_id?: unknown }): Promise<void> {
-  const title = inboxSessionTitleOf(e)
-  if (title === null || typeof e.session_id !== 'string') return
+async function noteSessionName($: Engine, e: { command?: unknown; args?: unknown }, before: string): Promise<void> {
   try {
-    await $.state.set({ ...SESSION_TITLE, id: e.session_id }, title)
+    const after = String(await $.session.id())
+    const stored = readSessionNames(await $.store.get(STORE_INBOX_SESSION_NAMES))
+    await $.store.set(STORE_INBOX_SESSION_NAMES, sessionNamesAfterCommand(stored, { command: e.command, args: e.args, before, after }, await $.clock.now()))
   } catch {
-    // The hook never fails over a label: the poll says the last word it had.
+    // The poll says the last word it had.
   }
 }
 
-/** The title last told for `sessionId`; null when none was told (a poll then repeats its last word). */
-async function sessionTitleOf($: Engine, sessionId: string): Promise<string | null> {
-  const { value } = await $.state.get({ ...SESSION_TITLE, id: sessionId })
-  return typeof value === 'string' ? value : null
+/** The name kept for `sessionId`; `''` when it has none. Rejects when the store cannot say, and the poll then repeats its last word. */
+async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
+  return readSessionNames(await $.store.get(STORE_INBOX_SESSION_NAMES))[sessionId]?.name ?? ''
 }
 
 /**
@@ -485,7 +481,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
-      label: () => sessionTitleOf($, sessionId),
+      label: () => sessionNameOf($, String(sessionId)),
       ...(inboxTools
         ? {
             inboxTools,
@@ -636,17 +632,6 @@ export function register(on: On) {
     return result
   })
 
-  // The session's title (see the header: under a guard these two are skipped, each with a line of its own).
-  // Whatever the switches say: with the mod off nothing polls, so nothing reads it.
-  on('classic.SessionStart', async ($: Engine, e: any, next: Next) => {
-    await noteSessionTitle($, e)
-    return next(e)
-  })
-  on('classic.UserPromptSubmit', async ($: Engine, e: any, next: Next) => {
-    await noteSessionTitle($, e)
-    return next(e)
-  })
-
   on('session.end', async ($: Engine, e: any, next: Next) => {
     // Stop delivering for the session that ended; its open reviews stay in
     // the store and reattach if it is resumed.
@@ -713,6 +698,19 @@ export function register(on: On) {
     const spec = COMMANDS[name]
     const text = await instance.runCommand(spec.kind, typeof e.args === 'string' ? e.args : '')
     return { text }
+  })
+
+  // The session's name (see the header). Matched by name, as above. The engine's
+  // own command runs and its answer comes back as it is: the engine credits a
+  // plugin only on an answer that differs. After `next`: a command that threw
+  // named nothing, and `/clear` has moved the session id by then. Before
+  // `allowed` too: a first `/rename` can beat session.start, and with the mod off
+  // nothing polls, so nothing reads it.
+  on('command.run', { command: [...INBOX_SESSION_NAME_COMMANDS] }, async ($: Engine, e: any, next: Next) => {
+    const before = await Promise.resolve($.session.id()).then(String, () => '')
+    const result = await next(e)
+    if (before) await noteSessionName($, e, before)
+    return result
   })
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {

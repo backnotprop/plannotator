@@ -1,19 +1,20 @@
 import { describe, expect, test } from 'bun:test'
-import { InboxLink, inboxRegistryPathOf, inboxSessionTitleOf } from './inbox'
+import { InboxLink, INBOX_SESSION_NAMES_MAX, inboxRegistryPathOf, readSessionNames, sessionNamesAfterCommand, STORE_INBOX_SESSION_NAMES } from './inbox'
 import { register } from './register'
 import { fakeHost } from './testing/fake-host'
 
-// Session labels (approval "inbox-session-label"): the To picker's name for a
-// Claude Code session is its `session_title`, which only the classic
-// SessionStart and UserPromptSubmit inputs carry. The failures this catches:
-// reading it from `session.start` or `prompt.submit`, which never have it (the
-// label would silently never show); dropping the wiring from the hook through
-// `currentMod` and `PlannotatorMod` to the link, which no fake `label` can see;
-// a poll that stops carrying it, or carries another session's after `/clear`; a
-// subagent's event renaming the session; a poll that does not know the title
-// blanking a labelled row, or a reload doing the same until the next prompt.
+// Session labels (approval "inbox-session-label", Change 2026-11-01): a Claude
+// Code session shows a label only once it is named with `/rename`. The engine
+// tells a plugin the name nowhere else, so `command.run` keeps it in `$.store`.
+// The failures this catches: an unnamed session showing anything; the wiring from
+// the hook through `PlannotatorMod` to the link coming undone, which no fake
+// `label` can see; a `/clear` losing a name the engine kept, or keeping one the
+// engine moved; a `--resume` not finding the name; another session's name; a poll
+// that cannot read the store blanking a labelled row; and the hook changing
+// `/rename`'s or `/clear`'s answer, which the engine would then credit to us.
 //
-// What a guard does to these hooks needs the engine: apps/hook/tests/register.test.ts.
+// That a real `/rename` raises this hook, and what a guard does, needs the
+// engine: apps/hook/tests/register.test.ts and a real session.
 
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
@@ -26,7 +27,7 @@ async function ticks(host: ReturnType<typeof fakeHost>, n: number) {
   }
 }
 
-function linkOver(host: ReturnType<typeof fakeHost>, label?: () => string | null | Promise<string | null>) {
+function linkOver(host: ReturnType<typeof fakeHost>, label?: () => string | Promise<string>) {
   host.files.set(inboxRegistryPathOf(DATA), REGISTRY)
   const polls: Record<string, unknown>[] = []
   host.onFetch = (url, body) => {
@@ -39,114 +40,148 @@ function linkOver(host: ReturnType<typeof fakeHost>, label?: () => string | null
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
-/** The module's hooks as the engine holds them: `event` to its function, the matcher dropped. */
-function hooks(): Map<string, Hook[]> {
-  const out = new Map<string, Hook[]>()
+/** The module's hooks as the engine holds them: `event` to its matcher and function. */
+function hooks() {
+  const held = new Map<string, { matcher: unknown; run: Hook }[]>()
   register((event: string, ...args: unknown[]) => {
-    out.set(event, [...(out.get(event) ?? []), args.at(-1) as Hook])
+    held.set(event, [...(held.get(event) ?? []), { matcher: args.length > 1 ? args[0] : undefined, run: args.at(-1) as Hook }])
   })
-  return out
-}
-
-/** `$.state` as the host keeps it: by plugin, key and member id, outliving any module variable. */
-function stateOf() {
-  const values = new Map<string, unknown>()
-  const name = (ref: { plugin: string; key: string; id?: string }) => `${ref.plugin}/${ref.key}/${ref.id ?? ''}`
   return {
-    title: (session: string) => values.get(name({ plugin: 'plannotator', key: 'sessionTitle', id: session })),
-    state: {
-      get: async (ref: { plugin: string; key: string; id?: string }) => ({ value: values.get(name(ref)), version: 0 }),
-      set: async (ref: { plugin: string; key: string; id?: string }, value: unknown) => {
-        values.set(name(ref), value)
-        return { isSet: true, version: 1 }
-      },
-    },
+    only: (event: string) => held.get(event)![0]!.run,
+    /** The `command.run` hook the engine selects for `command`, by its matcher. */
+    command: (command: string) => held.get('command.run')!.find((hook) => (hook.matcher as { command: string[] }).command.includes(command))!.run,
   }
 }
 
-describe('inboxSessionTitleOf', () => {
-  test('the title, and an empty one as empty: it clears', () => {
-    expect(inboxSessionTitleOf({ session_title: 'Fix login redirect' })).toBe('Fix login redirect')
-    expect(inboxSessionTitleOf({ session_title: '' })).toBe('')
+const NOW = 1_000
+
+function named(...ids: string[]) {
+  return Object.fromEntries(ids.map((id) => [id, { name: `Name of ${id}`, at: NOW }]))
+}
+
+describe('what a command does to the names', () => {
+  const after = (record: ReturnType<typeof named>, command: string, args: string, before: string, moved = before) => sessionNamesAfterCommand(record, { command, args, before, after: moved }, NOW)
+
+  test('/rename names the session, trimmed, and replaces the name it had', () => {
+    expect(after({}, 'rename', '  Fix login redirect ', 's1')).toEqual({ s1: { name: 'Fix login redirect', at: NOW } })
+    expect(after(named('s1'), 'rename', 'Docs pass', 's1').s1?.name).toBe('Docs pass')
   })
 
-  test('says nothing for an engine without the field, or for a subagent', () => {
-    expect(inboxSessionTitleOf({})).toBeNull()
-    expect(inboxSessionTitleOf({ session_title: 7 })).toBeNull()
-    expect(inboxSessionTitleOf({ session_title: 'A subagent', agent_id: 'agent-1' })).toBeNull()
+  test('a bare /rename reads as unnamed: the model chose a name we are not told, and the old one is wrong now', () => {
+    expect(after(named('s1', 's2'), 'rename', '', 's1')).toEqual(named('s2'))
+  })
+
+  test("/clear takes the name to the new session id, as the engine does; the old session keeps it for a resume", () => {
+    const names = after(named('old'), 'clear', '', 'old', 'new')
+    expect(names.new?.name).toBe('Name of old')
+    expect(names.old?.name).toBe('Name of old')
+  })
+
+  test('/clear <name> names the session it left, and the new one has none', () => {
+    const names = after({}, 'clear', 'Finished login work', 'old', 'new')
+    expect(names).toEqual({ old: { name: 'Finished login work', at: NOW } })
+  })
+
+  test('/clear of an unnamed session names nothing; one that did not move the id changes nothing', () => {
+    expect(after({}, 'clear', '', 'old', 'new')).toEqual({})
+    expect(after(named('s1'), 'clear', 'Ignored', 's1')).toEqual(named('s1'))
+  })
+
+  test('the store stays bounded: the oldest names go first', () => {
+    const full = Object.fromEntries(Array.from({ length: INBOX_SESSION_NAMES_MAX }, (_, i) => [`s${i}`, { name: 'n', at: i }]))
+    const names = sessionNamesAfterCommand(full, { command: 'rename', args: 'Newest', before: 'new', after: 'new' }, INBOX_SESSION_NAMES_MAX)
+    expect(Object.keys(names)).toHaveLength(INBOX_SESSION_NAMES_MAX)
+    expect(names.new?.name).toBe('Newest')
+    expect(names.s0).toBeUndefined()
+    expect(names.s1).toBeDefined()
+  })
+
+  test('what the store holds is read with care: another shape is no name', () => {
+    expect(readSessionNames(undefined)).toEqual({})
+    expect(readSessionNames([])).toEqual({})
+    expect(readSessionNames({ a: 'text', b: { name: 7, at: 1 }, c: { name: 'ok' }, d: { name: '', at: 1 }, e: null, f: { name: 'Kept', at: 2 } })).toEqual({ f: { name: 'Kept', at: 2 } })
   })
 })
 
-describe('the hooks', () => {
-  test('the classic events are read and the rest of the chain runs as it did', async () => {
-    const on = hooks()
-    const kept = stateOf()
-    for (const [event, title] of [
-      ['classic.SessionStart', 'From the start'],
-      ['classic.UserPromptSubmit', 'From a prompt'],
-    ] as const) {
-      expect(on.get(event)).toHaveLength(1)
-      const input = { session_id: 'sess-hooks', session_title: title }
-      const answer = await on.get(event)![0]!({ state: kept.state }, input, (e) => ({ passed: e }))
-      expect(answer).toEqual({ passed: input })
-      expect(kept.title('sess-hooks')).toBe(title)
+describe('the command.run hook', () => {
+  function storeOf(session: string) {
+    const values = new Map<string, unknown>()
+    return {
+      values,
+      $: {
+        session: { id: async () => session },
+        clock: { now: async () => NOW },
+        store: { get: async (key: string) => values.get(key), set: async (key: string, value: unknown) => void values.set(key, value) },
+      },
     }
+  }
+
+  test("the engine's own command runs and its answer comes back as it was, so nothing is credited to us", async () => {
+    const { $ } = storeOf('s1')
+    const input = { command: 'rename', args: 'Fix login redirect' }
+    const answer = { ref: 4 }
+    let passed: unknown
+    const got = await hooks().command('rename')($, input, (e) => {
+      passed = e
+      return answer
+    })
+    expect(passed).toBe(input)
+    expect(got).toBe(answer)
   })
 
-  test("a call that says nothing keeps the title; each session's is its own", async () => {
-    const on = hooks()
-    const kept = stateOf()
-    const $ = { state: kept.state }
-    const start = on.get('classic.SessionStart')![0]!
-    const prompt = on.get('classic.UserPromptSubmit')![0]!
-    await start($, { session_id: 'sess-keep', session_title: 'Kept' }, () => ({}))
-    await prompt($, { session_id: 'sess-keep' }, () => ({}))
-    expect(kept.title('sess-keep')).toBe('Kept')
-    await prompt($, { session_id: 'sess-keep', agent_id: 'a', session_title: 'A subagent' }, () => ({}))
-    expect(kept.title('sess-keep')).toBe('Kept')
-    // /clear: a new id, and no title carried over; another session's event leaves this one's alone.
-    await start($, { session_id: 'sess-after-clear' }, () => ({}))
-    expect(kept.title('sess-after-clear')).toBeUndefined()
-    await start($, { session_id: 'sess-other', session_title: 'Other' }, () => ({}))
-    expect(kept.title('sess-keep')).toBe('Kept')
-    await prompt($, { session_id: 'sess-keep', session_title: '' }, () => ({}))
-    expect(kept.title('sess-keep')).toBe('')
+  test('a command that fails names nothing, and still fails', async () => {
+    const { $, values } = storeOf('s1')
+    await expect(
+      (async () =>
+        hooks().command('rename')($, { command: 'rename', args: 'Never ran' }, () => {
+          throw new Error('refused')
+        }))(),
+    ).rejects.toThrow('refused')
+    expect(values.has(STORE_INBOX_SESSION_NAMES)).toBe(false)
   })
 
-  test('an engine with no $.state still runs the chain: a label never fails a prompt', async () => {
-    const on = hooks()
-    const input = { session_id: 'sess-old', session_title: 'Title' }
-    expect(await on.get('classic.UserPromptSubmit')![0]!({}, input, (e) => ({ passed: e }))).toEqual({ passed: input })
+  test('a store that fails never fails the command', async () => {
+    const answer = { ref: 4 }
+    const broken = {
+      session: { id: async () => 's1' },
+      clock: { now: async () => NOW },
+      store: {
+        get: async () => {
+          throw new Error('the store is gone')
+        },
+        set: async () => undefined,
+      },
+    }
+    expect(await hooks().command('rename')(broken, { command: 'rename', args: 'Name' }, () => answer)).toBe(answer)
   })
 })
 
 describe('the poll', () => {
-  test('carries the title on every poll, so a later hook call updates what the Inbox shows', async () => {
+  test('carries the name on every poll, so a /rename reaches the next one', async () => {
     const host = fakeHost()
-    let title = ''
-    const { link, polls } = linkOver(host, () => title)
+    let name = ''
+    const { link, polls } = linkOver(host, () => name)
     link.start()
     await ticks(host, 2)
     expect(polls.length).toBeGreaterThan(0)
     expect(polls.every((poll) => poll.label === '')).toBe(true)
 
-    title = 'Fix login redirect'
+    name = 'Fix login redirect'
     await ticks(host, 2)
     expect(polls.at(-1)!.label).toBe('Fix login redirect')
 
-    title = ''
+    name = ''
     await ticks(host, 2)
     expect(polls.at(-1)!.label).toBe('')
     link.dispose()
   })
 
   test.each([
-    ['answers null', (): null => null],
-    ['rejects', (): Promise<string> => Promise.reject(new Error('the state is gone'))],
-    ['throws', (): string => { throw new Error('the state is gone') }],
+    ['rejects', (): Promise<string> => Promise.reject(new Error('the store is gone'))],
+    ['throws', (): string => { throw new Error('the store is gone') }],
   ] as const)('a source that %s cannot tell: the last word stands, and "" still clears', async (_how, cannotTell) => {
     const host = fakeHost()
-    let read: () => string | null | Promise<string> = () => 'Fix login redirect'
+    let read: () => string | Promise<string> = () => 'Fix login redirect'
     const { link, polls } = linkOver(host, () => read())
     link.start()
     await ticks(host, 2)
@@ -164,7 +199,7 @@ describe('the poll', () => {
     link.dispose()
   })
 
-  test('a link with no title source sends no field', async () => {
+  test('a link with no name source sends no field', async () => {
     const host = fakeHost()
     const { link, polls } = linkOver(host)
     link.start()
@@ -177,7 +212,6 @@ describe('the poll', () => {
 
 /** The `$` the module runs on, in memory: enough for the real session.start, instance and link. */
 function engineOver(firstSession: string) {
-  const kept = stateOf()
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
@@ -189,6 +223,7 @@ function engineOver(firstSession: string) {
   const world = {
     sessionId: firstSession,
     polls,
+    store,
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
         clock += 1_000
@@ -198,7 +233,6 @@ function engineOver(firstSession: string) {
       }
     },
     $: {
-      state: kept.state,
       env: { get: async (name: string) => (name === 'HOME' ? '/home/me' : name === 'PLANNOTATOR_DATA_DIR' ? DATA : undefined), set: async () => undefined },
       fs: {
         exists: async (path: string) => files.has(path),
@@ -246,44 +280,75 @@ function engineOver(firstSession: string) {
   return world
 }
 
-describe('from a classic event to a poll body', () => {
-  test('through the real hooks, instance and link: a title, a later title, a new instance, and /clear', async () => {
+describe('from /rename to a poll body', () => {
+  test('through the real hooks, instance and link: unnamed, named, renamed, /clear, a resume, and another session', async () => {
     const on = hooks()
     const world = engineOver('sess-wired')
     const { $ } = world
-    const prompt = on.get('classic.UserPromptSubmit')![0]!
     const pass = (e: unknown) => e
-    const instanceNow = (id: string) => on.get('turn.start')![0]!($, { turnId: `turn-${id}`, text: '' }, pass)
+    const end = () => on.only('session.end')($, {}, pass)
+    let turn = 0
+    const nextInstance = () => on.only('turn.start')($, { turnId: `turn-${(turn += 1)}`, text: '' }, pass)
+    const rename = (args: string) => on.command('rename')($, { command: 'rename', args }, async () => ({ ref: 1 }))
+    /** `/clear` as the engine runs it: the session ends and the process goes on under a new id, all inside `next`. */
+    const clear = (args: string, nextId: string) =>
+      on.command('clear')($, { command: 'clear', args }, async () => {
+        await end()
+        world.sessionId = nextId
+        return { text: '', ref: 2 }
+      })
+    const pollsFrom = async (seen: number) => {
+      await world.tick(3)
+      expect(world.polls.length).toBeGreaterThan(seen)
+      return world.polls.slice(seen)
+    }
 
-    // Before session.start finished: the engine may raise a session's first events that early.
-    await on.get('classic.SessionStart')![0]!($, { session_id: 'sess-wired', session_title: 'From the start' }, pass)
-    await on.get('session.start')![0]!($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/ai-collab' }))
-    await world.tick(3)
-    expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'From the start' })
+    // Unnamed: the row reads as it always did.
+    await on.only('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/ai-collab' }))
+    expect((await pollsFrom(0)).every((poll) => poll.session === 'sess-wired' && poll.label === '')).toBe(true)
 
-    await prompt($, { session_id: 'sess-wired', session_title: 'Fix login redirect' }, pass)
+    await rename('Fix login redirect')
     await world.tick(3)
     expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Fix login redirect' })
 
-    // A reload: module variables are gone and the host's state is not, so the host's
-    // copy is set here, past the hooks. The new instance's first poll has to say it.
-    await on.get('session.end')![0]!($, {}, pass)
-    await $.state.set({ plugin: 'plannotator', key: 'sessionTitle', id: 'sess-wired' }, 'Kept by the host')
-    const before = world.polls.length
-    await instanceNow('again')
+    await rename('Docs pass')
     await world.tick(3)
-    expect(world.polls.length).toBeGreaterThan(before)
-    expect(world.polls.slice(before).every((poll) => poll.label === 'Kept by the host')).toBe(true)
+    expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Docs pass' })
 
-    // /clear: another session id, and the old title is not this session's.
-    await on.get('session.end')![0]!($, {}, pass)
+    // A resume is another process: the name is the store's, set past the hooks here
+    // so this can only pass by reading it, and it shows on the first poll.
+    await end()
+    const named = readSessionNames(world.store.get(STORE_INBOX_SESSION_NAMES))
+    await $.store.set(STORE_INBOX_SESSION_NAMES, { ...named, 'sess-wired': { name: 'Kept in the store', at: 1 } })
+    let seen = world.polls.length
+    await nextInstance()
+    expect((await pollsFrom(seen)).every((poll) => poll.label === 'Kept in the store')).toBe(true)
+
+    // /clear: the engine writes the name onto the new session id, so the new id shows it.
+    await clear('', 'sess-cleared')
+    seen = world.polls.length
+    await nextInstance()
+    expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-cleared' && poll.label === 'Kept in the store')).toBe(true)
+
+    // /clear <name>: the session it left has that name, the new one none.
+    await clear('Finished', 'sess-fresh')
+    seen = world.polls.length
+    await nextInstance()
+    expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-fresh' && poll.label === '')).toBe(true)
+
+    // Back to the session /clear named, in this process, then to one never named.
+    await end()
     world.sessionId = 'sess-cleared'
-    const cleared = world.polls.length
-    await instanceNow('cleared')
-    await world.tick(3)
-    expect(world.polls.length).toBeGreaterThan(cleared)
-    expect(world.polls.slice(cleared).every((poll) => poll.session === 'sess-cleared' && poll.label === '')).toBe(true)
+    seen = world.polls.length
+    await nextInstance()
+    expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-cleared' && poll.label === 'Finished')).toBe(true)
 
-    await on.get('session.end')![0]!($, {}, pass)
+    await end()
+    world.sessionId = 'sess-never-named'
+    seen = world.polls.length
+    await nextInstance()
+    expect((await pollsFrom(seen)).every((poll) => poll.session === 'sess-never-named' && poll.label === '')).toBe(true)
+
+    await end()
   })
 })

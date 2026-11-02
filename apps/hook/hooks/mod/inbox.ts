@@ -299,13 +299,58 @@ export function inboxSessionDirOf(dataDir: string, sessionId: string): string {
 }
 
 /**
- * What a classic SessionStart or UserPromptSubmit input says about the session's
- * title (`session_title`, which `session.start` and `prompt.submit` do not
- * carry): the title, '' for an empty one, or null when it says nothing (an
- * engine older than the field, no title yet, a subagent's event).
+ * `$.store` key: what each session was named, for the Inbox's To picker. Kept in
+ * the store, by session id, because the engine tells a plugin a session's name
+ * nowhere else: no `$` call reads it and no module event carries it, and a
+ * `--resume` restores it for the engine alone. Kept to the newest
+ * INBOX_SESSION_NAMES_MAX.
  */
-export function inboxSessionTitleOf(input: { session_title?: unknown; agent_id?: unknown }): string | null {
-  return typeof input.session_title === 'string' && !input.agent_id ? input.session_title : null
+export const STORE_INBOX_SESSION_NAMES = 'inboxSessionNames'
+export const INBOX_SESSION_NAMES_MAX = 500
+
+/** The slash commands that change a session's name. `command.run` resolves their aliases (`/name`, `/reset`, `/new`). */
+export const INBOX_SESSION_NAME_COMMANDS = ['clear', 'rename'] as const
+
+export type InboxSessionNames = Record<string, { name: string; at: number }>
+
+/** The stored record: session id → its name and when it was set, anything else dropped. */
+export function readSessionNames(value: unknown): InboxSessionNames {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionNames = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { name, at } = (entry ?? {}) as { name?: unknown; at?: unknown }
+    if (id && name && typeof name === 'string' && typeof at === 'number' && Number.isFinite(at)) out[id] = { name, at }
+  }
+  return out
+}
+
+function withSessionName(record: InboxSessionNames, sessionId: string, name: string, now: number): InboxSessionNames {
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * The record after a `/rename` or `/clear` ran. `before` and `after` are the
+ * session's id either side of it, since `/clear` moves it. The engine's rules:
+ * - `/rename <name>` names the session. A bare `/rename` also names it, with a
+ *   name the model makes up, which reaches no hook and no answer here: the session
+ *   then reads as unnamed, since the name it had is no longer its name.
+ * - `/clear` writes the name onto the new session id, so the name goes with it.
+ * - `/clear <name>` names the session it left, and the new one has no name.
+ */
+export function sessionNamesAfterCommand(
+  record: InboxSessionNames,
+  run: { command: unknown; args: unknown; before: string; after: string },
+  now: number,
+): InboxSessionNames {
+  const args = typeof run.args === 'string' ? run.args.trim() : ''
+  if (run.command === 'rename') return withSessionName(record, run.after, args, now)
+  // A `/clear` that left the session where it was did nothing to its name.
+  if (run.command !== 'clear' || run.before === run.after) return record
+  if (args) return withSessionName(record, run.before, args, now)
+  const carried = record[run.before]?.name
+  return carried ? withSessionName(record, run.after, carried, now) : record
 }
 
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
@@ -462,14 +507,13 @@ export interface InboxLinkOptions {
    */
   root?: () => Promise<string>
   /**
-   * The session's title as the engine last told a hook (`inboxSessionTitleOf`),
-   * read for every poll, so a later hook call updates what the Inbox shows.
-   * `''` says it has none, which clears it. null or a rejection say it is not
-   * known: the poll repeats the last word, since sending nothing would clear
-   * the label too. Set by the host, never by the model: it is no tool argument.
-   * Absent: no `label`.
+   * The name the person gave the session (`STORE_INBOX_SESSION_NAMES`), read
+   * for every poll, so a `/rename` reaches the Inbox with the next one. `''`
+   * says it has none, which clears it. A rejection says it is not known: the poll
+   * repeats the last word, since sending nothing would clear the label too. Set
+   * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
-  label?: () => string | null | Promise<string | null>
+  label?: () => string | Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
 }
@@ -857,12 +901,11 @@ export class InboxLink {
       .catch(() => null)
   }
 
-  /** The title this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no title source. */
+  /** The name this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no name source. */
   private async labelNow(): Promise<string | null> {
     if (!this.options.label) return null
     try {
-      const label = await this.options.label()
-      if (typeof label === 'string') this.lastLabel = label
+      this.lastLabel = await this.options.label()
     } catch {
       // Not known now: the last word stands.
     }

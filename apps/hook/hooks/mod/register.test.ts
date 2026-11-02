@@ -17,15 +17,31 @@ function registrations(): { event: string; matcher: unknown }[] {
 // commands `<plugin>+plannotator: …`. A matcher that misses one of ours brings
 // back the blocking skill for that command instead (the hook never runs).
 describe('command.run registration', () => {
-  test('is matched on exactly the commands the mod answers', () => {
+  test('is matched on exactly the commands the mod answers, and the two that change a session name', () => {
     const hooks = registrations().filter((hook) => hook.event === 'command.run')
 
-    expect(hooks).toHaveLength(1)
-    const matcher = hooks[0]?.matcher as { command?: unknown } | undefined
-    expect(Array.isArray(matcher?.command)).toBe(true)
-    expect([...(matcher?.command as string[])].sort()).toEqual([...Object.keys(COMMANDS), INBOX_COMMAND.name].sort())
+    expect(hooks).toHaveLength(2)
+    const matched = hooks.map((hook) => {
+      const matcher = hook.matcher as { command?: unknown } | undefined
+      expect(Array.isArray(matcher?.command)).toBe(true)
+      return [...(matcher?.command as string[])].sort()
+    })
+    expect(matched).toContainEqual([...Object.keys(COMMANDS), INBOX_COMMAND.name].sort())
+    expect(matched).toContainEqual(['clear', 'rename'])
     expect(Object.keys(COMMANDS).sort()).toEqual(['plannotator-annotate', 'plannotator-last', 'plannotator-review'])
     expect(INBOX_COMMAND.name).toBe('plannotator-inbox')
+  })
+})
+
+// #2243: a classic hook cc-plugin-sec-default sends past the mod is a "hook was
+// skipped" line every session on a guarded account. The session name must never
+// bring these two back (owner's decision on #2450).
+describe('no classic hook for the session name', () => {
+  test('the mod has no classic.SessionStart or classic.UserPromptSubmit hook', () => {
+    const events = registrations().map((hook) => hook.event)
+
+    expect(events).not.toContain('classic.SessionStart')
+    expect(events).not.toContain('classic.UserPromptSubmit')
   })
 })
 
