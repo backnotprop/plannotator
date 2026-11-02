@@ -11,7 +11,7 @@
  *  1. Compose: a pasted screenshot attaches as `pasted-image-<date>-<time>.png`
  *     and rides the Send; a text paste is left to the browser.
  *  2. The reply box: two pasted images (one held mid-upload for the picture),
- *     Send carries both; the agent's wait_for_reply names them; the sent reply
+ *     Send carries both; the agent's read_thread names them; the sent reply
  *     shows them in the thread's tiles.
  *  3. The reply box's paperclip and drops (approval "inbox-reply-attach"):
  *     files dropped on the thread with the reply closed open it holding them,
@@ -248,10 +248,11 @@ test('the reply box: two pasted images (one still uploading), Send carries both 
   await reply.scrollIntoViewIfNeeded();
   await shot(page, '03-sent-reply-in-thread');
 
-  const answer = await agent.waitForReply(world.threadId, 10);
-  const body = (answer.reply as { body: string }).body;
-  expect(body).toContain('The legend sits on top of the axis labels.');
-  for (const name of names) expect(body).toMatch(new RegExp(`\\nAttached: ${name.replace(/\./g, '\\.')} \\(/.+/inbox/uploads/att_[0-9A-Z]+/${name.replace(/\./g, '\\.')}\\)`));
+  const answer = await agent.nextReply(world.threadId, 10);
+  expect(answer.body).toContain('The legend sits on top of the axis labels.');
+  const attached = answer.attachments as { name: string; path: string }[];
+  expect(attached.map((a) => a.name)).toEqual(names);
+  for (const file of attached) expect(file.path).toMatch(new RegExp(`/inbox/uploads/att_[0-9A-Z]+/${file.name.replace(/\./g, '\\.')}$`));
   expect(world.errors).toEqual([]);
 });
 
@@ -324,15 +325,9 @@ test('the reply box: files dropped on the thread open the reply holding them; th
   const names = ['ledger-q3-export.png', 'currency-notes.md', 'exports-2026-10.zip'];
   const reply = pane.locator('article.ib-message').last();
   for (const name of names) await expect(reply.locator(`.ib-att-t[data-attachment-name="${name}"]`)).toBeVisible();
-  // The agent may not have read the earlier test's reply yet: read on until this one.
-  let body = '';
-  let cursor: number | undefined;
-  for (let i = 0; i < 3 && !body.includes('Here is the Q3 export'); i++) {
-    const answer = await agent.waitForReply(world.threadId, 10, cursor);
-    body = (answer.reply as { body: string }).body;
-    cursor = answer.cursor as number | undefined;
-  }
-  for (const name of names) expect(body).toContain(`Attached: ${name} (`);
+  const answer = await agent.nextReply(world.threadId, 10);
+  expect(answer.body).toContain('Here is the Q3 export');
+  expect((answer.attachments as { name: string }[]).map((a) => a.name)).toEqual(expect.arrayContaining(names));
   expect(world.errors).toEqual([]);
 });
 

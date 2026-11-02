@@ -321,8 +321,7 @@ describe("the list: per-thread sections across projects", () => {
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads?project=prj_01ARZ3NDEKTSV4RRFFQ69G5FAV`)).status).toBe(404);
 
     // The agent reads the reply: Sent moves to Quiet.
-    const got = structured<{ status: string }>(await client.callTool({ name: "wait_for_reply", arguments: { thread_id: sentRow.thread_id, timeout_seconds: 5 } }));
-    expect(got.status).toBe("replied");
+    await client.callTool({ name: "read_thread", arguments: { thread_id: sentRow.thread_id } });
     // The person opens the news: it leaves "New since you looked"...
     const seen = await post(server, `/api/inbox/threads/${news.thread_id}/seen`, {});
     expect(seen.status).toBe(200);
@@ -412,43 +411,6 @@ describe("routing edges, through the real doors", () => {
     servers.splice(servers.indexOf(server), 1);
     server = await start(dataDir);
     expect((await list(server)).sections).toEqual(before.sections);
-  });
-
-  test("wait_for_reply in a shared thread: another session writing after the reply does not hide it; a returned reply checks only itself", async () => {
-    const root = tempRoot();
-    const repo = gitProject(root, "api");
-    const server = await start(join(root, "data"));
-    const client = await mcpClient(server);
-    const send = async (args: Record<string, unknown>) =>
-      structured<Sent>(await client.callTool({ name: "send_message", arguments: { project_path: repo, ...args } }));
-    const wait = async (args: Record<string, unknown>) =>
-      structured<{ status: string; cursor: number; reply?: { body: string } }>(
-        await client.callTool({ name: "wait_for_reply", arguments: { timeout_seconds: 1, ...args } }),
-      );
-
-    // ses_A asks in "shared"; the person answers; ses_B then writes in the same thread.
-    const asked = await send({ body: PLAIN_Q("Use the new schema?"), thread: "shared", agent_session: "ses_A" });
-    expect((await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { idempotency_key: "r-shared", words: "Yes, the new one." })).status).toBe(200);
-    await send({ body: "I am on the migration.", thread: "shared", agent_session: "ses_B" });
-    // ses_A still gets the answer at once: the threshold is ITS last message, not ses_B's.
-    expect(await wait({ thread_id: asked.thread_id, agent_session: "ses_A" })).toMatchObject({
-      status: "replied",
-      reply: { body: expect.stringContaining("Yes, the new one.") },
-    });
-
-    // Two replies before the agent looks: the first one returned leaves the row in Sent.
-    const q = await send({ body: "Ready to merge?", agent_session: "ses_C" });
-    for (const [key, words] of [["r1", "First thought."], ["r2", "Second thought."]]) {
-      expect((await post(server, `/api/inbox/messages/${q.message_id}/reply`, { idempotency_key: key, words })).status).toBe(200);
-    }
-    const rowOf = async () => rowsOf(await list(server)).find((r) => r.thread_id === q.thread_id)!;
-    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
-    const got1 = await wait({ thread_id: q.thread_id, agent_session: "ses_C" });
-    expect(got1.reply?.body).toContain("First thought.");
-    expect(await rowOf()).toMatchObject({ section: "sent", sent: { checked_at: null } });
-    const got2 = await wait({ thread_id: q.thread_id, agent_session: "ses_C", cursor: got1.cursor });
-    expect(got2.reply?.body).toContain("Second thought.");
-    expect((await rowOf()).section).toBe("quiet");
   });
 
   test("/seen: a look with nothing new writes nothing; the window guards refuse before anything is written", async () => {

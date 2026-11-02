@@ -228,26 +228,20 @@ export function createInboxLiveSessions(options: {
   const startedAt = now();
   const sessions = new Map<string, SeenSession>();
   /**
-   * MCP activity per agent session: when a tool call last named it, and the
-   * wait_for_reply calls it holds open now. Presence only (a session that
-   * asked is not "ended" while it talks to the Inbox); it never makes a
-   * session live for New message, which needs a connection that wakes it.
+   * MCP activity per agent session: when a tool call last named it. Presence
+   * only (a session that asked is not "ended" while it talks to the Inbox); it
+   * never makes a session live for New message, which needs a connection that
+   * wakes it.
    */
-  const mcpSeen = new Map<string, { lastSeen: number; holding: number; host?: string; name?: string; waits?: (string | null)[] }>();
+  const mcpSeen = new Map<string, { lastSeen: number; host?: string; name?: string }>();
   const mcpEntry = (session: string) => {
     let entry = mcpSeen.get(session);
     if (!entry) {
-      entry = { lastSeen: now(), holding: 0 };
+      entry = { lastSeen: now() };
       mcpSeen.set(session, entry);
     }
     return entry;
   };
-  /**
-   * The session holds a wait_for_reply open now that would return an item of
-   * `threadId`: a wait on that thread, or one on every thread it asked (null).
-   */
-  const waitingOverMcp = (session: string, threadId: string): boolean =>
-    (mcpSeen.get(session)?.waits ?? []).some((thread) => thread === null || thread === threadId);
   /** A tool call named this agent session (and, when the call said so, its host and name: the tag list's MCP rows). */
   const seenOverMcp = (session: string, who: { host?: unknown; name?: unknown } = {}) => {
     if (!session) return;
@@ -255,22 +249,6 @@ export function createInboxLiveSessions(options: {
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
     if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
-  };
-  /** A wait_for_reply for this session is open (on `threadId`, or null: every thread it asked): present until it answers. */
-  const holdOverMcp = (session: string, threadId: string | null = null): (() => void) => {
-    const entry = mcpEntry(session);
-    entry.holding += 1;
-    entry.lastSeen = now();
-    (entry.waits ??= []).push(threadId);
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      entry.holding = Math.max(0, entry.holding - 1);
-      const at = entry.waits?.indexOf(threadId) ?? -1;
-      if (at >= 0) entry.waits!.splice(at, 1);
-      entry.lastSeen = now();
-    };
   };
   /**
    * project_path to its project's root. The Inbox passes its shared
@@ -485,7 +463,7 @@ export function createInboxLiveSessions(options: {
 
   /**
    * Whether the session that asked is still there, with the grace above: it
-   * holds a poll or an MCP wait_for_reply, or polled or called an MCP tool
+   * holds a poll, or polled or called an MCP tool
    * within `INBOX_ASKER_GRACE_MS`, or this Inbox started less than that long
    * ago (sessions are kept in memory only). The window asks only about a
    * session whose message came through a connection that wakes it
@@ -495,8 +473,8 @@ export function createInboxLiveSessions(options: {
     // A session the Inbox wakes itself (Codex) is there until its thread is known to be gone.
     const wakeOnly = options.wakeOnlyStatus?.(session) ?? null;
     if (wakeOnly !== null) return wakeOnly === "alive";
-    const recent = (entry: { holding: number; lastSeen: number } | undefined) =>
-      !!entry && (entry.holding > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
+    const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
+      !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
     return now() - startedAt <= INBOX_ASKER_GRACE_MS;
   };
@@ -777,7 +755,7 @@ export function createInboxLiveSessions(options: {
       parts.push(`${id}:${isLive(entry) ? 1 : 0}${entry.busy === null ? "n" : entry.busy ? "b" : "i"}${entry.sendNow ? "s" : ""}${clocked}`);
     }
     for (const [id, entry] of mcpSeen) {
-      if (entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
+      if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
     }
     return parts.join("|");
   };
@@ -998,8 +976,6 @@ export function createInboxLiveSessions(options: {
     askerLive,
     replyTarget,
     seenOverMcp,
-    holdOverMcp,
-    waitingOverMcp,
     route,
     allLive,
     isSessionLive,

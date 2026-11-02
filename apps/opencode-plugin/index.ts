@@ -738,7 +738,7 @@ Do NOT proceed with implementation until your plan is approved.`;
   // The Plannotator Inbox tool (inbox.ts), decided once at plugin setup: only
   // where the inbox tool switch allows it for OpenCode and an Inbox was found.
   // OpenCode 1 gets the tool only: it has no way to wake an idle session, so
-  // replies are read with wait_for_reply or read_thread, and the description
+  // replies are read with read_thread, and the description
   // says nothing about them arriving by themselves. Except in a server the
   // Inbox started for a launch (`PLANNOTATOR_LAUNCH`, packages/server/
   // inbox-launch-opencode.ts): the Inbox delivers its replies as turns there.
