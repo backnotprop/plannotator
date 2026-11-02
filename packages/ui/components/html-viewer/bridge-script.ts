@@ -60,6 +60,10 @@ body[data-plannotator-pinpoint-cursor],
 body[data-plannotator-pinpoint-cursor] * {
   cursor: crosshair !important;
 }
+/* Armed, body listens for clicks so a tap pins (setTapTarget): no grey flash over the whole page on each tap. */
+body[data-plannotator-pinpoint-cursor] {
+  -webkit-tap-highlight-color: transparent;
+}
 /* A plain click on a link with a real destination follows it while armed
  * (Cmd/Ctrl-click pins it), so such a link keeps the pointer that says so,
  * until the modifier is held. A link that goes nowhere (no href, "", "#",
@@ -508,14 +512,31 @@ export const BRIDGE_SCRIPT = `(function() {
   var annotateModeActive = true;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
+  // WebKit's touch model (iOS, and Playwright's WebKit on Linux) turns a tap
+  // into mouse events and a click only when the tapped element or an ancestor
+  // up to <body> listens for a click; listeners on document and window (all
+  // of the bridge's) do not count. Without this, a tap on plain text while
+  // armed sends no click and pins nothing. So while armed in pinpoint, body
+  // listens (a no-op), and its tap highlight is off: the pin draws its own box.
+  var tapTargetBody = null;
+  function noteTap() {}
+  function setTapTarget(on) {
+    var body = on ? document.body : null;
+    if (body === tapTargetBody) return;
+    if (tapTargetBody) tapTargetBody.removeEventListener('click', noteTap);
+    tapTargetBody = body;
+    if (body) body.addEventListener('click', noteTap);
+  }
   function updatePinpointCursor() {
     if (!document.body) return;
     if (annotateModeActive && currentInputMethod === 'pinpoint') {
       document.body.setAttribute('data-plannotator-pinpoint-cursor', '');
       if (!LIVE) document.body.setAttribute('data-plannotator-frame-inert', '');
+      setTapTarget(true);
     } else {
       document.body.removeAttribute('data-plannotator-pinpoint-cursor');
       document.body.removeAttribute('data-plannotator-frame-inert');
+      setTapTarget(false);
     }
   }
   var pinpointHover = null;

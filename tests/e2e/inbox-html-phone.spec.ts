@@ -8,6 +8,9 @@
  * - Chromium gets real input through the DevTools protocol: a real pinch, and
  *   the browser's own long press, which selects a word in the frame.
  * - WebKit has no such channel. A tap (Playwright's `tap`) is its own tap event.
+ *   On Linux (CI) it keeps iOS's rule: a tap clicks only an element that, or
+ *   whose ancestor up to body, listens for clicks. The pin tests guard the
+ *   bridge's armed body listener with it; macOS WebKit clicks either way.
  *   It cannot pinch and it cannot make a touch selection, so on WebKit the
  *   selection is set by script and the zoom is a stubbed `visualViewport.scale`.
  *   Those two are FORCED, and the tests that use them say so in their names.
@@ -334,6 +337,11 @@ for (const phone of [
 
 // (A later tap does not clear Chromium's emulated long-press selection, so closing by a tap on the page is left to a real phone.)
 test('Pixel 7 (Chromium), real long press: a finger selects a word and the card opens on it, focus left in the page', async () => {
+  // Chromium on Linux (CI) recognizes no long press from DevTools touches: a held
+  // synthesizeTapGesture, or a touchStart held 1.5 s, ends as pointerup and touchend
+  // with no contextmenu and no selection, so there is nothing for the bridge to read.
+  // The forced-selection tests above cover the bridge there; this one runs on macOS.
+  test.skip(process.platform === 'linux', 'Chromium on Linux makes no long press from DevTools touches');
   await withPhone('chromium', async (w, page) => {
     await open(w, page, 'report.html');
     const box = (await frame(page).locator('#p1').boundingBox())!;
