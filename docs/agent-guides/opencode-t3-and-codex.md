@@ -162,9 +162,11 @@ runs for anyone who did not opt in.
   in `HIDDEN_SUBCOMMANDS`.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
-  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
+  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
   (`t3HookCommand`, `packages/shared/t3-hook-command.ts`): only an Agent SDK
-  session (`sdk-ts`, …) starts the binary; an interactive `claude` (`cli`)
+  session (`sdk-ts`, …, or `t3-code`, which T3 sets for its Claude) starts the
+  binary (a hook the SDK-only gate of earlier builds wrote is still found by
+  reinstall and uninstall); an interactive `claude` (`cli`)
   is answered by the shell with no output (~3 ms instead of ~290 ms of CLI
   startup). The binary repeats the check as the first statement of
   `apps/hook/server/index.ts` and in `prepareT3Hook`. Inside an SDK session

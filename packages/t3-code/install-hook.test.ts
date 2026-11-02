@@ -67,7 +67,7 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n%s\\n" "$PLANNOTATOR_DATA_DIR" "$1"\n', { mode: 0o755 });
   const run = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)],
     { env: { PATH: "/usr/bin:/bin", ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
-  for (const entrypoint of ["sdk-ts", "sdk-py"]) {
+  for (const entrypoint of ["sdk-ts", "sdk-py", "t3-code"]) {
     const result = run(entrypoint);
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toBe(dataDir + "\nt3-hook\n");
@@ -81,6 +81,8 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   expect(parseT3HookCommand(t3HookCommand(executable, dataDir) + " && echo unrelated")).toBeUndefined();
   expect(parseT3HookCommand("/other/custom-command t3-hook")).toBeUndefined();
   expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) /other/custom-command t3-hook;; esac')).toBeUndefined();
+  // The SDK-only gate earlier builds wrote is still found, so reinstall and uninstall replace it.
+  expect(parseT3HookCommand('case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=\'/d\' \'/bin/plannotator\' t3-hook;; esac')).toEqual({ executable: "/bin/plannotator" });
   // The ungated form earlier builds wrote is still recognized, so reinstall and uninstall replace it.
   expect(parseT3HookCommand(`PLANNOTATOR_DATA_DIR='/data' '${executable}' t3-hook`)).toEqual({ executable });
 });

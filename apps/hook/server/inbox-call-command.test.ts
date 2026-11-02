@@ -29,6 +29,7 @@ const entry = resolve(import.meta.dir, "index.ts");
 const HOUR = 60 * 60_000;
 const CODEX_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const QWEN_SESSION = "11111111-2222-4333-8444-555555555555";
+const T3_THREAD = "00000000-0000-4000-8000-000000000001";
 
 let stubs: string[] = [];
 const roots: string[] = [];
@@ -351,6 +352,14 @@ describe("who is calling", () => {
     expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
     expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
     expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
+    // T3 Code owns its thread whatever agent runs there: Claude's marker and Codex's id beside it are that agent.
+    const t3 = { host: "t3", session: T3_THREAD, name: "T3 Code" };
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1" })).toEqual(t3);
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toEqual(t3);
+    // Another agent started in the thread's shell is not the thread.
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", GEMINI_CLI: "1" })).toBe("session_ambiguous");
+    // A mod-run Claude Code started inside a T3 shell is its own session.
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, PLANNOTATOR_SESSION_TAG: "claude-code:s" })).toBe("session_ambiguous");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

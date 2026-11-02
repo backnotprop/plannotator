@@ -58,13 +58,13 @@ import { handleInboxServerReady, startInboxServer } from "@plannotator/server/in
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
-import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { agentSpec, claudeCodeModProvidesInbox, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { claudeModOwnsInbox, inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 
@@ -637,6 +637,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       hostSession: inboxHostSessionFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),
+      claudeMod: claudeModOwnsInbox(process.env, () => claudeCodeModProvidesInbox(createAgentEnvironment(), process.env.PLANNOTATOR_CWD || process.cwd())),
     });
     process.exit(0);
   }

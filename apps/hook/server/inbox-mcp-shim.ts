@@ -41,6 +41,9 @@ import {
   INBOX_QWEN_HOST,
   INBOX_QWEN_NAME,
   INBOX_QWEN_SESSION_ENV,
+  INBOX_T3_HOST,
+  INBOX_T3_NAME,
+  INBOX_T3_THREAD_ENV,
   INBOX_WAKING_HOSTS,
   codexThreadOfCall,
   inboxId,
@@ -48,6 +51,7 @@ import {
   isInboxSessionId,
   isQwenMcpClient,
   isQwenSessionId,
+  isT3ThreadId,
   qwenSessionOfCall,
 } from "@plannotator/core/inbox-types";
 import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
@@ -80,6 +84,8 @@ export interface InboxHostSession {
  * The agent session this process belongs to, from the environment it
  * inherited, or null. `PLANNOTATOR_SESSION_TAG` (`<host>:<session id>`, set by
  * the Claude Code mod in every process its session starts) comes first; then
+ * `T3CODE_THREAD_ID`, which T3 Code sets in every process of a thread's agent
+ * (it owns the thread whatever runs inside, so it outranks Codex's id); then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
  * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs. Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
@@ -91,10 +97,12 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
     const colon = tag.indexOf(":");
     const host = colon > 0 ? tag.slice(0, colon) : "";
     const session = tag.slice(colon + 1);
-    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && isInboxSessionId(session) && (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) && (host !== INBOX_QWEN_HOST || isQwenSessionId(session))) {
+    if (Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) && isInboxSessionId(session) && (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) && (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) && (host !== INBOX_T3_HOST || isT3ThreadId(session))) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
   }
+  const t3 = env[INBOX_T3_THREAD_ENV];
+  if (isT3ThreadId(t3)) return { host: INBOX_T3_HOST, session: t3, name: INBOX_T3_NAME };
   const pi = env.PI_SESSION_ID;
   if (isInboxSessionId(pi)) return { host: "pi", session: pi, name: INBOX_SESSION_HOST_NAMES.pi! };
   const codex = env.CODEX_THREAD_ID;
@@ -102,6 +110,27 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   const qwen = env[INBOX_QWEN_SESSION_ENV];
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
   return null;
+}
+
+/** The first Claude Code that runs hooks modules, and so the mod. */
+const CLAUDE_CODE_MOD_MIN: readonly number[] = [2, 1, 287];
+
+/**
+ * Whether the shim runs where the Claude Code mod's `plannotator_inbox` tool
+ * surely reaches the Inbox and wakes the session: an interactive Claude Code
+ * (`CLAUDE_CODE_ENTRYPOINT=cli`, not a T3 thread) new enough for mods (the
+ * version from `AI_AGENT`, `claude-code_2-1-316_harness`, which Claude Code
+ * passes its MCP servers), and `modProvidesInbox` (the plugin enabled, the mod
+ * and the Inbox tool on). Anything unknown keeps the tools, so a person who
+ * turned the mod off and connected Claude Code through MCP keeps their Inbox.
+ */
+export function claudeModOwnsInbox(env: Record<string, string | undefined>, modProvidesInbox: () => boolean): boolean {
+  if (env.CLAUDECODE !== "1" || env.CLAUDE_CODE_ENTRYPOINT !== "cli" || isT3ThreadId(env[INBOX_T3_THREAD_ENV])) return false;
+  const version = /^claude-code_(\d+)-(\d+)-(\d+)(?:_|$)/.exec(env.AI_AGENT ?? "")?.slice(1).map(Number);
+  if (!version) return false;
+  const index = version.findIndex((part, i) => part !== CLAUDE_CODE_MOD_MIN[i]);
+  if (index >= 0 && version[index]! < CLAUDE_CODE_MOD_MIN[index]!) return false;
+  return modProvidesInbox();
 }
 
 /**
@@ -178,6 +207,12 @@ export interface InboxMcpShimOptions {
    * or reaches the Inbox.
    */
   askAiChild?: boolean;
+  /**
+   * The shim runs in an interactive Claude Code (`claudeModOwnsInbox`), whose
+   * `plannotator_inbox` tool is the connection: it answers with no tools, so
+   * the agent never has two Inbox tools of which only one wakes it.
+   */
+  claudeMod?: boolean;
   /** Default: process stdin / stdout. */
   input?: ReadableStream<Uint8Array>;
   write?: (line: string) => void;
@@ -239,7 +274,7 @@ export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: strin
  * resources as an error and mark it disconnected. That is harmless: they go
  * on without it.
  */
-export function askAiChildReply(message: JsonRpc): string | null {
+export function askAiChildReply(message: JsonRpc, refusal = "The Plannotator Inbox is off in an agent that Plannotator's Ask AI started."): string | null {
   if (!message || typeof message !== "object" || !("id" in message) || typeof message.method !== "string") return null;
   const result = (value: Record<string, unknown>) => JSON.stringify({ jsonrpc: "2.0", id: message.id ?? null, result: value });
   switch (message.method) {
@@ -256,7 +291,7 @@ export function askAiChildReply(message: JsonRpc): string | null {
     case "ping":
       return result({});
     default:
-      return rpcError(message.id, "The Plannotator Inbox is off in an agent that Plannotator's Ask AI started.", -32601);
+      return rpcError(message.id, refusal, -32601);
   }
 }
 
@@ -296,8 +331,8 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       write(rpcError(null, "Parse error", -32700));
       return;
     }
-    if (options.askAiChild) {
-      const reply = askAiChildReply(message);
+    if (options.askAiChild || options.claudeMod) {
+      const reply = askAiChildReply(message, options.askAiChild ? undefined : "In Claude Code, the Inbox is the plannotator_inbox tool.");
       if (reply) write(reply);
       return;
     }

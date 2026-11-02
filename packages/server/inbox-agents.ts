@@ -654,11 +654,17 @@ function claudeSettingsPluginState(settings: { enabledPlugins?: unknown } | null
   return ours.length > 0 ? false : undefined;
 }
 
-/** Claude Code's settings scopes the Inbox can read, strongest first: managed, then the user's settings.local.json, then settings.json. */
-function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user"; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
+/** Claude Code's settings scopes, strongest first; a project's own two (`.claude/settings.local.json`, then `.claude/settings.json`) when `project` names it. */
+function claudeSettingsScopes(e: AgentEnvironment, project?: string): { scope: "managed" | "project" | "user"; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
   const managed = claudeManagedSettingsPath(e);
   return [
     ...(managed ? [{ scope: "managed" as const, settings: readClaudeSettings(managed) }] : []),
+    ...(project
+      ? [
+          { scope: "project" as const, settings: readClaudeSettings(join(project, ".claude", "settings.local.json")) },
+          { scope: "project" as const, settings: readClaudeSettings(join(project, ".claude", "settings.json")) },
+        ]
+      : []),
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.local.json")) },
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.json")) },
   ];
@@ -670,7 +676,7 @@ function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user";
  * over the user's true), else the registry. Pure.
  */
 export function claudePluginStateFromScopes(
-  scopes: readonly { scope: "managed" | "user"; on: boolean | undefined }[],
+  scopes: readonly { scope: "managed" | "project" | "user"; on: boolean | undefined }[],
   registered: boolean,
 ): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
   const decided = scopes.find((scope) => scope.on !== undefined);
@@ -723,8 +729,8 @@ export function claudeCodePluginState(e: AgentEnvironment): "enabled" | "disable
 }
 
 /** claudeCodePluginState, and whether managed (enterprise) settings decided it. */
-export function claudeCodePluginStatus(e: AgentEnvironment): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
-  const scopes = claudeSettingsScopes(e).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
+export function claudeCodePluginStatus(e: AgentEnvironment, project?: string): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
+  const scopes = claudeSettingsScopes(e, project).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
   return claudePluginStateFromScopes(scopes, claudePluginRegistered(e));
 }
 
@@ -734,8 +740,8 @@ export function claudeCodePluginStatus(e: AgentEnvironment): { state: "enabled" 
  * process's environment (the shell that started the Inbox may be the one that
  * starts Claude Code). Undefined when nothing sets it.
  */
-function claudeCodeModEnv(e: AgentEnvironment): string | undefined {
-  for (const { settings } of claudeSettingsScopes(e)) {
+function claudeCodeModEnv(e: AgentEnvironment, project?: string): string | undefined {
+  for (const { settings } of claudeSettingsScopes(e, project)) {
     const env = settings?.env;
     if (env && typeof env === "object") {
       const value = (env as Record<string, unknown>).PLANNOTATOR_CLAUDE_MOD;
@@ -751,14 +757,23 @@ function claudeCodeModEnv(e: AgentEnvironment): string | undefined {
  * Code's settings `env`, else this process's environment), then config.json
  * `claudeCodeMod`. Off, Claude Code has no Inbox tool even with the plugin.
  */
-export function claudeCodeModOn(e: AgentEnvironment): boolean {
-  const value = claudeCodeModEnv(e);
+export function claudeCodeModOn(e: AgentEnvironment, project?: string): boolean {
+  const value = claudeCodeModEnv(e, project);
   return resolveClaudeCodeMod(loadConfig(), value === undefined ? {} : { PLANNOTATOR_CLAUDE_MOD: value });
 }
 
-/** Claude Code's Inbox tool is on: the plugin's mod is on and `inboxTool` allows it. */
-export function claudeCodeInboxToolOn(e: AgentEnvironment): boolean {
-  return claudeCodeModOn(e) && resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, "claude-code");
+/**
+ * Claude Code has the `plannotator_inbox` tool: the plugin is enabled (in
+ * `project`'s own settings too, when given), its mod is on and `inboxTool`
+ * allows it.
+ */
+export function claudeCodeModProvidesInbox(e: AgentEnvironment, project?: string): boolean {
+  return claudeCodePluginStatus(e, project).state === "enabled" && claudeCodeInboxToolOn(e, project);
+}
+
+/** Claude Code's Inbox tool is on: the plugin's mod is on (in `project`'s settings `env` too, when given) and `inboxTool` allows it. */
+export function claudeCodeInboxToolOn(e: AgentEnvironment, project?: string): boolean {
+  return claudeCodeModOn(e, project) && resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, "claude-code");
 }
 
 /**
@@ -1314,7 +1329,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   if (!agentHomeAllowed(e)) return { ...empty, skipped: "sandbox" };
   const file = readInboxAgents(options.dataDir);
   const report: InboxConnectReport = { ...empty, first: !file.first_connected_at };
-  report.claude_code = claudeCodePluginEnabled(e) && claudeCodeInboxToolOn(e);
+  report.claude_code = claudeCodeModProvidesInbox(e);
 
   const pending = AGENT_SPECS.filter((spec) => spec.id !== "claude-code" && spec.detect(e));
   // An agent with a record is never added again by itself; an MCP entry it

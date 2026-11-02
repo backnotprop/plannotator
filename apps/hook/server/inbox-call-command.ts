@@ -37,7 +37,7 @@
  */
 
 import { resolve } from "node:path";
-import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
@@ -51,7 +51,7 @@ const REQUEST_TIMEOUT_MS = 90_000;
 const IDENTITY_FIELDS = ["agent_session", "agent_host", "agent_name"] as const;
 
 /** Each variable that names a host session, read on its own by the shim's own rule. */
-const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV] as const;
+const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", INBOX_T3_THREAD_ENV, "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV] as const;
 
 /**
  * The hosts that mark the shells they start (`detectOrigin`), each here for a
@@ -98,6 +98,10 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
     if (!named.some((other) => other.host === found.host && other.session === found.session)) named.push(found);
   }
   const sessionless = SESSIONLESS_HOSTS.filter(({ variable, host }) => env[variable] && !named.some((other) => other.host === host));
+  // T3 Code owns the thread whatever agent runs in it: that agent's own variables (Codex's id, CLAUDECODE) are not another caller.
+  // Another agent's marker (Gemini CLI, OpenCode, …) is a shell started inside the thread: still ambiguous below.
+  const t3 = named.find((found) => found.host === INBOX_T3_HOST);
+  if (t3 && flag === null && named.every((found) => found === t3 || found.host === "codex") && sessionless.every(({ host }) => host === "claude-code")) return { ok: true, caller: t3 };
   if (flag !== null) {
     const caller = callerOfFlag(flag);
     if (!caller) return { ok: false, usage: true, code: "invalid_session", message: `--session takes <host>:<id> or <id>, as your Tidy's wake gives it, not ${JSON.stringify(flag)}.` };

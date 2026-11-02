@@ -10,13 +10,15 @@ export function quoteHookWord(value: string): string {
 
 /**
  * The shell gate in front of the hook. T3 Code runs Claude through the Agent
- * SDK, which sets CLAUDE_CODE_ENTRYPOINT to `sdk-ts` (`sdk-py`, `sdk-cli`, …)
- * for the Claude it starts; an interactive `claude` reports `cli`. The hook
+ * SDK, and names itself in CLAUDE_CODE_ENTRYPOINT (`t3-code`); other SDK apps
+ * report `sdk-ts` (`sdk-py`, `sdk-cli`, …) and an interactive `claude` `cli`. The hook
  * runs on every Bash call of every Claude session that loads this settings
  * file, so outside an SDK session the shell answers on its own (no output, no
  * decision) and the Plannotator binary never starts.
  */
-const T3_HOOK_GATE_OPEN = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) ';
+const T3_HOOK_GATE_OPEN = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) ';
+/** The gate earlier builds wrote, before T3 named its entrypoint: still read, so reinstall and uninstall clean it up. */
+const T3_HOOK_GATE_OPEN_SDK_ONLY = 'case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) ';
 const T3_HOOK_GATE_CLOSE = ";; esac";
 
 export function t3HookCommand(executable: string, dataDir: string): string {
@@ -25,7 +27,7 @@ export function t3HookCommand(executable: string, dataDir: string): string {
 
 /** Whether a Claude session can be T3's: only Agent SDK sessions are. */
 export function isAgentSdkEntrypoint(value: string | undefined): boolean {
-  return typeof value === "string" && value.startsWith("sdk");
+  return typeof value === "string" && (value.startsWith("sdk") || value === "t3-code");
 }
 
 /**
@@ -36,9 +38,8 @@ export function isAgentSdkEntrypoint(value: string | undefined): boolean {
  */
 export function parseT3HookCommand(command: string): { executable: string } | undefined {
   let inner = command.trim();
-  if (inner.startsWith(T3_HOOK_GATE_OPEN) && inner.endsWith(T3_HOOK_GATE_CLOSE)) {
-    inner = inner.slice(T3_HOOK_GATE_OPEN.length, -T3_HOOK_GATE_CLOSE.length);
-  }
+  const gate = [T3_HOOK_GATE_OPEN, T3_HOOK_GATE_OPEN_SDK_ONLY].find((open) => inner.startsWith(open) && inner.endsWith(T3_HOOK_GATE_CLOSE));
+  if (gate) inner = inner.slice(gate.length, -T3_HOOK_GATE_CLOSE.length);
   const words = simpleShellCommandWords(inner);
   if (!words) return;
   if (words[0]?.startsWith("PLANNOTATOR_DATA_DIR=")) words.shift();

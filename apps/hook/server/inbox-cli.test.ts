@@ -25,7 +25,7 @@ import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/s
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
 import { detachedInboxEnv } from "./inbox-command";
-import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
+import { claudeModOwnsInbox, fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, signalProvenInbox, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 
@@ -443,7 +443,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     // Codex and Qwen Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
     // cross-session messaging), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "opencode", "pi", "qwen"]);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
@@ -459,6 +459,30 @@ describe("plannotator inbox mcp inside an agent session", () => {
       session: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b",
       name: "Pi",
     });
+    // T3 Code's thread, which outranks the id of the Codex running in it; the Plannotator tag still comes first.
+    const t3 = "00000000-0000-4000-8000-000000000001";
+    expect(inboxHostSessionFromEnv({ T3CODE_THREAD_ID: t3, CODEX_THREAD_ID: "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b" })).toEqual({ host: "t3", session: t3, name: "T3 Code" });
+    expect(inboxHostSessionFromEnv({ T3CODE_THREAD_ID: "not-a-uuid" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "t3:not-a-uuid" })).toBeNull();
+    expect(inboxHostSessionFromEnv({ T3CODE_THREAD_ID: t3, PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` })?.host).toBe("claude-code");
+    // The MCP server lists no tools only where the mod's plannotator_inbox tool is surely there: an interactive Claude
+    // Code new enough for mods (its AI_AGENT names the version), with the plugin, the mod and the Inbox tool on.
+    const cli = { CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", AI_AGENT: "claude-code_2-1-316_harness" };
+    expect(claudeModOwnsInbox(cli, () => true)).toBe(true);
+    expect(claudeModOwnsInbox({ ...cli, AI_AGENT: "claude-code_2-1-287_harness" }, () => true)).toBe(true);
+    // The mod off, the plugin missing or the Inbox tool off (PLANNOTATOR_CLAUDE_MOD=0, …): the person's MCP entry is their Inbox.
+    expect(claudeModOwnsInbox(cli, () => false)).toBe(false);
+    for (const env of [
+      { ...cli, AI_AGENT: "claude-code_2-1-286_harness" },
+      { CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli" },
+      { ...cli, AI_AGENT: "claude-code_unknown" },
+      { ...cli, CLAUDE_CODE_ENTRYPOINT: "t3-code", T3CODE_THREAD_ID: t3 },
+      { ...cli, CLAUDE_CODE_ENTRYPOINT: "sdk-ts" },
+      { ...cli, T3CODE_THREAD_ID: t3 },
+      {},
+    ]) {
+      expect(claudeModOwnsInbox(env, () => true)).toBe(false);
+    }
     // The Plannotator tag wins over Pi's own variable.
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}`, PI_SESSION_ID: "abc" })?.host).toBe("claude-code");
     for (const tag of [

@@ -12,7 +12,7 @@ import { loadConfig } from "@plannotator/shared/config";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_NOTE_START } from "./inbox-agent-notes";
-import { claudePluginStateFromScopes, createAgentEnvironmentFor } from "./inbox-agents";
+import { claudeCodeModProvidesInbox, claudePluginStateFromScopes, createAgentEnvironmentFor } from "./inbox-agents";
 
 let fake: FakeAgents;
 let server: InboxServer | null = null;
@@ -115,6 +115,25 @@ test("Claude Code's plugin is found in every scope the Inbox can read: settings.
   writeFileSync(join(claude, "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": false } }));
   // Turned off by name (`claude plugin disable`): not installed for the Inbox, and said, so the screen never offers installing it.
   expect(await plugin()).toEqual({ installed: false, disabled: true });
+});
+
+test("a project's own settings can turn the plugin off for that project, so its Claude Code has no plannotator_inbox tool", () => {
+  mkdirSync(join(fake.home, ".claude"), { recursive: true });
+  writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
+  const project = join(fake.root, "app");
+  mkdirSync(join(project, ".claude"), { recursive: true });
+  const e = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: fake.env });
+  expect(claudeCodeModProvidesInbox(e, project)).toBe(true);
+  writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": false } }));
+  expect(claudeCodeModProvidesInbox(e, project)).toBe(false);
+  writeFileSync(join(project, ".claude", "settings.local.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
+  expect(claudeCodeModProvidesInbox(e, project)).toBe(true);
+  expect(claudeCodeModProvidesInbox(e)).toBe(true);
+  // The project's settings `env` turning the mod off wins over the user's on.
+  writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true }, env: { PLANNOTATOR_CLAUDE_MOD: "1" } }));
+  writeFileSync(join(project, ".claude", "settings.local.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true }, env: { PLANNOTATOR_CLAUDE_MOD: "0" } }));
+  expect(claudeCodeModProvidesInbox(e, project)).toBe(false);
+  expect(claudeCodeModProvidesInbox(e)).toBe(true);
 });
 
 test("Claude Code's mod off (claudeCodeMod in config.json, or PLANNOTATOR_CLAUDE_MOD=0): the plugin gives no Inbox tool, so it is not connected", async () => {
