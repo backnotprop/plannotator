@@ -5370,7 +5370,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* The tour's answer to a click it cannot use: one short line on the card. */
 .ib-tour-coach .ib-tc-nudge { margin: 8px 0 0; padding: 6px 9px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--popover)); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; }
 /* A click on the card shows its target again. */
-.pn-inbox .ib-tour-again { outline: 3px solid var(--primary) !important; outline-offset: 3px; }
+.pn-inbox .ib-tour-mark { outline: 3px solid var(--primary) !important; outline-offset: 3px; }
 .ib-tc-do { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 600; display: inline-flex; gap: 5px; align-items: center; }
 .ib-tc-wait { display: inline-flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-tc-wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--primary) 30%, transparent); border-top-color: var(--primary); }
@@ -5381,7 +5381,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   @keyframes ib-tour-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--primary) 45%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
   .ib-tour-coach { animation: ib-pm-in 160ms ease-out; }
   .ib-tc-wait::before { animation: ib-spin 0.9s linear infinite; }
-  .pn-inbox .ib-tour-again { animation: ib-tour-pulse 0.8s ease-out 2; }
+  .pn-inbox .ib-tour-mark { animation: ib-tour-pulse 0.8s ease-out 2; }
 }
 
 /* The replay's marks: what is a replay of the real thread says so. */
