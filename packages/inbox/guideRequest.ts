@@ -6,7 +6,7 @@
  * to, and the words it carries. The reply itself is an ordinary one (the reply
  * route, its idempotency key, its wake), sent by `Thread.tsx`.
  */
-import { INBOX_WAKING_HOSTS, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { wordsMessage } from './sendTargets';
 
 /**
@@ -55,4 +55,15 @@ export function guideRequestTarget(thread: InboxThread): GuideRequestTarget | nu
   const to = recipientOf(message);
   if (!to || !GUIDE_REQUEST_HOSTS.has(to.host)) return null;
   return { message, to };
+}
+
+/**
+ * Whether the window may call the request's session ended (ReplyRoute's `askerCanEnd`, for the target): an agent
+ * message that came through a waking connection (`wakes`), or a person's message (a hand-off, a thread they started)
+ * addressed to a session of a host that polls through Plannotator's connection (Claude Code, Pi, OpenCode). Codex
+ * and Qwen Code (MCP alone) never poll, so their session is never called ended.
+ */
+export function guideTargetCanEnd(target: GuideRequestTarget): boolean {
+  if (target.message.author.kind === 'agent') return target.message.wakes === true;
+  return !INBOX_MCP_WAKING_HOSTS.includes(target.to.host);
 }

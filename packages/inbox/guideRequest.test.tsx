@@ -13,7 +13,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
-import { GUIDE_REQUEST_WORDS, guideRequestTarget } from './guideRequest';
+import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from './guideRequest';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -21,7 +21,13 @@ const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as ty
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billing-svc', root: '/work/billing', created_at: '2026-11-02T09:00:00.000Z' };
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_claude', name: null };
 const PI: InboxAuthor = { kind: 'agent', host: 'pi', session: 'ses_pi', name: null };
-const [M1, M2, M3] = ['msg_01M62DTT05NJ59ZR4AJCDJ70XK', 'msg_01M62DTW6WCYD3ZH6Z17MFMA8G', 'msg_01M62DTXR00R23JW3GNA2KTM9H'] as const;
+const [M1, M2, M3, M4, M5] = ['msg_01M62DTT05NJ59ZR4AJCDJ70XK', 'msg_01M62DTW6WCYD3ZH6Z17MFMA8G', 'msg_01M62DTXR00R23JW3GNA2KTM9H', 'msg_01M62DTXR74RT77ZXA4ZWGPMC8', 'msg_01M62DTXR74RT77ZXA4ZWGPMC9'] as const;
+/** The person's reply that hands the thread from Claude Code to Pi (settled). */
+const HANDOFF = (minute = 12) =>
+  message(M3, { kind: 'person' }, 'Pi, take this over.', minute, {
+    to: { host: 'pi', session: 'ses_pi' },
+    handoff: { from: { host: 'claude-code', session: 'ses_claude' }, at: '2026-11-02T10:12:00.000Z', settled_at: '2026-11-02T10:12:10.000Z' },
+  });
 const WORDS = 'Also rename the flag to RETRY_SAME_KEY before you push.';
 
 function message(id: string, author: InboxAuthor, body: string, minute: number, extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
@@ -71,9 +77,30 @@ test('not offered: an archived thread, a host that gets no guided reviews, an ag
 test('a thread the person started goes to the session it is addressed to; a handed-off thread to its new owner', () => {
   const started = threadOf([message(M1, { kind: 'person' }, 'Fix the 409 retries.', 1, { started_by_person: true, to: { host: 'pi', session: 'ses_pi' } })]);
   expect(guideRequestTarget(started)).toEqual({ message: started.messages[0]!, to: { host: 'pi', session: 'ses_pi' } });
-  const handoff = message(M3, { kind: 'person' }, 'Pi, take this over.', 12, { to: { host: 'pi', session: 'ses_pi' }, handoff: { from: { host: 'claude-code', session: 'ses_claude' }, at: '2026-11-02T10:12:00.000Z', settled_at: '2026-11-02T10:12:10.000Z' } });
+  const handoff = HANDOFF();
   const handed = threadOf([...worked().messages, handoff]);
   expect(guideRequestTarget(handed)).toEqual({ message: handoff, to: { host: 'pi', session: 'ses_pi' } });
+});
+
+test("the person wrote last: the request answers the agent's latest message, never the person's own reply", () => {
+  const answered = threadOf([...worked().messages, message(M3, { kind: 'person' }, 'Looks right. Ship it after lunch.', 12, { reply_to: M2 })]);
+  expect(guideRequestTarget(answered)).toEqual({ message: answered.messages[1]!, to: { host: 'claude-code', session: 'ses_claude' } });
+});
+
+test('the former owner writes after a hand-off: the request still goes to the new owner, then to its own message', () => {
+  const late = message(M4, CLAUDE, 'One more note on the retry cap.', 14);
+  const handed = threadOf([...worked().messages, HANDOFF(), late]);
+  expect(guideRequestTarget(handed)).toEqual({ message: handed.messages[2]!, to: { host: 'pi', session: 'ses_pi' } });
+  const fromPi = message(M5, PI, 'Taking it. Reading the diff now.', 16);
+  expect(guideRequestTarget(threadOf([...handed.messages, fromPi]))?.message.id).toBe(M5);
+});
+
+test("which sessions the window may call ended: a waking agent message, a person's message to a polling host; never Codex", () => {
+  const can = (message: InboxMessageWire, to: { host: string; session: string }) => guideTargetCanEnd({ message, to });
+  expect(can(worked().messages[1]!, { host: 'claude-code', session: 'ses_claude' })).toBe(true);
+  expect(can({ ...worked().messages[1]!, wakes: false }, { host: 'claude-code', session: 'ses_claude' })).toBe(false);
+  expect(can(HANDOFF(), { host: 'pi', session: 'ses_pi' })).toBe(true);
+  expect(can({ ...HANDOFF(), to: { host: 'codex', session: 'th_1' } }, { host: 'codex', session: 'th_1' })).toBe(false);
 });
 
 test('the words name a guided review (pinned on purpose: the agent tool lists get_guide_brief and submit_guide by that phrase)', () => {
@@ -86,15 +113,15 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** The session the window asks about, as live or not (`?asker=`). */
-let askerLive = true;
+/** The sessions the window asks about (`?asker=`), live unless named here as not. */
+let liveness: Record<string, boolean> = {};
 let replyAnswer: () => Promise<Response> = async () => Response.json({ reply: {}, questions: [], replayed: false });
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
-  askerLive = true;
+  liveness = {};
   replyAnswer = async () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -106,7 +133,7 @@ beforeEach(() => {
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [], ...(asked ? { asker: { session: asked, live: askerLive } } : {}) });
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [], ...(asked ? { asker: { session: asked, live: liveness[asked] ?? true } } : {}) });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -248,7 +275,7 @@ test.skipIf(!hasDom)('hidden, not disabled: an archived thread, a host without g
   host?.remove();
 
   // The session that wrote it came through a waking connection and has not been heard from since.
-  askerLive = false;
+  liveness = { ses_claude: false };
   await render(worked());
   await until(() => !!document.querySelector('[data-session-ended]'), 'the session read as ended');
   await openMenu();
@@ -270,4 +297,60 @@ test.skipIf(!hasDom)('a refused request says so and sends again with the same ke
   await until(() => replies().length === 2, 'the retry');
   // The retry is the same request: the server answers a replay, never a second reply.
   expect(replies()[1]!.body.idempotency_key).toBe(replies()[0]!.body.idempotency_key);
+});
+
+test.skipIf(!hasDom)("after a hand-off the new owner's session decides: ended, no item; live, the request goes to it", async () => {
+  const handed = threadOf([...worked().messages, HANDOFF()]);
+  // The former owner is live; the new owner has ended.
+  liveness = { ses_claude: true, ses_pi: false };
+  await render(handed);
+  await until(() => posted.length === 0 && !!document.querySelector('[data-thread-more]'), 'the thread');
+  for (let i = 0; i < 5; i += 1) await settle();
+  await openMenu();
+  expect(labels()).toContain('Copy thread ID');
+  expect(offered()).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+
+  liveness = { ses_claude: false, ses_pi: true };
+  await render(handed);
+  for (let i = 0; i < 5; i += 1) await settle();
+  await openMenu();
+  expect(offered()).toBe(true);
+  await act(async () => requestItem()!.click());
+  await until(() => replies().length === 1, 'the request');
+  expect(replies()[0]!.path).toEndWith(`/api/inbox/messages/${M3}/reply`);
+});
+
+test.skipIf(!hasDom)("a request that failed in one thread does not hand its key to the next thread's request", async () => {
+  // The Inbox refuses a key it has seen on a reply to another message (`idempotency_key_reused`), as it does.
+  const keys = new Map<string, string>();
+  replyAnswer = async () => {
+    const last = replies().at(-1)!;
+    const key = String(last.body.idempotency_key);
+    const target = last.path.split('/').at(-2)!;
+    if (keys.has(key) && keys.get(key) !== target) return Response.json({ error: 'idempotency_key_reused', message: 'That key was used for another reply.' }, { status: 409 });
+    keys.set(key, target);
+    if (target === M2) return Response.json({ error: 'inbox_busy', message: 'The Inbox is busy.' }, { status: 503 });
+    return Response.json({ reply: {}, questions: [], replayed: false });
+  };
+  const el = await render(worked());
+  await openMenu();
+  await act(async () => requestItem()!.click());
+  await until(() => !!el.querySelector('.ib-error'), 'the first request refused');
+  // The same pane now shows another thread.
+  const other: InboxThread = { ...threadOf([message(M4, PI, 'Done: the refund worker and its tests.', 20, { reply_to: null, thread_id: M4, subject: 'Refund worker' })]), thread_id: M4, subject: 'Refund worker' };
+  act(() =>
+    root!.render(
+      <ThreadPane thread={other} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} linkOf={() => 'http://localhost:4321/'} />,
+    ),
+  );
+  for (let i = 0; i < 3; i += 1) await settle();
+  await openMenu();
+  await act(async () => requestItem()!.click());
+  await until(() => replies().length === 2, 'the second request');
+  for (let i = 0; i < 3; i += 1) await settle();
+  expect(replies()[1]!.path).toEndWith(`/api/inbox/messages/${M4}/reply`);
+  expect(replies()[1]!.body.idempotency_key === replies()[0]!.body.idempotency_key).toBe(false);
+  expect((el.querySelector('.ib-error')?.textContent ?? '').includes('was not sent')).toBe(false);
 });
