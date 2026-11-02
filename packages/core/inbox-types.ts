@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxTidyMark } from "./inbox-tidy";
+import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 
@@ -1301,6 +1302,18 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Additive: absent from an older Inbox.
    */
   pinned_at?: string | null;
+  /**
+   * The thread is snoozed (approval "inbox-snooze"; the rules are core's
+   * inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the
+   * window and the phone read, never on anything an agent reads. Additive:
+   * absent from an older Inbox.
+   */
+  snoozed?: InboxRowSnooze | null;
+  /**
+   * The thread came back from a snooze at this time and has not been read
+   * since: the row's small clock. Only on the list model, like `snoozed`.
+   */
+  snooze_back?: string | null;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1428,8 +1441,11 @@ export const INBOX_ROW_WAIT_TEXT_MAX = 200;
 export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
 export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
+/** A group the list draws: a section, or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`), which no row is placed in. */
+export type InboxListGroupId = InboxSectionId | "snoozed";
+
 export interface InboxListSection {
-  id: InboxSectionId;
+  id: InboxListGroupId;
   label: string;
   threads: InboxListRow[];
 }

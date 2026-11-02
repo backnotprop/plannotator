@@ -195,6 +195,14 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.rows.map((r) => [r.thread_id, r.machine])).toEqual([["new", B]]);
   });
 
+  test("a machine keeps snoozes only when its list says so: an older Inbox's list (no `snoozes`) offers no Snooze", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [] });
+    expect(peer.list!.snoozes).toBe(false);
+    peer.acceptList({ cursor: 4, sections: [], snoozes: true });
+    expect(peer.list!.snoozes).toBe(true);
+  });
+
   test("one fetch in flight at a time: refreshes during it make one more, never several at once (F5)", async () => {
     let inFlight = 0;
     let most = 0;

@@ -219,7 +219,7 @@ test("the header's ⋯: Copy thread copies every message, the answer on its ques
   await openThread(page);
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
-  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Archive thread']);
+  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Snooze', 'Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Archive thread']);
   await shot(page, 'desktop-light-thread-menu-open.png');
   await threadMenu(page).locator('[data-copy-item="thread"]').click();
   await expect(toast(page)).toContainText('Thread copied');

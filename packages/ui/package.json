@@ -85,7 +85,7 @@
     "@lezer/highlight": "^1.2.5",
     "@pierre/diffs": "1.5.2",
     "@plannotator/atomic-editor": "^0.9.0",
-    "@plannotator/core": "0.25.14",
+    "@plannotator/core": "0.25.15",
     "@plannotator/markdown-editor": "^0.5.0",
     "@plannotator/web-highlighter": "^0.8.1",
     "@tanstack/react-table": "^8.21.3",
