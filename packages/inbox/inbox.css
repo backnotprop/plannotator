@@ -6303,7 +6303,7 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-fcomp .ib-fcomp-drop { border-radius: 13px; }
 .ib-fcomp-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .ib-fcomp-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-weight: 600; }
-.pn-inbox .ib-fcomp-q { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px dashed color-mix(in oklch, var(--muted-foreground) 50%, transparent); background: none; color: var(--muted-foreground); font-size: inherit; cursor: pointer; }
+.pn-inbox .ib-fcomp-q { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 999px; border: 1px dashed color-mix(in oklch, var(--muted-foreground) 50%, transparent); background: none; color: var(--muted-foreground); font-size: inherit; cursor: pointer; }
 .pn-inbox .ib-fcomp-q:hover { color: var(--foreground); border-style: solid; }
 .ib-fcomp-sent { flex: 1; display: inline-flex; align-items: center; gap: 6px; color: var(--success, #3fae6a); font-weight: 600; }
 .ib-fcomp-note { flex: 1; }
@@ -6328,12 +6328,17 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-view.ib-fullview .ib-imgview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) { grid-template-rows: minmax(0, 1fr); }
 /* A film keeps its own controls clear: the stage ends above the card or the pill (not once Hide took them away). */
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 0; }
+.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-vidview:has(> :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone))) .ib-vidstage,
+.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 0; }
 
-/* Hide (») hides what floats with the toolbar: the size chip, the composer or its pill (inert as well: FullScreenComposer.tsx). */
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-imgbar, .ib-fcomp, .ib-fcomp-pillwrap) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 180ms; }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-fcomp, .ib-fcomp-pillwrap) { transform: translate(-50%, 16px); }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-fcomp.ib-phone, .ib-fcomp-pillwrap.ib-phone) { transform: translateY(16px); }
+/* Hide (») hides what floats with the toolbar: the size chip, the composer or its pill (inert as well: FullScreenComposer.tsx).
+   A phone's Show tools (revealed) brings the composer and its pill back with the toolbar; the size chip stays away. */
+.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-imgbar,
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
+.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 180ms; }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
+.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(-50%, 16px); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp.ib-phone, .ib-fcomp-pillwrap.ib-phone) { transform: translateY(16px); }
 @media (prefers-reduced-motion: reduce) {
   .ib-fcomp, .ib-fcomp-pillwrap, .ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-imgbar, .ib-fcomp, .ib-fcomp-pillwrap) { transition: none; }
 }

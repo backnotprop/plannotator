@@ -1144,7 +1144,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K7000000000000000000002
   -d '{"idempotency_key":"00000000-0000-4000-8000-000000000056"}'
 ```
 
-`{ "message": { "id": "msg_01K70000000000000000000020", "ack": { "label": "Looks good", "at": "2026-10-15T11:00:00.000Z", "read_seq": 41, "made_read": true, "settled_seq": null, "settled_at": null, "seen_at": null }, "...": "" }, "thread": { "section": "quiet", "read_at": "2026-10-15T11:00:00.000Z", "ack": { "label": "Looks good", "at": "2026-10-15T11:00:00.000Z" }, "...": "" } }`. Undo: `{ "idempotency_key": "…057", "ack": false }` answers the same shape with `ack: null`. Ten seconds after it stands, the Inbox writes `settled_seq` (agents see it from then on: `read_thread` carries `ack: { label, at }`, and `wait_for_reply` answers `{ status: "acknowledged" }`), and once an agent reads it, `seen_at` (the window draws "<agent> saw it"). Nothing is pushed for it, ever.
+`{ "message": { "id": "msg_01K70000000000000000000020", "ack": { "label": "Looks good", "at": "2026-10-15T11:00:00.000Z", "read_seq": 41, "made_read": true, "settled_seq": null, "settled_at": null, "seen_at": null }, "...": "" }, "thread": { "section": "quiet", "read_at": "2026-10-15T11:00:00.000Z", "ack": { "label": "Looks good", "at": "2026-10-15T11:00:00.000Z" }, "...": "" } }`. Undo: `{ "idempotency_key": "…057", "ack": false }` answers the same shape with `ack: null`. Ten seconds after it stands, the Inbox writes `settled_seq` (agents see it from then on: `read_thread` carries `ack: { label, at }`), and once an agent reads it, `seen_at` (the window draws "<agent> saw it"). Nothing is pushed for it, ever.
 
 ### 7.57 A reply carrying files
 
@@ -1156,7 +1156,7 @@ curl -sS -X POST "$INBOX/api/inbox/device/messages/msg_01K7000000000000000000002
   -d '{"idempotency_key":"00000000-0000-4000-8000-000000000057","words":"This is what I see.","questions":[],"uploads":["upl_01K70000000000000000000057"]}'
 ```
 
-7.11's answer, with `reply.attachments` holding each file as an ordinary attachment record (the same as 7.40's thread). The agent reads them as `Attached: <name> (<path>)` lines under the words, on its wake and from `wait_for_reply`. A Send of files alone (no words, no answers) is a reply, read as a words-only one. Replaying the key answers the reply it wrote and copies nothing; an id that is gone: `404 upload_not_found`, nothing written. On a Send that answers several sessions, name the files on the reply that carries the words (the last), as the window does.
+7.11's answer, with `reply.attachments` holding each file as an ordinary attachment record (the same as 7.40's thread). The agent reads them as `Attached: <name> (<path>)` lines under the words on its wake, and as attachment records from `read_thread`. A Send of files alone (no words, no answers) is a reply, read as a words-only one. Replaying the key answers the reply it wrote and copies nothing; an id that is gone: `404 upload_not_found`, nothing written. On a Send that answers several sessions, name the files on the reply that carries the words (the last), as the window does.
 
 ### 7.58 Send now
 

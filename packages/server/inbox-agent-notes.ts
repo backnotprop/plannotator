@@ -27,7 +27,11 @@
  * before exactly one end: the block is ours; none: appended; anything else:
  * damaged, nothing is written. `inbox/agent-notes.json` keeps each block's
  * SHA-256, so a block the person edited is theirs and never overwritten (a
- * newer note version is written only over an untouched block). Writes keep
+ * newer note version is written only over an untouched block). The one
+ * exception: in an edited block that has a record, refreshInboxNotes swaps the
+ * exact retired sentence "otherwise call `wait_for_reply`" for "otherwise read
+ * the thread later with `read_thread`", touching no other byte and no record.
+ * Writes keep
  * line endings and mode, follow symlinks, are atomic, and are skipped when
  * nothing changes (agent-files.ts).
  */
@@ -75,14 +79,16 @@ import {
  * decision inside a report or summary still goes in a `:::question` block, one
  * per decision (the owner: agents hand decisions over as prose); v5 is on
  * users' disks, v6 was on no tag when this line went in, so it was amended in
- * place. An earlier block Plannotator wrote is brought
+ * place. v7 (2026-11-01): v6 with the reply line naming read_thread, since
+ * wait_for_reply is gone from the Inbox; v6 is on users' disks. An earlier
+ * block Plannotator wrote is brought
  * up to date at the Inbox's next start (refreshInboxNotes) or when the note
  * is added again (`--notes`, the Settings switch); a block the person edited
- * never is. Every version's text is frozen as literals and its block's hash
+ * never is (bar the one retired sentence, above). Every version's text is frozen as literals and its block's hash
  * pinned (inbox-agent-notes-refresh.test.ts): a released note's bytes never
  * change without a new version, or the notes on disk would read as edited.
  */
-export const INBOX_NOTE_VERSION = 6;
+export const INBOX_NOTE_VERSION = 7;
 const noteStart = (version: number) =>
   `<!-- plannotator-inbox:start v${version} · added by Plannotator. Remove it in the Inbox's Settings or with \`plannotator uninstall\` -->`;
 export const INBOX_NOTE_START = noteStart(INBOX_NOTE_VERSION);
@@ -143,6 +149,21 @@ const INBOX_NOTE_BODY_V5 = [
   'In a `:::question` block, put your recommendation on its own line after the choices as `Recommended: <label>`; never write "(recommended)" in a choice label.',
 ].join("\n");
 
+/** v6's body, exactly as builds before v7 wrote it (on users' disks; frozen as literals so such a block still reads as Plannotator's own). */
+const INBOX_NOTE_BODY_V6 = [
+  "## Plannotator Inbox",
+  "",
+  "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
+  "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
+  "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
+  "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
+  "One thread per work stream, unless the person says otherwise.",
+  "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
+  "Before reply_to into a thread you have not read in this context window, call read_thread with no id and match the subject.",
+  'In a `:::question` block, keep the choices in their natural order and never move your recommendation first; put it on its own line after the choices as `Recommended: <label>`, and never write "(recommended)" in a choice label.',
+].join("\n");
+
 /**
  * The note (DESIGN.md section 2.3): true with or without the tool, so a
  * session without it is not misled. Loaded in every session of the agent, so
@@ -155,7 +176,8 @@ const INBOX_NOTE_BODY_V5 = [
  * INBOX_THREAD_RULE (a literal too, held equal by the same test). v6 (the
  * owner, 2026-10-31): choices stay in their natural order; only the
  * `Recommended:` line marks the pick, never its place; a decision inside a
- * report still goes in its own `:::question` block.
+ * report still goes in its own `:::question` block. v7 (2026-11-01): the reply
+ * line says to read the thread later, wait_for_reply being gone.
  */
 export const INBOX_NOTE_BODY = [
   "## Plannotator Inbox",
@@ -163,7 +185,7 @@ export const INBOX_NOTE_BODY = [
   "The person keeps a Plannotator Inbox on this computer: a window where they read what agents send and answer when they can.",
   "If you have a `plannotator_inbox` tool or a `plannotator-inbox` MCP server, use its `send_message` to ask a decision only they can make (as a `:::question` block) or to hand over finished long work (put the files to read in `attachments`). Then keep working.",
   "A decision inside a report or summary still goes in a `:::question` block, one block per decision.",
-  "Their reply comes back to this session by itself where your agent supports that; otherwise call `wait_for_reply`.",
+  "Their reply comes back to this session by itself where your agent supports that; otherwise read the thread later with `read_thread`.",
   "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination.",
   "One thread per work stream, unless the person says otherwise.",
   "A decision you sent to the Inbox stays there. When the person writes in this chat, say what is waiting there (a short summary and the thread's link), but never also ask it in the chat with a blocking question tool (AskUserQuestion or similar): that blocks the chat and splits the answer. Ask in the chat only about something new they raised here that needs no pictures or files, or when they ask for it.",
@@ -183,6 +205,7 @@ export const INBOX_NOTE_EARLIER_BLOCKS: readonly string[] = [
   `${noteStart(3)}\n${INBOX_NOTE_BODY_V3}\n${INBOX_NOTE_END}`,
   `${noteStart(4)}\n${INBOX_NOTE_BODY_V4}\n${INBOX_NOTE_END}`,
   `${noteStart(5)}\n${INBOX_NOTE_BODY_V5}\n${INBOX_NOTE_END}`,
+  `${noteStart(6)}\n${INBOX_NOTE_BODY_V6}\n${INBOX_NOTE_END}`,
 ];
 
 export const INBOX_AGENT_NOTES_FILE = "agent-notes.json";
@@ -587,7 +610,9 @@ export interface RefreshInboxNotesOptions {
  *    line (findBlock); any other markers are damaged and nothing is written;
  *  - it is replaced only when it is byte for byte (line endings aside) a block
  *    an earlier Plannotator wrote AND the one its record names (the hash):
- *    a block the person edited is never touched, nor a file without a record;
+ *    a block the person edited is never rewritten, nor a file without a record;
+ *    the one exception is the retired reply sentence (RETIRED_REPLY_PHRASE),
+ *    swapped in place inside an edited block, the record left as it is;
  *  - a note the person removed (no block) is never put back;
  *  - a read-only file (no owner write bit) is left alone, and so is a file
  *    with other hard links (the atomic rename would split them);
@@ -670,7 +695,11 @@ export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options:
   return results;
 }
 
-/** One file of refreshInboxNotes: its outcome, the file written only for `refreshed`. */
+/** The reply sentence of v1 to v6 (wait_for_reply is gone from the Inbox) and what replaces it inside a block the person edited. */
+const RETIRED_REPLY_PHRASE = "otherwise call `wait_for_reply`";
+const CURRENT_REPLY_PHRASE = "otherwise read the thread later with `read_thread`";
+
+/** One file of refreshInboxNotes: its outcome, the file written for `refreshed`, and for `edited` only when the retired reply sentence was swapped. */
 function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: RefreshInboxNotesOptions, commitRecords: () => () => void): NoteRefresh["result"] {
   const read = readAgentFile(path);
   if (read.kind === "missing") return "missing";
@@ -680,12 +709,18 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
   if (found.kind === "damaged") return "damaged";
   const hash = sha256(found.block);
   if (hash === sha256(INBOX_NOTE_BLOCK)) return "current";
-  if (!EARLIER_BLOCK_HASHES.has(hash) || ![...recorded].some((r) => ownedBy(r, hash))) return "edited";
-  if ((read.mode & 0o200) === 0) return "read-only";
-  if (statSync(read.target).nlink > 1) return "hard-linked";
+  const untouched = EARLIER_BLOCK_HASHES.has(hash) && [...recorded].some((r) => ownedBy(r, hash));
+  // The one exception for a block the person edited: the exact retired sentence inside the block is
+  // swapped, every other byte and the record kept (so it still reads as edited, and a second run finds nothing).
+  const patchedBlock = untouched ? null : found.block.split(RETIRED_REPLY_PHRASE).join(CURRENT_REPLY_PHRASE);
+  const patching = patchedBlock !== null && patchedBlock !== found.block;
+  if (!untouched && !patching) return "edited";
+  const kept: NoteRefresh["result"] = untouched ? "read-only" : "edited";
+  if ((read.mode & 0o200) === 0) return kept;
+  if (statSync(read.target).nlink > 1) return untouched ? "hard-linked" : "edited";
   // The block's own line ending, so the bytes around it never change their ending.
   const nl = found.block.includes("\r\n") ? "\r\n" : "\n";
-  const next = read.text.slice(0, found.start) + blockIn(nl) + read.text.slice(found.end);
+  const next = read.text.slice(0, found.start) + (patching ? patchedBlock! : blockIn(nl)) + read.text.slice(found.end);
   options.beforeWrite?.(read.target);
   // Compare and write: the bytes on disk must still be the ones this read (and the mode the same).
   const before = Buffer.from(withBom(read.text, read.bom), "utf8");
@@ -697,6 +732,15 @@ function refreshNoteFile(path: string, recorded: ReadonlySet<string>, options: R
     return "changed";
   }
   if (!now.equals(before)) return "changed";
+  if (patching) {
+    // Only the file changes: the record keeps the hash of what Plannotator wrote, so the block stays the person's.
+    try {
+      writeAgentFileAtomic(read.target, withBom(next, read.bom), read.mode, false);
+    } catch {
+      return "refused";
+    }
+    return "edited";
+  }
   let rollback: () => void;
   try {
     rollback = commitRecords();

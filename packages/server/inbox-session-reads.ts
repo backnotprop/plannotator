@@ -18,7 +18,6 @@
  *    rule "call read_thread with no id and match the subject" checks. A list
  *    a connection reads for the session-start text (`_meta` peek) does not
  *    count: the agent did not choose to check.
- *  - wait_for_reply returning a reply (or a 👍) in that thread;
  *  - the person's reply or message delivered to this session (the wake, a
  *    Codex queue), read from the store's delivery records;
  *  - the session's own earlier message in the thread (it wrote there, so it
@@ -73,7 +72,7 @@ const msOf = (iso: string | null | undefined): number | null => {
 
 const later = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b));
 
-/** When `session` last read the thread: read_thread, wait_for_reply, or a delivery of the person's words to it. */
+/** When `session` last read the thread: read_thread, or a delivery of the person's words to it. */
 function lastRead(store: InboxStore, session: string, messages: readonly InboxMessage[], threadId: string): number | null {
   let last = readsByStore.get(store)?.get(keyOf(session, threadId)) ?? null;
   for (const message of messages) {

@@ -490,7 +490,7 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 
 **Answers without comments (ui 0.53.0).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (ui 0.53.0)".
 
-**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only) and its composer come back, a diagram's parts take comments too (next publish), question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
+**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only) and its composer come back, a diagram's parts take comments too (ui 0.56.0), question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
 
 **Local links decided by the host (ui 0.53.0).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (ui 0.53.0)".
 
@@ -516,7 +516,7 @@ import { DiffFileTree } from "@plannotator/ui/components/DiffFileTree";
 
 For a custom row, use the atoms (`DiffFileTreeFolderRow`, `DiffFileTreeFileRowContent`, `ChangeTypeLetter`, `DiffCounts`, `diffFileTreeIndent`) with `buildDiffFileTree` and `useDiffFileTreeExpansion`. Plannotator's review shares the tree builder, the expansion hook and `ChangeTypeLetter`, but since its aligned sidebar it draws its own folder and file rows, so it is no longer an example of these atoms. See HANDOFF.md § "Diff file tree".
 
-### Document contents rail (`components/MarkdownContentsRail`; unreleased)
+### Document contents rail (`components/MarkdownContentsRail`; ui 0.56.0)
 
 Workspaces' contents rail, moved here (approved 2026-10-03 in Workspaces; the move approved 2026-10-30) so Workspaces and the Plannotator Inbox draw the same one. Plan review does not use it.
 
@@ -548,7 +548,7 @@ Two, both in the package, never two on one surface:
 - **Plan review** keeps `hooks/useActiveSection`, unchanged: an IntersectionObserver band from 80 px below the scroll element's top to 20% of its height. `useActiveSection.positions.test.tsx` pins its answers at scroll positions that tell 80 from 52 or 100 px and 20% from 30%.
 - **The contents rail's surface** (the rail, and `DocumentContents` where the rail yields) uses the rail's scroll math, `utils/headingScrollSpy` (above); `hooks/useHeadingScrollSpy(scrollViewport, blockIds)` is it for a list. Both scroll a pick to 80 px, so a pick lands where plan review's does.
 
-### Document contents (`components/DocumentContents`; unreleased)
+### Document contents (`components/DocumentContents`; ui 0.56.0)
 
 A Contents list on the contents rail's surface, for where the rail yields: `TableOfContents` bound to one scroll element, with the rail's headings (levels 1 to 4) and the rail's scroll math (`useHeadingScrollSpy`) marking the heading being read, so the list and the rail never disagree. It reads the current heading at once on mount (a sheet opened mid-document). It draws no chrome; the host titles and places it. It keeps the marked entry in view inside the list's own scroll box.
 
@@ -562,7 +562,7 @@ import { DocumentContents } from "@plannotator/ui/components/DocumentContents";
 - `TableOfContents` takes two optional seams: `scrollViewport`, the element a click scrolls (default: the `ScrollViewportProvider` context, as before), and `maxLevel` (default 3). Plan review passes neither and is unchanged.
 - Used by the Inbox's sheet (a phone, or where the rail yields) and the phone surface; plan review keeps `SidebarContainer`.
 
-### Floating chat window (`components/chat`; unreleased)
+### Floating chat window (`components/chat`; ui 0.56.0)
 
 A floating window, a transcript and a composer, as screen code only: the host owns the conversation, the transport and anything saved. It imports nothing from a backend and has no seam in `configurePlannotatorUI`; everything comes in as props.
 
@@ -606,7 +606,7 @@ const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: sa
   `data-text-part`, `data-message-id`, `data-message-role`, `data-part-index` and `data-annotatable` on its root are written by this code alone.
 - **Styles.** Nine tokens are not in `theme.css`; `components/chat/index.ts` lists them, and a host defines them in its own `@theme`. Add this folder and `components/ui/{button,textarea}.tsx` to your `@source`. Recipes live in `chatRecipes.tsx` so a `*.tsx` glob reaches them.
 
-### Inbox thread parts (`components/inbox-thread`; unreleased, in progress)
+### Inbox thread parts (`components/inbox-thread`; ui 0.56.0, in progress)
 
 The Plannotator Inbox's thread display parts, moved here unchanged so the Inbox and Workspaces draw the same thread. They move in small steps, so treat these imports as unstable until the set is complete.
 
@@ -664,7 +664,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.55.0 depends exactly on `@plannotator/core` 0.25.14. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.56.0 depends exactly on `@plannotator/core` 0.25.14. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

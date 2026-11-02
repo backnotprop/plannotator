@@ -2,7 +2,7 @@
  * Comments on the text of an agent's message in the Plannotator Inbox
  * (approval "inbox-message-comments", 2026-10-19), proved through the
  * server's real doors: a running Inbox on loopback, the MCP SDK client over
- * streamable HTTP for the agent (send_message, wait_for_reply), and real
+ * streamable HTTP for the agent (send_message, read_thread), and real
  * `fetch` for the window. Every test has its own temp data dir. The window
  * side (select, comment, the chip, Send) is proved in
  * packages/inbox/messageComments.test.tsx and tests/e2e/inbox-message-comments.spec.ts.
@@ -319,7 +319,7 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
   }
 });
 
-test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's wait_for_reply returns it, and a sent comment is closed", async () => {
+test("Send carries the comments quoted under 'Feedback on your message from <time>', before the files'; the agent's read_thread returns it, and a sent comment is closed", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const client = await agent(server);
@@ -373,7 +373,7 @@ test("Send carries the comments quoted under 'Feedback on your message from <tim
   expect((await post(server, "/api/inbox/annotations/ann-msg-1/remove", {})).status).toBe(409);
 
   // The agent that wrote the message reads the reply with the quotes and comments.
-  const answer = await call(client, "wait_for_reply", { thread_id: sent.thread_id, agent_session: "ses_retry", timeout_seconds: 5 });
+  const answer = await call(client, "read_thread", { thread_id: sent.thread_id, agent_session: "ses_retry", format: "full" });
   const text = JSON.stringify(answer);
   expect(text).toContain("2, 4 and 8 seconds");
   expect(text).toContain("Cap the total wait too.");
