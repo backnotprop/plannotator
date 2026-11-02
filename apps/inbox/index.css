@@ -7,8 +7,6 @@
 /* Tell Tailwind where to scan for classes */
 @source "../../packages/ui/components/**/*.tsx";
 @source "../../packages/ui/hooks/**/*.ts";
-/* The shared chat window has no host here yet. The first one in the Inbox removes this line. */
-@source not "../../packages/ui/components/chat/**";
 @source "../../packages/inbox/**/*.tsx";
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
