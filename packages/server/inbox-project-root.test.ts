@@ -362,6 +362,26 @@ describe("a plain folder that holds one repository's checkouts", () => {
     expect(await resolveInboxProjectRoot(notes)).toMatchObject({ root: api, worktree: notes });
   });
 
+  test("a checkout right in the folder splits it off only when it is of another repository, or its `.git` does not read", async () => {
+    const { folder, main } = appnotesLayout(tempRoot());
+    git(main, "worktree", "add", "-q", join(folder, "scratch-wt"), "-b", "scratch");
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: main, worktree: folder });
+    mkdirSync(join(folder, "broken"));
+    writeFileSync(join(folder, "broken", ".git"), "not a gitdir line\n");
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
+    rmSync(join(folder, "broken"), { recursive: true });
+    git(folder, "init", "-q", join(folder, "other"));
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
+  });
+
+  test("files beside the checkouts folder do not count toward the scan; folders past it leave the folder its own project", async () => {
+    const { folder, main } = appnotesLayout(tempRoot());
+    for (let i = 0; i < 300; i += 1) writeFileSync(join(folder, `note-${i}.md`), "x\n");
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: main, worktree: folder });
+    for (let i = 0; i < INBOX_PROJECT_CONTAINER_SCAN_MAX; i += 1) mkdirSync(join(folder, `d${i}`));
+    expect(await resolveInboxProjectRoot(folder)).toMatchObject({ root: folder, worktree: null });
+  });
+
   test("this user's home (injected) holding a worktrees folder is never a checkouts folder, nor walked up to", async () => {
     const root = tempRoot();
     const home = join(root, "me");
@@ -372,6 +392,7 @@ describe("a plain folder that holds one repository's checkouts", () => {
     git(root, "init", "-q", main);
     expect(isHomeOrRootFolder(home, home)).toBe(true);
     expect(isHomeOrRootFolder(home, null)).toBe(false);
+    for (const shaped of ["/home/bob", "/Users/bob"]) expect(isHomeOrRootFolder(shaped, null)).toBe(true);
     for (const folder of [home, notes]) {
       expect(await checkoutsHolderOf(folder, home)).toBeNull();
       expect(await resolveInboxProjectRoot(folder, { home })).toMatchObject({ root: folder, worktree: null, settled: true });

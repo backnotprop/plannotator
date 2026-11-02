@@ -19,14 +19,16 @@
  *     a plain folder of notes beside the checkouts): that repository's
  *     project, so a session started in `<repo>` files where its checkouts
  *     do (`repositoryHeldBy`). Read from disk without git and bounded: the
- *     entries of its `worktrees` / `.worktrees` folder, at most
- *     `INBOX_PROJECT_CONTAINER_SCAN_MAX`, and each one's `.git`. Only
+ *     folders of its `worktrees` / `.worktrees` folder and its own, at most
+ *     `INBOX_PROJECT_CONTAINER_SCAN_MAX` folders and
+ *     `INBOX_PROJECT_CONTAINER_ENTRIES_MAX` entries each, and each one's `.git`. Only
  *     checkouts in such a folder count (a `~/code` holding `api` and
  *     `api-wt` side by side is a folder of projects, not a repository);
  *     they must be of one repository, or four in five of them (a stray
  *     clone does not split the folder off), whose root git confirms and
  *     which lies in the folder (or its checkouts folder); a folder that also
- *     holds a checkout right in it is a folder of repositories. A plain
+ *     holds a checkout of another repository right in it is a folder of
+ *     repositories. A plain
  *     subfolder (`<repo>/notes`) is asked of the nearest such parent, at
  *     most three up. A home folder or a filesystem root is never folded.
  *
@@ -84,8 +86,10 @@ export const INBOX_PROJECT_ROOT_TTL_MS = 60_000;
 export const INBOX_PROJECT_ROOT_CACHE_MAX = 512;
 /** How many parents up a folder outside any work tree looks for a checkouts holder (rule 4: `appnotes/notes` is `appnotes`'s). */
 export const INBOX_PROJECT_CONTAINER_WALK_MAX = 3;
-/** A `worktrees` folder with more entries than this is not read for checkouts (rule 4): its folder stays its own project. */
+/** A `worktrees` folder, or a folder that holds one, with more folders than this in it is not read (rule 4): the folder stays its own project. */
 export const INBOX_PROJECT_CONTAINER_SCAN_MAX = 256;
+/** And with more entries of any kind than this (files of notes count only here): the folder stays its own project. */
+export const INBOX_PROJECT_CONTAINER_ENTRIES_MAX = 4096;
 
 export interface InboxProjectRoot {
   /** The project's root: a realpath. */
@@ -300,23 +304,27 @@ async function mainWorktreeOf(git: InboxGitRunner, commonDir: string): Promise<{
 const CHECKOUT_FOLDERS = ["worktrees", ".worktrees"];
 
 /**
- * The names of the folders right in `folder` (symlinks not followed), or null when it has more entries than
- * the scan reads. Asynchronous, so a slow disk never holds the Inbox's event loop.
+ * The names of the folders right in `folder` (symlinks not followed), or null when it cannot be read or has
+ * more folders (`INBOX_PROJECT_CONTAINER_SCAN_MAX`) or entries (`INBOX_PROJECT_CONTAINER_ENTRIES_MAX`) than
+ * the scan reads: a folder of notes files is read whole. Asynchronous, so a slow disk never holds the
+ * Inbox's event loop.
  */
 async function childFolders(folder: string): Promise<string[] | null> {
   let dir: Awaited<ReturnType<typeof opendir>>;
   try {
     dir = await opendir(folder);
   } catch {
-    return [];
+    return null;
   }
   const names: string[] = [];
   try {
     for (let seen = 0; ; seen += 1) {
       const entry = await dir.read();
       if (entry === null) return names;
-      if (seen >= INBOX_PROJECT_CONTAINER_SCAN_MAX) return null;
-      if (entry.isDirectory()) names.push(entry.name);
+      if (seen >= INBOX_PROJECT_CONTAINER_ENTRIES_MAX) return null;
+      if (!entry.isDirectory()) continue;
+      if (names.length >= INBOX_PROJECT_CONTAINER_SCAN_MAX) return null;
+      names.push(entry.name);
     }
   } catch {
     return null;
@@ -449,8 +457,10 @@ function inCheckouts(root: string, folder: string): boolean {
  * folder (`inCheckouts`: `~/work` holding the repositories `api` and `web` beside `worktrees/api-feat` is a
  * folder of repositories, not `api`'s). Null: the folder stays its own project.
  *
- * A folder that also holds a checkout right in it, outside its checkouts folders (`~/work/web` beside
- * `~/work/worktrees/api`), is a folder of repositories: no repository speaks for it (#2526 delta review, D2).
+ * A folder that also holds a checkout of another repository right in it, outside its checkouts folders
+ * (`~/work/web` beside `~/work/worktrees/api`), or one whose `.git` does not read, is a folder of
+ * repositories: no repository speaks for it (#2526 delta review, D2). A checkout of the same repository
+ * there (a linked worktree added as `appnotes/scratch`) does not split it off (E1).
  *
  * A git that does not answer for the checkout does not fail the session (it would have no project to file
  * into): the repository's main checkout in the checkouts folder, read from disk, stands for it; with none
@@ -460,15 +470,6 @@ async function repositoryHeldBy(folder: string, { git, home }: Rule4): Promise<R
   if (isHomeOrRootFolder(folder, home)) return null;
   const direct = await childFolders(folder);
   if (direct === null) return null;
-  for (const name of direct) {
-    if (CHECKOUT_FOLDERS.includes(name)) continue;
-    try {
-      await lstat(join(folder, name, ".git"));
-      return null;
-    } catch {
-      // Not a checkout.
-    }
-  }
   const checkouts: { path: string; common: string; main: boolean }[] = [];
   for (const name of CHECKOUT_FOLDERS) {
     try {
@@ -485,6 +486,15 @@ async function repositoryHeldBy(folder: string, { git, home }: Rule4): Promise<R
   }
   const lead = leadingRepository(checkouts);
   if (!lead) return null;
+  for (const name of direct) {
+    if (CHECKOUT_FOLDERS.includes(name)) continue;
+    try {
+      await lstat(join(folder, name, ".git"));
+    } catch {
+      continue; // Not a checkout.
+    }
+    if ((await checkoutOf(join(folder, name)))?.common !== lead[0]!.common) return null;
+  }
   const checkout = lead.find((one) => one.main) ?? lead[0]!;
   const resolved = await resolveWorkTree(checkout.path, git);
   if (resolved === null) return null;

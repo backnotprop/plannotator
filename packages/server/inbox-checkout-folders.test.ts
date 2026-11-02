@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inboxProjectDisplayName } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { foldCheckoutFolderProjects, INBOX_CHECKOUT_FOLDS_FILE, INBOX_CHECKOUT_FOLDS_MAX_STARTS } from "./inbox-checkout-folders";
@@ -346,4 +347,18 @@ test("a folder project the person combined into another project stays there", as
   store.combineProject(old.id, elsewhere.id);
   expect(await foldCheckoutFolderProjects({ store })).toEqual({ folded: [], done: true });
   expect(store.canonicalProjectId(old.id)).toBe(elsewhere.id);
+});
+
+test("a rename made while git answers counts: the folder project is read again right before the combine", async () => {
+  const { folder, main, dataDir } = appnotes(tempRoot());
+  const store = InboxStore.open(dataDir);
+  store.ensureProject({ name: "main", root: main });
+  const old = store.ensureProject({ name: "appnotes", root: folder });
+  const renaming: InboxGitRunner = async (args, cwd) => {
+    if (inboxProjectDisplayName(store.project(old.id)!) === null) store.renameProject(old.id, "Appnotes notes");
+    const result = Bun.spawnSync(["git", ...args], { cwd, env: GIT_ENV, stdout: "pipe", stderr: "pipe" });
+    return { exitCode: result.exitCode, stdout: result.stdout.toString() };
+  };
+  expect(await foldCheckoutFolderProjects({ store, git: renaming })).toEqual({ folded: [], done: true });
+  expect(store.canonicalProjectId(old.id)).toBe(old.id);
 });
