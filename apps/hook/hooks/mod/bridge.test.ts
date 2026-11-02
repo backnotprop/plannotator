@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createPullSessionBridge, type PullSessionBridge } from '../../../../packages/ai/session-bridge-pull.ts'
-import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
+import { createBridge, OTHER_PLUGIN_INTERRUPT_TEXT, SESSION_GONE_INTERRUPT_TEXT, TAKEN_OVER_INTERRUPT_TEXT, takenOverFallback } from './bridge'
 import { fakeHost, type FakeHost } from './testing/fake-host'
 import { TAKEN_OVER_BY_PERSON_TEXT, TurnTracker } from './turns'
 
@@ -114,6 +114,37 @@ describe('Ask this session over the pull bridge', () => {
     expect(host.aborted).toEqual(['user-turn'])
 
     live = false
+    server.dispose()
+    await running
+  })
+
+  // The failure this guards: a poll stays open up to 15 s past `/clear` or a
+  // lease move, and an interrupt arriving on it aborted the turn of whatever
+  // conversation the process had gone on with, and reported ok.
+  test('an interrupt on a held poll after the session ended aborts nothing and reports ok: false', async () => {
+    live = true
+    server = createPullSessionBridge({ token: TOKEN, host: 'claude-code', modes: { turn: true, transient: false } })
+    const host = fakeHost()
+    wire(host, server)
+    const events: unknown[] = []
+    const answer = host.onFetch!
+    host.onFetch = (url, body) => {
+      if (url.endsWith('/event')) events.push(body)
+      return answer(url, body)
+    }
+    const turns = new TurnTracker()
+    turns.onTurnStart('new-conversation-turn', 'a turn of the next conversation')
+    const client = createBridge({ host, baseUrl: 'http://127.0.0.1:4321', token: TOKEN, turns, isLive: () => live })
+    const running = client.run()
+    await until(() => server!.bridge.status() === 'busy')
+
+    live = false
+    const refused = await Promise.resolve(server.bridge.interrupt!()).then(() => 'reported ok', (error: Error) => error.message)
+
+    expect(host.aborted).toEqual([])
+    expect(refused).toBe(SESSION_GONE_INTERRUPT_TEXT)
+    expect(events).toContainEqual({ type: 'interrupted', interruptId: 'interrupt-1', ok: false, message: SESSION_GONE_INTERRUPT_TEXT })
+
     server.dispose()
     await running
   })

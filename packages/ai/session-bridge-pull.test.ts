@@ -87,7 +87,7 @@ afterEach(() => {
  * A Plannotator server's AI runtime with a pull bridge, plus a host process
  * simulated by the real pull client talking to it through `fetch`.
  */
-function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(), wire: { olderServer?: boolean } = {}) {
+function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(), wire: { olderServer?: boolean } = {}, client: { statusIntervalMs?: number } = {}) {
   const pull = createPullSessionBridge({
     token: TOKEN,
     host: "opencode",
@@ -126,7 +126,7 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
       bridge: host.bridge,
       signal: controller.signal,
       pollWaitMs: 100,
-      statusIntervalMs: 10,
+      statusIntervalMs: client.statusIntervalMs ?? 10,
       deltaFlushMs: 5,
       maxFailures: 2,
       fetch: fetchShim,
@@ -288,6 +288,34 @@ describe("pull session bridge", () => {
     await run.done;
     expect(run.messages[0]).toEqual({ type: "status", status: "interrupting" });
     expect(run.messages.at(-1)).toMatchObject({ type: "result", result: "done" });
+  });
+
+  // The failure this guards: the client called the host's interrupt on a bridge
+  // that already reads `gone`, and told the server it had worked.
+  test("an interrupt that reaches a session already gone never calls the host, and reports ok: false", async () => {
+    const host = fakeHost("busy");
+    const { startHost, pull } = setup({}, host, {}, { statusIntervalMs: 60_000 });
+    void startHost();
+    await waitFor(() => pull.bridge.status() === "busy");
+
+    // The status push has not gone out, so the server still thinks it is busy.
+    host.setStatus("gone");
+    const refused = await Promise.resolve(pull.bridge.interrupt!()).then(() => "reported ok", (error: Error) => error.message);
+    expect(host.interrupts).toBe(0);
+    expect(refused).toBe("The session is no longer available.");
+  });
+
+  test("an interrupt on a poll still open after the owner stopped the client never calls the host", async () => {
+    const host = fakeHost("busy");
+    const { startHost, stopHost, pull } = setup({}, host);
+    const stopped = startHost();
+    await waitFor(() => pull.bridge.status() === "busy");
+
+    stopHost();
+    const refused = await Promise.resolve(pull.bridge.interrupt!()).then(() => "reported ok", (error: Error) => error.message);
+    await stopped;
+    expect(host.interrupts).toBe(0);
+    expect(refused).toBe("The session is no longer available.");
   });
 
   test("stopping a running question cancels it on the host, and frees the slot when the host confirms", async () => {

@@ -657,7 +657,10 @@ step followed, as `done` with the turn's answer (their prompt then runs as a
 turn of its own). The note reads "You typed into this session…" for
 `composer` / `bridge` and the neutral "Another message entered this session…"
 otherwise. From the take-over on, a cancel closes only the question and an
-interrupt answers `ok: false`; Plannotator never aborts that turn. Plan review does not block the session
+interrupt answers `ok: false`; Plannotator never aborts that turn. An interrupt
+that arrives once the launch is not live here (a poll stays open past `/clear`
+or a lease move) also answers `ok: false` and aborts nothing, as a question
+there is refused `gone`. Plan review does not block the session
 under the mod, so the status is never `blocked` and plan review gets real turns
 too (verified live). Polls ask for 15 s (750 ms while our question streams, so
 deltas flush), and stop for good on 401/403/404/405/503 (`404` = an older CLI
