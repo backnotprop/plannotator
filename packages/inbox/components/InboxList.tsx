@@ -52,6 +52,8 @@ export interface InboxListProps {
   narrow: boolean;
   selectedThreadId: string | null;
   notice: string | null;
+  /** This page is older than the Inbox (StalePageNotice, stalePage.ts): at the list's top, above the notifications line. */
+  stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
   onShowNew: () => void;
@@ -1104,6 +1106,7 @@ export function InboxList(props: InboxListProps) {
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
         >
+          {props.stale}
           {props.ask}
           {awayLines.map((line) => (
             // A linked machine that is away: one quiet line, as a thread's meta line reads (its rows are greyed below).

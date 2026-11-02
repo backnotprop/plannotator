@@ -736,6 +736,16 @@ export function setPageSession(value: string): void {
   if (pageSession === null) pageSession = value;
 }
 
+/**
+ * Only the stale page notice's Reload (stalePage.ts `reloadOntoInbox`) calls this. The Inbox restarted under the page,
+ * so the saves made before the reload carry the running Inbox's session (only when that Inbox is this page's own);
+ * when they do not all land, Reload sets the first session back, so the page's later writes are refused (409) as
+ * before. No other code changes the page's session after the first list read.
+ */
+export function adoptPageSession(value: string): void {
+  pageSession = value;
+}
+
 /** For a DOM test file that runs after another one in the same process (without `--isolate`) against its own server: the first file's session would otherwise stay. */
 export function resetPageSessionForTests(): void {
   pageSession = null;
@@ -1155,6 +1165,8 @@ export const inboxApi = {
   resolve: (messageId: string, resolved: boolean) =>
     post<unknown>(messageUrl(messageId, `/resolve`), { resolved }),
   health: () => get<InboxHealth>(inboxUrl('/health')),
+  /** The health, or InboxReadTimeout past `timeoutMs` (the stale page notice's checks and its Reload). */
+  healthWithin: (timeoutMs: number) => getWithin<InboxHealth>(inboxUrl('/health'), timeoutMs),
   /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
   guide: (messageId: string) =>
     get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
