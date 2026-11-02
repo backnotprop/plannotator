@@ -143,7 +143,7 @@ async function world(options: WorldOptions = {}) {
   const transcribe = (clip: Uint8Array<ArrayBuffer> = wav(), init: RequestInit = {}) =>
     fetch(`${base}/api/inbox/voice/transcribe?serverSession=${session}`, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: clip, ...init });
   const status = async (query = "") => (await (await fetch(`${base}/api/inbox/voice/status${query}`)).json()) as { state: string; plan: string | null };
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string } };
+  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxVoice?: unknown; inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string } };
   return { root, dataDir, codex: codex as FakeCodex, server, base, session, json, settings, turnOn, transcribe, status, saved };
 }
 
@@ -669,13 +669,22 @@ describe("the announcement", () => {
   test.each([
     ["no ChatGPT login", { account: null }],
     ["a Codex API key", { account: { type: "apiKey" } }],
-  ])("%s: not shown, not spent, and asked only once this start", async (_name, codex) => {
+  ])("%s: not shown, settled (skippedAt), and Codex asked once", async (_name, codex) => {
     const w = await world({ version: "0.30.0", usedBefore: true, codex });
     expect(await claim(w)).toBe(false);
     expect((await w.settings()).voice.intro_due).toBe(false);
     expect(await claim(w)).toBe(false);
     expect(w.codex.starts()).toBe(1);
     expect(w.saved().inboxVoiceIntro?.shownAt).toBeUndefined();
+    expect(w.saved().inboxVoiceIntro?.skippedAt).toMatch(/^\d{4}-/);
+  });
+
+  test("a later Inbox start with a settled result neither shows it nor starts Codex", async () => {
+    // The config an earlier start left (dueAt kept, skippedAt written): the next start must not check again.
+    const w = await world({ version: "0.30.0", usedBefore: true, config: { inboxVoiceIntro: { dueAt: "2026-10-30T00:00:00.000Z", skippedAt: "2026-10-31T00:00:00.000Z" } } });
+    expect((await w.settings()).voice.intro_due).toBe(false);
+    expect(await claim(w)).toBe(false);
+    expect(w.codex.starts()).toBe(0);
   });
 
   test("no Codex: nothing started", async () => {
