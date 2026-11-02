@@ -266,6 +266,17 @@ export function isInsideFolder(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
+/**
+ * The projects a guess (git past its time limit) may file into: repository projects (a `.git` on disk, read
+ * without git), never one at the exact home folder or `/`, which a dotfiles home or an older Inbox may have
+ * made: it would take every folder under it for good. Only the exact home and `/` (`shape: false`): a
+ * repository at `/home/<user>` (a devcontainer, a CI runner) stays one. Rule 4's disk fallback answers
+ * settled, so it never comes here, and `inCheckouts` keeps that one out of home and `/`.
+ */
+export function guessableProjects<T extends { root: string }>(projects: readonly T[], home: string | null, hasGit: (root: string) => boolean = (root) => existsSync(join(root, ".git"))): T[] {
+  return projects.filter((project) => hasGit(project.root) && !isHomeOrRootFolder(project.root, home, { shape: false }));
+}
+
 /** Of `projects`, the one whose root holds `folder` most closely (the deepest root), or null. */
 export function nearestProjectHolding<T extends { root: string }>(projects: readonly T[], folder: string): T | null {
   let best: T | null = null;

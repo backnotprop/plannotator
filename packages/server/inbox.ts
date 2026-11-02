@@ -157,7 +157,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
-import { createInboxProjectRoots, folderHoldsOtherWork, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
+import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
@@ -890,16 +890,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
     ...(options.projectRootHome !== undefined ? { home: options.projectRootHome } : {}),
   });
-  /**
-   * The projects a guess (git past its time limit) may file into: repository
-   * projects (a `.git` on disk, no git run), never one at the home folder or
-   * `/`, which a dotfiles home or an older Inbox may have made: it would take
-   * every folder under it for good. Only the exact home and `/` (a repository
-   * at `/home/<user>` stays one). Read only for an unsettled answer: rule 4's
-   * disk fallback answers settled, so it never comes here, and `inCheckouts`
-   * keeps that one out of home and `/`.
-   */
-  const repositoryProjects = () => store.allProjects().filter((project) => existsSync(join(project.root, ".git")) && !isHomeOrRootFolder(project.root, projectRoots.home, { shape: false }));
+  // The projects a guess (git past its time limit) may file into (inbox-project-root.ts `guessableProjects`).
+  const repositoryProjects = () => guessableProjects(store.allProjects(), projectRoots.home);
   // Images messages show that have no captured file yet: copied in the background after a read of their thread (inbox-message-images.ts).
   const imageCapture = createInboxImageCapture(store);
   const projectLocks = new Map<string, Promise<InboxProject>>();

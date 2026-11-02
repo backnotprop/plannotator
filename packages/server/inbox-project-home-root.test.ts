@@ -9,13 +9,22 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, join, parse } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_CHECKOUT_FOLDS_FILE } from "./inbox-checkout-folders";
-import { createInboxProjectRoots, inboxGitRunner, isHomeOrRootFolder, resolveCheckoutsFolder, resolveInboxProjectRoot, type InboxGitRunner } from "./inbox-project-root";
+import {
+  createInboxProjectRoots,
+  guessableProjects,
+  inboxGitRunner,
+  isHomeOrRootFolder,
+  isHomeOrRootShape,
+  resolveCheckoutsFolder,
+  resolveInboxProjectRoot,
+  type InboxGitRunner,
+} from "./inbox-project-root";
 
 async function until(check: () => boolean): Promise<void> {
   const end = Date.now() + 5_000;
@@ -150,13 +159,56 @@ describe("a dotfiles home and rule 4", () => {
     expect(isHomeOrRootFolder("/home/dev", null)).toBe(true);
   });
 
-  // A home-shaped folder that exists on every Mac, read only: git (a stand-in) names it as the toplevel.
-  test.if(existsSync("/Users/Shared"))("the resolver keeps a repository whose toplevel only looks like a home folder", async () => {
+  // A home-shaped folder that exists on the runner (the account's home: `/Users/<x>`, `/home/<x>` or `/root`),
+  // only read (realpath, stat), and passed as NOT the home (`home: null`): only its shape could stop it. A
+  // stand-in git names it, so nothing runs there.
+  const shapedFolder = (() => {
+    try {
+      const real = realpathSync(homedir());
+      return isHomeOrRootShape(real) && real !== parse(real).root ? real : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  test("a home-shaped path exists on this runner for the tests below", () => {
+    expect(shapedFolder).not.toBeNull();
+  });
+
+  test.if(shapedFolder !== null)("the resolver keeps a repository whose toplevel only looks like a home folder", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
     scratch.push(root);
-    const shaped = realpathSync("/Users/Shared");
+    const shaped = shapedFolder!;
     const git: InboxGitRunner = async () => ({ exitCode: 0, stdout: `${shaped}\n${shaped}/.git\n${shaped}/.git\n` });
     expect((await resolveInboxProjectRoot(root, { git, home: null })).root).toBe(shaped);
+  });
+
+  test.if(shapedFolder !== null)("a linked worktree folds into a main checkout that only looks like a home folder", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
+    scratch.push(root);
+    const shaped = shapedFolder!;
+    // The linked worktree and its repository's common dir, on disk; the main checkout git keeps on record for it (`core.worktree`) is the shaped folder.
+    const worktree = join(root, "wt");
+    const common = join(root, "repo.git");
+    mkdirSync(worktree);
+    mkdirSync(join(common, "worktrees", "wt"), { recursive: true });
+    const git: InboxGitRunner = async (args, cwd) => {
+      const ask = `${args.join(" ")} @ ${cwd}`;
+      if (ask === `rev-parse --show-toplevel --git-dir --git-common-dir @ ${worktree}`) return { exitCode: 0, stdout: `${worktree}\n${common}/worktrees/wt\n${common}\n` };
+      if (ask === `rev-parse --is-bare-repository @ ${common}`) return { exitCode: 0, stdout: "false\n" };
+      if (ask === `rev-parse --show-toplevel @ ${common}`) return { exitCode: 0, stdout: `${shaped}\n` };
+      if (ask === `rev-parse --show-toplevel --git-common-dir @ ${shaped}`) return { exitCode: 0, stdout: `${shaped}\n${common}\n` };
+      return { exitCode: 128, stdout: "" };
+    };
+    expect(await resolveInboxProjectRoot(worktree, { git, home: null })).toMatchObject({ root: shaped, worktree });
+    // The exact home is another matter: the worktree keeps its own toplevel.
+    expect(await resolveInboxProjectRoot(worktree, { git, home: shaped })).toMatchObject({ root: worktree, worktree: null });
+  });
+
+  test("a slow git may file into a repository project at a home-shaped path, never at the exact home or `/`", () => {
+    const projects = [{ root: "/home/dev" }, { root: "/Users/dev" }, { root: "/home/me" }, { root: "/" }, { root: "/home/dev/plain" }];
+    const withGit = new Set(["/home/dev", "/Users/dev", "/home/me", "/"]);
+    expect(guessableProjects(projects, "/home/me", (root) => withGit.has(root)).map((project) => project.root)).toEqual(["/home/dev", "/Users/dev"]);
   });
 });
 
