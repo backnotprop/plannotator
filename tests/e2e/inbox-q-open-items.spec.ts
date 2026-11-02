@@ -809,7 +809,7 @@ test('Mod+Enter and Q stand down where Send is not on screen or the key is not t
     });
     await gotoThread(t.late);
     await tabTo(card('Spot late').getByRole('textbox'));
-    // One character: one delayed save (a longer word would queue several, and outlast the wait below).
+    // One character: one delayed save (a longer word would save again behind it, and outlast the wait below).
     await page.keyboard.type('h', { delay: 0 });
     was = sent();
     await mod('Enter');

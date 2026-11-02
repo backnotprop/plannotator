@@ -189,6 +189,37 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
   expect(world.errors).toEqual([]);
 });
 
+test('a long "Other" answer behind slow saves: a few saves, and Send carries the final words right after them', async () => {
+  test.skip(legacy, 'the collapsed saves are new');
+  const { page } = world;
+  const threadId = await ask('Billing screens: a long answer', 'billing-long-answer');
+  await page.goto(`${world.url}#thread=${threadId}`);
+  const pane = page.locator('section.ib-pane');
+  const cards = pane.locator('fieldset[data-question-key]');
+  await expect(cards).toHaveCount(6);
+  await cards.nth(0).locator('[data-question-option]').filter({ hasText: 'Cards' }).click();
+  await expect.poll(() => states(threadId)).toEqual(['picked', 'open', 'open', 'open', 'open', 'open']);
+
+  // The owner's phone over a tailnet: each save takes a while, and the answer changes faster than that.
+  let saves = 0;
+  await page.route('**/picks', async (route) => {
+    saves += 1;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  const words = 'The header, beside the filters, where the eye already goes when it wants the numbers out.';
+  const other = cards.nth(1).getByRole('textbox', { name: /Other answer/ });
+  await other.pressSequentially(words, { delay: 10 });
+  const send = pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true });
+  await send.click();
+  await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
+  await page.unroute('**/picks');
+  const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
+  expect(reply).toContain(`Answer: ${words}`);
+  expect(saves).toBeLessThan(10);
+  expect(world.errors).toEqual([]);
+});
+
 // The iPhone 15's screen, touch and mobile layout in the config's own browser: launching WebKit by hand
 // from this Chromium project dies on the CI runner (as inbox-refresh.spec.ts notes). inbox-mobile.spec.ts
 // covers the window in WebKit itself.
