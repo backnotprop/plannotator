@@ -111,6 +111,8 @@ let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
+/** A session whose `?asker=` read waits until `until` settles (a slow /sessions round trip); null: none waits. */
+let holdAsker: { session: string; until: Promise<void> } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -118,6 +120,7 @@ beforeEach(() => {
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   liveness = null;
+  holdAsker = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -131,6 +134,7 @@ beforeEach(() => {
     if (path.includes('/sessions')) {
       // With `liveness`, `?asker=` is answered for whichever session the window asks about.
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
+      if (holdAsker && asked === holdAsker.session) await holdAsker.until;
       const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
       return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}) });
     }
@@ -539,6 +543,35 @@ test.skipIf(!hasDom)("a pick on ended A's question and words for live B: the cho
     ['A', '', { host: 'pi', session: 'ses_other' }],
     ['B', 'And keep the logs bucket.', null],
   ]);
+});
+
+// The same Send pressed before the read of A lands (the words moved the Send's sessions from A alone to B and A):
+// "not read yet" used to read as "not ended", so A's answer went to A with no choice.
+test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send before A's read lands: Send waits for it and opens the choice", async () => {
+  liveness = { ses_asker: false, ses_b: true };
+  sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  let release!: () => void;
+  holdAsker = { session: 'ses_asker', until: new Promise<void>((resolve) => (release = resolve)) };
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  // A's read has not landed: nothing goes yet.
+  expect(replies()).toEqual([]);
+  await act(async () => {
+    release();
+  });
+  await settle();
+  await settle();
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {

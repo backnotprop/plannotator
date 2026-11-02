@@ -74,31 +74,57 @@ export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsMo
   return !live.asker.live;
 }
 
-const NO_SESSIONS: ReadonlySet<string> = new Set();
+/** Whether one session has ended, as `askerHasEnded` reads it (the sessions route's `asker`). A read that fails: not ended. */
+async function sessionEnded(threadId: string, session: string): Promise<boolean> {
+  try {
+    const model = await inboxApi.sessions(threadId, session);
+    return model.asker?.session === session && model.asker.live === false;
+  } catch {
+    return false;
+  }
+}
+
+/** Each session's last known state in one thread: true ended, false not; a session not read yet is absent. */
+type KnownEnded = { threadId: string; ended: ReadonlyMap<string, boolean> };
+
+function withRead(was: KnownEnded, threadId: string, read: readonly (readonly [string, boolean])[]): KnownEnded {
+  const base = was.threadId === threadId ? was.ended : new Map<string, boolean>();
+  if (was.threadId === threadId && read.every(([session, ended]) => base.get(session) === ended)) return was;
+  const next = new Map(base);
+  for (const [session, ended] of read) next.set(session, ended);
+  return { threadId, ended: next };
+}
+
+export interface EndedSessions {
+  /** The sessions of the list that have ended, as last read. */
+  ended: ReadonlySet<string>;
+  /** Some session of the list has not been read yet: "not read" is not "not ended". */
+  unchecked: boolean;
+  /** Reads the sessions of the list not read yet, and returns the ended ones of the whole list. */
+  check: () => Promise<ReadonlySet<string>>;
+}
 
 /**
  * Which of `sessions` have ended, as `askerHasEnded` reads one (the sessions route's `asker`, with its grace),
  * read when the list changes and every 10 s: the other sessions one Send reaches (a pick on an ended session's
  * question while the words go to a live one). A read that fails says nothing ended.
+ *
+ * Each session keeps its last known state while the list changes (a pick changes it), and a session not read
+ * yet is `unchecked`, never "not ended": a Send pressed before its read lands waits for `check`, so it cannot
+ * go to an ended session without the route choice. An empty list (a thread with one agent) reads nothing.
  */
-export function useEndedSessions(threadId: string, sessions: readonly string[]): ReadonlySet<string> {
+export function useEndedSessions(threadId: string, sessions: readonly string[]): EndedSessions {
   const key = sessions.join('\u0000');
-  const [ended, setEnded] = useState<ReadonlySet<string>>(NO_SESSIONS);
+  const [known, setKnown] = useState<KnownEnded>({ threadId, ended: new Map() });
+  const latest = useRef({ threadId, key, known });
+  latest.current = { threadId, key, known };
   useEffect(() => {
-    setEnded(NO_SESSIONS);
     if (!key) return;
     let current = true;
     const load = async () => {
-      const next = new Set<string>();
-      for (const session of key.split('\u0000')) {
-        try {
-          const model = await inboxApi.sessions(threadId, session);
-          if (model.asker?.session === session && model.asker.live === false) next.add(session);
-        } catch {
-          // Not known: not called ended.
-        }
-      }
-      if (current) setEnded((was) => (was.size === next.size && [...next].every((s) => was.has(s)) ? was : next));
+      const list = key.split('\u0000');
+      const read = await Promise.all(list.map(async (session) => [session, await sessionEnded(threadId, session)] as const));
+      if (current) setKnown((was) => withRead(was, threadId, read));
     };
     void load();
     const timer = setInterval(() => void load(), 10_000);
@@ -107,7 +133,20 @@ export function useEndedSessions(threadId: string, sessions: readonly string[]):
       clearInterval(timer);
     };
   }, [threadId, key]);
-  return ended;
+  const list = key ? key.split('\u0000') : [];
+  const knownHere = known.threadId === threadId ? known.ended : null;
+  const ended = new Set(list.filter((session) => knownHere?.get(session) === true));
+  const unchecked = list.some((session) => !knownHere?.has(session));
+  const check = async (): Promise<ReadonlySet<string>> => {
+    const { threadId: id, key: now, known: was } = latest.current;
+    const here = was.threadId === id ? was.ended : null;
+    const all = now ? now.split('\u0000') : [];
+    const read = await Promise.all(all.filter((session) => !here?.has(session)).map(async (session) => [session, await sessionEnded(id, session)] as const));
+    if (read.length > 0) setKnown((prior) => withRead(prior, id, read));
+    const fresh = new Map(read);
+    return new Set(all.filter((session) => (fresh.get(session) ?? here?.get(session)) === true));
+  };
+  return { ended, unchecked, check };
 }
 
 /** The project's live sessions other than the one that asked. */

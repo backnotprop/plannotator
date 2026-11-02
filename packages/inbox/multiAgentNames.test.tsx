@@ -206,6 +206,26 @@ test.skipIf(!hasDom)('one agent that named itself: its own name, as before, wher
   expect(await boxHead(el)).toEqual({ head: 'Reply to Cursor in superfans', field: 'Reply to Cursor' });
 });
 
+test.skipIf(!hasDom)('an archived thread Claude Code started that Pi wrote in after the archive: the came-back note names Pi, whom the reply goes to', async () => {
+  const thread: InboxThread = {
+    ...threadOf(agentMessage(M1, CLAUDE, { seq: 1 }), agentMessage(M2, PI, { seq: 3, created_at: '2026-11-01T11:45:00.000Z' })),
+    resolved_at: '2026-11-01T11:00:00.000Z',
+    archive_seq: 2,
+  };
+  const el = await render(thread);
+  expect(el.querySelector('[data-came-back] .ib-st')?.textContent).toBe('Archived · Pi wrote after you archived it. Your reply goes to it; the thread stays archived.');
+});
+
+test.skipIf(!hasDom)('an archived thread its one agent came back to: the came-back note names that agent, as before', async () => {
+  const thread: InboxThread = {
+    ...threadOf(agentMessage(M1, CLAUDE, { seq: 1 }), agentMessage(M2, CLAUDE, { seq: 3, created_at: '2026-11-01T11:45:00.000Z' })),
+    resolved_at: '2026-11-01T11:00:00.000Z',
+    archive_seq: 2,
+  };
+  const el = await render(thread);
+  expect(el.querySelector('[data-came-back] .ib-st')?.textContent).toBe('Archived · Claude Code wrote after you archived it. Your reply goes to it; the thread stays archived.');
+});
+
 test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the last good "Saved" time; the next save that lands says Saved again', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE)));
   act(() => button(el, 'Reply').click());

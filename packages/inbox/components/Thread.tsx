@@ -1843,7 +1843,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking);
-  const endedOthers = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const endedOthers = otherEnded.ended;
   const wordsEnded = !resolved && askerHasEnded(wordsAsking, live);
   const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
@@ -1888,6 +1889,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const replyName = handingTo ? handingTo.label : handedOff ? handoffName(handedOff) : null;
   /** Whom the box's words go to: the hand-off's agent, else the session of the message they answer (wordsMessage). */
   const replyTo = replyName ?? recipientName(wordsMessage(thread));
+  // The agent that wrote last after the archive (the archived came-back note): named as a reply to it would be.
+  const cameBackName = cameBack ? recipientName(thread.messages.filter((m) => m.author.kind === 'agent' && afterArchive(m)).at(-1)) : asker;
   // The same agents in a file comment's composer (markdown, text and HTML files): a tag there sends the
   // whole reply to that agent, and the composer says so under the field.
   const commentMentions = useMemo<MentionSource | undefined>(
@@ -1912,6 +1915,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;
   // The choice at Send, when the session that asked has ended.
   const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
+  /** A Send waits for the read of a session it reaches (useEndedSessions' `check`): a second press meanwhile does nothing. */
+  const checkingEnded = useRef(false);
   /** What the route choice is for: a reply, or a Re-ask (the same choice, its own words). */
   const [routeFor, setRouteFor] = useState<'reply' | 'reask'>('reply');
   const reaskRef = useRef<HTMLButtonElement>(null);
@@ -3422,16 +3427,36 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       setError('Wait for the files to finish uploading.');
       return;
     }
+    // Another session this Send reaches, not read yet (the list just changed with a pick): wait for its read,
+    // so "not read yet" never sends to an ended session without the choice (handoff "multi-agent-thread-model").
+    let gateEnded = askerEnded;
+    let gateAsking = asking;
+    if (!options.routed && !askerEnded && !resolved && otherEnded.unchecked) {
+      if (checkingEnded.current) return;
+      checkingEnded.current = true;
+      let ended: ReadonlySet<string>;
+      try {
+        ended = await otherEnded.check();
+      } finally {
+        checkingEnded.current = false;
+      }
+      const other = otherSessions.filter((s) => ended.has(s.session)).at(-1) ?? null;
+      if (other) {
+        gateEnded = true;
+        gateAsking = other;
+      }
+    }
+    const gateOtherLive = gateAsking !== null && othersLive(gateAsking, live).length > 0;
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
-    if (askerEnded && anyOtherLive && asking && !options.routed) {
+    if (gateEnded && gateOtherLive && gateAsking && !options.routed) {
       const empty = picksCount === 0 && records.length === 0 && boxWords === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
         return;
       }
       setError(null);
-      setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, asking, live));
+      setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, gateAsking, live));
       if (options.stayFull) fileToThread();
       return;
     }
@@ -5245,7 +5270,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         </div>
         {cameBack && (
           <div className="ib-acts ib-archnote" data-came-back="">
-            <span className="ib-st">Archived · {asker} wrote after you archived it. Your reply goes to it; the thread stays archived.</span>
+            <span className="ib-st">
+              Archived · {cameBackName} wrote after you archived it. Your reply goes to {replyTo === cameBackName ? 'it' : replyTo}; the thread stays
+              archived.
+            </span>
             <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
               Unarchive
             </button>
@@ -5561,6 +5589,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             thread={thread}
             asker={asker}
             askerHost={root.author.kind === 'agent' ? root.author.host : null}
+            replyTo={replyTo}
             live={live}
             mode={newMessage}
             onPick={(target) => setNewMessage({ kind: 'compose', target })}
