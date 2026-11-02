@@ -64,24 +64,26 @@ test('the notice follows what the Update button offers', () => {
   expect(sidebarUpdateNotice('ready', false)).toEqual({ tone: 'primary', label: 'update ready' });
   // Failed is neutral, never the error colour (the Update button's rule).
   expect(sidebarUpdateNotice('failed', false)).toEqual({ tone: 'neutral', label: 'update failed' });
-  // In progress invites nothing; no update (up to date, snoozed, over the tailnet) is no dot.
+  // In progress invites nothing; no update (up to date, snoozed, a tailnet guest's page) is no dot.
   expect(sidebarUpdateNotice('updating', false)).toBeNull();
   expect(sidebarUpdateNotice('available', true)).toBeNull();
   expect(sidebarUpdateNotice(null, false)).toBeNull();
 });
 
-// A DOM test of the whole window over the tailnet is not possible here: the tailnet listener answers only a
-// Host the browser sets (happy-dom's fetch cannot), so the rule App follows is tested on its own.
-test('a page opened over the tailnet offers no update (the update routes answer 403 local_only there)', () => {
+test('a guest over the tailnet is offered no update (the update routes answer it 403 local_only); the owner is', () => {
   const update = { available: true, state: 'available', version: '9.9.9', current: '0.28.0', action: 'script', releaseUrl: '' } as const;
   type Update = Parameters<typeof updateForPage>[0];
   const offered = update as unknown as Update;
   expect(updateForPage(offered, { via: 'local' })).toBe(offered);
   // An Inbox that predates `via` is this computer's.
   expect(updateForPage(offered, {})).toBe(offered);
-  // Over the tailnet: no Update button, so no dot either.
+  // The owner's phone: the same button and dot as the computer.
+  expect(updateForPage(offered, { via: 'tailnet', guest: false })).toBe(offered);
+  // A guest: no Update button, so no dot either.
+  expect(updateForPage(offered, { via: 'tailnet', guest: true })).toBeNull();
+  expect(sidebarUpdateNotice(updateForPage(offered, { via: 'tailnet', guest: true })?.state, false)).toBeNull();
+  // An Inbox that predates `guest` and came through the tailnet: not known to be the owner, so a guest.
   expect(updateForPage(offered, { via: 'tailnet' })).toBeNull();
-  expect(sidebarUpdateNotice(updateForPage(offered, { via: 'tailnet' })?.state, false)).toBeNull();
   // Before the settings read answers, the page does not yet know where it came from.
   expect(updateForPage(offered, null)).toBeNull();
   expect(updateForPage(null, { via: 'local' })).toBeNull();

@@ -334,7 +334,7 @@ export interface SettingsModel {
   tailscale?: TailscaleSettings;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
-  /** A tailnet login other than the owner's (its page offers no What's new). Absent from an older Inbox. */
+  /** A tailnet login other than the owner's (`tailnetGuest` reads it). Absent from an older Inbox. */
   guest?: boolean;
   version: string;
   port: number;
@@ -376,7 +376,7 @@ export interface SettingsModel {
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
-   * another config.json `urlHost`; either locks it. Absent through the tailnet
+   * another config.json `urlHost`; either locks it. Absent for a tailnet guest
    * and from an older Inbox.
    */
   cookie_host?: InboxCookieHost;
@@ -416,6 +416,14 @@ export interface InboxLaunchSettings {
   needs_consent?: boolean;
   /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
   bypass_off?: boolean;
+}
+
+/**
+ * A page from a tailnet login other than the owner's: what is about this computer stays closed to it. Over the
+ * tailnet an Inbox that does not say counts as a guest, so a page never offers what its server may refuse.
+ */
+export function tailnetGuest(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined): boolean {
+  return settings?.via === 'tailnet' && settings.guest !== false;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
