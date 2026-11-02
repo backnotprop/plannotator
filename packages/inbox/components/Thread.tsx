@@ -4009,19 +4009,6 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     else go();
   };
 
-  const archiveButton = (
-    <Tip content={archived ? 'Unarchive' : 'Archive: the thread ends; the next message starts a new one'}>
-      <button
-        type="button"
-        className="ib-iconbtn"
-        onClick={() => void resolve(!archived)}
-        aria-label={archived ? 'Unarchive the thread' : 'Archive the thread'}
-        data-archive=""
-      >
-        <Icon name="archive" />
-      </button>
-    </Tip>
-  );
   // Pin to the sidebar (approval "inbox-pinned-threads"): the header ⋯ menu's first item (Pin thread /
   // Unpin thread), the phone's way to pin.
   // A click shows its state at once and its request waits for the one before it, so a quick
@@ -4142,7 +4129,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         </div>
       )}
       <div className="ib-phead" ref={headRef} data-artifacts-on={artifactsOn ? '' : undefined}>
-        {/* A phone leads with the way back to the list; Archive sits at the right, where the close was. */}
+        {/* A phone leads with the way back to the list; the ⋯ menu (with Archive) sits at the right, where the close was. */}
         {phone && artifactsOn ? (
           // On a phone Artifacts is a screen of its own: its way back is to the thread (the browser's Back, so the swipe agrees).
           <>
@@ -4216,7 +4203,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           </>
         )}
         {/* Mark read leads, furthest from the close, with its label and its E; everything at the right is an icon
-            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, Archive, then the close.
+            with a tooltip (approval "inbox-thread-artifacts"): Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close.
             A phone keeps the same order after its way back. */}
         {phone && artifactsOn ? null : (
           <>
@@ -4262,8 +4249,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 </button>
               </Tip>
             )}
-            {archiveButton}
-            <ThreadMore {...copyHost} pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined} markUnread={markUnreadInMenu ? onMarkUnread : undefined} />
+            <ThreadMore
+              {...copyHost}
+              pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              markUnread={markUnreadInMenu ? onMarkUnread : undefined}
+              archive={{ archived, onToggle: () => void resolve(!archived) }}
+            />
             {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />

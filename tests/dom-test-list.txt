@@ -456,3 +456,4 @@ packages/review-editor/components/GoToFile.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
+packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx

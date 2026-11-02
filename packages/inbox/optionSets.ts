@@ -33,8 +33,6 @@ export interface OptionSet {
   id: string;
   messageId: string;
   questionKey: string;
-  /** The question's prompt, for the caption's second line. */
-  prompt: string;
   choices: OptionSetChoice[];
   /** The thread's steps for those choices, in choice order: what the viewer steps through. */
   steps: AttachmentStep[];
@@ -121,7 +119,7 @@ export function optionSetOf(messages: readonly InboxMessageWire[], steps: readon
     choices.push({ label: choice.label, ...named[index]!, recommended: choice.recommended, attachmentId: step.attachment.id });
   });
   if (setSteps.length < 2) return null;
-  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, prompt: question.prompt, choices, steps: setSteps };
+  return { id: optionSetId(message.id, question.key), messageId: message.id, questionKey: question.key, choices, steps: setSteps };
 }
 
 /** The choice a file is in the set (by its own id or the twin record folded into its step); null when it is not one of them. */
@@ -135,9 +133,8 @@ export const FIRST_OPTION_NOTE = 'First option';
 
 /**
  * "Option B of 4: Quiet hover menu, recommended": what a step inside a set
- * says to a screen reader. Given `otherFiles` (a phone, where the caption shows
- * the end note only for a moment), the step onto the last option says the note
- * too: "Option D of 4: Header menu only. Last option. 2 other files under the
+ * says to a screen reader. Given `otherFiles`, the step onto the last option
+ * says the end note too (the card no longer shows it): "Option D of 4: Header menu only. Last option. 2 other files under the
  * 4/4 button".
  */
 export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: number): string {
@@ -147,17 +144,4 @@ export function optionAnnouncement(set: OptionSet, index: number, otherFiles?: n
   if (otherFiles === undefined || index !== set.steps.length - 1) return said;
   if (otherFiles === 0) return `${said}. ${LAST_OPTION_NOTE}`;
   return `${said}. ${LAST_OPTION_NOTE}. ${otherFiles} other ${otherFiles === 1 ? 'file' : 'files'} under the ${index + 1}/${set.steps.length} button`;
-}
-
-/**
- * The caption's last line at an end of the set: the end note, and at the
- * last option where the thread's other files are ("Last option · the
- * thread's 7 other files are under 4/4 ⌄"). Null in between, or at the first
- * option until a swipe past it says so.
- */
-export function optionEndLine(set: OptionSet, index: number, otherFiles: number, note: string | null): { note: string; others: number } | null {
-  const last = index === set.steps.length - 1;
-  if (last) return { note: LAST_OPTION_NOTE, others: otherFiles };
-  if (index === 0 && note === FIRST_OPTION_NOTE) return { note: FIRST_OPTION_NOTE, others: 0 };
-  return null;
 }
