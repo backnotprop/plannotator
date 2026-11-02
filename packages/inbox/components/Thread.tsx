@@ -1327,7 +1327,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * box: Cancel, Escape, a Send and another thread forget them.
    */
   // A paste is said in the thread's polite live region ("Attached pasted-image-….png").
-  const replyFiles = useComposeFiles(NO_UPLOADS, { onPasted: (names) => announce(attachedAnnouncement(names)), machine: machine?.id ?? null });
+  // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), anchored in the box's
+  // words; Put back, Undo and the browser's undo return it there. Full screen's card writes the same words.
+  const replyFiles = useComposeFiles(NO_UPLOADS, {
+    onPasted: (names) => announce(attachedAnnouncement(names)),
+    onPutBack: () => announce('The pasted text is back in your reply.'),
+    machine: machine?.id ?? null,
+    text: { value: box.text, set: (text) => changeReply(text, true) },
+  });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   // The sessions the reply box's text tags with `@` (approval "inbox-tag-agents"), as the field reports them.
   const [taggedIds, setTaggedIds] = useState<readonly string[]>([]);
@@ -3047,6 +3054,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');
     if (behind && !boxRef.current.open) restoringRef.current = true;
     setBox({ open: true, text });
+    // Open now, for the rest of this event: an `openBehind` after it (a paste in full screen's card) keeps these words.
+    boxRef.current = { open: true, text };
     replyDraft.save(text);
   };
 
@@ -3881,6 +3890,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               setError(null);
             },
             onRemoveFile: (key) => replyFiles.remove(key),
+            onPutBack: (key, field) => replyFiles.putBack(key, field),
             actions: draftActions.length,
             // Questions with no pick (the foot's button also counts picked ones not sent yet), and the open action items.
             openQuestions: unanswered.length,
@@ -4974,6 +4984,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             <DraftHead
               label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
               savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
+              tooLong={replyDraft.tooLong}
               conflict={
                 replyDraft.conflict !== null
                   ? {
@@ -5051,6 +5062,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                       // The × goes with its tile: focus stays in the reply.
                       textRef.current?.focus();
                     }}
+                    onPutBack={(key) => replyFiles.putBack(key, textRef.current)}
                   />
                 </div>
               )}

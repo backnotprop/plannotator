@@ -769,6 +769,7 @@ describe('the full-screen composer counts as the foot does', () => {
           onDropFiles: () => {},
           onPaste: () => {},
           onRemoveFile: () => {},
+          onPutBack: () => {},
           openQuestions,
           openActions,
           conflict: false,

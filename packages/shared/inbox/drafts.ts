@@ -17,7 +17,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_CARD_TITLE_MAX, isInboxId, type InboxDraft, type InboxDraftTo, type InboxUpload } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_TITLE_MAX, INBOX_DRAFT_BODY_MAX, isInboxId, type InboxDraft, type InboxDraftTo, type InboxUpload } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 import { readInboxUpload } from "./uploads";
 
@@ -25,8 +25,8 @@ export const INBOX_DRAFTS_DIR = "drafts";
 /** The longest thread name a draft keeps while the person types (a Send takes at most INBOX_THREAD_NAME_MAX). */
 export const INBOX_DRAFT_THREAD_NAME_MAX = 500;
 
-/** The longest draft body, in characters (the store takes any body, but a draft is saved on every pause). */
-export const INBOX_DRAFT_BODY_MAX = 1_000_000;
+/** The longest draft body, in characters (the store takes any body, but a draft is saved on every pause). Defined in core so the window can name it. */
+export { INBOX_DRAFT_BODY_MAX };
 const SHORT_MAX = 4096;
 
 function draftsDir(inboxDirPath: string): string {

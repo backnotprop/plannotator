@@ -5,7 +5,7 @@
  */
 
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
-import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { checkInboxThreadName, INBOX_DRAFT_BODY_MAX, INBOX_HOST_NAMES, type InboxComposeProject, type InboxComposeSession, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -288,6 +288,9 @@ export function statusLine(input: {
 
 /** What ⌘↵ says when nothing can be sent. */
 export const NOTHING_SENT_NO_AGENT = 'Nothing sent: no live agent is chosen. Save it as a draft.';
+
+/** A draft over the Inbox's limit, said plainly (the server's own words name a field). */
+export const DRAFT_TOO_LONG = `Too long to save as a draft: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
 
 /** The Drafts page chip's words: "Claude Code is live", "That session ended", "No agent chosen". */
 export function draftChip(draft: Pick<InboxDraft, 'to'> & { status: 'live' | 'ended' | 'none' }): string {

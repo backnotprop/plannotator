@@ -58,14 +58,16 @@ export function pasteOverflows(current: string, pasted: string): boolean {
 }
 
 export const THREAD_NAME_OVERFLOW_NOTE = 'Too long for a name, so it went into your message.';
+/** A paste of 32 KB or more into the chip goes to the message as a pasted text tile (approval "inbox-paste-attachment"). */
+export const THREAD_NAME_ATTACHED_NOTE = 'Too long for a name, so it was attached to your message.';
 
 export function ThreadNameChip(props: {
   state: ThreadNameState;
   suggested: string;
   onChange: (state: ThreadNameState) => void;
   onDone: () => void;
-  /** Text pasted into the chip that cannot be a name: the caller puts it in the message. */
-  onOverflow: (text: string) => void;
+  /** Text pasted into the chip that cannot be a name: the caller puts it in the message (and may say how, in the note). */
+  onOverflow: (text: string) => string | void;
   error?: string | null;
   idBase: string;
 }) {
@@ -124,8 +126,7 @@ export function ThreadNameChip(props: {
             // Never cut short: the words go to the message, said beside the chip.
             event.preventDefault();
             event.stopPropagation();
-            setNote(THREAD_NAME_OVERFLOW_NOTE);
-            onOverflow(text);
+            setNote(onOverflow(text) || THREAD_NAME_OVERFLOW_NOTE);
           }}
           onBlur={() => setClearing(false)}
           onKeyDown={(event) => {

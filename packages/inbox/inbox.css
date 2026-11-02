@@ -3836,6 +3836,29 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-prog i { display: block; height: 100%; background: var(--primary); transition: width 120ms linear; }
 .pn-inbox .ib-cp-fx { flex: none; width: 26px; height: 26px; border-radius: 6px; border: 0; background: transparent; color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; }
 .pn-inbox .ib-cp-fx:hover { background: var(--muted); color: var(--foreground); }
+/* A long paste as a file (approval "inbox-paste-attachment", Option A): the ordinary tile, its name the paste's first words.
+   Its second line holds the size ("Pasted text · 46.9 KB"), "Pasted text · Undo" for its first 10 s, and "Put back in box"
+   in ONE grid cell, so swapping them on hover or keyboard focus moves nothing. A phone, or a screen with no hover, keeps
+   the size there and puts "Undo" / "Put back" beside the × instead (below). */
+.ib-cp-file .ib-pt-nm { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-cp-file .ib-pt-line { display: grid; }
+.ib-pt-line > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-pt-act { justify-self: start; border: 0; padding: 0; background: none; font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.pn-inbox .ib-pt-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 2px; }
+/* Low specificity (:where), so the phone's rules below win over a tap's sticky :hover. */
+:where(.ib-pt[data-pasted-fresh]) .ib-pt-size { visibility: hidden; }
+.ib-pt-back { opacity: 0; }
+:where(.ib-pt:hover, .ib-pt:focus-within) .ib-pt-back { opacity: 1; }
+:where(.ib-pt:not([data-pasted-fresh]):hover, .ib-pt:not([data-pasted-fresh]):focus-within) .ib-pt-size { visibility: hidden; }
+.pn-inbox .ib-pt-side { display: none; flex: none; position: relative; align-items: center; height: 26px; padding: 0 4px; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 550; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+.pn-inbox .ib-pt-side::after { content: ''; position: absolute; inset: -9px -2px; }
+/* A tile the upload refused still gives the words back: its line holds the reason, so Put back stands beside the ×. */
+.pn-inbox .ib-pt.ib-refused .ib-pt-side { display: inline-flex; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse), (hover: none) {
+  .ib-pt .ib-pt-undo, .ib-pt .ib-pt-back { display: none; }
+  .ib-pt .ib-pt-size { visibility: visible; }
+  .pn-inbox .ib-pt-side { display: inline-flex; font-size: var(--ib-fs-15, 15px); }
+}
 /* The thread row (ThreadNameChip): under To, its chip the list's grey chip and a text field; aligned with To's agent. */
 .ib-cp-thread { display: flex; align-items: flex-start; gap: 10px; min-height: 42px; padding: 8px 14px 8px 16px; border-bottom: 1px solid var(--ib-line); flex: none; }
 .ib-cp-to .ib-cp-tol, .ib-cp-thread .ib-cp-tol { min-width: 46px; }

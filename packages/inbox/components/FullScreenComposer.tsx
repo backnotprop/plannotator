@@ -71,6 +71,8 @@ export interface FullScreenReply {
   onPaste: (event: ClipboardEvent<HTMLElement>) => void;
   /** A file tile's ×. */
   onRemoveFile: (key: string) => void;
+  /** A pasted text tile's Undo or Put back: its words back in the reply, the caret after them in `field` (the card's). */
+  onPutBack: (key: string, field: HTMLTextAreaElement | null) => void;
   /** Questions in the thread still open (no pick). */
   openQuestions: number;
   /**
@@ -493,6 +495,7 @@ export function FullScreenComposer({
               // The × goes with its tile: focus stays in the reply, as in the reply box.
               replyRef.current?.focus({ preventScroll: true });
             }}
+            onPutBack={(key) => reply.onPutBack(key, replyRef.current)}
           />
         </div>
       )}
