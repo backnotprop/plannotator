@@ -384,6 +384,7 @@ export class PlannotatorMod {
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
+          turns: this.turns,
         })
       : null
     this.inbox?.start()
@@ -1741,6 +1742,7 @@ export class PlannotatorMod {
 
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
+    this.inbox?.pushAskStatus()
   }
 
   // --- Names ----------------------------------------------------------------------
