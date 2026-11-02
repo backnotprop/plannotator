@@ -1,6 +1,6 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
-import type { LiveSession, LiveSessionsModel } from '../api';
+import { inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { hostName, sessionWords } from './NewMessage';
@@ -72,6 +72,42 @@ export const askerCanEnd = (asking: AskingSession | null): boolean => asking?.me
 export function askerHasEnded(asking: AskingSession | null, live: LiveSessionsModel | null): boolean {
   if (!asking || !askerCanEnd(asking) || !live?.asker || live.asker.session !== asking.session) return false;
   return !live.asker.live;
+}
+
+const NO_SESSIONS: ReadonlySet<string> = new Set();
+
+/**
+ * Which of `sessions` have ended, as `askerHasEnded` reads one (the sessions route's `asker`, with its grace),
+ * read when the list changes and every 10 s: the other sessions one Send reaches (a pick on an ended session's
+ * question while the words go to a live one). A read that fails says nothing ended.
+ */
+export function useEndedSessions(threadId: string, sessions: readonly string[]): ReadonlySet<string> {
+  const key = sessions.join('\u0000');
+  const [ended, setEnded] = useState<ReadonlySet<string>>(NO_SESSIONS);
+  useEffect(() => {
+    setEnded(NO_SESSIONS);
+    if (!key) return;
+    let current = true;
+    const load = async () => {
+      const next = new Set<string>();
+      for (const session of key.split('\u0000')) {
+        try {
+          const model = await inboxApi.sessions(threadId, session);
+          if (model.asker?.session === session && model.asker.live === false) next.add(session);
+        } catch {
+          // Not known: not called ended.
+        }
+      }
+      if (current) setEnded((was) => (was.size === next.size && [...next].every((s) => was.has(s)) ? was : next));
+    };
+    void load();
+    const timer = setInterval(() => void load(), 10_000);
+    return () => {
+      current = false;
+      clearInterval(timer);
+    };
+  }, [threadId, key]);
+  return ended;
 }
 
 /** The project's live sessions other than the one that asked. */

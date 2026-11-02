@@ -509,6 +509,38 @@ test.skipIf(!hasDom)("picks only on A's older question, the latest message from 
   expect(replies()).toEqual([]);
 });
 
+// Handoff "multi-agent-thread-model", failure 2: a pick on ended A's question while the words go to live B.
+// The words' session is live, so the choice used to stay shut: A's answer went to A, which had ended, and sat
+// there undelivered with no line. Every session a Send reaches is checked now: the choice opens for A's answer.
+test.skipIf(!hasDom)("a pick on ended A's question and words for live B: the choice opens for A's answer; the session picked gets it, B the words", async () => {
+  liveness = { ses_asker: false, ses_b: true };
+  sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  // The pick waits in the draft: the foot opens it with Edit draft.
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  // The note stays once the person types (it named A, then went, before).
+  expect(el.querySelector('[data-asker-ended]')?.textContent).toContain('The Claude Code session that asked has ended.');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+  act(() => radio(el, 'ses_other').click());
+  act(() => (el.querySelector('[data-route-send]') as HTMLButtonElement).click());
+  await settle();
+  await settle();
+  expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.words, r.body.to ?? null])).toEqual([
+    ['A', '', { host: 'pi', session: 'ses_other' }],
+    ['B', 'And keep the logs bucket.', null],
+  ]);
+});
+
 test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   annotations = [{ id: 'ann_1', project_id: PROJECT.id, thread_id: M1, message_id: M1, attachment_id: '', path: M1, version: 'current', message: { at: '2026-10-11T10:41:00.000Z' }, annotation: { id: 'ann_1', type: 'COMMENT', text: 'Why three?', originalText: 'retry policy' }, created_at: '2026-10-11T10:50:00.000Z', updated_at: '2026-10-11T10:50:00.000Z', removed_at: null, sent_reply_id: null }];

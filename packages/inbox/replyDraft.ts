@@ -75,6 +75,12 @@ export interface ReplyDraftState {
    * are not saved, and the line above the box says so, until they are shorter.
    */
   tooLong: boolean;
+  /**
+   * The last save of the box's words did not land: the Inbox refused it (not for its length) or did not
+   * answer, and reading the draft back did not find them. The line above the box says "Not saved" in
+   * place of "Saved …" until a later save lands, a Send carries the words or Discard drops them.
+   */
+  failed: boolean;
 }
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
@@ -88,8 +94,9 @@ const conflictWords = new Map<string, string>();
 /** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
 const tooLongThreads = new Set<string>();
 /**
- * Threads whose last save was refused for another reason (`validation_error` not about the body's
- * length): their words are not saved until a later save lands (the restart guard asks meanwhile).
+ * Threads whose last save did not land: refused for another reason (`validation_error` not about the
+ * body's length), or no answer and not found when read back. Their words are not saved until a later
+ * save lands (the restart guard asks meanwhile, and the line above the box says so: `failed`).
  */
 const refusedThreads = new Set<string>();
 export function replyDraftUnsaved(): boolean {
@@ -108,7 +115,7 @@ function unsavedChanged(): void {
 
 
 export function useReplyDraft(threadId: string) {
-  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null, tooLong: false });
+  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null, tooLong: false, failed: false });
   const stateRef = useRef(state);
   stateRef.current = state;
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -176,25 +183,29 @@ export function useReplyDraft(threadId: string) {
     unsavedChanged();
     if (target === current.current) setState((s) => ({ ...s, tooLong: on }));
   };
-  /** The thread's words were refused for another reason (on), or a save of them landed or they went (off). */
+  /** The thread's words were refused for another reason or did not land (on), or a save of them landed or they went (off). */
   const markRefused = (target: string, on: boolean) => {
     if (on === refusedThreads.has(target)) return;
     if (on) refusedThreads.add(target);
     else refusedThreads.delete(target);
     unsavedChanged();
+    if (target === current.current) setState((s) => ({ ...s, failed: on }));
   };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target) });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target), failed: refusedThreads.has(target) });
   };
   /**
    * A save of `text` went without its answer reaching here: it may have landed. The draft holding
    * those words is this window's own, so its base is that draft's (and the Send's clear_draft names it).
    */
-  const readBack = async (target: string, text: string, generation: number, files: ReplyDraftFiles = NO_FILES) => {
+  /** Resolves true when the words are found there (the save landed). */
+  const readBack = async (target: string, text: string, generation: number, files: ReplyDraftFiles = NO_FILES): Promise<boolean> => {
     const latest = await readDraft(target);
-    if (latest === undefined || draftKey(latest) !== replyContentKey(text, files) || generation !== generationOf(target) || claimed.current.has(target)) return;
+    if (latest === undefined || draftKey(latest) !== replyContentKey(text, files) || generation !== generationOf(target) || claimed.current.has(target)) return false;
+    markRefused(target, false);
     learn(target, latest);
     show(target, latest);
+    return true;
   };
 
   const write = useCallback((target: string, text: string, files: ReplyDraftFiles = NO_FILES) => {
@@ -282,8 +293,10 @@ export function useReplyDraft(threadId: string) {
         learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
       } catch {
-        // No answer: read back what may have landed. Otherwise kept in the box; the next pause in typing tries again.
-        await readBack(target, text, generation, files);
+        // No answer: read back what may have landed. Otherwise kept in the box, not saved (the line above the box
+        // says so); the next pause in typing tries again.
+        const landed = await readBack(target, text, generation, files);
+        if (!landed && generation === generationOf(target) && !claimed.current.has(target)) markRefused(target, true);
       } finally {
         unsaved -= 1;
         unsavedChanged();
@@ -303,16 +316,16 @@ export function useReplyDraft(threadId: string) {
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
-    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId) });
+    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
     void chain.current.then(async () => {
       try {
         // An older Inbox answers 404 (caught below): no draft.
         const draft = (await inboxApi.replyDraft(threadId)).draft ?? null;
         if (!live) return;
         adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
+        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId), failed: refusedThreads.has(threadId) });
       }
     });
     return () => {
@@ -353,7 +366,9 @@ export function useReplyDraft(threadId: string) {
       const kept = keptAlive.current;
       keptAlive.current = null;
       if (!event.persisted || !kept) return;
-      chain.current = chain.current.then(() => readBack(kept.threadId, kept.text, kept.generation, kept.files));
+      chain.current = chain.current.then(async () => {
+        await readBack(kept.threadId, kept.text, kept.generation, kept.files);
+      });
     };
     window.addEventListener('pagehide', onHide);
     window.addEventListener('pageshow', onShow);
@@ -410,7 +425,7 @@ export function useReplyDraft(threadId: string) {
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();
-    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
     if (machineOf(target)) return;
     chain.current = chain.current.then(() => inboxApi.discardReplyDraft(target).then(() => undefined, () => undefined));
   }, []);
@@ -454,7 +469,7 @@ export function useReplyDraft(threadId: string) {
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();
-    setState((s) => (s.tooLong ? { ...s, tooLong: false } : s));
+    setState((s) => (s.tooLong || s.failed ? { ...s, tooLong: false, failed: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
     if (conflicts.current.has(target)) {
@@ -463,7 +478,7 @@ export function useReplyDraft(threadId: string) {
       return;
     }
     learn(target, null);
-    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false, failed: false });
   }, []);
 
   /**

@@ -869,7 +869,9 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
       if (message.to.session === caller && !message.delivery) unread = true;
       continue;
     }
-    if ((store.messageCursor(message.id) ?? 0) > checked) unread = true;
+    // A plain reply: after the agent-read mark and not delivered (its recipient's read past a reply the mark
+    // waits at, owed to another session, records its delivery).
+    if ((store.messageCursor(message.id) ?? 0) > checked && !message.delivery) unread = true;
   }
   return { unread, last };
 }
@@ -1004,10 +1006,12 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const url = threadUrl(context.baseUrl(), threadId);
           const reader = input.agent_session?.trim() || null;
           // A session the person only tagged here reads as a guest: what the owner still waits for stays queued.
-          // So does a script that names no session (a raw MCP client's read still settles, as it always has).
+          // So does a script that names no session. A raw MCP client's read that names none settles only the
+          // replies to messages sent without a session; any read settles only what is owed to its reader.
           const guest = store.isTaggedGuest(threadId, reader) || (reader === null && callerPeeks(ctx));
           if (input.format === "full") {
-            if (!guest) store.markAgentChecked(threadId);
+            // Only what this reader is owed: a reply to another session waits for that one (markAgentChecked).
+            if (!guest) store.markAgentChecked(threadId, undefined, undefined, reader);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.
             if (!guest) store.markAcksSeen(threadId);
             // What this session was owed here and no wake is left to settle.
@@ -1025,7 +1029,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
           const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
           if (!guest) {
-            store.markAgentChecked(threadId, readThrough);
+            store.markAgentChecked(threadId, readThrough, undefined, reader);
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.

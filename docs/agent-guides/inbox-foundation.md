@@ -206,7 +206,7 @@ Sorting and the rest:
 - Every section sorts newest first by the thread's latest message (`last_at`, the time the row shows); ties on the thread id (owner ruling 2026-10-08).
 - `unread` (bold) means Stopped, Holding, Waiting or New, except a row in New only for the person's own unsent words or comments (no unseen agent message, not "Answered, not sent"): not bold, and not counted as waiting on the person (the sidebar's Drafts row counts it).
 - "Looked" is `POST /api/inbox/threads/:id/seen`, sent when a thread opens (capped with `through_seq` at the newest agent message the window read, so one that lands before the server takes the look stays new) and again when a message that arrived while the thread was open has been seen on sight (see "Seen on sight"). The person's own reply also counts; the Inbox's notes do not.
-- "The agent read it" is recorded when `read_thread` reads the thread, which moves a Sent row to Quiet. Any agent's read counts.
+- "The agent read it" is recorded when `read_thread` reads the thread, which moves a Sent row to Quiet. Only the recipient's read counts (see "Two agents in one thread" in `inbox-compose.md`).
 - `?project=prj_…` keeps the sections and drops other projects' rows.
 - The list is linear in the store: about 10 ms for 4,000 threads.
 

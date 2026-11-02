@@ -52,6 +52,9 @@ export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; 
 /** Above the reply box when its words are longer than a draft holds (the Inbox refuses such a draft). */
 export const DRAFT_NOT_SAVED_TOO_LONG = `Not saved: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
 
+/** Above the reply box when the last save did not land (refused, or no answer): said in place of "Saved …". */
+export const DRAFT_NOT_SAVED_FAILED = 'Not saved. It tries again when you type.';
+
 /** The conflict line's words: both windows hold words for this reply. */
 export function conflictText(sentElsewhere: boolean): string {
   return sentElsewhere ? 'Not saved: this reply was sent or discarded in another window.' : 'Not saved: this reply changed in another window.';
@@ -77,6 +80,7 @@ export function DraftHead({
   onDiscard,
   conflict = null,
   tooLong = false,
+  failed = false,
 }: {
   label: string;
   savedAt: string | null;
@@ -84,6 +88,8 @@ export function DraftHead({
   conflict?: DraftConflict | null;
   /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
   tooLong?: boolean;
+  /** The last save of the box's words did not land: "Not saved", in place of "Saved …" (an older save's time). */
+  failed?: boolean;
 }) {
   if (tooLong && !conflict) {
     return (
@@ -118,15 +124,15 @@ export function DraftHead({
     );
   }
   return (
-    <div className="ib-reply-l ib-draft-head" data-draft-head="">
-      {savedAt !== null && <span className="ib-draft-pill">Draft</span>} <span className="ib-draft-for" dir="auto">{label}</span>
-      {savedAt !== null && (
+    <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-failed={failed ? '' : undefined}>
+      {(savedAt !== null || failed) && <span className="ib-draft-pill">Draft</span>} <span className="ib-draft-for" dir="auto">{label}</span>
+      {(savedAt !== null || failed) && (
         <>
           <span className="ib-sp" />
           <span className="ib-draft-saved" role="status">
-            Saved {shortTime(savedAt)}
+            {failed ? DRAFT_NOT_SAVED_FAILED : `Saved ${shortTime(savedAt!)}`}
           </span>
-          {onDiscard && (
+          {onDiscard && savedAt !== null && (
             <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={onDiscard}>
               Discard
             </button>

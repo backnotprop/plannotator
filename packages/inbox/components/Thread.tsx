@@ -71,6 +71,7 @@ import {
   othersLive,
   redirectedName,
   routeRace,
+  useEndedSessions,
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
@@ -127,7 +128,7 @@ import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/gu
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, type SendTarget, type SentContents } from '../sendTargets';
+import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -277,6 +278,39 @@ function lastSkipOrPick(thread: InboxThread, skip: ReadonlySet<string>): InboxMe
     if ((m.questions ?? []).some((q) => q.state === 'picked' || (q.state === 'open' && skip.has(`${m.id}/${q.key}`)))) found = m;
   }
   return found;
+}
+
+/**
+ * The other sessions a Send reaches besides the words' (`words`, askingSessionOf): a pick, a skip, an action item
+ * or a comment on another session's message rides a reply to that session (sendTargetsOf, routeSendAnnotations).
+ * Only those whose message came through a waking connection, which can end (askerCanEnd); each once.
+ */
+function otherSendSessions(
+  thread: InboxThread,
+  options: { skip: ReadonlySet<string>; carries: boolean; records: readonly InboxAnnotationRecord[] },
+  words: AskingSession | null,
+): AskingSession[] {
+  const plain = sendTargetsOf(thread, options.skip).filter(
+    (t, index, all) => t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0 || (options.carries && index === all.length - 1),
+  );
+  const out: AskingSession[] = [];
+  for (const { message } of routeSendAnnotations(thread, plain, options.records).targets) {
+    if (message.author.kind !== 'agent' || !message.author.session || message.wakes !== true) continue;
+    const session = message.author.session;
+    if (session === words?.session || out.some((s) => s.session === session)) continue;
+    out.push({ message, session, host: message.author.host ?? '', name: agentName(message.author) });
+  }
+  return out;
+}
+
+/**
+ * A second agent in a thread (handoff "multi-agent-thread-model", option A): an agent message from another
+ * session than the thread's first agent (`first`: the root's author, or the session a thread the person started
+ * is addressed to). A reply to it goes to that session, so the window names it, not the first agent.
+ */
+export function isOtherAgent(message: InboxMessageWire | null | undefined, first: { host?: string | null; session?: string | null } | null): boolean {
+  if (message?.author.kind !== 'agent' || !first) return false;
+  return (message.author.session ?? null) !== (first.session ?? null) || (message.author.host ?? null) !== (first.host ?? null);
 }
 
 /** The key a reply of a Send keeps across retries: one per session (a message with no session is its own). */
@@ -1282,6 +1316,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
   const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
+  // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
+  // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
+  const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
+  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   // Archived (resolved). What an agent wrote after the archive line behaves as
   // an open thread's: its questions are live, Reply goes to it, its files take
   // comments; the thread stays archived. `resolved` is the thread with nothing
@@ -1796,14 +1834,25 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const keepOpen = skipIds.size === 0;
   const toggleKeepOpen = () => setSkipArmed(keepOpen ? new Set(unanswered.map((u) => u.id)) : null);
   const skipping = !keepOpen;
-  const asking = askingSessionOf(thread, { skip: skipIds, carries: boxWords !== '' || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
-  const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
+  const sendCarries = boxWords !== '' || records.length > 0 || replyUploads.length > 0 || draftPastes > 0;
+  const wordsAsking = askingSessionOf(thread, { skip: skipIds, carries: sendCarries });
+  const askerToWatch = wordsAsking && askerCanEnd(wordsAsking) ? wordsAsking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
-  const askerEnded = !resolved && askerHasEnded(asking, live);
+  // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
+  // on an ended session's question, while the words go to a live one, opens the choice for that answer.
+  const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking);
+  const endedOthers = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const wordsEnded = !resolved && askerHasEnded(wordsAsking, live);
+  const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
+  /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
+  const asking = endedOther ?? wordsAsking;
+  const askerEnded = wordsEnded || endedOther !== null;
+  /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
+  const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open.
   const taggable = useTaggable(thread.thread_id, (box.open || !!file) && !resolved);
-  const tagOwner = asking?.session ?? taggable?.owner?.session ?? null;
+  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
@@ -1836,6 +1885,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A thread handed to another session: its replies go there.
   const handedOff = activeHandoff(thread);
   const replyName = handingTo ? handingTo.label : handedOff ? handoffName(handedOff) : null;
+  /** Whom the box's words go to: the hand-off's agent, else the session of the message they answer (wordsMessage). */
+  const replyTo = replyName ?? recipientName(wordsMessage(thread));
   // The same agents in a file comment's composer (markdown, text and HTML files): a tag there sends the
   // whole reply to that agent, and the composer says so under the field.
   const commentMentions = useMemo<MentionSource | undefined>(
@@ -3556,9 +3607,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
-          // Only a message the ended session asked goes to the session picked;
-          // an answer to another session's message still goes to that session.
-          ...(to && target.message.author.kind === 'agent' && target.message.author.session === asking?.session ? { to } : {}),
+          // Only a message an ended session of this Send asked goes to the session picked;
+          // an answer to a live session's message still goes to that session.
+          ...(to && target.message.author.kind === 'agent' && !!target.message.author.session && endedSends.has(target.message.author.session) ? { to } : {}),
         } });
       }
       // The tiles this Send carries, by the uploads its requests carry: a file pasted while it is in flight stays.
@@ -3579,7 +3630,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       focusSent.current = !options.stayFull;
       if (options.stayFull) {
         setComposerSentAt(Date.now());
-        announce(`Sent to ${replyName ?? asker}.`);
+        announce(`Sent to ${replyTo}.`);
       }
       finishSent(sentUploads, sendClears);
       if (handedReply) {
@@ -3726,8 +3777,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const toName = (message: InboxMessageWire, to: { host: string; session: string }) =>
     isRedirected(message) ? redirectedName(to, askedBy(message)) : hostName(to.host);
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
-  // person started, the thread's (the server hands it to that session).
-  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to ? startedTo : null)) : null;
+  // person started, the thread's (the server hands it to that session), unless it answers another
+  // session that wrote in it (that session takes it, as any plain reply).
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
   const repliedTo = last.author.kind === 'person' && !lastTo ? askedBy(last) : undefined;
@@ -3781,14 +3833,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
-            name: asker,
+            name: recipientName(repliedTo),
             // A reply that tags agents: the owner's own delivery, never another recipient's.
             deliveredAt: lastTags.length > 0 ? (last.delivery?.at ?? sent?.recipients?.find((r) => r.owner)?.delivered_at ?? null) : (sent?.checked_at ?? null),
             time: whenTime,
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: askerEnded && asking ? { name: asking.name } : null,
+            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
@@ -3812,7 +3864,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     ? last.to
       ? toName(last, last.to)
       : hostName(lastTo.host)
-    : asker;
+    : recipientName(repliedTo);
   const [sendNowState, setSendNowState] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
   const sendNow = async () => {
     setSendNowState({ id: last.id, busy: true, error: null });
@@ -4052,7 +4104,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           threadId: thread.thread_id,
           phone,
           reply: {
-            to: replyName ?? asker,
+            to: replyTo,
             value: box.open ? box.text : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
             onSend: () => void send({ stayFull: true }),
@@ -4822,7 +4874,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           const ownerOfSent = message.to ?? (askedBy(message)?.author.kind === 'agent' ? askedBy(message)!.author : null);
           const toWords = (
             <>
-              to {isAgent ? 'you' : message.to ? toName(message, message.to) : asker}
+              to {isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message))}
               {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
               {sentTags.length > 0 && (
                 <span data-tagged-names="">
@@ -5197,9 +5249,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         ) : box.open ? (
           <>
             <DraftHead
-              label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
+              label={replyName ? `Reply to ${replyName}` : `Reply to ${replyTo} in ${thread.project.name}`}
               savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
+              failed={replyDraft.failed && box.text.trim() !== ''}
               conflict={
                 replyDraft.conflict !== null
                   ? {
@@ -5241,7 +5294,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               <InboxComposerField
                 textareaRef={textRef}
                 voice={voice}
-                ariaLabel={`Reply to ${replyName ?? asker}`}
+                ariaLabel={`Reply to ${replyTo}`}
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
                 destination="your reply"
