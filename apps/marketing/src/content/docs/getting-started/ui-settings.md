@@ -67,6 +67,10 @@ Controls whether the browser tab closes automatically after you approve or deny 
 
 Controls how the repository is named beside the document, in the plan diff, in code review's header and in the tab title. Off by default: `acme/payments-service`. On, the repository's name stands alone: `payments-service`, or the project for a GitLab subgroup path. Hovering the name always shows the full owner and repository. Outside a git remote the label is the folder name, which has no owner, so the setting changes nothing there. The setting is kept in your browser.
 
+### Name the tab after the folder
+
+Shown when you annotate a folder. Controls what the browser tab is called while you review it. Off by default: the tab names the open file, `proposal.md · acme/payments-service`, so several tabs of one folder are easy to tell apart. On, the tab names the folder whichever file is open: `add-refund-flow/ · acme/payments-service`. The header at the top of the page names the folder either way. The setting is kept in your browser.
+
 ## Display
 
 > Plan review only. These settings do not appear in the code review UI.

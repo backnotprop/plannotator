@@ -2634,6 +2634,13 @@ Settings → General gains a **Hide the repository owner** switch, off by defaul
 - **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
 - **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
 
+## Name the tab after the folder (next ui release; additive, no core change)
+
+Settings → General can show a **Name the tab after the folder** switch, off by default. Inert unless a host asks for it: the row only stores the setting, and the host names its tab from it.
+
+- **Setting `folderTabNamesFolder`** (`config/settings.ts`, cookie-only `plannotator-folder-tab-names-folder`, default false).
+- **`Settings`** gains **`showFolderTabSetting?: boolean`** (default false) to show the row. Plannotator passes true in a folder annotate session.
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.

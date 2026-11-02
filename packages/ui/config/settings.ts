@@ -313,6 +313,25 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
+  /**
+   * Name a folder session's browser tab after the folder: `docs/ · acme/payments`
+   * (on) instead of the open file, `rollout-plan.md · acme/payments`. Default
+   * OFF, the owner's ruling on #2392: the tab names the open file, so several
+   * tabs of one folder stay apart (#2061). The header names the folder either
+   * way. Read by `documentTabTitle` (`packages/editor/documentTitle.ts`).
+   * Cookie-only.
+   */
+  folderTabNamesFolder: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-folder-tab-names-folder');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-folder-tab-names-folder', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
   vimModeEnabled: {
     // Vim bindings deliberately default OFF. Unmodified letter keys must remain
     // inert for existing users until they explicitly opt into modal document

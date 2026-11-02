@@ -151,6 +151,13 @@ interface SettingsProps {
    * applies the `documentFontFamily` setting (`hooks/useDocumentFont`).
    */
   showDocumentFont?: boolean;
+  /**
+   * Show General's "Name the tab after the folder" row. Default false, like
+   * `showDocumentTextSize`: the row does something only where the page names
+   * its tab through the `folderTabNamesFolder` setting. Plannotator passes
+   * true in a folder annotate session.
+   */
+  showFolderTabSetting?: boolean;
   onUIPreferencesChange?: (prefs: UIPreferences) => void;
   /** Claude Code's permission mode was changed here (plan review). The host
    *  keeps its own copy in step, since its Approve sends the mode and its
@@ -1302,7 +1309,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false, showFolderTabSetting = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1340,6 +1347,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const enterSavesComment = useConfigValue('enterSavesComment');
   const hideRepoOwner = useConfigValue('hideRepoOwner');
+  const folderTabNamesFolder = useConfigValue('folderTabNamesFolder');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');
   const agentTerminalSide = useConfigValue('agentTerminalSide');
@@ -1809,6 +1817,23 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                             onChange={(v) => configStore.set('hideRepoOwner', v)}
                             label="Hide the repository owner"
                             description="When on, documents, code review and tab titles name the repository without its owner. Hover the name to see the owner."
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {/* Name the tab after the folder: opt-in, cookie-only. Off
+                        keeps the owner's default (#2392): the tab names the
+                        open file, so tabs of one folder stay apart. */}
+                    {showFolderTabSetting && (
+                      <>
+                        <div className="border-t border-border" />
+                        <div data-folder-tab-setting="true">
+                          <ToggleSwitch
+                            checked={folderTabNamesFolder}
+                            onChange={(v) => configStore.set('folderTabNamesFolder', v)}
+                            label="Name the tab after the folder"
+                            description="In a folder review, the browser tab names the folder instead of the open file. Leave it off to tell several tabs of one folder apart."
                           />
                         </div>
                       </>

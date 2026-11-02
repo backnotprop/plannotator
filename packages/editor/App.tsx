@@ -6730,6 +6730,8 @@ const App: React.FC = () => {
     () => repoInfo && { ...repoInfo, display: repoLabel(repoInfo.display, hideRepoOwner) },
     [repoInfo, hideRepoOwner],
   );
+  // Settings → General → "Name the tab after the folder" (off: the tab names the open file).
+  const folderTabNamesFolder = useConfigValue('folderTabNamesFolder');
   const documentTitleInput = useMemo<DocumentTitleInput>(() => ({
     apiMode: isApiMode,
     annotateMode,
@@ -6746,7 +6748,8 @@ const App: React.FC = () => {
     planHeading,
     archiveTitle: archive.currentInfo?.title ?? null,
     repo: titleRepo,
-  }), [annotateMode, annotateSource, archive.archiveMode, archive.currentInfo?.title, bundleFiles, bundleIndex, fileBrowser.activeFile, goalSetupMode, isApiMode, linkedDocHook.filepath, liveApp?.targetUrl, planHeading, titleRepo, sessionFolderPath, sourceFilePath]);
+    folderTabNamesFolder,
+  }), [annotateMode, annotateSource, archive.archiveMode, archive.currentInfo?.title, bundleFiles, bundleIndex, fileBrowser.activeFile, folderTabNamesFolder, goalSetupMode, isApiMode, linkedDocHook.filepath, liveApp?.targetUrl, planHeading, titleRepo, sessionFolderPath, sourceFilePath]);
   const compactDocumentTitle = useMemo(() => resolveCompactDocumentTitle(documentTitleInput), [documentTitleInput]);
   const headerDocumentName = useMemo(() => documentHeaderName(documentTitleInput), [documentTitleInput]);
   const tabTitle = useMemo(() => documentTabTitle(documentTitleInput), [documentTitleInput]);
@@ -7540,6 +7543,7 @@ const App: React.FC = () => {
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
           documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc'}
+          folderTabSettingAvailable={annotateMode && annotateSource === 'folder' && !!sessionFolderPath}
           agentConnected={webmcpActivity.calls > 0}
           onCallbackFeedback={handleCallbackFeedback}
           onCallbackApprove={handleCallbackApprove}

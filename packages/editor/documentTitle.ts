@@ -39,6 +39,8 @@ export interface DocumentTitleInput {
   /** Archive browsing: the archived plan's title. */
   archiveTitle?: string | null;
   repo?: DocumentTitleRepo | null;
+  /** Settings → General → "Name the tab after the folder": a folder session's tab names the folder, not the open file. */
+  folderTabNamesFolder?: boolean;
 }
 
 /** What the desktop header shows beside the logo; `title` rides its tooltip. */
@@ -169,9 +171,15 @@ function documentName(input: DocumentTitleInput): { name: string; title?: string
  * The browser tab's title, name first: `rollout-plan.md · acme/payments`,
  * `docs.stripe.com/refunds · Plannotator`, `Add partial refunds (plan) · …`.
  * Archive, goal setup, share links and an unnamed plan keep today's title.
+ * A folder session's tab names the open file, so several tabs of one folder
+ * stay apart (#2061), unless `folderTabNamesFolder` is on: then it names the
+ * folder whichever file is open, a document linked from one included.
  */
 export function documentTabTitle(input: DocumentTitleInput): string {
   if (!input.apiMode || input.archiveMode || input.goalSetupMode) return defaultTabTitle(input.repo);
+  if (input.folderTabNamesFolder && input.annotateSource === 'folder' && input.folderPath) {
+    return `${annotateBundleBaseName(input.folderPath)}/ · ${repoSuffix(input.repo)}`;
+  }
   const named = documentName(input);
   if (named) return `${named.name} · ${named.web ? 'Plannotator' : repoSuffix(input.repo)}`;
   if (!input.annotateMode && input.planHeading) {
@@ -190,7 +198,8 @@ export function documentTabTitle(input: DocumentTitleInput): string {
  * open, a document linked from one included: the folder is what the session
  * is about, and the open file is named by the file list's selected row and the
  * chip at the top of the document. The tab title still names the open file,
- * so several tabs stay apart (#2061).
+ * so several tabs stay apart (#2061), unless Settings → General → "Name the
+ * tab after the folder" is on.
  */
 export function documentHeaderName(input: DocumentTitleInput): DocumentHeaderName | null {
   if (!input.apiMode || !input.annotateMode || input.archiveMode || input.goalSetupMode) return null;

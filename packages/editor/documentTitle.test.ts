@@ -8,7 +8,8 @@
  * a plan revision. The `·` titles are the approved format and are pinned on
  * purpose (option B of the approval for #2061). A folder session's header
  * names the folder, as a path cut from the start, whichever file is open; its
- * tab still names the open file.
+ * tab still names the open file, unless Settings → General → "Name the tab
+ * after the folder" (`folderTabNamesFolder`) is on.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -112,6 +113,46 @@ describe('folder', () => {
     const windows = annotate({ annotateSource: 'folder', folderPath: 'C:\\repo\\docs', activeFile: 'C:\\repo\\docs\\spec.md' });
     expect(documentHeaderName(windows)?.name).toBe('C:\\repo\\docs');
     expect(documentTabTitle(windows)).toBe('spec.md · acme/payments');
+  });
+});
+
+describe('folder, with "Name the tab after the folder" on', () => {
+  const folder = annotate({ annotateSource: 'folder', folderPath: '/repo/docs', folderTabNamesFolder: true });
+  // Fails if the setting stops reaching the tab: the open file takes it back.
+  test('the open file once chosen: the tab names the folder, the header too', () => {
+    const open = { ...folder, activeFile: '/repo/docs/rollout-plan.md', linkedPath: '/repo/docs/rollout-plan.md' };
+    expect(documentTabTitle(open)).toBe('docs/ · acme/payments');
+    expect(documentHeaderName(open)).toEqual({ name: '/repo/docs', title: '/repo/docs', cutsFromStart: true });
+    expect(compactDocumentTitle(open)).toBe('rollout-plan.md');
+  });
+  // Fails if a document linked from a folder file takes the tab back.
+  test('a document linked from a folder file: the tab still names the folder', () => {
+    expect(documentTabTitle({ ...folder, activeFile: '/repo/docs/a.md', linkedPath: '/repo/shared/glossary.md' }))
+      .toBe('docs/ · acme/payments');
+  });
+  // Fails if the folder's name claims a repository outside one (#2075's rule
+  // for every tab), or drops the label it is given (the repository with its
+  // owner hidden, from "Hide the repository owner").
+  test('the repository beside it is the one given, or Plannotator outside one', () => {
+    const outside = { ...folder, activeFile: '/scratch/docs/a.md', folderPath: '/scratch/docs', repo: { display: 'docs' } };
+    expect(documentTabTitle(outside)).toBe('docs/ · Plannotator');
+    expect(documentTabTitle({ ...folder, activeFile: '/repo/docs/a.md', repo: { ...repo, display: 'payments' } }))
+      .toBe('docs/ · payments');
+  });
+  // Fails if the folder's name is taken at the wrong separator.
+  test('a Windows folder path', () => {
+    const windows = { ...folder, folderPath: 'C:\\repo\\docs', activeFile: 'C:\\repo\\docs\\spec.md' };
+    expect(documentTabTitle(windows)).toBe('docs/ · acme/payments');
+  });
+  // Fails if the setting leaks past folder sessions: one file, several files
+  // (no folder), and the last message keep naming what is open.
+  test('every other session kind is unchanged', () => {
+    expect(documentTabTitle(annotate({ sourceFilePath: '/repo/docs/rollout-plan.md', folderTabNamesFolder: true })))
+      .toBe('rollout-plan.md · acme/payments');
+    expect(documentTabTitle(annotate({ annotateSource: 'folder', linkedPath: '/repo/spec.md', bundle: { index: 0, total: 2 }, folderTabNamesFolder: true })))
+      .toBe('spec.md (1 of 2) · acme/payments');
+    expect(documentTabTitle(annotate({ annotateSource: 'message', folderTabNamesFolder: true })))
+      .toBe('Last message · acme/payments');
   });
 });
 

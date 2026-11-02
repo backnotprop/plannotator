@@ -10,6 +10,12 @@
  * apart only by it, #2061), the folder's name cut, and the path's separators
  * jumping to the far end (a right-to-left box without its isolate).
  *
+ * Settings → General → "Name the tab after the folder" (off by default) is
+ * offered in a folder session, and turning it on names the tab after the
+ * folder, `add-refund-flow/ · Plannotator`, which a reload keeps. Failures to
+ * catch: the row missing from a folder session, the switch not reaching the
+ * tab, and the choice lost on reload.
+ *
  * Annotate a folder at 1440 by 900 and in a 560 by 800 window. Against the
  * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR, headless. Build
  * the binary first (see inbox.spec.ts).
@@ -80,7 +86,7 @@ async function headerFit(page: Page): Promise<HeaderFit> {
   });
 }
 
-test('annotate a folder: the header names the folder, cut from the start, and the tab names the open file', async ({ browser }) => {
+test('annotate a folder: the header names the folder, cut from the start; the tab names the open file, or the folder when Settings says so', async ({ browser }) => {
   expect(existsSync(binary), 'build the scratch binary first').toBe(true);
   const root = inboxScratch('plannotator-folder-session-header-e2e-');
   mkdirSync(join(root, 'data'), { recursive: true });
@@ -123,6 +129,23 @@ test('annotate a folder: the header names the folder, cut from the start, and th
     expect(f.foldersCut, '560: the parent folders give way').toBe(true);
     expect(f.lastCut, '560: the folder name is whole').toBe(false);
     expect(f.inOrder, '560: the path reads in order up to the folder name').toBe(true);
+
+    // Opt in: Settings → General → "Name the tab after the folder". The tab names the folder.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole('button', { name: 'Options' }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const folderTab = page.locator('[data-folder-tab-setting] button[role="switch"]');
+    await expect(folderTab, 'a folder session offers the switch, off').toHaveAttribute('aria-checked', 'false');
+    await folderTab.click();
+    await expect(folderTab).toHaveAttribute('aria-checked', 'true');
+    await page.keyboard.press('Escape');
+    // The scratch folder is no git repository, so the folder sits beside Plannotator (#2075's rule).
+    await expect(page).toHaveTitle(`${FOLDER}/ · Plannotator`);
+    // The choice is a cookie: a reload keeps it, with the file open again.
+    await page.reload();
+    await page.getByText('proposal', { exact: true }).first().click();
+    await expect(page.locator('article[data-print-region="article"]:visible h1')).toHaveText(/^Proposal/);
+    await expect(page).toHaveTitle(`${FOLDER}/ · Plannotator`);
     await context.close();
   } finally {
     if (url) await fetch(new URL('/api/exit', url), { method: 'POST' }).catch(() => {});
