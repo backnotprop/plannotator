@@ -99,6 +99,7 @@
 **Guided reviews** (`packages/server/inbox-guides.ts`; code diffs only, in Plannotator's portable format).
 - `get_guide_brief` answers the authoring brief in the shape Workspaces' tool gives agents: `methodology`, `output_schema`, `diff_steps`, `rules`, and an `example` that works as it is.
 - `submit_guide` takes `guide` plus `patch`, or `snapshot`, plus `body` and send_message's routing fields.
+- The person can ask for one: the thread header's ⋯ **Request guided review** sends a reply asking for a guided review of the thread's code changes ("Request guided review" in `inbox-messages.md`).
 - Validation is Plannotator's own (`parseGuideSnapshot`, `buildAuthoredGuideSnapshot`'s placement checks). A refusal is `invalid_guide: …` naming the file.
 - The snapshot is stored as a blob only after the message lands. The message carries `guide: { sha256, input_sha256, bytes, title, sections, files, additions, deletions }`. Idempotency compares `input_sha256`.
 - The window: the message shows the guide as a card. Open (`#thread=…&guide=<message id>`) takes the window: Plannotator's `GuideView` over review-editor's `AllFilesCodeView`. The reader mounts only through a `lazy()` import, guarded by `tests/entry-assets.test.ts`.

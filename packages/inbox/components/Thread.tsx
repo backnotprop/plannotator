@@ -47,6 +47,7 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { useReplyDraft } from '../replyDraft';
+import { GUIDE_REQUEST_WORDS, guideRequestTarget } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
@@ -3954,6 +3955,39 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     }
   };
 
+  // Request guided review (the header's ⋯, guideRequest.ts): the person's reply asking for a guided review of the
+  // thread's code changes, to the session a typed reply reaches. Hidden on an archived thread, for a host that gets
+  // no guided reviews, and while the session it would reach has ended, as the window knows it.
+  const guideTarget = guideRequestTarget(thread);
+  const guideOffered = guideTarget !== null && !(askerEnded && asking?.session === guideTarget.to.session);
+  /** One request at a time (a double click sends one), and its key kept for a retry of the same request. */
+  const requestingGuide = useRef(false);
+  const guideKey = useRef<string | null>(null);
+  /**
+   * An ordinary reply of words alone, through the reply route: stored, shown as the person's message with its
+   * Delivered or Queued line, and waking the session as a typed reply does. The reply box, its draft, picks and
+   * comments are left as they are: the request carries none of them.
+   */
+  const requestGuide = async () => {
+    if (requestingGuide.current || sending) return;
+    const target = guideRequestTarget(threadRef.current);
+    if (!target) return;
+    requestingGuide.current = true;
+    setError(null);
+    guideKey.current ??= newUuid();
+    try {
+      await inboxApi.reply(target.message.id, { idempotency_key: guideKey.current, words: GUIDE_REQUEST_WORDS, questions: [] });
+      guideKey.current = null;
+      announce(`Asked ${hostName(target.to.host)} for a guided review.`);
+      await onChanged();
+      requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    } catch (cause) {
+      setError(`The guided review request was not sent. ${cause instanceof InboxApiError ? cause.message : 'Try again.'}`);
+    } finally {
+      requestingGuide.current = false;
+    }
+  };
+
   // Open questions in this thread (approval "inbox-thread-open-questions", option A): the "N open questions"
   // button lists them (Re-ask at its foot), and a row takes the person to the card (unfolding its message).
   const openQFromServer = resolved && !cameBack ? { questions: [], replaced: 0 } : threadOpenQuestions(thread.messages, liveMessage);
@@ -4517,6 +4551,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               snooze={onSnooze && onUnsnooze && !resolved ? { snoozed: !!row?.snoozed, onPick: onSnooze, onUnsnooze } : undefined}
+              requestGuide={guideOffered ? () => void requestGuide() : undefined}
             />
 
             {phone || stacked || backBesideFile || threadAlone ? null : (
