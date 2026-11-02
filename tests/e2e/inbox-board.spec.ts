@@ -282,14 +282,16 @@ test("an agent's cards appear live as it makes and moves them, bold until opened
   // The agent hands Delivery ticks over: In review.
   await claude.card({ op: 'move', card_id: ids.ticks, column: 'in_review', you: 'Look at the screenshots, then merge #14', project_path: projects.plannotator });
   await expect(lane(page, 'in_review').locator(`[data-card-id="${ids.ticks}"]`)).toBeVisible();
-  // The card whose every PR merged leaves the lanes for Done by itself, once its mark is read.
-  await expect(card(page, ids.icon)).toHaveCount(0);
+  // The card whose every PR merged moves to the Done lane by itself, once its mark is read.
+  await expect(lane(page, 'done').locator(`[data-card-id="${ids.icon}"]`)).toBeVisible();
   // The agent's last word is not on the lane card (approval board-lane-card, r1): its title row alone.
   await expect(card(page, ids.herdr).locator('.ib-bc-line')).toHaveCount(0);
   await expect(card(page, ids.herdr)).not.toContainText('Triage the open PRs first');
   // No counts in the header: the lane counts say it.
   await expect(page.locator('[data-board-summary]')).toHaveCount(0);
-  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 2');
+  // The Done lane holds this week's (both done just now); the header links to every done card.
+  await expect(lane(page, 'done').locator('.ib-lane-n')).toHaveText('2');
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('All done');
   // No "on you" pill on a lane, no counts on a card.
   await expect(page.locator('.ib-onyou')).toHaveCount(0);
   // Each lane card with a link carries its state as a mark, read for the cards on screen in
@@ -424,14 +426,37 @@ test('dragging a card to another lane moves it', async () => {
   await expect(card(page, ids.herdr)).toHaveAttribute('data-column', 'in_review');
 });
 
+test('"Waiting on you": an agent asks in a thread linked to its card; the card says so and opens it, and stays in its lane', async () => {
+  const { page, claude, projects, ids } = world;
+  const asked = await claude.send({
+    project_path: projects.plannotator,
+    subject: 'Hero easing: which curve',
+    thread: 'hero-easing',
+    body: ['Two easings rendered.', '', ':::question', 'Which easing for the hero scene?', '', '- [ ] Spring', '- [ ] Ease out', ':::'].join('\n'),
+  });
+  await claude.card({ op: 'link', card_id: ids.hero, thread_id: asked.thread_id, project_path: projects.plannotator });
+  const link = card(page, ids.hero).locator('[data-card-waiting]');
+  await expect(link).toHaveText(/Waiting on you: Hero easing: which curve/);
+  await expect(card(page, ids.hero)).toHaveAttribute('data-column', 'in_progress');
+  await both(page, 'waiting-on-you-1440');
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`thread=${asked.thread_id}`));
+  await page.goBack();
+  await expect(card(page, ids.hero)).toBeVisible();
+  // The agent's question goes, and so does the line: the card never moved.
+  await claude.send({ project_path: projects.plannotator, thread: 'hero-easing', body: 'Never mind: going with the spring.', supersedes: [asked.message_id as string] });
+  await expect(link).toHaveCount(0);
+  await expect(lane(page, 'in_progress').locator(`[data-card-id="${ids.hero}"]`)).toBeVisible();
+});
+
 test('Ship, park in Backlog, Cancel with a reason, and Restore; the Done and Cancelled pages', async () => {
   const { page, pi, projects, ids } = world;
   // Ship.
   await card(page, ids.caret).locator('[data-card-open]').click();
   let panel = page.locator(`[data-card-panel="${ids.caret}"]`);
   await panel.locator('[data-card-ship]').click();
-  await expect(card(page, ids.caret)).toHaveCount(0);
-  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 3');
+  await expect(lane(page, 'done').locator(`[data-card-id="${ids.caret}"]`)).toBeVisible();
+  await expect(lane(page, 'done').locator('.ib-lane-n')).toHaveText('3');
   // Park an agent's card in Backlog (the Icebox's job now): the agent may say, never take it out.
   await page.keyboard.press('Escape');
   await card(page, ids.polylane).locator('[data-card-open]').click();
@@ -634,4 +659,32 @@ test.describe('iPhone 15 (WebKit)', () => {
       }
     });
   }
+
+  test('a week on, the Done fold ends in All done (N); tapping it shows the older cards and focus goes to the first of them', async () => {
+    const context = await browser!.newContext({ ...device, colorScheme: 'light' });
+    try {
+      const page = await context.newPage();
+      // Every card here was done minutes ago: eight days on they are out of the fold's last week.
+      await page.clock.setFixedTime(Date.now() + 8 * 24 * 60 * 60 * 1000);
+      await page.goto(`${world.url}#board`);
+      await expect(page.locator('[data-board-view="phone"]')).toBeVisible();
+      await page.locator('[data-board-fold="done"]').tap();
+      const all = page.locator('[data-board-done-all]');
+      await expect(all).toHaveText(/^All done \(\d+\)$/);
+      const done = page.locator('[data-lane="done"] .ib-bcard');
+      await expect(done).toHaveCount(0);
+      await all.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(shots, 'phone-all-done-light.png') });
+      await all.tap();
+      await expect(all).toHaveCount(0);
+      await expect(done.first()).toBeVisible();
+      // The button left the page: focus is on the first card it showed, never on the body.
+      await expect(done.first().locator('[data-card-open]')).toBeFocused();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(shots, 'phone-all-done-open-light.png') });
+    } finally {
+      await context.close();
+    }
+  });
 });
