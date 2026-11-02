@@ -1,0 +1,104 @@
+/* A launched session's permission prompt (components/PermissionCard.tsx; approval "inbox-permission-prompt"):
+   its own framed object in the thread, a little narrower than the text. Theme tokens only. */
+
+.pn-inbox .ib-message.pc-item { padding: 0; border-top-color: transparent; }
+.pn-inbox .ib-message + .ib-message.pc-item,
+.pn-inbox .ib-message.pc-item + .ib-message { margin-top: 14px; padding-top: 0; border-top-color: transparent; }
+.pn-inbox .ib-message.pc-item + .ib-message.pc-item { margin-top: 10px; }
+.pn-inbox .ib-pbody.ib-folding .ib-message.pc-item { margin: 12px 0; padding: 0; border-top-color: transparent; }
+.pn-inbox .ib-pbody.ib-folding .ib-message.pc-item + .ib-message.pc-item { margin-top: 8px; }
+.pn-inbox .ib-pbody.ib-folding .ib-message.pc-item + .ib-message:not(.pc-item) { border-top-color: transparent; }
+
+.pc-card {
+  max-width: 720px;
+  border-radius: var(--ib-lr-xl, 12px);
+  overflow: hidden;
+  color: var(--foreground);
+  background: var(--card);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 90%, transparent), 0 1px 2px color-mix(in oklch, var(--ib-shadow-ink, var(--foreground)) 6%, transparent);
+}
+
+/* The header: the runtime, its live status, Stop. */
+.pc-head { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent); font-size: var(--ib-fs-13, 13px); }
+.pc-app { font-weight: 600; white-space: nowrap; }
+.pc-sub { min-width: 0; color: var(--muted-foreground); }
+.pc-sp { flex: 1; }
+.pc-time { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pn-inbox .pc-stop { padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
+.pn-inbox .pc-stop:hover { color: var(--foreground); background: var(--ib-hover, var(--muted)); }
+
+/* The request: the action, then exactly what the tool will do. */
+.pc-body { padding: 12px 14px 14px; }
+.pc-title { margin: 0 0 10px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.pc-title code, .pn-inbox .pc-row .ib-btn code, .pc-rec-verb code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.9em; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 7%, transparent); }
+.pn-inbox .pc-row .ib-btn.ib-pri code { background: color-mix(in oklch, var(--primary-foreground) 18%, transparent); }
+.pc-code { margin: 0; padding: 11px 14px; border-radius: var(--ib-lr-md, 9px); background: var(--ib-raise, var(--muted)); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-13, 13px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pc-code code { font: inherit; background: none; padding: 0; }
+/* A link exactly as sent, wrapped anywhere: never cut, never shortened. */
+.pc-url { word-break: break-all; }
+/* A Bash call that asks to run outside the sandbox: said first, plainly. */
+.pc-warn { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--destructive); }
+/* A MultiEdit's edit heading inside its change. */
+.pc-hunk { display: block; padding: 3px 14px; font-family: var(--font-sans, inherit); font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 4%, transparent); }
+.pc-why { margin: 8px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.pc-path { font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.94em; color: var(--foreground); overflow-wrap: anywhere; }
+.pc-strong { color: var(--foreground); font-weight: 500; }
+.pc-dim { color: var(--muted-foreground); }
+
+/* A Write's content or an Edit's change: the path and its facts, then numbered lines. */
+.pc-file { border-radius: var(--ib-lr-md, 9px); background: var(--ib-raise, var(--muted)); overflow: hidden; }
+.pc-links-to { margin: 0; padding: 7px 14px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent); }
+.pc-code + .pc-links-to { padding: 0; border: 0; }
+.pc-file-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; padding: 9px 14px 8px; font-size: var(--ib-fs-12-5, 12.5px); border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent); }
+.pc-facts { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.pc-lines { margin: 0; padding: 8px 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.6; color: var(--foreground); overflow-x: auto; }
+.pc-line { display: grid; grid-template-columns: 42px minmax(0, 1fr); padding-right: 14px; }
+.pc-line code { font: inherit; background: none; padding: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pc-ln { padding-right: 14px; text-align: right; color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); user-select: none; font-variant-numeric: tabular-nums; }
+.pc-line[data-sign="+"] { background: color-mix(in oklch, var(--success) 10%, transparent); }
+.pc-line[data-sign="-"] { background: color-mix(in oklch, var(--destructive) 9%, transparent); }
+.pn-inbox .pc-more { display: block; width: 100%; padding: 8px 14px; border: 0; border-top: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent); background: none; text-align: left; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .pc-more:hover { color: var(--foreground); }
+
+/* The answers: Allow once is the one accent button; Deny is plain, never red. */
+.pc-foot { padding: 12px 14px 13px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+.pc-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Every answer wraps rather than clips: the session choice names every rule it grants, and all of them must show. */
+.pn-inbox .pc-row .ib-btn { height: auto; min-height: 32px; max-width: 100%; padding-block: 5px; white-space: normal; text-align: left; overflow-wrap: anywhere; line-height: 1.35; }
+.pn-inbox .pc-row .ib-btn code { white-space: normal; overflow-wrap: anywhere; }
+.pc-modes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pn-inbox .pc-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 500; color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 28%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.pn-inbox .pc-link:hover { text-decoration-color: currentColor; }
+.pc-foot .ib-error { margin: 10px 0 0; }
+
+.pn-inbox .pc-reason textarea { display: block; width: 100%; min-height: 64px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); resize: vertical; outline: none; }
+.pn-inbox .pc-reason textarea:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 18%, transparent); }
+.pc-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.pc-confirm p { margin: 0; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; color: var(--muted-foreground); }
+
+/* Answered: the same frame, one line. */
+.pn-inbox .pc-rec-line { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 8px 14px; border: 0; background: none; text-align: left; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); cursor: pointer; }
+.pn-inbox .pc-rec-line:hover { background: color-mix(in oklch, var(--muted) 35%, transparent); }
+.pc-rec-icon { display: inline-flex; flex: none; color: var(--muted-foreground); }
+.pc-rec-icon[data-kind="allow"] { color: var(--success); }
+/* The verdict keeps its line: the path takes only the room left (basis 0) and truncates first; a verdict longer than the line wraps. */
+.pc-rec-verb { flex: 0 1 auto; font-weight: 500; }
+.pc-rec-line > .pc-sp { display: none; }
+.pc-rec-what { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pc-rec-reason { margin: -4px 0 0; padding: 0 14px 10px 60px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pc-rec > .pc-body { border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
+
+/* Phone: the same card, its buttons stacked as 44 px targets. */
+@media (max-width: 640px) {
+  .pc-card { max-width: none; }
+  .pc-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pc-row { flex-direction: column; align-items: stretch; }
+  .pn-inbox .pc-row .ib-btn { min-height: 44px; justify-content: center; text-align: center; }
+  .pc-modes > span:first-child { flex-basis: 100%; }
+  .pc-rec-reason { padding-left: 14px; }
+}
+
+/* After Approve in Terminal: the host's line, and on a phone Copy attach command beside it. */
+.pc-term { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; }
+/* Approve in Terminal beside the allows: a quiet way to Claude's own dialog. */
+.pn-inbox .pc-link.pc-quiet { font-weight: 400; color: var(--muted-foreground); }

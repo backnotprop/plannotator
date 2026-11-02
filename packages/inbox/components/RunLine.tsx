@@ -8,11 +8,11 @@ import { hostLabel } from '../compose/model';
 import { Tip } from './Tip';
 import { useMinuteClock } from './Undelivered';
 
-/** "4 min" since `since` (at least 1). */
+/** "4 min" since `since`; nothing under a minute (never "1 min" a few seconds in). */
 function minutesSince(since: string | null, now: number): string | null {
   if (!since) return null;
-  const min = Math.max(1, Math.floor((now - Date.parse(since)) / 60_000));
-  return `${min} min`;
+  const min = Math.floor((now - Date.parse(since)) / 60_000);
+  return min >= 1 ? `${min} min` : null;
 }
 
 /** `claude attach 4f1c9a2e` on screen; the command copied also changes into the folder first. */
@@ -21,7 +21,7 @@ const shownCommand = (command: string) => command.replace(/^cd .*? && /, '');
 const STOP_TIP = 'Stops the session. Commands it started in the background keep running.';
 
 /**
- * A launched thread's run line (UX screens 05, 06, 08, 11, 12, 14, 15): one
+ * A launched thread's run line (UX screens 05, 06, 08, 09, 11, 12, 14, 15): one
  * quiet line under the latest message, in place of the delivery line, saying
  * what the agent the person started is doing. It goes away while the agent
  * rests (`run` null: the thread draws nothing). Stop is a text button; the
@@ -33,7 +33,7 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const ticking = run.state === 'working' || run.state === 'waiting_terminal';
+  const ticking = run.state === 'working' || run.state === 'waiting_answer' || run.state === 'waiting_terminal';
   const now = useMinuteClock(ticking);
   const name = hostLabel(run.agent);
   const minutes = ticking ? minutesSince(run.since, now) : null;
@@ -97,6 +97,15 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       text = (
         <>
           {name} is working{minutes ? ` · ${minutes}` : ''}
+        </>
+      );
+      actions = stop;
+      break;
+    case 'waiting_answer':
+      // A permission prompt asked above, as a question card (screen 09): answering it is the action.
+      text = (
+        <>
+          {name} is waiting on your answer{minutes ? ` · ${minutes}` : ''}
         </>
       );
       actions = stop;

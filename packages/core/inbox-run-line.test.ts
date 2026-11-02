@@ -40,6 +40,18 @@ describe("inboxRunOf", () => {
     expect(inboxRunOf(evidence({ live: idle, turnWaiting: true, now: T0 + INBOX_RUN_START_GRACE_MS + 1 }))).toBeNull();
   });
 
+  test("our own open permission question is waiting_answer since it was asked, before the host's waiting_terminal", () => {
+    const waiting = { status: "waiting", state: "blocked", waitingFor: "permission prompt" };
+    const asked = T0 + 90_000;
+    const busy = { busy: true, busySince: T0 + 30_000 };
+    expect(inboxRunOf(evidence({ live: busy, seenLive: true, host: waiting, waitingSince: T0, permissionSince: asked }))).toMatchObject({
+      state: "waiting_answer",
+      since: new Date(asked).toISOString(),
+    });
+    // Withdrawn (no open question): the host's word decides again.
+    expect(inboxRunOf(evidence({ live: busy, seenLive: true, host: waiting, waitingSince: T0, permissionSince: null }))?.state).toBe("waiting_terminal");
+  });
+
   test("answered in Terminal: a live idle session is blocked on nothing, even while the host's last word was waiting", () => {
     const waiting = { status: "waiting", state: "blocked", waitingFor: "permission prompt" };
     expect(inboxRunOf(evidence({ live: { busy: false, busySince: null }, seenLive: true, host: waiting, waitingSince: T0 }))).toBeNull();

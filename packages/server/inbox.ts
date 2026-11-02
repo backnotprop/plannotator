@@ -113,6 +113,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { combineSuggestions } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
@@ -758,6 +759,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
+  // The requests the phone's device door hands in, in-process, after it checked the device's token
+  // (inbox-devices.ts `toWindow`): the person's own paired device, which answers a permission prompt as a window does.
+  const fromDeviceDoor = new WeakSet<Request>();
   // Search (packages/server/inbox-search.ts): the index is built on the first search, not here.
   const search = createInboxSearchRoutes({ store, serverSession, index: options.searchIndex });
   // Mark read: the note to the asking agents goes once the Undo window has passed.
@@ -2499,7 +2503,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of deliveryListeners) listener();
     },
     log: (line) => process.stderr.write(`${line}\n`),
+    // The permission hook runs this Plannotator.
+    selfCommand,
   });
+  // The login shell read ahead, off any request's path (launch on only).
+  launch.warm();
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({
@@ -2686,9 +2694,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return mcp.fetch(req);
     }
 
+    // A launched session's permission hook (inbox-launch-permission.ts): guarded like the bridge below
+    // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
+    const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
     const askClient = askOn && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient) {
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -2699,6 +2710,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const match = /^Bearer\s+(\S+)$/i.exec((req.headers.get("authorization") ?? "").trim());
       if (!match || !tokensEqual(match[1]!, token)) {
         return json({ error: "Missing or wrong Inbox token.", code: "unauthorized" }, 401);
+      }
+      if (isPermissionHook) {
+        try {
+          return (await launch.permissionRoute(req, path)) ?? json({ error: "Not found", code: "not_found" }, 404);
+        } catch (error) {
+          return errorResponse(error);
+        }
       }
       if (askClient) {
         try {
@@ -3246,10 +3264,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
+        // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
         const run = await launch.runOf(thread.thread_id);
         const row = store.listRow(thread.thread_id);
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run }) });
+        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? launch.rowDecorator()(row) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -3439,19 +3458,46 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ message: store.undoHandoff(handoffUndo[1]!) });
       }
 
+      /**
+       * Not a permission question, or the person's own call: a window's (the page's own Origin, this Host, and this
+       * run's serverSession) or a paired device's through the device door (its token already checked).
+       */
+      const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
+        if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
+        if (fromDeviceDoor.has(request)) return true;
+        const from = request.headers.get("origin");
+        let fromHost: string | null = null;
+        try {
+          fromHost = from ? new URL(from).host : null;
+        } catch {
+          fromHost = null;
+        }
+        return fromHost !== null && fromHost === (request.headers.get("host") ?? "") && body.serverSession === serverSession;
+      };
+
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);
       if (messageMatch) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const messageId = messageMatch[1]!;
+        // A launched session's permission prompt is answered from a window only: the page's own Origin and
+        // this run's serverSession, never a bare local call (an agent's curl). A tightening, not a secret:
+        // see "Permission prompts" in docs/agent-guides/inbox-launch.md.
+        if ((messageMatch[2] === "picks" || messageMatch[2] === "reply") && !answeredFromWindow(req, body, store.message(messageId))) {
+          return json({ error: "A permission prompt is answered in the Inbox window.", code: "window_only" }, 403);
+        }
         switch (messageMatch[2]) {
           case "picks": {
             // `unsent_only` (decision mode): a pick that raced the Send of its reply never reopens what went.
             if (body.unsent_only !== undefined && typeof body.unsent_only !== "boolean") {
               throw new InboxError("validation_error", "unsent_only: a boolean.", { field: "unsent_only" });
             }
-            const questions = store.savePicks(messageId, body.questions as never, { unsentOnly: body.unsent_only === true });
+            // `confirm_full`: the person confirmed Full permissions on a launched session's permission question.
+            if (body.confirm_full !== undefined && typeof body.confirm_full !== "boolean") {
+              throw new InboxError("validation_error", "confirm_full: a boolean.", { field: "confirm_full" });
+            }
+            const questions = store.savePicks(messageId, body.questions as never, { unsentOnly: body.unsent_only === true, confirmFull: body.confirm_full === true });
             return json({ message_id: messageId, questions, reply: null });
           }
           case "reply": {
@@ -3695,7 +3741,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       port: () => port,
       registry: () => registry,
       readBody,
-      dispatch: fetch,
+      // Only the door calls this, after the device's token: its requests may answer a permission prompt.
+      dispatch: (req) => {
+        fromDeviceDoor.add(req);
+        return fetch(req);
+      },
       now: options.now,
       refusalKeptMs: options.unlinkedRefusalKeptMs,
       tailscale: options.tailscale,

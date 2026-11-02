@@ -110,6 +110,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { sanitizeTag } from "@plannotator/core/project";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
@@ -185,6 +186,12 @@ export type InboxListener = (line: InboxLine) => void;
 export interface InboxSendInput {
   project_id: string;
   author: Extract<InboxAuthor, { kind: "agent" }>;
+  /**
+   * Server only (launch's permission route): the author is a permission
+   * question's `perm:<session>` identity. Every other writer is refused that
+   * prefix, so a `perm:` author is always the Inbox's own permission card.
+   */
+  permission?: boolean;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -3008,6 +3015,9 @@ export class InboxStore {
    * store's log, so a replay routes the same way.
    */
   sendMessage(input: InboxSendInput): InboxSendResult {
+    if (input.permission !== true && isInboxPermissionSession(input.author.session)) {
+      throw new InboxError("validation_error", `agent_session: "${INBOX_PERMISSION_SESSION_PREFIX}" is reserved for the Inbox's own permission questions.`, { field: "agent_session" });
+    }
     const body = input.body;
     if (typeof body !== "string" || body.trim() === "") throw new InboxError("validation_error", "body: a message needs a body.", { field: "body" });
     // One line of plain text, checked before anything else (a reply ignores
@@ -3605,7 +3615,7 @@ export class InboxStore {
     mode: "pick" | "send",
     /** Each entry's index in the request's `questions` (a Send's entries are planned per message). */
     indices?: readonly number[],
-    options: { unsentOnly?: boolean } = {},
+    options: { unsentOnly?: boolean; confirmFull?: boolean } = {},
   ): { record: InboxQuestionRecord; answer: QuestionAnswer | null | undefined }[] {
     const records = new Map(this.questionRecords(message.id).map((r) => [r.key, r]));
     const seen = new Set<string>();
@@ -3640,9 +3650,16 @@ export class InboxStore {
       // revision matches when the pick raced the Send (read before it, saved after), and saving it would reopen an
       // answer the agent already has. Without it a sent question takes a pick again, as the thread-state model has
       // it (the window never offers one; adr/implementation/inbox-thread-state.md).
-      if (mode === "pick" && options.unsentOnly === true && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
+      // A launched session's permission question is always unsent-only: its answer already went to the hook, and
+      // a stale window or phone must never reopen it or rewrite what the thread says Claude was told.
+      const permission = message.author.kind === "agent" && isInboxPermissionSession(message.author.session);
+      const alreadySent = record.answer !== null && record.revision > 0 && record.sent_revision === record.revision;
+      if (mode === "pick" && (options.unsentOnly === true || permission) && alreadySent) {
         throw refusalError({ code: "question_already_sent", key: entry.key });
       }
+      // The same for a reply that carries its own answer: once the prompt is answered, the reply posts as text
+      // and leaves the answer record alone (sendReply refuses it when nothing else is left to send).
+      if (mode === "send" && permission && alreadySent) return;
       let answer: QuestionAnswer | null | undefined;
       if (entry.answer === null) {
         if (mode === "send") throw new InboxError("validation_error", `${field}.answer: a Send cannot clear a pick.`, { field: `${field}.answer` });
@@ -3656,15 +3673,40 @@ export class InboxStore {
         const checked = checkInboxAnswer(record, entry.answer, `${field}.answer`);
         if (!checked.ok) throw refusalError(checked.refusal);
         answer = checked.answer;
+        // Full permissions turns every later prompt off: the first time in a session it is picked only with the
+        // person's confirmation (`confirm_full`, the window's "Switch this session to Full permissions?").
+        // A consent step, not a control: the window that asks can send it.
+        if (permission && answer?.selected.includes(INBOX_PERMISSION_FULL) && !(mode === "pick" && options.confirmFull === true) && !this.fullPermissionsUsed(message)) {
+          throw new InboxError("validation_error", "Full permissions: confirm it first (confirm_full).", { field: "confirm_full" });
+        }
       }
       plan.push({ record, answer });
     });
     return plan;
   }
 
+  /**
+   * Whether the session that wrote this permission question already switched to Full permissions from an
+   * earlier one in the thread (its answer sent): only the first time asks for `confirm_full`.
+   */
+  private fullPermissionsUsed(message: InboxMessage): boolean {
+    if (message.author.kind !== "agent") return false;
+    const session = message.author.session;
+    for (const id of this.threadMessageIds(message.thread_id)) {
+      if (id === message.id) continue;
+      const earlier = this.message(id);
+      if (earlier?.author.kind !== "agent" || earlier.author.session !== session) continue;
+      for (const record of this.questionRecords(id)) {
+        if (record.answer?.selected.includes(INBOX_PERMISSION_FULL) && record.revision > 0 && record.sent_revision === record.revision) return true;
+      }
+    }
+    return false;
+  }
+
   /** Save picks at once (no reply is written): each revision goes up by one. */
   /** `unsentOnly`: refuse a pick on a question a reply already sent (`question_already_sent`), as decision mode asks. */
-  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean } = {}): InboxQuestion[] {
+  /** `confirmFull`: the person confirmed Full permissions on a launched session's permission question. */
+  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean; confirmFull?: boolean } = {}): InboxQuestion[] {
     const message = this.targetMessage(messageId);
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new InboxError("validation_error", "questions: at least one question is required.", { field: "questions" });
@@ -3732,6 +3774,11 @@ export class InboxStore {
       plan.push(...this.planAnswers(target, list.map((x) => x.entry), "send", list.map((x) => x.index)));
     }
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
+    // Every listed answer was on an answered permission question (planAnswers leaves those alone) and the reply
+    // has no words of its own: say so, rather than "write a reply".
+    if (entries.length > 0 && plan.length === 0 && words.trim() === "" && feedback === "" && (input.attachments ?? []).length === 0) {
+      throw refusalError({ code: "question_already_sent", key: entries[0]!.key });
+    }
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
     // Skips only what the person listed ("Skip them"), and only while still open.
     const planned = new Set(plan.map((p) => p.record.id));
@@ -3959,6 +4006,11 @@ export class InboxStore {
     }
     if (message.author.kind !== "agent") {
       throw new InboxError("validation_error", "Re-ask goes to an agent's message: the questions it asked.", { field: "message_id" });
+    }
+    // A launched session's permission prompt is never asked again: its hook waits on this one question,
+    // and a Re-ask would send the person's unsent picks without their Send.
+    if (isInboxPermissionSession(message.author.session)) {
+      throw new InboxError("validation_error", "A permission prompt is not asked again: answer it here, or in Terminal.", { field: "message_id" });
     }
     // The questions this session asked in the thread (only this message's
     // when the agent named no session), not one the archive closed.

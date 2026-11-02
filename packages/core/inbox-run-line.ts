@@ -5,11 +5,13 @@
  * `agents --json`, what it remembers in memory) and this decides the state.
  *
  * - `launch.error` → failed (or missing, when the CLI was gone).
+ * - Our own permission question is open and its hook still holds it (the
+ *   lease) → waiting_answer, whatever the host says: `waitingFor` cannot
+ *   tell "asked in the Inbox" from "nobody asked" (bg-perm-test).
  * - The host says it waits on a prompt (`status: waiting` + `waitingFor`) →
  *   waiting_terminal, unless the session is live and idle: a session blocked
  *   on a dialog may still poll busy, but an idle one is blocked on nothing
- *   (the person answered in Terminal and the turn ended). (PR 2 adds
- *   `waiting_answer` from our own open question first.)
+ *   (the person answered in Terminal and the turn ended).
  * - A reply's respawn that failed, or never connected within the grace →
  *   failed (missing when the CLI is gone), with Try again; it is never
  *   retried by itself.
@@ -36,7 +38,7 @@ export interface InboxRunEvidence {
   now: number;
   /** The latest start or respawn (ms); the launch's `started_at` after an Inbox restart. */
   startedAt: number;
-  /** That start was a reply's respawn or Try again. */
+  /** That start was a reply's respawn (a Try again of a start that never ran is a first start). */
   again: boolean;
   /** The CLI is gone from the login PATH (false), there (true), or not checked (null). */
   cliAvailable: boolean | null;
@@ -56,6 +58,8 @@ export interface InboxRunEvidence {
   stoppedByPersonAt: number | null;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
+  /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
+  permissionSince?: number | null;
 }
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
@@ -80,6 +84,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     if (error.code === "missing") return line("missing");
     return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at });
   }
+  if (e.permissionSince != null) return line("waiting_answer", { since: iso(e.permissionSince) });
   const host = e.host === "absent" ? null : e.host;
   const idle = e.live !== null && e.live.busy !== true;
   if (host?.status === "waiting" && host.waitingFor && !idle) return line("waiting_terminal", { since: iso(e.waitingSince) });

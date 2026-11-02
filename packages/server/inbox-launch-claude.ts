@@ -22,6 +22,7 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
+import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
 
 /** The first Claude Code with `--bg`, `agents --json`, `respawn` as tested. Below it the To row is not offered. */
@@ -85,6 +86,19 @@ export function agentByShort(agents: readonly ClaudeAgent[], short: string): Cla
 
 export type ClaudeStartFailure = { code: "untrusted" | "failed"; text: string };
 
+/** The permission mode a launch starts in: bypass (full permissions), auto, or null (the person's own `defaultMode`, no flag). */
+export type ClaudeLaunchMode = "bypassPermissions" | "auto" | null;
+
+/**
+ * A start a CLI refused for `--permission-mode auto`: Claude's own refusal of the flag's value
+ * (`error: option '--permission-mode <mode>' argument 'auto' is invalid.`), a CLI without auto mode.
+ * Such a start is made again with no `--permission-mode`, in default mode.
+ */
+export function refusedForMode(result: Pick<AgentRunResult, "exitCode" | "timedOut" | "stdout" | "stderr">): boolean {
+  if (result.exitCode === 0 || result.timedOut) return false;
+  return /option '--permission-mode <mode>' argument 'auto' is invalid/.test(`${result.stderr}\n${result.stdout}`);
+}
+
 /** Why `claude --bg` did not start a session, in words for the run line (screen 14). */
 export function startFailureOf(result: Pick<AgentRunResult, "exitCode" | "timedOut" | "stdout" | "stderr">, folder: string): ClaudeStartFailure {
   const output = `${result.stderr}\n${result.stdout}`;
@@ -104,6 +118,49 @@ export function shellQuote(value: string): string {
 /** The command that opens the session in a terminal (the ⋯ menu's Copy attach command). */
 export function claudeAttachCommand(folder: string, short: string): string {
   return `cd ${shellQuote(folder)} && claude attach ${short}`;
+}
+
+/**
+ * Claude Code 2.1.314 takes a PermissionRequest hook's allow only when the ask
+ * lets hooks allow it. Its own safety checks (removing the working folder, for
+ * one) do not: it awaits the hooks, ignores an allow, takes a deny, and only
+ * then shows its own dialog, which blocks the call by itself after about 2
+ * minutes. The hook's input does not mark such a check, but it carries the
+ * session's `permission_mode`, and in bypass mode only such checks reach the
+ * hook (one limit: a `permissions.ask` rule of the person's own, if Claude asks
+ * it in bypass mode, gets the same card although a hook could allow it). So a
+ * session in bypass mode is offered Deny, or Approve in Terminal: the hook says
+ * nothing, Claude's own dialog comes up, and the person approves it there.
+ *
+ * In any other mode a prompt can be person-only too, and nothing in the hook's
+ * input says so (it carries tool_name, tool_input, permission_suggestions,
+ * mcp_server and the common fields): a `permissions.ask` rule ("Permission rule
+ * … requires confirmation") ignores a hook's allow, and so, very likely, does a
+ * safety check. So every card also offers Approve in Terminal, the honest way
+ * when Claude wants a person; the run line says when an allow did not count.
+ */
+export const CLAUDE_TERMINAL_ONLY = "Claude Code only accepts this approval in Terminal.";
+/** After Approve in Terminal on a safety check: Claude's dialog waits about 2 minutes, then blocks the call. */
+export const CLAUDE_HANDOFF = "Approve it in Claude Code within 2 minutes.";
+/** After Approve in Terminal on any other prompt. */
+export const CLAUDE_HANDOFF_PLAIN = "Approve it in Claude Code, in Terminal.";
+
+/** Whether the session runs in bypass mode: its hook input's `permission_mode`; the launch record only when the input has none. */
+export function claudeInBypass(launch: Pick<InboxLaunchRecord, "full_permissions">, event: { permission_mode: string | null }): boolean {
+  return event.permission_mode !== null ? event.permission_mode === "bypassPermissions" : launch.full_permissions === true;
+}
+
+/**
+ * What a permission card may offer: Approve in Terminal always; in bypass mode no mode switch and no allow from here
+ * (Deny, or Approve in Terminal).
+ */
+export function claudePermissionTerms(
+  launch: Pick<InboxLaunchRecord, "full_permissions">,
+  event: { permission_mode: string | null },
+): { full: boolean; allowHere: boolean; terminal: true; note: string | null; handoff: string } {
+  return claudeInBypass(launch, event)
+    ? { full: true, allowHere: false, terminal: true, note: CLAUDE_TERMINAL_ONLY, handoff: CLAUDE_HANDOFF }
+    : { full: false, allowHere: true, terminal: true, note: null, handoff: CLAUDE_HANDOFF_PLAIN };
 }
 
 /** What Open in Terminal runs when no session exists yet (an untrusted folder): plain `claude`, so its trust prompt shows. */
@@ -134,23 +191,41 @@ export function createClaudeHost(options: { environment: () => Promise<AgentEnvi
     agents,
     /**
      * `claude --bg` in `folder` with the launch's settings file, then the full
-     * session id. `fullPermissions` adds bypass mode as the only flag; nothing
-     * else goes on argv. A failure names the folder as `shownFolder` (`~/…`).
+     * session id. `allowBypass` (the person recorded bypass consent) adds
+     * `--allow-dangerously-skip-permissions`, so the session may switch to
+     * bypass later (the card's Full permissions); `mode` adds `--permission-mode`
+     * (null: the person's own default mode). Nothing else goes on argv. Auto
+     * mode refused (a CLI without it): started again with no mode (an auto
+     * launch's settings file pins default mode), and `modeRefused` says why.
+     * A failure names the folder as `shownFolder` (`~/…`).
      */
-    async start(input: { folder: string; shownFolder: string; name: string; settingsPath: string; fullPermissions: boolean; environment: AgentEnvironment }): Promise<
-      ({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string }
-    > {
+    async start(input: {
+      folder: string;
+      shownFolder: string;
+      name: string;
+      settingsPath: string;
+      mode: ClaudeLaunchMode;
+      allowBypass: boolean;
+      environment: AgentEnvironment;
+    }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
       // A name that starts with "-" would read as a flag.
       const name = input.name.replace(/^-+/, "").trim() || "Inbox";
-      const argv = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.fullPermissions ? ["--permission-mode", "bypassPermissions"] : [])];
-      const { result, missing } = await run(argv, input.folder, START_TIMEOUT_MS, input.environment);
-      const output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
+      let { result, missing } = await run([...base, ...(input.mode ? ["--permission-mode", input.mode] : [])], input.folder, START_TIMEOUT_MS, input.environment);
+      let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      let modeRefused: string | undefined;
+      if (input.mode === "auto" && !missing && refusedForMode(result)) {
+        modeRefused = startFailureOf(result, input.shownFolder).text;
+        ({ result, missing } = await run(base, input.folder, START_TIMEOUT_MS, input.environment));
+        output = `${output}\n[auto mode refused; started again with no --permission-mode]\n${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      }
+      const more = modeRefused ? { modeRefused } : {};
       const started = result.exitCode === 0 ? parseBackgrounded(result.stdout) : null;
-      if (!started) return { ok: false, missing, ...startFailureOf(result, input.shownFolder), output };
+      if (!started) return { ok: false, missing, ...startFailureOf(result, input.shownFolder), output, ...more };
       // The supervisor lists the session as soon as `--bg` returns; a short retry covers a busy one.
       for (let attempt = 0; attempt < 5; attempt++) {
         const found = agentByShort((await agents(input.folder)) ?? [], started.short);
-        if (found) return { ok: true, session: found.sessionId, short: started.short, output };
+        if (found) return { ok: true, session: found.sessionId, short: started.short, output, ...more };
         await Bun.sleep(400);
       }
       // Never leave it running unseen (Try again would start a second one): stop and remove it first.

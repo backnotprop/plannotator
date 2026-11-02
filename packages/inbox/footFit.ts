@@ -27,10 +27,13 @@ export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['f
  * The visible words of each form: "6 open questions" / "6 open" / "6". With
  * action items: "2 open action items" alone, "6 questions, 2 action items"
  * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
+ * `permission` (only a launched agent's permission prompts wait): "1 permission
+ * waiting" / "1 waiting" / "1".
  */
-export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0): string {
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false): string {
   const n = questions + actions;
   if (form === 'count') return String(n);
+  if (permission) return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
   return openItemsLabel(questions, actions);
 }
@@ -168,12 +171,13 @@ function rowMids(row: Element): number[] {
     .map((r) => r.top + r.height / 2);
 }
 
-/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-label`). */
+/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-permission`, `data-oq-label`). */
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
   const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions);
+  const permission = button.hasAttribute('data-oq-permission');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');

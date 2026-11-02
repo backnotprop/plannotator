@@ -216,6 +216,8 @@ export interface ThreadModel {
   row?: InboxListRow | null;
   /** A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off. */
   run?: InboxRun | null;
+  /** With `run`: the command that attaches to the launched session in a terminal, also while it rests; null before it exists. */
+  attach_command?: string | null;
 }
 
 export interface ReplyResult {
@@ -404,8 +406,16 @@ export interface SettingsModel {
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
 export interface InboxLaunchSettings {
   enabled: boolean;
-  /** "Start new sessions with full permissions": Claude Code starts in bypass mode. */
+  /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
   full_permissions: boolean;
+  /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
+  follows?: 'claude' | 'shell' | null;
+  /** A launch starts in the person's own Claude default mode (not auto). */
+  own_mode?: boolean;
+  /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
+  needs_consent?: boolean;
+  /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
+  bypass_off?: boolean;
 }
 
 /**
@@ -1059,10 +1069,11 @@ export const inboxApi = {
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
-  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
+  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
+      ...(options.confirmFull ? { confirm_full: true } : {}),
     }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
@@ -1239,6 +1250,9 @@ export const inboxApi = {
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
   launchDelete: (launchId: string) => post<{ ok: true }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
   launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
+  /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),

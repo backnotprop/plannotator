@@ -51,8 +51,11 @@ import type { PlannotatorConfig } from "./config";
 
 describe("resolveInboxLaunch", () => {
   test("off unless enabled; the model only when it is a plain model name, never settings of another shape", () => {
-    expect(resolveInboxLaunch({})).toEqual({ enabled: false, fullPermissions: false, model: null });
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: false, model: "haiku" });
+    // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
+    expect(resolveInboxLaunch({})).toEqual({ enabled: false, fullPermissions: null, model: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku" });
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
     for (const model of ["haiku --dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(65)]) {
       expect(resolveInboxLaunch({ inboxLaunch: { model } } as unknown as PlannotatorConfig).model).toBeNull();

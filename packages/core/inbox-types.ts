@@ -870,13 +870,21 @@ export interface InboxLaunchRecord {
   started_at: string;
   /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
   full_permissions?: true;
+  /** Started in the person's own Claude `permissions.defaultMode` (no `--permission-mode`). Neither this nor full: auto mode. */
+  own_mode?: true;
+  /**
+   * The person recorded Claude Code's bypass consent when the launch was made: it starts with
+   * `--allow-dangerously-skip-permissions`, and its card offers Full permissions. Absent (an older launch
+   * too): no Full permissions.
+   */
+  bypass_available?: true;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
 }
 
 /** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
-export type InboxRunState = "starting" | "working" | "waiting_terminal" | "stopped" | "failed" | "missing";
+export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing";
 
 /** What a launched thread's run line shows (the thread route's `run`). */
 export interface InboxRun {
@@ -886,9 +894,9 @@ export interface InboxRun {
   /** The project's name (the line's "in <project>"). */
   project: string;
   folder: string;
-  /** Since when: the start (starting), the turn (working), the prompt (waiting_terminal), the stop. */
+  /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
   since: string | null;
-  /** `starting` after a reply or Try again ("Starting … again"). */
+  /** `starting` after a reply's respawn ("Starting … again"). */
   again: boolean;
   /** `stopped`: the person pressed Stop (the line names the time). */
   stopped_by_person: boolean;

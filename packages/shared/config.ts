@@ -491,7 +491,8 @@ export interface PlannotatorConfig {
    * packages/server/inbox-launch.ts). `enabled`: config only, default false,
    * off, compose, the thread and every route are as before.
    * `fullPermissions`: Settings → Agents' "Start new sessions with full
-   * permissions" (bypass mode). `model`: config only, a model name such as
+   * permissions" (bypass mode); never set, a launch follows the person's
+   * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
    * `haiku` for each launch's settings file (the manual smoke); anything that
    * is not a plain model name is ignored.
    */
@@ -1149,11 +1150,12 @@ export function resolveDefaultDiffTypeFor(
 const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
 /** config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name. */
-export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean; model: string | null } {
+export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null } {
   const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
   return {
     enabled: coerceConfigBoolean(value.enabled, false),
-    fullPermissions: coerceConfigBoolean(value.fullPermissions, false),
+    // null: the person never set the switch (a launch follows their login shell).
+    fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
   };
 }
