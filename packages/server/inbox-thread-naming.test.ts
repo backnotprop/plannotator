@@ -2,7 +2,7 @@
  * Naming a thread the person started (approval "inbox-agent-names-own-thread"),
  * through the server's real doors: the wake asks the addressed session to name
  * it (`name_thread` on the bridge command, INBOX_NAME_THREAD_LINE in the wake),
- * MCP-only agents learn it from wait_for_reply and read_thread
+ * MCP-only agents learn it from read_thread
  * (`name_this_thread: true` and the hint), send_message's result says when a
  * reply named it or did not, and compose takes a name the person gives
  * (`thread_name`), which no agent replaces and no wake asks about. Every test
@@ -140,21 +140,19 @@ describe("an agent names a thread the person started", () => {
     expect(inboxWakeText(wake)).not.toContain(INBOX_NAME_THREAD_LINE);
   });
 
-  test("an agent that only waits (MCP) gets the hint with the person's reply while the thread has no name", async () => {
+  test("an agent that reads later (MCP) gets the hint with the person's reply while the thread has no name", async () => {
     const { server, client, project } = await setup();
     await poll(server, "ses-live", project);
     const sent = (await (await compose(server, { to: { session: "ses-live" }, body: IDEA, idempotency_key: "c1" })).json()) as { message: InboxMessage };
-    // The agent answers without a name, then waits; the person replies.
+    // The agent answers without a name; the person replies.
     const answer = await call(client, "send_message", { body: "Questions first: which columns?", reply_to: sent.message.id, project_path: project, agent_session: "ses-live", agent_host: "claude-code" });
-    const waiting = call(client, "wait_for_reply", { thread_id: sent.message.id, agent_session: "ses-live", timeout_seconds: 10 });
-    await Bun.sleep(100);
     await fetch(`${base(server)}/api/inbox/messages/${answer.structuredContent.message_id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: server.serverSession, words: "Todo, doing, done.", idempotency_key: "r1" }),
     });
-    const got = await waiting;
-    expect(got.structuredContent).toMatchObject({ status: "replied", name_this_thread: true });
+    const got = await call(client, "read_thread", { thread_id: sent.message.id, agent_session: "ses-live" });
+    expect(got.structuredContent).toMatchObject({ name_this_thread: true });
     expect(got.content[0]!.text).toContain(INBOX_NAME_THIS_THREAD_HINT);
   });
 

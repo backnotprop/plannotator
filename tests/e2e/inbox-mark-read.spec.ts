@@ -15,7 +15,7 @@
  *    words-only Send after Skip it is one reply: one new person message,
  *    carrying the skip and the words, to the message that asked;
  *  - a words-only reply left as it is keeps every question open, and the
- *    agent's wait_for_reply gets the words plus the still-open line;
+ *    agent's read_thread gets the words plus the still-open line;
  *  - Mark read moves a thread to Quiet ("Read"), and an agent's new message
  *    brings it back to the top;
  *  - Mark read on a thread an agent is stopped on warns, and Z undoes it;
@@ -267,8 +267,7 @@ test('a words-only reply left as it is: the questions stay open, and the agent g
   // The cards still take answers: nothing was skipped.
   await expect(pane.getByText(/^Skipped · \d{1,2}:\d{2} [AP]M$/)).toHaveCount(0);
   await shot('04c-words-only-keeps-open');
-  const waited = await agents.codex.waitForReply(threadId, 5);
-  expect((waited.reply as { body: string }).body).toBe(
+  expect((await agents.codex.nextReply(threadId, 5)).body).toBe(
     "Received, I'll answer these after lunch.\n\nNo questions answered yet; all 3 are still open. Don't re-ask them; the person will answer in the Inbox.",
   );
   type Model = { thread: { messages: { questions?: { state: string }[] }[] } };

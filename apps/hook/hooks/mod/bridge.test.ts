@@ -313,7 +313,7 @@ describe('how a bridge loop ends', () => {
     expect(await client(host).run()).toMatchObject({ reason: 'refused', status: 404 })
   })
 
-  test('superseded: the next poll waits 10-15 s instead of taking the server back at once', async () => {
+  test('superseded: the next poll waits 10-14 s instead of taking the server back at once', async () => {
     const host = fakeHost()
     const pollTimes: number[] = []
     host.onFetch = (url) => {
@@ -328,8 +328,26 @@ describe('how a bridge loop ends', () => {
     for (const [index, time] of pollTimes.slice(1).entries()) {
       const gap = time - (pollTimes[index] as number)
       expect(gap).toBeGreaterThanOrEqual(10_000)
-      expect(gap).toBeLessThanOrEqual(15_000)
+      expect(gap).toBeLessThanOrEqual(14_000)
     }
+  })
+
+  test('a question an open poll brings after the client stopped being live is refused as gone, and never submitted', async () => {
+    const host = fakeHost()
+    const events: unknown[] = []
+    let live = true
+    host.onFetch = (url, body) => {
+      if (url !== POLL) {
+        events.push(body)
+        return { status: 200, ok: true, text: '{}' }
+      }
+      live = false
+      return { status: 200, ok: true, text: JSON.stringify({ commands: [{ type: 'ask', askId: 'late', text: 'Why?', mode: 'turn' }] }) }
+    }
+    await client(host, () => live).run()
+
+    expect(host.submits).toEqual([])
+    expect(events).toEqual([{ type: 'error', askId: 'late', code: 'gone' }])
   })
 
   test('a review that is no longer live ends it as ended', async () => {

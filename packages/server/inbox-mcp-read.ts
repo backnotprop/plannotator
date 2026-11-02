@@ -348,15 +348,14 @@ export function agentQuestions(questions: readonly InboxQuestion[]): AgentQuesti
 
 /**
  * One question in words: `Q1 q-abc sent: "Yes"`, `Q2 q-def open`, `Q3 q-… replaced by msg_…/q-…`.
- * `withPrompt` names the prompt (a one-line message); `withAnswer` false
- * leaves the answer out (wait_for_reply, whose reply body words it).
+ * `withPrompt` names the prompt (a one-line message).
  */
-export function questionWords(q: AgentQuestionRef, withPrompt = false, withAnswer = true): string {
+export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
   const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
-  const answer = withAnswer ? answerWords(q.answer) : "";
+  const answer = answerWords(q.answer);
   if (q.state === "picked") return `${head} picked, not sent${answer ? `: ${answer}` : ""}`;
   if (q.state === "sent") return `${head} sent${answer ? `: ${answer}` : ""}`;
   if (q.state === "closed") return `${head} closed${answer ? ` (${answer})` : ""}`;

@@ -111,7 +111,7 @@ describe("openDecisions", () => {
     expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["A asks?", "B asks?"]);
   });
 
-  test("an MCP-only agent's Re-ask note waits until it writes again, whatever presence says (it may be in wait_for_reply)", () => {
+  test("an MCP-only agent's Re-ask note waits until it writes again, whatever presence says", () => {
     const { store, project } = open();
     const [a] = AGENTS;
     // No `wakes`: an agent that reads the Inbox through MCP. Its session is never told ended.
