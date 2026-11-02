@@ -46,6 +46,8 @@ import type { InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotat
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
+  InboxAccountsRead,
+  InboxMachineAccountsRead,
   InboxAgentsModel,
   InboxAnnotationRecord,
   InboxCardColumn,
@@ -350,6 +352,8 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
+  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
+  cswap?: boolean;
   /**
    * Plannotator's appearance in config.json (`theme`), the value plan review
    * reads too: null when never chosen. Absent from an Inbox that predates it.
@@ -1335,6 +1339,11 @@ export const inboxApi = {
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),
   setLan: (on: boolean) => post<{ lan: LanState }>(inboxUrl('/lan'), { on }),
+  /** Settings → Accounts (packages/server/inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  /** `fresh`: skip the answer the Inbox keeps 30 s (Refresh). */
+  accounts: (fresh = false) => get<InboxAccountsRead>(inboxUrl('/accounts', fresh ? 'fresh=1' : undefined)),
+  /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
+  machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
   agents: () => get<InboxAgentsModel>(inboxUrl('/agents')),
   saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>

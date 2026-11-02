@@ -157,6 +157,7 @@ import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } f
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
@@ -188,9 +189,8 @@ import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plann
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
-import { createInboxMachines, type InboxMachines, type MachineFrame } from "./inbox-machines";
+import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { replyIsStale } from "./inbox-outbox";
-import type { PeerLinkTimings } from "./inbox-peer-link";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay } from "./inbox-relay";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -370,7 +370,7 @@ export interface InboxServerOptions {
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
-  machineLinkTimings?: Partial<PeerLinkTimings>;
+  machineLinkTimings?: MachineLinkTimings;
   /** Tests: how often a window's event stream sends `event: heartbeat` (default `INBOX_WINDOW_HEARTBEAT_MS`). */
   windowHeartbeatMs?: number;
   /** The Board, decided here instead of config.json `inboxBoard` (tests). Absent: config.json decides on every request. */
@@ -422,6 +422,8 @@ export interface InboxServerOptions {
   codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
+  /** Tests: where a read of `cswap list --json` looks, how long it waits, when a stuck run is killed, and how long an answer serves (packages/server/inbox-accounts.ts). */
+  accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
 }
@@ -1854,6 +1856,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store: store.diskUsage(),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
+    /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
+    cswap: !guest && accounts.installed(),
   });
 
   /** Save the knob for the hosts named, keeping the others as they are. `validateOnly`: check the input and write nothing. */
@@ -2546,6 +2550,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.voice,
   });
 
+  /** Settings → Accounts (inbox-accounts.ts): this computer's Claude accounts, read through `cswap`. */
+  const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
+
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
   const openInRoute = createInboxOpenInRoute({
     store,
@@ -3000,6 +3007,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ownerOrLocal(req, via)) throw voiceOwnerOnly();
         const answer = await voice.route(req, url, via);
         if (answer) return answer;
+      }
+      // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,
+      // so another site gets no answer and no way to start one, and a tailnet guest gets neither. One check for this
+      // computer's read and a linked machine's, which is not forwarded any other way. On the door for a machine only.
+      const machineAccounts = /^\/api\/inbox\/accounts\/(ibx_[0-9A-HJKMNP-TV-Z]{26})$/.exec(path);
+      if (path === "/api/inbox/accounts" || machineAccounts) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
+        const fresh = url.searchParams.get("fresh") === "1";
+        return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.
