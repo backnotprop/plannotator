@@ -47,8 +47,8 @@
     "*.mjs"
   ],
   "dependencies": {
-    "@modelcontextprotocol/server": "2.3.1",
-    "@pierre/diffs": "1.5.2",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@pierre/diffs": "1.6.1",
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
@@ -59,7 +59,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/client": "2.4.0",
     "fast-check": "4.10.2",
     "glimpseui": "^0.8.0"
   }
