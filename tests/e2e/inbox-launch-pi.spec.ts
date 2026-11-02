@@ -392,6 +392,7 @@ test('a Pi that runs but never connected: Open in Terminal ends it only once the
     const ran = await waitFor('osascript', () => fake.osascript().at(-1));
     const command = ran.at(-1)!;
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
+    // inbox-guard: own child (the hand-over waits on the fake Pi this test started, never on an Inbox)
     expect(command).toContain(`kill -0 ${start.pid}`);
     // Terminal has not run it yet: the Inbox's Pi still has the session.
     await page.waitForTimeout(1_000);
