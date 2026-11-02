@@ -132,7 +132,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-reply-draft-files-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '40'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '44'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -1156,4 +1156,75 @@ test.skipIf(!hasDom)('words typed, then Cancel while the file save is on its way
   await settle(800);
   expect(await draftNames()).toEqual(['mine.png']);
   expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+/** "Hi" saved, then `mine.png` attached (its save held on its way) and "Hi there" typed: the start of a conflict to come. */
+async function attachThenType(el: HTMLElement) {
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const slow = holdSaveWhere((body) => body.includes('"files_add":[{'));
+  attach(el, [image('mine.png', 271)]);
+  await until(slow.held, 'the file save held');
+  type(replyText(el)!, 'Hi there');
+  return slow;
+}
+
+test.skipIf(!hasDom)('the pane given another thread and then this one again during that conflict: the box shows the waiting file, and Keep mine keeps it', async () => {
+  const other = worlds.pop()!;
+  const read = async (id: string) => (JSON.parse((await loopback(`/api/inbox/threads/${id}`)).text) as { thread: InboxThread }).thread;
+  const [first, next] = [await read(world.waiting), await read(other.waiting)];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const el = host;
+  const draw = (t: InboxThread) =>
+    act(() =>
+      root!.render(
+        <ThreadPane thread={t} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />,
+      ),
+    );
+  act(() => {
+    root = createRoot(el);
+  });
+  draw(first);
+  const slow = await attachThenType(el);
+  draw(next);
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${other.waiting}"]`) !== null, 'the other thread');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  slow.release();
+  await settle(2000);
+  // Back to the first thread: its words come back with the conflict, and the file waiting on the choice with them.
+  draw(first);
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(replyText(el)?.value).toBe('Hi there');
+  expect(tiles(el)).toEqual(['mine.png:done']);
+  act(() => button(el, 'Keep mine').click());
+  await until(async () => (await serverDraft())?.body === 'Hi there', 'mine kept');
+  await settle(800);
+  expect(await draftNames()).toEqual(['mine.png']);
+  expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+test.skipIf(!hasDom)('a tile removed in the conflict box stays removed once the conflict clears, after Cancel and Edit draft', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const slow = await attachThenType(el);
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  slow.release();
+  await settle(2000);
+  act(() => button(el, 'Edit draft').click());
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  // The person takes the file out, then empties the words: no conflict left.
+  act(() => (replyBox(el)!.querySelector('[data-compose-file] .ib-cp-fx') as HTMLButtonElement).click());
+  await until(() => tiles(el).length === 0, 'the tile removed');
+  type(replyText(el)!, '');
+  await settle(1500);
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed again');
+  act(() => button(el, 'Edit draft').click());
+  await until(() => replyBox(el) !== null, 'the box again');
+  await settle(1000);
+  expect(tiles(el)).toEqual([]);
+  expect(await draftNames()).toEqual([]);
+  await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);

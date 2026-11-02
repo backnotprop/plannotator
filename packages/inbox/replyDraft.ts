@@ -628,6 +628,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       }
       if (tooLongThreads.has(target)) markTooLong(target, false);
       if (conflicts.current.has(target)) {
+        // The box's file changes made meanwhile (a tile removed or attached) wait with the others, so they hold
+        // after the conflict clears, Cancel and Edit draft; Keep mine counts from here, Discard mine drops them.
+        carry(target, take(target, files, text));
         // Emptied, or the same words the server holds: no conflict left. Otherwise still not
         // saved: the person chooses (Keep mine / Discard).
         if ((text.trim() === '' && files.length === 0) || replyContentKey(text, files) === (synced.current.get(target) ?? '')) {
