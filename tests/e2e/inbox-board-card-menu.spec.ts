@@ -5,10 +5,10 @@
  * `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
  *  - a right-click on a lane card opens Open thread, the lanes (columns v2,
- *    its own checked), Shipped, Cancel…; it never opens the card;
+ *    its own checked), Done, Cancel…; it never opens the card;
  *  - a lane picked moves the card (the store too), with no toast, focus
  *    following the card into its new lane;
- *  - Shipped and a Cancel the menu started each show the one toast; its
+ *  - Done and a Cancel the menu started each show the one toast; its
  *    Undo (and `Z`) puts the card back where it was, in the store too, and
  *    focus on the card in its lane; a card moved on while the toast is up:
  *    Undo sends nothing;
@@ -147,7 +147,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   ids.export = await make(pi, 'Export a guided review', { column: 'in_progress' });
   ids.qr = await make(claude, 'Phone pairing QR', { column: 'in_progress', thread_id: ticks.thread_id });
   ids.vite = await make(codex, 'vite 8 for the review app', { column: 'in_review', you: 'Merge #2412' });
-  ids.tab = await make(claude, 'Unread count on the tab', { column: 'shipped' });
+  ids.tab = await make(claude, 'Unread count on the tab', { column: 'done' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -176,7 +176,7 @@ test('a right-click on a lane card opens the approved items, its column checked,
   const { page, ids } = world;
   const popup = await openMenu(page, ids.qr);
   // The approved words and order (layout A), pinned on purpose: the opened card's Move menu, word for word.
-  await expect(menuItems(page)).toHaveText(['Open thread', 'Backlog', 'To do', 'In progress', 'In review', 'Shipped', 'Cancel…']);
+  await expect(menuItems(page)).toHaveText(['Open thread', 'Backlog', 'To do', 'In progress', 'In review', 'Done', 'Cancel…']);
   await expect(popup).toHaveAttribute('aria-label', 'Phone pairing QR');
   await expect(popup.getByRole('group', { name: 'Column' })).toBeVisible();
   await expect(popup.getByRole('menuitemradio', { name: 'In progress' })).toHaveAttribute('aria-checked', 'true');
@@ -238,18 +238,18 @@ test('a lane picked moves the card, in the store too, with no toast; focus follo
   expect((await stored(page, ids.export))?.column).toBe('in_review');
 });
 
-test('Shipped from the menu: the toast, then Undo (and Z) put the card back in its lane, the store too, focus on it', async () => {
+test('Done from the menu: the toast, then Undo (and Z) put the card back in its lane, the store too, focus on it', async () => {
   const { page, ids } = world;
   await openMenu(page, ids.slack);
-  await menu(page).locator('[data-card-menu-to="shipped"]').click();
-  await expect(toast(page)).toContainText('Shipped');
+  await menu(page).locator('[data-card-menu-to="done"]').click();
+  await expect(toast(page)).toContainText('Done');
   await expect(toast(page)).toContainText('“Slack bridge”');
   await expect(cardEl(page, ids.slack)).toHaveCount(0);
-  expect((await stored(page, ids.slack))?.column).toBe('shipped');
+  expect((await stored(page, ids.slack))?.column).toBe('done');
   // The card left the lane: focus goes to the card now in its slot there.
   await expect(cardButton(page, ids.qr)).toBeFocused();
   await page.mouse.move(5, 5);
-  await shot(page, '04-after-shipped-toast-light.png');
+  await shot(page, '04-after-done-toast-light.png');
   await toast(page).locator('[data-toast-undo]').click();
   await expect(toast(page)).toHaveCount(0);
   await expect(laneCard(page, 'in_progress', ids.slack)).toBeVisible();
@@ -257,8 +257,8 @@ test('Shipped from the menu: the toast, then Undo (and Z) put the card back in i
   await expect(cardButton(page, ids.slack)).toBeFocused();
   // The same with the toast's existing key.
   await openMenu(page, ids.slack);
-  await menu(page).locator('[data-card-menu-to="shipped"]').click();
-  await expect(toast(page)).toContainText('Shipped');
+  await menu(page).locator('[data-card-menu-to="done"]').click();
+  await expect(toast(page)).toContainText('Done');
   await expect(cardEl(page, ids.slack)).toHaveCount(0);
   await page.keyboard.press('z');
   await expect(toast(page)).toHaveCount(0);
@@ -267,14 +267,14 @@ test('Shipped from the menu: the toast, then Undo (and Z) put the card back in i
   await expect(cardButton(page, ids.slack)).toBeFocused();
 });
 
-test('Shipped from the menu, another card: Undo moves it back to the lane it came from', async () => {
+test('Done from the menu, another card: Undo moves it back to the lane it came from', async () => {
   const { page, ids } = world;
   await openMenu(page, ids.menu);
-  await menu(page).locator('[data-card-menu-to="shipped"]').click();
-  await expect(toast(page)).toContainText('Shipped');
+  await menu(page).locator('[data-card-menu-to="done"]').click();
+  await expect(toast(page)).toContainText('Done');
   await expect(toast(page)).toContainText('“Board card menu”');
   await expect(cardEl(page, ids.menu)).toHaveCount(0);
-  expect((await stored(page, ids.menu))?.column).toBe('shipped');
+  expect((await stored(page, ids.menu))?.column).toBe('done');
   await toast(page).locator('[data-toast-undo]').click();
   await expect(laneCard(page, 'todo', ids.menu)).toBeVisible();
   expect((await stored(page, ids.menu))?.column).toBe('todo');
@@ -284,8 +284,8 @@ test('Shipped from the menu, another card: Undo moves it back to the lane it cam
 test('a card moved on while its toast is up: Undo sends nothing and says it has moved since', async () => {
   const { page, ids } = world;
   await openMenu(page, ids.menu);
-  await menu(page).locator('[data-card-menu-to="shipped"]').click();
-  await expect(toast(page)).toContainText('Shipped');
+  await menu(page).locator('[data-card-menu-to="done"]').click();
+  await expect(toast(page)).toContainText('Done');
   // Moved on elsewhere (as an agent would) while the toast is up; the window hears of it.
   await personMove(page, ids.menu, { op: 'move', column: 'in_review' });
   await expect(laneCard(page, 'in_review', ids.menu)).toBeVisible();

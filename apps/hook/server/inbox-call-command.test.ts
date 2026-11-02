@@ -553,7 +553,7 @@ describe("a Tidy run from one script", () => {
     expect(withdrawn!.questions![0]!.state).toBe("superseded");
     expect(done!.questions![0]!.action_result).toMatchObject({ by: "agent" });
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone","include_resolved":true}'])).stdout).cards as { column: string }[];
-    expect(cards.map((c) => c.column)).toEqual(["shipped"]);
+    expect(cards.map((c) => c.column)).toEqual(["done"]);
   });
 
   test("the Board's Tidy: a script that only moves cards counts as tidied, for that session", async () => {

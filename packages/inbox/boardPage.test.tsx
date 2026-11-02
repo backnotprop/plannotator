@@ -3,10 +3,10 @@
  * over a scripted fetch (no server): the lanes (columns v2) and a card's two
  * lines, bold while unread, no "on you" pill on a lane; the agents' drops above the
  * lanes with "Got it"; the opened card beside the lanes with its history,
- * its links read only once it opens, and Ship, Cancel with a reason;
+ * its links read only once it opens, and Mark done, Cancel with a reason;
  * Start on an agent's To do card telling that agent in the card's thread
  * and marking the card sent; New card into Backlog; the empty Board's line;
- * the phone's stacked list with Shipped and Cancelled folded. What regresses: a
+ * the phone's stacked list with Done and Cancelled folded. What regresses: a
  * lane out of order, "You: …" in an agent's lane, a card fetching its links
  * before it is opened, a Start that moves the card, a drop that never asks
  * for its reason, a phone that lays the lanes side by side.
@@ -64,7 +64,7 @@ const CARDS: InboxCardWire[] = [
   card('crd_price', { title: 'Pricing page', column: 'in_review', you: 'Read the copy, then say go', said: 'Copy drafted', heard_at: NEW, heard_seq: 12 }),
   card('crd_vite', { title: 'vite 8 and electron-forge', column: 'in_progress', said: 'vite 8 merged', agent: CODEX, refs: [{ kind: 'pr', source: 'github', ref: 'acme/widgets#12', url: 'https://github.com/acme/widgets/pull/12' }] }),
   card('crd_ticks', { title: 'Delivery ticks on list rows', column: 'in_review', you: 'Merge #14' }),
-  card('crd_tab', { title: 'Unread count on the tab', column: 'shipped' }),
+  card('crd_tab', { title: 'Unread count on the tab', column: 'done' }),
   card('crd_poly', { title: 'Polylane plan evaluation', column: 'backlog', agent: null, created_by: PERSON, heard_by: PERSON }),
   card('crd_sqlite', { title: 'Spike: SQLite for the store', column: 'dropped', aside_from: 'in_progress', dropped: { at: NEW, by: CODEX, reason: 'Superseded by the JSONL store', seen_at: null } }),
 ];
@@ -201,9 +201,10 @@ test.if(hasDom)('the lanes in order, the title row, bold while unread, no "on yo
   draw();
   await settle();
   expect($$('.ib-blanes [data-lane]').map((lane) => lane.dataset.lane)).toEqual(['backlog', 'todo', 'in_progress', 'in_review']);
-  // In flight leaves out Backlog (nobody has started it); on you is In review.
-  expect($('[data-board-summary]')!.textContent).toBe('5 in flight · 2 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
+  // No counts in the header (owner, 2026-11-02): its two links alone.
+  expect($('[data-board-summary]')).toBeNull();
+  expect($('.ib-bhead')!.textContent).not.toContain('in flight');
+  expect($('[data-board-link="done"]')!.textContent).toBe('Done 1');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 1');
   expect($('[data-board-link="icebox"]')).toBeNull();
   expect(cardEl('crd_price')!.querySelector('.ib-bc-line')!.textContent).toBe('You: Read the copy, then say go');
@@ -338,7 +339,7 @@ test.if(hasDom)('the agents’ drops show above the lanes with their reason; Got
   expect(drawn.moves).toEqual([{ id: 'crd_sqlite', move: { op: 'restore' } }]);
 });
 
-test.if(hasDom)('the opened card: its history and links read now, then Ship, and Cancel with a reason', async () => {
+test.if(hasDom)('the opened card: its history and links read now, then Mark done, and Cancel with a reason', async () => {
   scriptFetch();
   const drawn = draw({ openCard: 'crd_vite' });
   await settle();
@@ -361,7 +362,7 @@ test.if(hasDom)('the opened card: its history and links read now, then Ship, and
   act(() => panel.querySelector<HTMLButtonElement>('[data-drop-confirm]')!.click());
   await settle();
   expect(drawn.moves).toEqual([
-    { id: 'crd_vite', move: { op: 'move', column: 'shipped' } },
+    { id: 'crd_vite', move: { op: 'move', column: 'done' } },
     { id: 'crd_vite', move: { op: 'drop', reason: 'Folded into the plan' } },
   ]);
   // Escape closes it.
@@ -429,10 +430,9 @@ test.if(hasDom)('an empty Board says "No cards yet" with Copy prompt', async () 
   draw({ model: { serverSession: 's', cursor: 1, cards: [], dropped_unseen: 0, seen_seq: null } });
   await settle();
   expect($('[data-board-empty]')!.textContent).toContain('No cards yet');
-  expect($('[data-board-summary]')!.textContent).toBe('Nothing in flight');
 });
 
-test.if(hasDom)('a phone: one stacked list, Shipped and Cancelled folded at the end', async () => {
+test.if(hasDom)('a phone: one stacked list, Done and Cancelled folded at the end', async () => {
   scriptFetch();
   draw({ phone: true });
   await settle();
@@ -440,7 +440,7 @@ test.if(hasDom)('a phone: one stacked list, Shipped and Cancelled folded at the 
   expect($('.ib-blanes')).toBeNull();
   const folds = $$('[data-board-fold]');
   expect(folds.map((b) => [b.dataset.boardFold, b.getAttribute('aria-expanded')]).slice(-2)).toEqual([
-    ['shipped', 'false'],
+    ['done', 'false'],
     ['dropped', 'false'],
   ]);
   // A folded group keeps its body (aria-controls names it), hidden. Booleans, so a failure
@@ -450,7 +450,7 @@ test.if(hasDom)('a phone: one stacked list, Shipped and Cancelled folded at the 
     return el === null ? 'absent' : el.closest('[hidden]') ? 'hidden' : 'shown';
   };
   expect(shown()).toBe('hidden');
-  act(() => $('[data-board-fold="shipped"]')!.click());
+  act(() => $('[data-board-fold="done"]')!.click());
   expect(shown()).toBe('shown');
 });
 
@@ -516,12 +516,11 @@ test.if(hasDom)('a page that may not read marks (over the tailnet) asks nothing 
   expect($('.ib-bcard[data-card-id="crd_vite"] [data-card-mark]')!.dataset.cardMark).toBe('unknown');
 });
 
-// Columns v2: "in flight" leaves Backlog out, so a Board of Backlog ideas only must still draw its lanes.
+// Columns v2: Backlog is not in flight, yet a Board of Backlog ideas only must still draw its lanes.
 test.if(hasDom)('a Board holding only Backlog ideas draws them, never the empty Board line', async () => {
   scriptFetch();
   draw({ model: { serverSession: 's', cursor: 1, cards: [card('crd_idea', { title: 'Themes for the Board', agent: null, created_by: PERSON, heard_by: PERSON })], dropped_unseen: 0, seen_seq: LOOK } });
   await settle();
   expect($('[data-board-empty]')).toBeNull();
   expect(cardEl('crd_idea')).not.toBeNull();
-  expect($('[data-board-summary]')!.textContent).toBe('Nothing in flight');
 });

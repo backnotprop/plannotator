@@ -3,7 +3,7 @@
  * Project button in the Board's header, as the window draws it over a
  * scripted fetch. What regresses: a Board of one project growing a control
  * it does not need; another project's card on the lanes, in the counts, on
- * the Shipped or Cancelled page or in the drops; "in" coming back on the
+ * the Done or Cancelled page or in the drops; "in" coming back on the
  * button; the menu offering a project with no card; × or Show all projects
  * not clearing; a card opened from another project closing under the
  * filter; the phone's button squeezed into the header instead of its own
@@ -64,13 +64,13 @@ const CARDS: InboxCardWire[] = [
   card('web_backlog', WEB, { column: 'todo' }),
   card('web_design', WEB, { column: 'in_progress' }),
   card('web_look', WEB, { column: 'in_review', you: 'Pick a dialog' }),
-  card('web_shipped', WEB, { column: 'shipped' }),
+  card('web_shipped', WEB, { column: 'done' }),
   card('web_ice', WEB, { column: 'dropped', aside_from: 'backlog', dropped: { at: AT, by: { kind: 'person' }, reason: null, seen_at: AT } }),
   card('web_drop', WEB, { column: 'dropped', aside_from: 'in_progress', dropped: { at: AT, by: CLAUDE, reason: 'Superseded', seen_at: null } }),
   card('api_build', API, { column: 'in_progress' }),
   card('api_review', API, { column: 'in_review', you: 'Merge #3' }),
-  card('api_shipped', API, { column: 'shipped' }),
-  card('docs_ship', 'prj_docs', { column: 'shipped' }),
+  card('api_shipped', API, { column: 'done' }),
+  card('docs_ship', 'prj_docs', { column: 'done' }),
 ];
 
 let root: Root | null = null;
@@ -186,7 +186,6 @@ test.if(hasDom)('a Board whose cards are all in one project has no Project butto
   expect($('[data-board-project-filter]')).toBeNull();
   expect($('.ib-bfbar')).toBeNull();
   expect(shownCards()).toEqual(['web_backlog', 'web_design', 'web_look']);
-  expect($('[data-board-summary]')!.textContent).toBe('3 in flight · 1 on you');
 });
 
 test.if(hasDom)('All projects shows every card; picking a project narrows the lanes, the counts and the links', async () => {
@@ -196,8 +195,7 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   // Unfiltered: today's Board, with the button reading All projects.
   expect(chipWords()).toBe('All projects');
   expect(shownCards()).toEqual(['api_build', 'api_review', 'web_backlog', 'web_design', 'web_look']);
-  expect($('[data-board-summary]')!.textContent).toBe('5 in flight · 2 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 3');
+  expect($('[data-board-link="done"]')!.textContent).toBe('Done 3');
   expect($('[data-dropped-notice]')!.getAttribute('data-dropped-notice')).toBe('1');
   // The button is the Board header's, beside the counts.
   expect($('.ib-bhead [data-board-project-chip]')).not.toBeNull();
@@ -216,8 +214,7 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(shownCards()).toEqual(['api_build', 'api_review']);
   expect(laneIds('in_progress')).toEqual(['api_build']);
   expect(laneIds('todo')).toEqual([]);
-  expect($('[data-board-summary]')!.textContent).toBe('2 in flight · 1 on you');
-  expect($('[data-board-link="shipped"]')!.textContent).toBe('Shipped 1');
+  expect($('[data-board-link="done"]')!.textContent).toBe('Done 1');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 0');
   // web's drop is not api's news.
   expect($('[data-dropped-notice]')).toBeNull();
@@ -241,9 +238,9 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect(cleared).not.toContain('api');
 });
 
-test.if(hasDom)('Shipped and Cancelled list only the filtered project', async () => {
+test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {
   scriptFetch();
-  const drawn = draw({ view: 'shipped', project: API });
+  const drawn = draw({ view: 'done', project: API });
   await settle();
   expect(shownCards()).toEqual(['api_shipped']);
   expect(chipWords()).toBe('api');

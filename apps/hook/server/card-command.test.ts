@@ -130,13 +130,13 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect((await card(box, ["move", id, "in_progress", "--pr", "backnotprop/plannotator#2020"])).stdout).toContain("links backnotprop/plannotator#2020");
     const shipped = await card(box, ["ship", id, "--say", "merged"]);
     expect(shipped.stderr).toBe("");
-    expect(shipped.stdout).toContain("Shipped");
+    expect(shipped.stdout).toContain("Moved to Done");
 
     const live = await card(box, ["list"]);
     expect(live.code).toBe(0);
     expect(live.stdout).toContain("0 cards");
     const all = await card(box, ["list", "--all", "--json"]);
-    expect((JSON.parse(all.stdout) as { cards: { id: string; column: string }[] }).cards).toEqual([expect.objectContaining({ id, column: "shipped" })]);
+    expect((JSON.parse(all.stdout) as { cards: { id: string; column: string }[] }).cards).toEqual([expect.objectContaining({ id, column: "done" })]);
   }, 30_000);
 
   test("inside a Claude Code session the card is that session's, and list shows the session's own", async () => {
@@ -232,6 +232,8 @@ describe("parseCardCommand", () => {
       json: true,
     });
     expect(parseCardCommand(["create", "--thread", "msg_1"])).toMatchObject({ ok: true, args: { op: "create", thread_id: "msg_1" } });
+    // `card done` is `card ship` (its column is Done).
+    expect(parseCardCommand(["done", "crd_x", "--say", "merged"])).toMatchObject({ ok: true, args: { op: "ship", card_id: "crd_x", say: "merged" } });
     expect(parseCardCommand(["say", "crd_x", "a", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["say", "crd_x", "a", "--say", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["create"])).toMatchObject({ ok: false });

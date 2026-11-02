@@ -11,7 +11,9 @@
  * a proposal; the Icebox folded in, so an agent never moves out a card the
  * person put here) · To do (asked or sent, not started) · In progress · In
  * review (handed over on purpose by an agent: "You: …" says what the person
- * owes) · Shipped, and Dropped (the Board calls it Cancelled). A card whose
+ * owes) · Done (merged, live or finished: not all work is code; `shipped`
+ * before the owner's rename, 2026-11-02), and Dropped (the Board calls it
+ * Cancelled). A card whose
  * linked thread waits on the person shows that from the thread; it never
  * moves the card.
  *
@@ -27,7 +29,7 @@
  * by guessing. One rule moves a card by itself (Q3 of the v2 approval): a
  * card in To do, In progress or In review ships once every PR it links has
  * merged and none is open (`inboxCardAutoShip`); an unknown state does
- * nothing, and a card the person moved out of Shipped is not shipped again
+ * nothing, and a card the person moved out of Done is not moved there again
  * for the same PRs.
  *
  * Browser-safe and dependency-free; re-exported by `inbox-types`.
@@ -49,17 +51,17 @@ import type { InboxAuthor } from "./inbox-types";
 export const INBOX_CARD_ACTION_ON: boolean = true;
 
 /** Every column a card can be in, in the Board's order. */
-export const INBOX_CARD_COLUMNS = ["backlog", "todo", "in_progress", "in_review", "shipped", "dropped"] as const;
+export const INBOX_CARD_COLUMNS = ["backlog", "todo", "in_progress", "in_review", "done", "dropped"] as const;
 
 export type InboxCardColumn = (typeof INBOX_CARD_COLUMNS)[number];
 
-/** The columns of work not finished: Backlog, To do, In progress, In review. Shipped and Dropped are resolved. */
+/** The columns of work not finished: Backlog, To do, In progress, In review. Done and Dropped are resolved. */
 export const INBOX_CARD_LIVE_COLUMNS: readonly InboxCardColumn[] = ["backlog", "todo", "in_progress", "in_review"];
 
 /** The column where a card waits on the person: it shows "You: …" (`you`). */
 export const INBOX_CARD_PERSON_COLUMNS: readonly InboxCardColumn[] = ["in_review"];
 
-/** The columns a card ships from by itself when every PR it links has merged (inboxCardAutoShip). */
+/** The columns a card moves to Done from by itself when every PR it links has merged (inboxCardAutoShip). */
 export const INBOX_CARD_AUTO_SHIP_COLUMNS: readonly InboxCardColumn[] = ["todo", "in_progress", "in_review"];
 
 /** How the Board names each column. Dropped is "Cancelled" to the person; its id stays, so an older Inbox still reads it. */
@@ -68,13 +70,14 @@ export const INBOX_CARD_COLUMN_LABELS: Readonly<Record<InboxCardColumn, string>>
   todo: "To do",
   in_progress: "In progress",
   in_review: "In review",
-  shipped: "Shipped",
+  done: "Done",
   dropped: "Cancelled",
 };
 
 /**
- * The column ids before v2, and `cancelled` (the Board's word for Dropped),
- * accepted from a caller: an agent whose tool list or help predates v2 (a
+ * The column ids before v2, `shipped` (Done's id until the owner's rename,
+ * 2026-11-02; stored v2 lines may hold it) and `cancelled` (the Board's word
+ * for Dropped), accepted from a caller and read from disk: an agent whose tool list or help predates v2 (a
  * session keeps its tool list; the Claude Code mod caches it) keeps working.
  * `backlog` is not here: it is a column in both, and from a caller it means
  * the new Backlog.
@@ -86,6 +89,7 @@ export const INBOX_CARD_COLUMN_ALIASES: Readonly<Record<string, InboxCardColumn>
   your_look: "in_review",
   your_review: "in_review",
   icebox: "backlog",
+  shipped: "done",
   cancelled: "dropped",
 };
 
@@ -290,12 +294,21 @@ export interface InboxCard {
    */
   cols?: number;
   /**
-   * The last time the Inbox shipped the card by itself (every linked PR
-   * merged, none open): when, and the PR URLs it saw. Kept after the person
-   * moves the card back, so the same PRs never ship it again; a new PR does.
+   * The last time the Inbox moved the card to Done by itself (every PR it
+   * links through `pr` merged, none open): when, and those PR URLs. For the
+   * history line only; `done_prs` is what stops a second automatic move.
    * Null (or absent) when it never happened.
    */
   auto_shipped?: InboxCardAutoShip | null;
+  /**
+   * The PRs (`inboxCardShipPrs`) the card linked the last time it moved into
+   * Done, by anyone: by hand, by an agent's ship, by the Inbox. Kept when it
+   * is moved back, so those PRs never move it to Done again; only a PR merged
+   * since that is not among them does. Absent on a card that never was in
+   * Done (a line from before this field reads it from the card's own earlier
+   * lines, InboxStore's load).
+   */
+  done_prs?: string[] | null;
 }
 
 /** An automatic ship: when, and the URLs of the PRs that had all merged. */
@@ -305,23 +318,23 @@ export interface InboxCardAutoShip {
 }
 
 /**
- * Whether a card ships by itself now, given the states of its links (by
- * URL): the URLs of its PRs when it is in To do, In progress or In review,
- * links at least one PR, and every one of them is merged (none open, draft,
- * closed or unknown), and it was not already shipped automatically for the
- * same PRs (the person moved it back). Null otherwise: anything unknown does
- * nothing.
+ * Whether a card moves to Done by itself now, given the states of its links
+ * (by URL): the URLs of its own PRs (inboxCardShipPrs) when it is in To do,
+ * In progress or In review, links at least one, every one of them is merged
+ * (none open, draft, closed or unknown), and one of them is new since the
+ * card was last in Done (`done_prs`: moved back by the person, or reported
+ * broken again, it stays). Null otherwise: anything unknown does nothing.
  */
 export function inboxCardAutoShip(
-  card: Pick<InboxCard, "column" | "prs"> & { refs?: readonly InboxCardRef[] | null; auto_shipped?: InboxCardAutoShip | null },
+  card: Pick<InboxCard, "column" | "prs"> & { refs?: readonly InboxCardRef[] | null; done_prs?: readonly string[] | null },
   stateOf: (url: string) => InboxCardMarkState | undefined,
 ): string[] | null {
   if (!INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) return null;
-  const prs = [...new Set(inboxCardRefsOf(card).filter((ref) => ref.kind === "pr").map((ref) => ref.url))].sort();
+  const prs = inboxCardShipPrs(card);
   if (prs.length === 0) return null;
   if (!prs.every((url) => stateOf(url) === "merged")) return null;
-  const before = card.auto_shipped ? [...card.auto_shipped.prs].sort() : null;
-  if (before && before.length === prs.length && before.every((url, i) => url === prs[i])) return null;
+  const before = new Set(card.done_prs ?? []);
+  if (prs.every((url) => before.has(url))) return null;
   return prs;
 }
 
@@ -340,15 +353,32 @@ export interface InboxCardRef {
   source: "github" | "gitlab" | "bitbucket" | (string & {});
   ref: string;
   url: string;
+  /**
+   * How it was linked: `pr` (the card action's `pr`: the card's own PR) or
+   * `ref` (context: an issue, or a PR to look at). Only a `pr` link moves a
+   * card to Done by itself (inboxCardShipPrs). Absent on a link written
+   * before it: context, never counted (a step-1 card's `prs` read as `pr`).
+   */
+  via?: "pr" | "ref";
 }
 
 /**
  * A card's references: `refs` when the card has them (written since step 2),
- * else its PRs as references (a card from step 1 has only `prs`).
+ * else its PRs as references (a card from step 1 has only `prs`, each linked
+ * as its own PR).
  */
 export function inboxCardRefsOf(card: { refs?: readonly InboxCardRef[] | null; prs: readonly InboxCardPr[] }): InboxCardRef[] {
   if (card.refs && card.refs.length > 0) return [...card.refs];
-  return card.prs.map((pr) => ({ kind: "pr", source: prSourceOf(pr.url), ref: pr.ref, url: pr.url }));
+  return card.prs.map((pr) => ({ kind: "pr", source: prSourceOf(pr.url), ref: pr.ref, url: pr.url, via: "pr" }));
+}
+
+/**
+ * The card's own PRs, the ones that move it to Done by itself (coordinator's
+ * call on review of #2522): linked through `pr`, never a PR linked through
+ * `ref` as context. Their URLs, sorted, each once.
+ */
+export function inboxCardShipPrs(card: { refs?: readonly InboxCardRef[] | null; prs: readonly InboxCardPr[] }): string[] {
+  return [...new Set(inboxCardRefsOf(card).filter((ref) => ref.kind === "pr" && ref.via === "pr").map((ref) => ref.url))].sort();
 }
 
 function prSourceOf(url: string): string {
@@ -481,7 +511,7 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
     if ((card.notes ?? null) !== (before.notes ?? null)) out.push({ at, by, kind: "notes" });
     if (card.column !== before.column) {
       if (card.column === "dropped") out.push({ at, by, kind: "dropped", reason: card.dropped?.reason ?? null });
-      else if (card.column === "shipped" && card.auto_shipped && card.auto_shipped.at !== before.auto_shipped?.at) {
+      else if (card.column === "done" && card.auto_shipped && card.auto_shipped.at !== before.auto_shipped?.at) {
         out.push({ at, by, kind: "auto_shipped", prs: [...card.auto_shipped.prs] });
       } else if (before.column === "dropped") {
         if (card.column === (before.aside_from ?? "backlog") && by.kind === "person") out.push({ at, by, kind: "restored", column: card.column });

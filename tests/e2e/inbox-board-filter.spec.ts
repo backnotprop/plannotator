@@ -7,7 +7,7 @@
  *  - no filter: `#board` is today's Board, every card, the button reading
  *    "All projects";
  *  - picking a project from the keyboard: `#board&project=prj_…`, the lanes,
- *    the counts and the Shipped page narrowed, the button reading the name
+ *    the lanes and the Done page narrowed, the button reading the name
  *    alone; Back undoes the pick; a reload keeps it;
  *  - opening a card, then its thread, then the way back: the same filtered
  *    Board;
@@ -128,16 +128,16 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   ids.address = await make(claude, paths.plannotator, 'One fixed Inbox address', { column: 'in_review', you: 'Pick a dialog (two options)' });
   ids.ticks = await make(claude, paths.plannotator, 'Delivery ticks', { column: 'in_review', you: 'Merge #14', thread_id: ticks.thread_id });
   ids.filter = await make(claude, paths.plannotator, 'Board project filter', { column: 'in_progress' });
-  ids.tab = await make(claude, paths.plannotator, 'Unread count on the tab', { column: 'shipped' });
+  ids.tab = await make(claude, paths.plannotator, 'Unread count on the tab', { column: 'done' });
   ids.design = await make(codex, paths.workspaces, 'A design system like Linear’s', { column: 'in_review', you: 'Answer 11 questions', thread_id: design.thread_id });
   ids.tokens = await make(codex, paths.workspaces, 'Soft tokens for Workspaces', { column: 'in_progress' });
   ids.onboard = await make(codex, paths.workspaces, 'Workspaces onboarding');
-  ids.wsShipped = await make(codex, paths.workspaces, 'Workspaces colours', { column: 'shipped' });
+  ids.wsDone = await make(codex, paths.workspaces, 'Workspaces colours', { column: 'done' });
   ids.poly = await make(pi, paths.machine, 'Polylane plan evaluation');
   ids.store = await make(pi, paths.machine, 'Session list store', { column: 'in_progress' });
   ids.long = await make(claude, paths[LONG], 'Warehouse cutover', { column: 'in_progress' });
-  ids.landing = await make(codex, paths['guides-repo'], 'Landing copy', { column: 'shipped' });
-  ids.pando = await make(claude, paths.pando, 'Pando sync idea', { column: 'shipped' });
+  ids.landing = await make(codex, paths['guides-repo'], 'Landing copy', { column: 'done' });
+  ids.pando = await make(claude, paths.pando, 'Pando sync idea', { column: 'done' });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const errors: string[] = [];
@@ -166,15 +166,15 @@ test('no filter: the Board as before, every card, the button reading All project
   await expect(page.locator('[data-board-page][data-board-view="lanes"]')).toBeVisible();
   expect(await hashOf(page)).toBe('#board');
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
-  await expect(page.locator('[data-board-summary]')).toHaveText(`${ALL_IN_FLIGHT} in flight · 3 on you`);
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 4');
+  await expect(page.locator('[data-board-summary]')).toHaveCount(0);
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 4');
   expect(await chipWords(page)).toBe('All projects');
   await expect(page.locator('[data-board-project-clear]')).toHaveCount(0);
   for (const id of [ids.auto, ids.design, ids.store, ids.long]) await expect(cardEl(page, id)).toBeVisible();
   await both(page, 'none-1440');
 });
 
-test('picking a project from the keyboard narrows the lanes, the counts and Shipped; Back undoes it; a reload keeps it', async () => {
+test('picking a project from the keyboard narrows the lanes and Done; Back undoes it; a reload keeps it', async () => {
   const { page, ids, project } = world;
   // Keyboard only: Tab-reachable, Enter opens, arrows move, Enter picks (Base UI's menu; no shortcut of its own).
   await chip(page).focus();
@@ -198,8 +198,7 @@ test('picking a project from the keyboard narrows the lanes, the counts and Ship
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
   for (const id of [ids.design, ids.tokens, ids.onboard]) await expect(cardEl(page, id)).toBeVisible();
   await expect(cardEl(page, ids.auto)).toHaveCount(0);
-  await expect(page.locator('[data-board-summary]')).toHaveText('3 in flight · 1 on you');
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 1');
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 1');
   // The name alone, no "in" (the owner, 2026-10-28), and ×.
   expect(await chipWords(page)).toBe('workspaces');
   await expect(page.locator('[data-board-project-clear]')).toBeVisible();
@@ -207,11 +206,11 @@ test('picking a project from the keyboard narrows the lanes, the counts and Ship
   await expect(page.locator('[data-board-live]')).toContainText('workspaces');
   await both(page, 'filtered-1440');
 
-  // Shipped keeps the filter.
-  await page.locator('[data-board-link="shipped"]').click();
-  expect(await hashOf(page)).toBe(`#board=shipped&project=${project.workspaces}`);
+  // Done keeps the filter.
+  await page.locator('[data-board-link="done"]').click();
+  expect(await hashOf(page)).toBe(`#board=done&project=${project.workspaces}`);
   await expect(page.locator('.ib-bcard')).toHaveCount(1);
-  await expect(cardEl(page, ids.wsShipped)).toBeVisible();
+  await expect(cardEl(page, ids.wsDone)).toBeVisible();
   await page.goBack();
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}`);
 
@@ -265,7 +264,7 @@ test('a project with nothing in flight says so; Show all projects clears the fil
   const empty = page.locator('[data-board-empty="project"]');
   await expect(empty).toBeVisible();
   await expect(empty.locator('b')).toHaveText('pando');
-  await expect(page.locator('[data-board-link="shipped"]')).toHaveText('Shipped 1');
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 1');
   await both(page, 'empty-1440');
   await empty.locator('[data-board-show-all]').click();
   await expect(empty).toHaveCount(0);
@@ -327,9 +326,9 @@ test('a narrow window: the button on its own row under the header, a long name w
   await expect(cardEl(page, ids.long)).toBeVisible();
   await expect(page.locator('.ib-bfbar [data-board-project-chip]')).toBeVisible();
   await expect(page.locator('.ib-bhead [data-board-project-chip]')).toHaveCount(0);
-  // The counts are not cut to a few letters.
-  const summaryCut = await page.locator('[data-board-summary]').evaluate((el) => el.scrollWidth > el.clientWidth + 1);
-  expect(summaryCut).toBe(false);
+  // Nothing in the header runs past its edge.
+  const headCut = await page.locator('.ib-bhead').evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  expect(headCut).toBe(false);
   expect(await chipWords(page)).toBe(LONG);
   await shot(page, 'long-900-light.png');
   await page.emulateMedia({ colorScheme: 'dark' });

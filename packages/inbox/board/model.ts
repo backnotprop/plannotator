@@ -3,7 +3,7 @@
  * "inbox-board-look", the unread signal in "inbox-board-signal").
  *
  * - Lanes (approval "inbox-board-columns-v2"): Backlog, To do, In progress,
- *   In review. Shipped and Cancelled (the Dropped column) are links to their
+ *   In review. Done and Cancelled (the Dropped column) are links to their
  *   own lists; the Icebox folded into Backlog.
  * - A card (variant C "Lean") is two lines: the title, then "You: …" in the
  *   person's columns or the agent's last word otherwise, and its last-heard
@@ -12,7 +12,7 @@
  *   after the person's last look at the Board (isInboxCardUnread). The look
  *   moves when the Board is opened; the page keeps the marks it opened with
  *   for the visit, and a card the person opens or moves stops being bold.
- * - The person's moves: any live column, Ship, Drop (reason), Restore.
+ * - The person's moves: any live column, Done, Drop (reason), Restore.
  *   The store decides what is allowed; these say what the menu offers.
  */
 
@@ -33,18 +33,23 @@ import {
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 
-export type BoardView = 'lanes' | 'shipped' | 'cancelled';
+export type BoardView = 'lanes' | 'done' | 'cancelled';
 
-/** The Board's list a hash names (`#board=shipped`, `#board=cancelled`; `#board=icebox` from before v2 is Cancelled); anything else is the lanes. */
+/**
+ * The Board's list a hash names (`#board=done`, `#board=cancelled`); an older
+ * address still opens its list (`#board=shipped` is Done, `#board=icebox`
+ * from before v2 is Cancelled); anything else is the lanes.
+ */
 export function boardViewOf(value: string | null): BoardView {
-  if (value === 'shipped' || value === 'cancelled') return value;
+  if (value === 'done' || value === 'cancelled') return value;
+  if (value === 'shipped') return 'done';
   return value === 'icebox' ? 'cancelled' : 'lanes';
 }
 
 /**
  * The Board's project filter (`#board&project=prj_…`, the key the list uses
  * for a project): only that project's cards, on the lanes, the counts, the
- * Shipped and Cancelled lists and the agents' drops. Null: every card, as
+ * Done and Cancelled lists and the agents' drops. Null: every card, as
  * before the filter existed.
  */
 export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(cards: readonly T[], project: string | null): readonly T[] {
@@ -53,7 +58,7 @@ export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(card
 
 /**
  * The projects the Board's Project menu offers: those with a card on the
- * Board in any column (a project of Shipped or Cancelled cards only included),
+ * Board in any column (a project of Done or Cancelled cards only included),
  * in the sidebar's order, and the chosen project even with no card left, so
  * the menu always shows what is picked.
  */
@@ -117,19 +122,15 @@ export function laneWindowStart(index: number, fit: number, total: number): numb
   return Math.max(0, Math.min(total - fit, index - Math.floor(fit / 2)));
 }
 
-/** The header's facts: cards in flight (To do, In progress, In review: Backlog is not started by anyone), those on the person, and the two links' counts. */
+/** The header links' counts: Done, and Cancelled (the Dropped column). The header counts nothing else (owner, 2026-11-02). */
 export function boardCounts(cards: readonly InboxCardWire[]) {
-  let inFlight = 0;
-  let onYou = 0;
-  let shipped = 0;
+  let done = 0;
   let dropped = 0;
   for (const card of cards) {
-    if (INBOX_CARD_LIVE_COLUMNS.includes(card.column) && card.column !== 'backlog') inFlight += 1;
-    if (isInboxCardPersonColumn(card.column)) onYou += 1;
-    if (card.column === 'shipped') shipped += 1;
+    if (card.column === 'done') done += 1;
     if (card.column === 'dropped') dropped += 1;
   }
-  return { inFlight, onYou, shipped, dropped };
+  return { done, dropped };
 }
 
 /** An agent's drops the person has not seen, newest first: the Board's "N dropped by an agent". */
@@ -188,7 +189,7 @@ export type CardMenuItem =
  * A "one flat menu"), as groups drawn with a line between them: Open thread
  * when the card links one (`thread`, from `youThread`); then the opened
  * card's Move menu item for item and word for word (`columnChoices`: the
- * lanes, the card's own checked, then Shipped); then Cancel…. A cancelled
+ * lanes, the card's own checked, then Done); then Cancel…. A cancelled
  * card has no menu (its row has Restore): no groups.
  */
 export function cardMenuItems(card: InboxCardWire, thread: string | null): CardMenuItem[][] {
@@ -203,17 +204,17 @@ export function cardMenuItems(card: InboxCardWire, thread: string | null): CardM
 
 /**
  * The toast after a card leaves the lanes from its right-click menu (owner's
- * yes, 2026-10-31): Shipped, or a Cancel started from the menu, each with
+ * yes, 2026-10-31): Done, or a Cancel started from the menu, each with
  * Undo through the same route. Null for any other move (lane to lane, a
  * restore): the card is seen moving, and the live region says it. Undo: a
  * restore for a cancelled card (back where it was); the lane it came from
- * for a shipped card.
+ * for a card in Done.
  */
 export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead: string; detail: string; undo: BoardMove } | null {
   if (moved.column === card.column) return null;
   const detail = `“${card.title}”`;
   if (moved.column === 'dropped') return { lead: 'Cancelled', detail, undo: { op: 'restore' } };
-  if (moved.column === 'shipped' && INBOX_CARD_LIVE_COLUMNS.includes(card.column)) return { lead: 'Shipped', detail, undo: { op: 'move', column: card.column } };
+  if (moved.column === 'done' && INBOX_CARD_LIVE_COLUMNS.includes(card.column)) return { lead: 'Done', detail, undo: { op: 'move', column: card.column } };
   return null;
 }
 
@@ -231,7 +232,6 @@ export function cardUndoStillApplies(moved: Pick<InboxCardWire, 'column' | 'move
 export function moveSaid(card: InboxCardWire, moved: InboxCardWire): string {
   if (moved.column === 'dropped') return `Cancelled “${card.title}”. It is kept under Cancelled.`;
   if (card.column === 'dropped') return `Restored “${card.title}” to ${INBOX_CARD_COLUMN_LABELS[moved.column]}.`;
-  if (moved.column === 'shipped') return `Shipped “${card.title}”.`;
   return `Moved “${card.title}” to ${INBOX_CARD_COLUMN_LABELS[moved.column]}.`;
 }
 
@@ -282,7 +282,7 @@ export function sentTo(card: InboxCardWire): string | null {
 /**
  * The opened card's foot: Send to an agent for a card nobody was asked about
  * (no agent, never sent), Start for a Backlog or To do card that has an agent
- * and is not waiting on a send, Restore for a cancelled card, else Ship;
+ * and is not waiting on a send, Restore for a cancelled card, else Mark done;
  * Cancel… beside it where it applies.
  */
 export function cardFoot(card: InboxCardWire): { primary: 'send' | 'start' | 'ship' | 'restore' | null; drop: boolean } {
@@ -291,12 +291,12 @@ export function cardFoot(card: InboxCardWire): { primary: 'send' | 'start' | 'sh
   if (waiting && card.agent === null && card.sent === null) return { primary: 'send', drop: true };
   // Not started, with an agent (not just sent to it): Start tells that agent to begin (owner's note).
   if (waiting && card.agent !== null && !isInboxCardSentWaiting(card)) return { primary: 'start', drop: true };
-  return { primary: card.column === 'shipped' ? null : 'ship', drop: true };
+  return { primary: card.column === 'done' ? null : 'ship', drop: true };
 }
 
-/** The column menu on the opened card: the lanes (the card's own checked), then Shipped. */
+/** The column menu on the opened card: the lanes (the card's own checked), then Done. */
 export function columnChoices(card: InboxCardWire): { column: InboxCardColumn; label: string; current: boolean }[] {
-  const columns: InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'shipped'];
+  const columns: InboxCardColumn[] = [...INBOX_CARD_LIVE_COLUMNS, 'done'];
   return columns.map((column) => ({ column, label: INBOX_CARD_COLUMN_LABELS[column], current: card.column === column }));
 }
 
@@ -364,8 +364,8 @@ export function historyWords(entry: InboxCardHistoryEntry): { before: string; bo
     case 'dropped':
       return { before: `Cancelled by ${by}`, bold: null, after: '', quote: entry.reason ? `“${entry.reason}”` : null };
     case 'auto_shipped':
-      // The Inbox shipped it (approval "inbox-board-columns-v2", Q3): every PR it links had merged.
-      return { before: 'Shipped automatically: ', bold: entry.prs.map((url) => shortRef(prRefOfUrl(url))).join(', '), after: entry.prs.length === 1 ? ' merged' : ' all merged', quote: null };
+      // The Inbox moved it to Done (approval "inbox-board-columns-v2", Q3): every PR it links had merged.
+      return { before: 'Done automatically: ', bold: entry.prs.map((url) => shortRef(prRefOfUrl(url))).join(', '), after: entry.prs.length === 1 ? ' merged' : ' all merged', quote: null };
     case 'said':
       return { before: by === 'you' ? 'You' : by, bold: null, after: '', quote: `“${entry.text}”` };
     case 'you':
