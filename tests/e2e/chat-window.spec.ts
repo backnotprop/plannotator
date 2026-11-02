@@ -184,11 +184,16 @@ test('with richMarkdown what Workspaces draws draws, and hostile text is still i
       attributes: [...new Set(parts.flatMap((el) => el.getAttributeNames()))],
       inputs: Array.from(document.querySelectorAll<HTMLInputElement>('[data-text-part] input')).map((el) => `${el.type}:${el.disabled}`),
       sources: Array.from(document.querySelectorAll('[data-text-part] img')).map((el) => el.getAttribute('src')),
+      loading: [...new Set(Array.from(document.querySelectorAll('[data-text-part] [loading]')).map((el) => `${el.tagName.toLowerCase()}:${el.getAttribute('loading')}`))],
     };
   });
   expect(found.pwned).toBeUndefined();
   expect(found.tags.filter((tag) => /script|iframe|form|button|style|svg/.test(tag))).toEqual([]);
-  expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align', 'title', 'start', 'src', 'alt', 'width', 'height', 'type', 'checked', 'disabled'].includes(name))).toEqual([]);
+  // `loading` is not in the sanitizer's allowlist, so a model's own is dropped. The
+  // sanitizer's hook then writes `loading="lazy"` on every image it keeps
+  // (`loadWhenNear` in chatMarkdown.ts), which is why it is the only value here.
+  expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align', 'title', 'start', 'src', 'alt', 'width', 'height', 'type', 'checked', 'disabled', 'loading'].includes(name))).toEqual([]);
+  expect(found.loading).toEqual(['img:lazy']);
   expect([...new Set(found.inputs)]).toEqual(['checkbox:true']);
   expect(found.sources.filter((address) => address?.startsWith('javascript:'))).toEqual([]);
   expect(seen.errors).toEqual([]);
