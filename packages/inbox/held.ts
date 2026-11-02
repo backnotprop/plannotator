@@ -358,6 +358,42 @@ export function putRowBack(shown: readonly InboxListSection[], before: readonly 
 }
 
 /**
+ * The look the window sends when a thread opens has gone out: the open row
+ * reads as looked at until the server has taken the look and the list has
+ * been read again (App.tsx `looking`), which then gives the server's row. Its
+ * news is seen (`unseen` 0); a row in New for that news alone is no longer
+ * bold, so the row's hover action and the header's button are Mark unread at
+ * once (markRead.ts `canMarkUnread`). A row that still waits on the person
+ * (questions, picks not sent) stays bold and keeps Mark read.
+ */
+export function lookedRow(row: InboxListRow): InboxListRow {
+  if (row.unseen === 0) return row;
+  return { ...row, unseen: 0, unread: row.unread && !(row.section === 'new' && !row.answered_not_sent) };
+}
+
+/** The list on screen with the rows of `threadIds` read as looked at (`lookedRow`); the group each is drawn in never changes. */
+export function markHeldRowLooked(shown: readonly InboxListSection[], threadIds: ReadonlySet<string>): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => (threadIds.has(row.thread_id) ? lookedRow(row) : row)),
+  }));
+}
+
+/**
+ * The server's row for a thread in place of the one on screen, in the group it
+ * is drawn in (the list holds still). For a write that found the row on screen
+ * out of date (Mark unread answering `wrote: false`: an agent wrote there and
+ * the held list kept the old row behind "N new"): the row shows what is true
+ * now, bold with Mark read, instead of offering the same dead click again.
+ */
+export function replaceHeldRow(shown: readonly InboxListSection[], next: InboxListRow): InboxListSection[] {
+  return shown.map((section) => ({
+    ...section,
+    threads: section.threads.map((row) => (row.thread_id === next.thread_id ? next : row)),
+  }));
+}
+
+/**
  * The person archived a thread while its row is on screen (the thread is
  * open). The list the window reads leaves archived threads out, so
  * refreshHeldRows would keep the row as it was; this shows it archived in

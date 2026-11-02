@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -520,5 +520,29 @@ describe('the Snoozed band', () => {
     const sooner = { ...asleep(b), snoozed: { until: '2026-10-07T18:00:00Z', at: '2026-10-07T10:00:00Z' } } as InboxListRow;
     const both = settleThread(settled, model([], [asleep(a), sooner]), 'b');
     expect(both.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['b', 'a']);
+  });
+});
+
+// The open row is drawn read as its look goes out (the owner, 2026-11-02: its hover action must be Mark unread at
+// once). Unbolding a row that still waits on the person (a question, picks not sent) would hide that it waits.
+describe('markHeldRowLooked', () => {
+  const news = (id: string, extra: Partial<InboxListRow> = {}) =>
+    ({ ...row(id, 'docs-site', '2026-10-07T10:00:00Z', 'agent'), section: 'new', unseen: 1, unread: true, answered_not_sent: false, ...extra }) as InboxListRow;
+  const rowIn = (list: InboxListSection[], id: string) => list.flatMap((s) => s.threads).find((r) => r.thread_id === id)!;
+
+  test('a row in New for its news alone reads seen and not bold; every other row is untouched', () => {
+    const list: InboxListSection[] = [{ id: 'new', label: 'New since you looked', threads: [news('a'), news('b')] }];
+    const looked = markHeldRowLooked(list, new Set(['a']));
+    expect(rowIn(looked, 'a')).toMatchObject({ unseen: 0, unread: false, section: 'new' });
+    expect(rowIn(looked, 'b')).toMatchObject({ unseen: 1, unread: true });
+  });
+
+  test('a row that still waits on the person stays bold', () => {
+    const list: InboxListSection[] = [
+      { id: 'waiting', label: 'Waiting on you', threads: [news('q', { section: 'waiting' })] },
+      { id: 'new', label: 'New since you looked', threads: [news('p', { answered_not_sent: true })] },
+    ];
+    expect(rowIn(markHeldRowLooked(list, new Set(['q'])), 'q')).toMatchObject({ unseen: 0, unread: true, section: 'waiting' });
+    expect(rowIn(markHeldRowLooked(list, new Set(['p'])), 'p')).toMatchObject({ unseen: 0, unread: true });
   });
 });

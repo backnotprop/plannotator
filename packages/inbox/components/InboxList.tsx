@@ -56,6 +56,8 @@ export interface InboxListProps {
    * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
    */
   notice: { count: number; project?: string | null } | null;
+  /** This page is older than the Inbox (StalePageNotice, stalePage.ts): at the list's top, above the notifications line. */
+  stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
   onShowNew: () => void;
@@ -659,7 +661,7 @@ function RowWithAction({
   children,
 }: {
   row: InboxListRow;
-  /** The group the row sits in on screen: a seen update the list still holds in New keeps Mark read. */
+  /** The group the row sits in on screen (markRead.ts `seenHeldInNew`). */
   drawn: InboxListGroupId;
   menu: boolean;
   onMarkRead?: (row: InboxListRow) => void;
@@ -667,9 +669,12 @@ function RowWithAction({
   onSendNow?: (row: InboxListRow) => void;
   children: ReactNode;
 }) {
-  const offer = onMarkRead && offersRowMarkRead(row, drawn);
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
-  const unread = !offer && onMarkUnread && canMarkUnread(row);
+  // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
+  // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
+  // Its Mark read (move it to Quiet now) stays in the row menu and the header.
+  const unread = onMarkUnread && canMarkUnread(row);
+  const offer = !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
   const sendNow = onSendNow && !offer && !unread && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
   return (
@@ -1133,6 +1138,7 @@ export function InboxList(props: InboxListProps) {
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
         >
+          {props.stale}
           {props.ask}
           {awayLines.map((line) => (
             // A linked machine that is away: one quiet line, as a thread's meta line reads (its rows are greyed below).
