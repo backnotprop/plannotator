@@ -2661,9 +2661,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .pn-inbox .ib-fline { position: relative; display: grid; grid-template-columns: 24px 118px minmax(0, 1fr) auto minmax(66px, auto); align-items: center; gap: 0 10px; width: calc(100% + 16px); height: 44px; margin: 0 -8px; padding: 0 8px; border-radius: 8px; text-align: left; font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox :is(button.ib-fline, .ib-fline:has(> .ib-fl-hit)):hover { background: color-mix(in oklch, var(--muted) 40%, transparent); }
 .pn-inbox .ib-fl-hit { position: absolute; inset: 0; border-radius: inherit; }
-.ib-fline:has(> .ib-fl-hit) > :not(.ib-fl-hit) { position: relative; pointer-events: none; }
+/* Everything after the fold button (always the row's first child): no `:has(…) > :not(…)`, see .ib-pfoot's route form. */
+.ib-fline > .ib-fl-hit ~ :not(.ib-fl-hit) { position: relative; pointer-events: none; }
 /* The row's own buttons, and the time (its tooltip is the whole moment) take the pointer. */
-.ib-fline:has(> .ib-fl-hit) :is(.ib-hcount, .ib-fl-tm > button, .ib-fl-tm > [data-full-when]) { pointer-events: auto; }
+.ib-fline > .ib-fl-hit ~ * :is(.ib-hcount, .ib-fl-tm > button, .ib-fl-tm > [data-full-when]), .ib-fline > .ib-fl-hit ~ .ib-hcount { pointer-events: auto; }
 .ib-fline.ib-is-open .ib-fl-nm { font-weight: 600; }
 /* The open row's third column: the project gives way first ("in plann…"); "to you", the session-ended mark
    and the attachments count never shrink, and the column wraps rather than cut them (the row grows). */
@@ -3629,7 +3630,11 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
    sessions scrolls inside it, and Send and Back stay in view. The foot itself never scrolls or clips (New
    message's list and the step list open above it). */
 .ib-pfoot:has(> .ib-routeform) { display: flex; flex-direction: column; max-height: 70%; }
-.ib-pfoot:has(> .ib-routeform) > * { flex: none; }
+/* Its other children, before and after it. Written without `:has(…) > *`: Chromium merges what follows every
+   `:has()` into one invalidation set, and one universal or `:not()` part there made every DOM change under an
+   element with a `:has()` rule (the reply box's textarea gets a new text node on every key) restyle the whole
+   page: 3,500 elements a key on a long thread (hasInvalidation.test.ts). The same for the fold row and the voice line. */
+.ib-pfoot > :where(:not(.ib-routeform)):has(~ .ib-routeform), .ib-pfoot > .ib-routeform ~ * { flex: none; }
 .ib-pfoot > .ib-routeform { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
 .ib-routeform > * { flex: none; }
 .ib-routeform > .ib-route { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -6829,7 +6834,8 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   .pn-inbox .ib-vmic::after { content: ''; position: absolute; inset: -4px; }
   .pn-inbox .ib-dtlink { padding: 8px 2px; }
   /* A phone's row holds the status or the chips, not both: they step aside until the words land. Nothing wraps, so the button stays under the finger. */
-  .ib-rfoot:has(.ib-vline) > :not(.ib-dtfoot, .ib-rclip), .ib-cp-foot:has(.ib-vline) > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]) { display: none; }
+  /* Each child before the voice foot (the row's last but compose's Send), as a `:has()` of its own: no `:has(…) > :not(…)`, see .ib-pfoot's route form. */
+  .ib-rfoot > :not(.ib-dtfoot, .ib-rclip):has(~ :where(.ib-dtfoot) .ib-vline), .ib-cp-foot > :not(.ib-dtfoot, .ib-cp-clip, [data-compose-send]):has(~ :where(.ib-dtfoot) .ib-vline) { display: none; }
   /* New message's field runs past what a phone's keyboard leaves: its note stays in sight, at the body's foot. */
   .ib-cp-field .ib-vnote { position: sticky; bottom: 0; z-index: 1; padding: 6px 0; background: var(--card); }
   .ib-vline { gap: 8px; }
