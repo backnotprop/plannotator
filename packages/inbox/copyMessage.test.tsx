@@ -459,7 +459,7 @@ test.skipIf(!hasDom)("the header's ⋯: Copy thread copies every message, folded
   expect(more(M1)).toBeNull();
   await press(threadMore()!);
   await until(() => !!threadMenu(), 'the thread menu');
-  expect(labels(threadMenu())).toEqual(['Copy thread', 'Copy link', 'Copy thread ID']);
+  expect(labels(threadMenu())).toEqual(['Copy thread', 'Copy link', 'Copy thread ID', 'Archive thread']);
   await choose(item(threadMenu(), 'thread'));
   expect(copied[0]!.text).toBe(threadMarkdown(t));
   expect(copied[0]!.text).toContain(`Answer: ${PICK}`);
