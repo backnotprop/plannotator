@@ -6,7 +6,7 @@
  * and the thread's foot ("Draft · 2 picks" before Send / Edit draft). Action
  * items waiting for the Send count as "1 done", "1 can't do".
  */
-import type { InboxRowUnsent } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, type InboxRowUnsent } from '@plannotator/core/inbox-types';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
 
@@ -49,6 +49,9 @@ export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; 
   );
 }
 
+/** Above the reply box when its words are longer than a draft holds (the Inbox refuses such a draft). */
+export const DRAFT_NOT_SAVED_TOO_LONG = `Not saved: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
+
 /** The conflict line's words: both windows hold words for this reply. */
 export function conflictText(sentElsewhere: boolean): string {
   return sentElsewhere ? 'Not saved: this reply was sent or discarded in another window.' : 'Not saved: this reply changed in another window.';
@@ -73,12 +76,28 @@ export function DraftHead({
   savedAt,
   onDiscard,
   conflict = null,
+  tooLong = false,
 }: {
   label: string;
   savedAt: string | null;
   onDiscard: (() => void) | null;
   conflict?: DraftConflict | null;
+  /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
+  tooLong?: boolean;
 }) {
+  if (tooLong && !conflict) {
+    return (
+      <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-too-long="">
+        <span className="ib-draft-for" dir="auto">
+          {label}
+        </span>
+        <span className="ib-sp" />
+        <span className="ib-draft-saved" role="status">
+          {DRAFT_NOT_SAVED_TOO_LONG}
+        </span>
+      </div>
+    );
+  }
   if (conflict) {
     // Not a live region: the thread's own region says it once when it appears.
     return (

@@ -73,6 +73,37 @@ export interface PeerLinkOptions {
 
 type Json = Record<string, any>;
 
+/** No refusal is longer: a far side that answers 401 with more is not read past this. */
+const REFUSAL_MAX_BYTES = 64 * 1024;
+
+/** A far answer's body as text, reading no further than `maxBytes`: past that it cancels the stream and answers null. */
+export async function readCapped(response: Response, maxBytes: number): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(chunks).toString("utf8");
+    size += value.length;
+    if (size > maxBytes) {
+      // Not awaited: a clone's cancel settles only once its twin is cancelled too.
+      void reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+}
+
+/** The `code` of a door's refusal, if it reads as one. */
+async function refusalCode(response: Response): Promise<unknown> {
+  try {
+    return (JSON.parse((await readCapped(response, REFUSAL_MAX_BYTES)) ?? "null") as Json | null)?.code;
+  } catch {
+    return undefined;
+  }
+}
+
 export class PeerLink {
   readonly id: string;
   state: PeerLinkState = "connecting";
@@ -318,8 +349,8 @@ export class PeerLink {
       clearTimeout(timer);
     }
     if (response.status === 401) {
-      const copy = (await response.clone().json().catch(() => ({}))) as Json;
-      if (copy.code === "device_revoked" || copy.code === "device_token_invalid") this.stream?.abort();
+      const code = await refusalCode(response.clone());
+      if (code === "device_revoked" || code === "device_token_invalid") this.stream?.abort();
     } else if (this.state !== "online") {
       this.poke();
     } else {

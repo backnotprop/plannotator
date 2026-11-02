@@ -129,6 +129,7 @@ packages/inbox/tagAgents.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
+packages/inbox/pasteText.test.tsx
 packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
@@ -181,6 +182,7 @@ packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/agentsSettings.test.tsx
+packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx
 packages/inbox/settingsSections.test.tsx

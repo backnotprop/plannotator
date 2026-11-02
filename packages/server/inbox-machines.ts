@@ -24,13 +24,14 @@
  *    (`link-back`, `unlink`).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -106,9 +107,12 @@ export interface InboxMachinesContext {
    */
   holds: (kind: HeldKind, id: string) => boolean;
   /** Tests: the links' clocks. */
-  timings?: Partial<PeerLinkTimings>;
+  timings?: MachineLinkTimings;
   now?: () => Date;
 }
+
+/** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
+export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
 export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView };
@@ -570,7 +574,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(route) === "accounts") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -645,6 +650,47 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const machine = machinesView().find((m) => m.id === entry.machine) ?? null;
     return new Response(JSON.stringify({ outbox: outboxView(entry), machine }), { status: 202, headers });
+  };
+
+  // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
+
+  /**
+   * Its door's read, asked for only when a window asks (nothing polls), kept
+   * nowhere, and picked by name again. Each machine is its own request, so a
+   * slow one holds up only itself. It waits past the far run's own limit, so a
+   * slow run comes back as its real `timed_out`, and only a machine that does
+   * not answer at all is offline. A door that hangs while its line stays up is
+   * awake, and so is one that revoked this link: the wait outlasts the line's
+   * silence limit, so a machine truly asleep has lost its line by the end of
+   * it. A door that does not know the route is an older Plannotator. An answer
+   * past the cap is a failed read, and read no further.
+   */
+  const accountsOf = async (machine: string, fresh: boolean, signal: AbortSignal): Promise<InboxMachineAccountsRead> => {
+    const peer = peers.get(machine);
+    if (!peer) throw new InboxError("machine_not_linked", "That machine is not linked.");
+    if (peer.state === "needs_update") return { state: "needs_update" };
+    if (peer.state === "revoked") return { state: "unreachable" };
+    if (peer.state === "offline") {
+      peer.poke();
+      return { state: "offline" };
+    }
+    try {
+      const waitMs = context.timings?.accountsMs ?? INBOX_MACHINE_ACCOUNTS_WAIT_MS;
+      // `timeoutMs` stops at the answer's headers: this signal covers its body too.
+      const response = await peer.request("accounts", fresh ? "?fresh=1" : "", { method: "GET", headers: {}, timeoutMs: waitMs, signal: AbortSignal.any([signal, AbortSignal.timeout(waitMs)]) });
+      const raw = await readCapped(response, INBOX_MACHINE_ACCOUNTS_MAX_BYTES);
+      if (raw === null) return { state: "failed", reason: "bad_output" };
+      let body: unknown = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // Not JSON: no answer to this read, below.
+      }
+      if (response.status === 404 && (body as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
+      return response.ok ? parsePeerAccounts(body) : { state: "unreachable" };
+    } catch {
+      return { state: peer.state === "online" ? "unreachable" : "offline" };
+    }
   };
 
   // ── The window's routes and the CLI's ──
@@ -752,6 +798,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     },
     route,
     control,
+    accountsOf,
     linkBack,
     unlinkedBy,
     start,

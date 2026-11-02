@@ -1826,6 +1826,60 @@ export interface InboxAgentRow {
   wakes?: boolean;
 }
 
+/** One usage limit of a Claude account, as `cswap list --json` reports it. A window it does not report is null, never 0. */
+export interface InboxUsageWindow {
+  pct: number;
+  resetsAt: string | null;
+  countdown: string | null;
+  clock: string | null;
+}
+
+/** A limit on one model family; `name` is what the window calls it ("Fable"). */
+export interface InboxScopedUsageWindow extends InboxUsageWindow {
+  name: string;
+}
+
+export interface InboxAccountUsage {
+  fiveHour: InboxUsageWindow | null;
+  sevenDay: InboxUsageWindow | null;
+  scoped: InboxScopedUsageWindow[];
+}
+
+/** One Claude account on this computer. Field names are `cswap`'s; nothing else of its row reaches the window. */
+export interface InboxAccount {
+  number: number;
+  alias: string | null;
+  /** Null for an API-key account: its placeholder address is never passed on. */
+  email: string | null;
+  organizationName: string | null;
+  isOrganization: boolean;
+  active: boolean;
+  usageStatus: string | null;
+  usageError: string | null;
+  usageRetryAt: string | null;
+  /** Null: no reading. */
+  usage: InboxAccountUsage | null;
+  /** How old `cswap` says the reading is. It serves the last good one when a fetch fails. */
+  usageAgeSeconds: number | null;
+}
+
+/** Why a read of the accounts failed: a fixed code, never `cswap`'s own words. */
+export type InboxAccountsFailure = "timed_out" | "run_failed" | "bad_output" | "unknown_schema";
+
+/** `GET /api/inbox/accounts` (Settings → Accounts). */
+export type InboxAccountsRead =
+  | { state: "not_installed" }
+  | { state: "failed"; reason: InboxAccountsFailure }
+  | { state: "accounts"; accounts: InboxAccount[] };
+
+/**
+ * `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is
+ * none: `offline`, no answer at all; `needs_update`, a version apart;
+ * `unreachable`, it answered something else (a 500, a refused token). None is
+ * an error.
+ */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
@@ -2082,6 +2136,9 @@ export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
 
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). The window names it too. */
 export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+/** The longest draft body (compose drafts and reply drafts), in characters: the window says so before the server refuses one. */
+export const INBOX_DRAFT_BODY_MAX = 1_000_000;
 
 /**
  * A file the person uploaded from the window for a thread they start, not
