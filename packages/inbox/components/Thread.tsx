@@ -81,6 +81,7 @@ import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
+import { createPickQueue, onlyQuestionsChanged } from '../pickQueue';
 import { sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -892,6 +893,8 @@ export interface ThreadPaneProps {
   sent: { at: string; checked_at: string | null; recipients?: InboxSentRecipient[] } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
   onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
+  /** Answers to question cards started saving (true), or the last one landed (false): one read for the lot, not one per save. */
+  onPickSaves?: (saving: boolean) => void;
   /** Something was written (a Send, resolve): read the thread and the list again. */
   onChanged: () => Promise<void>;
   /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
@@ -1222,7 +1225,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1274,7 +1277,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // Picks saved at once; shown before the server answers, then from the server.
   const [pending, setPending] = useState<ReadonlyMap<string, QuestionAnswer | null>>(new Map());
-  const pickChain = useRef<Promise<void>>(Promise.resolve());
+  const onPickSavesNow = useRef(onPickSaves);
+  onPickSavesNow.current = onPickSaves;
+  const [pickQueue] = useState(() => createPickQueue((saving) => onPickSavesNow.current?.(saving)));
   const revisions = useRef(new Map<string, number>());
   const threadRef = useRef(thread);
   threadRef.current = thread;
@@ -1677,7 +1682,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   );
 
   // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, thread);
+  // A saved pick moves neither: only a real read of the thread reads them again.
+  const filesRevision = useRef(thread);
+  if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -2603,7 +2611,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           const wasOpen = boxRef.current.open;
           void (async () => {
             await actionSavesSettled();
-            await pickChain.current;
+            // An answer that was not saved says so; the key is spent, never a Send of the older answer.
+            if (!(await pickQueue.settled())) return;
             for (let i = 0; i < 8 && !ready(sendRef.current); i += 1) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             if (boxRef.current.open !== wasOpen || !showingRef.current || modalOpen()) return;
             if (ready(sendRef.current)) press();
@@ -2767,7 +2776,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const id = `${messageId}/${key}`;
     setPending((current) => new Map(current).set(id, answer));
     setError(null);
-    pickChain.current = pickChain.current.then(async () => {
+    // Read when the save starts, never when the answer changed: the save running now raises the revision.
+    pickQueue.put(id, async () => {
       const known = questionById(id);
       const revision = Math.max(revisions.current.get(id) ?? 0, known?.revision ?? 0);
       /** Held for another machine (linked machines): the pick stays drawn as picked; it applies when that machine takes it. */
@@ -2781,6 +2791,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const latest = threadRef.current;
         threadRef.current = { ...latest, messages: latest.messages.map((m) => (m.id === messageId ? { ...m, questions: result.questions } : m)) };
         onQuestions(messageId, result.questions);
+        return true;
       } catch (cause) {
         if (cause instanceof InboxHeldError) {
           held = true;
@@ -2790,11 +2801,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           onToastNow.current?.({ icon: 'clock', lead: cause.message, wrap: true });
           // The outbox may have settled it already (its frame came before this answer).
           settleHeldPicks(outboxNow.current);
-          return;
+          return true;
         }
-        // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced.
-        if (!isSuperseded(cause)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
+        // The agent replaced the question meanwhile: reading the thread again redraws it as Replaced, and a Send goes
+        // without it (the stale guard says so). A newer answer waiting speaks for this question when it lands.
+        const replaced = isSuperseded(cause);
+        if (!replaced && !pickQueue.hasNewer(id)) setError(cause instanceof InboxApiError ? cause.message : 'The pick was not saved.');
         await onChanged();
+        return replaced;
       } finally {
         setPending((current) => {
           if (held) return current;
@@ -3201,7 +3215,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     try {
       // A Done or a note under an action item still on its way (a note saves on leaving its field): answered first.
       await actionSavesSettled();
-      await pickChain.current;
+      // A reply names its questions by revision and the server sends what is saved, so the newest answers land first.
+      // One that was not saved stops the Send (its error shows): the older answer would go in its place.
+      if (!(await pickQueue.settled())) return;
       const current = threadRef.current;
       // The box's words, or (the box closed) the words kept as its draft: the foot's Send carries them too.
       // Before anything goes, the draft's saves are answered (a save landing after the Send would bring the
@@ -3686,8 +3702,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // A pick still being saved goes too: wait for it, then take the targets
       // from the thread as saved (threadRef), not as drawn when Re-ask was
       // pressed: a note just saved has a newer revision, a question just
-      // picked is no longer open.
-      await pickChain.current;
+      // picked is no longer open. One that was not saved stops it, as it stops a Send.
+      if (!(await pickQueue.settled())) return;
       const targets = resolved && !cameBack ? [] : reaskTargets(threadRef.current.messages, liveMessage);
       const freshNotes = targets.filter((t) => t.kind === 'reask');
       // The routed note follows the session the person chose for, wherever its latest message is now.

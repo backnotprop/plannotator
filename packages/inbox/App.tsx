@@ -644,7 +644,9 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
-  const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
+  /** The open thread's answers saving, whether a question record came meanwhile, and the read it owes (`onPickSaves`). */
+  const pickSaves = useRef({ saving: false, owed: false, read: () => {} });
+  const subscribeQuestions =useCallback((listener: (question: InboxQuestion) => void) => {
     questionListeners.current.add(listener);
     return () => void questionListeners.current.delete(listener);
   }, []);
@@ -1430,6 +1432,18 @@ function Inbox() {
     let machinesSet = '';
     let machinesAdopt = false;
     let cancelled = false;
+    const readAfterRecord = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void refreshList(false).then((next) => next && flushNotifications(next));
+        void refreshDecisions();
+        const open = routeRef.current.thread;
+        if (open) void refreshThread(open);
+        // Picks and comments are unsent work too: the Drafts row follows them.
+        void refreshDrafts();
+      }, 80);
+    };
+    pickSaves.current.read = readAfterRecord;
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
     void (async () => {
@@ -1460,15 +1474,12 @@ function Inbox() {
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
           if (event?.kind === 'question') for (const listener of questionListeners.current) listener(event.question);
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            void refreshList(false).then((next) => next && flushNotifications(next));
-            void refreshDecisions();
-            const open = routeRef.current.thread;
-            if (open) void refreshThread(open);
-            // Picks and comments are unsent work too: the Drafts row follows them.
-            void refreshDrafts();
-          }, 80);
+          // A question line while this window saves answers: read once, when the last of them lands (onPickSaves).
+          if (event?.kind === 'question' && pickSaves.current.saving) {
+            pickSaves.current.owed = true;
+            return;
+          }
+          readAfterRecord();
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
@@ -1580,6 +1591,7 @@ function Inbox() {
     })();
     return () => {
       cancelled = true;
+      pickSaves.current.read = () => {};
       discardPreparedInboxEvents();
       unsubscribe();
       if (timer) clearTimeout(timer);
@@ -2194,11 +2206,25 @@ function Inbox() {
         ? { ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }
         : current,
     );
+  };
+
+  /**
+   * Answers to the open thread's question cards are saving (a card saves on
+   * every change). Each save's answer already brought its questions, so what
+   * the reads show waits for the last one: one read for the lot. Only the
+   * records of those saves wait; anything else is read as it comes.
+   */
+  const onPickSaves = useCallback((saving: boolean) => {
+    pickSaves.current.saving = saving;
+    if (saving) return;
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
     // the list catches up when the thread closes (settle.ts).
     void refreshList(!routeRef.current.thread, true);
-  };
+    if (!pickSaves.current.owed) return;
+    pickSaves.current.owed = false;
+    pickSaves.current.read();
+  }, [refreshList]);
 
   const afterWrite = async () => {
     const open = routeRef.current.thread;
@@ -4490,6 +4516,7 @@ function Inbox() {
             draftChanged={draftChanged}
             onReplyOpened={() => setReplyFor(null)}
             onQuestions={patchQuestions}
+            onPickSaves={onPickSaves}
             onChanged={afterWrite}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
