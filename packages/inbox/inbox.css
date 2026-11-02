@@ -2008,38 +2008,53 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    standing up with its tools out, where it ends at the size bar and at the toolbar or the option card (`useClearRows` reads it).
    Fit and the pan's limits work inside it; the stage stays whole, so every row still takes the fingers. */
 .ib-imgclear { position: absolute; inset: 0; visibility: hidden; pointer-events: none; }
-.ib-view.ib-fullview.ib-phone { --ib-optcap-h: max(72px, calc(72px * var(--ib-type, 14) / 14)); --ib-clearfoot: max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom)); }
+.ib-view.ib-fullview.ib-phone { --ib-clearfoot: max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom)); }
 /* A comment row in the grid: the stage already ends above it. */
 .ib-view.ib-fullview.ib-phone:has(.ib-imgcompose) { --ib-clearfoot: 0px; }
 @media (orientation: portrait) {
   :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"] .ib-imgclear { top: 62px; bottom: calc(68px + var(--ib-clearfoot)); }
-  :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"]:has(.ib-optcap) .ib-imgclear { bottom: calc(80px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
+  :root:not([data-ib-keyboard]) .ib-view.ib-fullview.ib-phone[data-tools="pinned"]:not(:has(.ib-fcomp-pillwrap)):has(.ib-optcap) .ib-imgclear { bottom: calc(80px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
 }
-/* A question's picture choices in full screen (the same approval, "Option caption"): the choice on screen, the
-   question, one dot per choice. It stays while the set is open, where the step chip shows (above a phone's toolbar).
-   On a phone it is always one height (the picture fits above it) and Hide takes it with the rest. */
-.ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; width: min(420px, calc(100% - 32px)); padding: 11px 14px 12px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; }
+/* A question's picture choices in full screen (approval "inbox-option-card-lean", over "Option caption"): one row, the
+   choice on screen (Previous, its letter, its name, "Recommended" in plain text, Next; a phone swipes, so no arrows).
+   It stays while the set is open, in place of the step chip, and is always one height (`--ib-optcap-h`), so the picture
+   fits clear above it. Hide takes it with the rest, and so does minimizing the comment box. */
+.ib-view.ib-fullview { --ib-optcap-h: max(42px, calc(42px * var(--ib-type, 14) / 14)); }
+.ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(640px, calc(100% - 32px)); height: var(--ib-optcap-h); padding: 0 6px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; transition: opacity 180ms ease 180ms; }
 :root.light .ib-optcap { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
-.ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); width: min(420px, calc(100% - 56px)); height: var(--ib-optcap-h); }
-.ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); width: min(420px, calc(100% - 352px)); }
-.ib-optcap-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); max-width: calc(100% - 56px); padding: 0 14px; }
+.ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
+/* Minimizing the comment box shrinks the foot first: a fade would show the card hopping down, so it goes at once. Coming back it waits (the base delay) for the picture to finish easing. */
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { transition: none; }
+.ib-view.ib-fullview:not(.ib-phone):not(:has(.ib-imgcompose)) { --ib-clearfoot: var(--ib-fvfoot, 0px); }
+.ib-view.ib-fullview:not(.ib-phone):has(.ib-imgcompose) { --ib-clearfoot: 0px; }
+.ib-view.ib-fullview:not(.ib-phone)[data-tools="pinned"]:not(:has(.ib-fcomp-pillwrap)):has(.ib-optcap) .ib-imgclear { bottom: calc(22px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); max-width: calc(100% - 352px); }
+.ib-optcap-step { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; pointer-events: auto; }
+@media (pointer: coarse) { .ib-view.ib-fullview:not(.ib-phone) { --ib-optcap-h: max(52px, calc(52px * var(--ib-type, 14) / 14)); } .ib-optcap-step { width: 44px; height: 44px; } }
+.ib-optcap-step:hover:not([aria-disabled="true"]) { background: var(--muted); color: var(--foreground); }
+.ib-optcap-step:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: -2px; }
+.ib-optcap-step[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .ib-optcap-letter { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-foreground); font: 700 var(--ib-fs-12-5, 12.5px)/1 var(--font-sans, system-ui); }
 .ib-optcap-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-15, 15px); font-weight: 600; }
-.ib-optcap-rec { flex: none; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--primary); background: color-mix(in oklch, var(--primary) 12%, transparent); border-radius: 6px; padding: 2px 7px; }
-.ib-optcap-q { display: flex; align-items: center; gap: 10px; margin-top: 6px; min-width: 0; }
-.ib-optcap-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-/* A phone's end note, in the question's line: its words give way, never the pill they point to. */
-.ib-optcap-q:has(.ib-optcap-noteline) { gap: 8px; }
-.ib-optcap-noteline { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-optcap-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ib-optcap-noteline .ib-optcap-pill { flex: none; }
-.ib-optcap-dots { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-.ib-optcap-dots i { display: block; width: 6px; height: 6px; border-radius: 3px; background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); transition: width 180ms cubic-bezier(0.23, 1, 0.32, 1), background-color 180ms ease; }
-.ib-optcap-dots i.ib-on { width: 16px; background: var(--primary); }
-.ib-optcap-end { margin-top: 9px; padding-top: 9px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
-.ib-optcap-pill { display: inline-flex; align-items: center; gap: 2px; color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-@media (prefers-reduced-motion: reduce) { .ib-optcap-dots i, .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap { transition: none; } }
+/* The names of the set share one cell, so the card is as wide as the widest (up to its cap) on every step; only the visible row shows. */
+.ib-optcap-body { flex: 0 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); }
+.ib-optcap-main, .ib-optcap-size { grid-area: 1 / 1; display: flex; align-items: center; gap: 10px; min-width: 0; white-space: nowrap; }
+.ib-optcap-size { visibility: hidden; height: 0; overflow: hidden; pointer-events: none; }
+/* A cut name's full text, for a mouse that rests on it (OptionCaption reads the pointer's place: the card lets every pointer through to the picture). */
+.ib-optcap-tip { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); max-width: min(560px, calc(100vw - 32px)); padding: 6px 10px; border-radius: 8px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25); font-size: var(--ib-fs-13, 13px); line-height: 1.35; font-weight: 500; pointer-events: none; }
+.ib-optcap-rec { flex: none; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); }
+@media (prefers-reduced-motion: reduce) {
+  .ib-optcap,
+  .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
+  .ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { transition: none; }
+}
 /* the image's size bar moves out from under the toolbar */
 .ib-view.ib-fullview:not(.ib-phone) .ib-imgbar { right: auto; left: 14px; }
 /* and the "Your marked-up copy" chip sits under it */
