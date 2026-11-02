@@ -382,9 +382,9 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(filePane).toHaveCount(0);
   await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 annotations');
+  await expect(chip).toHaveText('2 comments');
   await chip.click();
-  const pop = page.getByRole('dialog', { name: '2 annotations ride this reply' });
+  const pop = page.getByRole('dialog', { name: '2 comments' });
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('src/auth.ts (guided review)');
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('lines 2-3');
   await pop.locator('[data-annotation-row]').nth(1).getByRole('button', { name: 'Edit' }).click();

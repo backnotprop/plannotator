@@ -46,7 +46,12 @@ const SIZES = [
   { width: 390, height: 660, keyboard: 403 },
   { width: 320, height: 568, keyboard: 353 },
 ] as const;
-type Size = (typeof SIZES)[number];
+/** Dictating, the status has the least room here: Send still carries its word. */
+const TIGHT = [
+  { width: 360, height: 640, keyboard: 383 },
+  { width: 375, height: 667, keyboard: 410 },
+] as const;
+type Size = (typeof SIZES)[number] | (typeof TIGHT)[number];
 
 const SESSION = 'ses-phone-compose';
 const MESSAGE = 'Rename the Quiet section to Done? Quiet reads like muted to me.';
@@ -665,7 +670,7 @@ for (const engine of ENGINES) {
     });
 
     if (engine.name === 'chromium') {
-      for (const size of SIZES) {
+      for (const size of [...SIZES, ...TIGHT]) {
         test(`${size.width} px: dictating keeps one row, with the clip and mic where they were`, async () => {
           const page = await phone(size);
           await openWorstDraft(page);
