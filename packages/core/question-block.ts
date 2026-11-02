@@ -1344,15 +1344,20 @@ export const findDirectiveBlocks = (
  * Every top-level line of a markdown document that the block splitter reads
  * as an ordinary line: not inside a code fence, display math, a directive's
  * body or a raw HTML block, and not a directive's opener (the walk
- * `findDirectiveBlocks` makes, so the two cannot differ). `line` is the
- * line's text (with link references resolved; the text after a display
- * math close, when one shares its line), `lineNumber` its 1-based line in
- * `markdown`. For a host that checks lines the parser leaves as text (the
- * Plannotator Inbox's `:::question {#x}` warning).
+ * `findDirectiveBlocks` makes, so the two cannot differ). `lineNumber` is
+ * the line's 1-based line in `markdown`. For a host that checks lines the
+ * parser leaves as text (the Plannotator Inbox's `:::question {#x}` warning).
+ *
+ * `line` is the parser's processed text, not the source line: link
+ * references are resolved, and after a display math block that closes
+ * mid-line it is only the text after the close. Read the source line by
+ * `lineNumber` when the exact text matters.
+ *
+ * @internal Not part of the published grammar; it may change with the walk.
  */
 export const forEachTopLevelLine = (
   markdown: string,
-  options: { frontmatter?: boolean },
+  options: { frontmatter?: boolean } = {},
   visit: (line: string, lineNumber: number) => void,
 ): void => {
   walkTopLevelLines(markdown, options, { line: visit });

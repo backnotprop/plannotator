@@ -10,7 +10,7 @@
  * message whose blocks opened.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -120,6 +120,28 @@ test("a warning with other hints in the same result: every warning stays a line 
   expect(lines).toContain(warning(1, ":::question"));
   expect(lines).toContain(warning(12, ":::question-text"));
   // The other hint is whole, on a line with no warning in it.
+  const hint = lines.find((line) => line.includes("marks its recommendation inside a choice label"));
+  expect(hint).toBeDefined();
+  expect(hint).not.toContain("has text after it");
+});
+
+test("submit_guide: the warnings come last there too, each a line of its own after the other hints", async () => {
+  const { project, client } = await world();
+  writeFileSync(join(project, "a.ts"), "export const a = 1;\n");
+  const patch = ["diff --git a/a.ts b/a.ts", "--- a/a.ts", "+++ b/a.ts", "@@ -1 +1 @@", "-export const a = 0;", "+export const a = 1;", ""].join("\n");
+  const guide = { title: "One change", intent: "Shows a.", sections: [{ title: "The change", overview: "a moves to 1.", diffs: [{ file: "a.ts", summary: "Bumps a." }] }] };
+  const body = [":::question {#ship}", "Ship it?", "- [ ] Yes", ":::", "", ":::question", "Which colour?", "- [ ] Blue (Recommended)", "- [ ] Green", ":::"].join("\n");
+  const result = (await client.callTool({ name: "submit_guide", arguments: { project_path: project, guide, patch, body } })) as {
+    isError?: boolean;
+    content: { text: string }[];
+    structuredContent: Record<string, any>;
+  };
+  expect(result.isError).toBeFalsy();
+  expect(result.structuredContent.question_openers_with_text).toEqual([{ line: 1, directive: ":::question" }]);
+  expect(result.structuredContent.recommended_in_label).toHaveLength(1);
+  const lines = result.content.map((part) => part.text).join("\n").split("\n");
+  // The warning is the last line, whole; the other hint sits on a line with no warning in it.
+  expect(lines.at(-1)).toBe(warning(1, ":::question"));
   const hint = lines.find((line) => line.includes("marks its recommendation inside a choice label"));
   expect(hint).toBeDefined();
   expect(hint).not.toContain("has text after it");
