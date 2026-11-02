@@ -68,5 +68,5 @@ export {
   type ChatTextPart,
   type ChatTranscriptProps,
 } from './ChatTranscript';
-export { chatMarkdownHtml, personMarkdownHtml } from './chatMarkdown';
+export { chatMarkdownHtml, personMarkdownHtml, richMarkdownHtml } from './chatMarkdown';
 export { FOCUS_RING, floatingDialogChrome } from './chatRecipes';
