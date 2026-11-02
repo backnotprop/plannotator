@@ -140,6 +140,8 @@ import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
 import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadStep';
 import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
+import { emitAskChange } from './ask/askEvents';
+import { useInboxAsk } from './ask/useInboxAsk';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -1481,6 +1483,8 @@ function Inbox() {
             void refreshDrafts();
           }, 80);
         },
+        // An Ask AI chat changed; the window reads it, and nothing else on the page depends on it.
+        onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => {
           if (pinsTimer) clearTimeout(pinsTimer);
@@ -1497,15 +1501,21 @@ function Inbox() {
         // The live sessions moved (approval "inbox-row-delivery"): read the list again while a row's
         // delivery can still change (queued, sending, saved, not delivered), so its glyph follows.
         onDeliveries: () => {
+          // Whether a thread's agent can answer Ask AI moves with them.
+          emitAskChange(null);
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
-        onConnect: reportWindow,
+        onConnect: () => {
+          reportWindow();
+          emitAskChange(null);
+        },
         // The stream went silent past its window (or the tab came back after it): read what a record would make the
         // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
         onCatchUp: () => {
+          emitAskChange(null);
           void refreshList(false).then((next) => next && flushNotifications(next));
           void refreshDecisions();
           const open = routeRef.current.thread;
@@ -1835,6 +1845,8 @@ function Inbox() {
       if (event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) return;
+      // The Ask AI window is not on the ladder: Escape in it never closes the thread under it.
+      if (target?.closest?.('[data-chat-window]')) return;
       // Words selected in a message (approval "inbox-message-comments"): its selection toolbar or label picker owns this Escape.
       if (selectionToolbarShowing()) return;
       // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
@@ -3475,6 +3487,15 @@ function Inbox() {
   // their own first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
+  // Ask AI (PLANNOTATOR_INBOX_ASK_AI): off, this reads nothing and draws nothing. A linked machine's thread has no chat here.
+  const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
+  const ask = useInboxAsk({
+    on: settings?.ask_ai === true && !tourOn,
+    threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
+    phone,
+    openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
+    replyInThread: (threadId, words) => setAskReply({ threadId, words }),
+  });
   const reducedMotion = useReducedMotion();
   const [tourState, dispatchTourRaw] = useReducer(tourReducer, TOUR_START);
   const tourContent = useTourFixture(tourOn);
@@ -4489,6 +4510,10 @@ function Inbox() {
             replyRequest={replyFor}
             draftChanged={draftChanged}
             onReplyOpened={() => setReplyFor(null)}
+            askButton={ask.button}
+            askFileButton={ask.fileButton}
+            replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
+            onReplyWordsTaken={() => setAskReply(null)}
             onQuestions={patchQuestions}
             onChanged={afterWrite}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
@@ -4926,6 +4951,7 @@ function Inbox() {
           />
         </div>
       )}
+      {ask.layer}
       {toast && soundDialog !== 'open' && !agentNoteOpen && <InboxToast toast={toast} phone={phone} onDismiss={dismissToast} onHold={holdToast} />}
       <SearchHost
         mounted={searchMounted}

@@ -13,7 +13,7 @@ import { askChatGroups, askChatName, askChatTime } from './askModel';
  * another chat shows there and nowhere before that (told to the owner).
  * Rows have no close X: End stays on the round button.
  */
-export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat; phone: boolean; onPick: (threadId: string) => void }) {
+export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat; phone: boolean; onPick: (chat: InboxAskChat) => void }) {
   const [chats, setChats] = useState<readonly InboxAskChat[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const chip = useRef<HTMLButtonElement>(null);
@@ -42,7 +42,7 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
         key={chat.thread_id}
         className="ib-pmi ib-ask-row"
         label={name}
-        onClick={() => onPick(chat.thread_id)}
+        onClick={() => onPick(chat)}
         aria-label={[name, chat.project, when, state === 'current' ? 'current chat' : state === 'answering' ? 'answering' : state === 'unread' ? 'new answer' : null].filter(Boolean).join(', ')}
         data-ask-chat={chat.thread_id}
         data-state={state ?? undefined}
