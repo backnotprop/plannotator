@@ -5,7 +5,7 @@ import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { agentName, formatCount, fullTime, shortTime, waitCount } from '../format';
+import { agentName, formatCount, fullTime, shortTime, waitCount, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
@@ -28,6 +28,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
+import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listMoveIndex, listStops, LIST_STOPS, type ListMove } from '../listKeys';
@@ -139,6 +140,8 @@ export interface InboxListProps {
    * option off, whatever this browser chose, as the tour's sidebar ignores its closed sections.
    */
   rememberLook?: boolean;
+  /** The ⋮ menu's "Customize rows…": Settings → Rows. Absent (the tour): no item. */
+  onCustomizeRows?: () => void;
 }
 
 /**
@@ -215,7 +218,19 @@ function SnoozedUntil({ row }: { row: InboxListRow }) {
 }
 
 /** The row's time. A thread back from a snooze shows a small clock before it until the person reads it. */
-function RowTime({ row }: { row: InboxListRow }) {
+function RowTime({ row, relative = false }: { row: InboxListRow; relative?: boolean }) {
+  // A relative time moves on by itself: the shared minute clock renders it again (only while it is on).
+  const now = useRelativeClock(relative);
+  const iso = rowTimeIso(row);
+  // Relative: a screen reader hears "4 minutes ago" (never "4m"), and the pointer's tooltip gives the clock time.
+  const time = relative ? (
+    <span className="ib-trel" data-relative-time="" title={whenTime(iso)}>
+      <span aria-hidden="true">{relativeTime(iso, now)}</span>
+      <span className="ib-sr">{relativeWords(iso, now)}</span>
+    </span>
+  ) : (
+    shortTime(iso)
+  );
   return (
     <>
       {row.snooze_back && (
@@ -223,7 +238,7 @@ function RowTime({ row }: { row: InboxListRow }) {
           <Icon name="clock" size={13} />
         </span>
       )}
-      <TimeWithTick delivery={row.delivery} time={shortTime(rowTimeIso(row))} />
+      <TimeWithTick delivery={row.delivery} time={time} />
     </>
   );
 }
@@ -513,8 +528,8 @@ function GuideMark({ row }: { row: InboxListRow }) {
  * mark. Short of room the preview gives way first, all the way, then the title; each cut ends in "…" with its
  * tooltip. The mark drops its label to its icon.
  */
-function TitleCell({ row, pill = false }: { row: InboxListRow; pill?: boolean }) {
-  const preview = previewOf(row);
+function TitleCell({ row, pill = false, noPreview = false }: { row: InboxListRow; pill?: boolean; noPreview?: boolean }) {
+  const preview = noPreview ? null : previewOf(row);
   return (
     <>
       <RowTitle row={row} className="ib-title" pill={pill} tip />
@@ -600,7 +615,14 @@ function fitCountsColumn(list: HTMLElement, pinColumn: boolean): void {
  * list. In one project's list (`filtered`) the first column holds the marks alone.
  * A list with a pinned row adds the pin's column just left of the open counts.
  */
-function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void }) {
+/** Settings → Rows' choices a row reads beyond the list column's classes (listLook.ts). */
+interface RowLook {
+  noPreview: boolean;
+  relative: boolean;
+  titleFirst: boolean;
+}
+
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badgeEl = badgeOf(row, kbd, full);
@@ -623,7 +645,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
     >
       <FromLine row={row} project={project} filtered={filtered} />
       <span className="ib-subj">
-        <TitleCell row={row} pill={pill} />
+        <TitleCell row={row} pill={pill} noPreview={noPreview} />
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
           Undelivered, Read …) take the width they need, between the title cell and the badge. */}
@@ -635,7 +657,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
         <OpenCounts row={row} tip />
       </span>
       <span className="ib-t">
-        <RowTime row={row} />
+        <RowTime row={row} relative={relative} />
       </span>
       {pinned && <PinnedWords />}
     </button>
@@ -755,10 +777,16 @@ function RowWithAction({
   );
 }
 
-function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void }) {
+function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badge = badgeOf(row, kbd);
+  const lead = <LeadLine row={row} project={project} filtered={filtered} />;
+  const time = (
+    <span className="ib-t">
+      <RowTime row={row} relative={relative} />
+    </span>
+  );
   return (
     <>
     <button
@@ -778,23 +806,36 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       {/* Three lines (approval "inbox-list-row-v2", 2026-10-30). Line 1: the agents' tiles and the project after
           them, on one line, then the ✓ and the time at the right. Compact rows (approval "inbox-list-options"): the
           title joins line 1, before the time, cut with "…", and line 2 goes. */}
-      <div className="ib-l1">
-        <LeadLine row={row} project={project} filtered={filtered} />
-        {compact && <RowTitle row={row} className="ib-title" pill={pill} tip />}
-        <span className="ib-t">
-          <RowTime row={row} />
-        </span>
-      </div>
-      {/* Line 2: the title, never cut: a long one wraps (in its pill, one line cut with "…"). */}
-      {!compact && (
-        <div className="ib-l2">
-          <RowTitle row={row} className="ib-title" pill={pill} tip={pill} />
-        </div>
+      {titleFirst ? (
+        // Settings → Rows' First line "Thread name": the name (one line, cut with "…") and the time on line 1, the
+        // agents and the project on line 2; compact rows keep one line, the name before the project.
+        <>
+          <div className="ib-l1">
+            <RowTitle row={row} className="ib-title" pill={pill} tip />
+            {compact && lead}
+            {time}
+          </div>
+          {!compact && <div className="ib-l2 ib-l2-lead">{lead}</div>}
+        </>
+      ) : (
+        <>
+          <div className="ib-l1">
+            {lead}
+            {compact && <RowTitle row={row} className="ib-title" pill={pill} tip />}
+            {time}
+          </div>
+          {/* Line 2: the title, never cut: a long one wraps (in its pill, one line cut with "…"). */}
+          {!compact && (
+            <div className="ib-l2">
+              <RowTitle row={row} className="ib-title" pill={pill} tip={pill} />
+            </div>
+          )}
+        </>
       )}
       {/* Line 3: the grey preview, cut first, then the guided review mark, and at the right end the pin, the badge
           and the count (inbox-row-byline's line 2 without the marks). Nothing to show: no line. */}
       <div className="ib-l3">
-        <Preview row={row} />
+        {!noPreview && <Preview row={row} />}
         <GuideMark row={row} />
         {pinned && <PinMark />}
         {badge}
@@ -816,12 +857,12 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * at the right end of line 3. A pin with nothing else for line 3 stays at the
  * right end of line 1, before the time.
  */
-function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void }) {
+function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
   // A phone: the icons only, no card (the thread shows the details).
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
   const guide = row.guide && row.section !== 'sent';
-  const preview = previewOf(row);
+  const preview = noPreview ? null : previewOf(row);
   // A pin with nothing else for line 3 (no preview, book, badge or count) stays on line 1, before the time, so the
   // row never grows a line for the pin alone.
   const pinOnLine1 = pinned && !preview && !guide && !badge && !row.snoozed && countWords(row, 0) === null && row.questions.open < 1;
@@ -840,17 +881,38 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       data-lit={lit ? '' : undefined}
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
     >
-      <span className="ib-m1">
-        <LeadLine row={row} project={project} filtered={filtered} tip={false} />
-        {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
-        {pinOnLine1 && <PinMark />}
-        <span className="ib-t">
-          <RowTime row={row} />
-        </span>
-      </span>
-      {/* Line 2: the title, never cut (in its pill, one line cut with "…"); compact rows have it on line 1. Line 3:
-          the preview (cut first), then the book, the pin, the badge and the count. */}
-      {!compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
+      {titleFirst ? (
+        // Settings → Rows' First line "Thread name", as on a three-line row.
+        <>
+          <span className="ib-m1">
+            <RowTitle row={row} className="ib-m2" pill={pill} />
+            {compact && <LeadLine row={row} project={project} filtered={filtered} tip={false} />}
+            {pinOnLine1 && <PinMark />}
+            <span className="ib-t">
+              <RowTime row={row} relative={relative} />
+            </span>
+          </span>
+          {!compact && (
+            <span className="ib-m1 ib-m1-lead">
+              <LeadLine row={row} project={project} filtered={filtered} tip={false} />
+            </span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="ib-m1">
+            <LeadLine row={row} project={project} filtered={filtered} tip={false} />
+            {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
+            {pinOnLine1 && <PinMark />}
+            <span className="ib-t">
+              <RowTime row={row} relative={relative} />
+            </span>
+          </span>
+          {/* Line 2: the title, never cut (in its pill, one line cut with "…"); compact rows have it on line 1. */}
+          {!compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
+        </>
+      )}
+      {/* Line 3: the preview (cut first), then the book, the pin, the badge and the count. */}
       <span className="ib-m3">
         {preview && (
           <span className="ib-pv" dir="auto">
@@ -896,6 +958,8 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts), all off by default.
   const [look, setLook] = useListLook(props.rememberLook !== false);
+  // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
+  const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -965,7 +1029,7 @@ export function InboxList(props: InboxListProps) {
   // swap every row twice, at the moment the close hands a row its focus.
   const [besideThread, setBesideThread] = useState(props.narrow);
   useLayoutEffect(() => setBesideThread(props.narrow), [props.narrow]);
-  const twoLine = (narrowList && (props.narrow || !props.filtered)) || (thinList && (props.narrow || !besideThread));
+  const twoLine = (narrowList && (props.narrow || !noProject)) || (thinList && (props.narrow || !besideThread));
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
   // keeps the short forms and the bare triangles (option A).
   const fullWords = !twoLine && !shortWords;
@@ -1035,7 +1099,7 @@ export function InboxList(props: InboxListProps) {
     <section
       ref={listEl}
       id={columnId}
-      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${props.filtered ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
+      className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${noProject ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
     >
       <div className="ib-lhead">
@@ -1110,8 +1174,9 @@ export function InboxList(props: InboxListProps) {
             onRefresh={() => props.onRefresh?.()}
             hideAway={(props.machines?.linked.length ?? 0) > 0 && props.onHideAway ? { on: props.hideAway === true, onChange: props.onHideAway } : undefined}
             look={look}
-            onLook={setLook}
+            onLook={(key, on) => setLook({ [key]: on })}
             threadPanel={props.threadPanel}
+            onCustomize={props.onCustomizeRows}
           />
         )}
       </div>
@@ -1180,7 +1245,7 @@ export function InboxList(props: InboxListProps) {
                       // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
                       shape={props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
                       full={fullWords}
-                      filtered={props.filtered}
+                      filtered={noProject}
                       selected={row.thread_id === props.selectedThreadId}
                       lit={lit(row)}
                       onOpen={openRow}
@@ -1194,6 +1259,9 @@ export function InboxList(props: InboxListProps) {
                       keys={rowKeys}
                       pill={look.highlight}
                       compact={look.compact}
+                      noPreview={look.hidePreview}
+                      relative={look.relativeTime}
+                      titleFirst={look.titleFirst}
                     />
                   ))}
               </div>
@@ -1242,6 +1310,12 @@ interface ListRowProps {
   pill: boolean;
   /** "Compact rows" (listLook.ts): a three-line or phone row's title on line 1. */
   compact: boolean;
+  /** Settings → Rows' "Subject line" off (listLook.ts `hidePreview`): no grey subject under a named thread. */
+  noPreview?: boolean;
+  /** Settings → Rows' Time "Relative" (listLook.ts `relativeTime`). */
+  relative?: boolean;
+  /** Settings → Rows' First line "Thread name" (listLook.ts `titleFirst`): three-line and phone rows. */
+  titleFirst?: boolean;
 }
 
 /**
@@ -1250,15 +1324,16 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, menu, pinned, pinColumn, keys, pill, compact }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false }: ListRowProps) {
     const open = () => onOpen(row);
-    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} onOpen={open} />;
+    const rowLook: RowLook = { noPreview, relative, titleFirst };
+    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
         {shape === 'narrow' ? (
-          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} onOpen={open} />
+          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} onOpen={open} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} onOpen={open} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} onOpen={open} />
         )}
       </RowWithAction>
     );
@@ -1279,6 +1354,9 @@ export const ListRow = memo(
     a.keys === b.keys &&
     a.pill === b.pill &&
     a.compact === b.compact &&
+    a.noPreview === b.noPreview &&
+    a.relative === b.relative &&
+    a.titleFirst === b.titleFirst &&
     a.onOpen === b.onOpen &&
     a.onMarkRead === b.onMarkRead &&
     a.onMarkUnread === b.onMarkUnread &&

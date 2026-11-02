@@ -6667,6 +6667,98 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
   .pn-inbox .ib-lo-phone .ib-lo-acts .ib-btn, dialog.ib-lo-phone .ib-lo-acts .ib-btn { min-height: 44px; justify-content: center; }
 }
 
+/* Settings → Rows (components/RowsSettings.tsx): the narrow picture and the controls side by side (the controls drop
+   under it when the page is too narrow), the full-width picture under both. The page reaches into the window's right
+   margin, up to 240 px, so the full-width picture draws a wide list at its own size from a 1440 px window; narrower,
+   it zooms (RowsSettings `WidePreview`). The pictures are the list's own rows on the list's own ground, in a frame. */
+.ib-spg[data-settings-section="rows"] { max-width: none; margin-right: calc(-1 * clamp(0px, (100vw - 1000px) / 2, 240px)); }
+.ib-rws-top { display: flex; flex-wrap: wrap; gap: 20px 28px; align-items: flex-start; margin-top: 20px; }
+.ib-rws-fig { margin: 0; min-width: 0; }
+.ib-rws-fig > figcaption { margin: 0 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; }
+.ib-rws-fig-narrow { flex: none; width: 382px; max-width: 100%; }
+.ib-rws-fig-wide { margin-top: 24px; }
+.ib-rws-ctl { flex: 1 1 320px; min-width: 0; }
+.ib-rws-ctl > .ib-sgroup-first { margin-top: 0; }
+.ib-rws-ctl .ib-sgroup > h2 { margin-bottom: 8px; }
+.ib-rws-frame { overflow: hidden; border: 1px solid var(--ib-line); border-radius: 10px; background: var(--card); }
+.ib-rws-frame .ib-listcol.ib-rws-list { position: relative; inset: auto; visibility: visible; width: auto; border-right: 0; }
+.pn-inbox .ib-rws-frame .ib-lbody { overflow: hidden; padding-top: 4px; padding-bottom: 4px; }
+.ib-rws-frame .ib-lbody > .ib-group > .ib-rw, .ib-rws-frame .ib-lbody > .ib-group > .ib-mrow { content-visibility: visible; }
+.ib-rws-head { display: flex; align-items: center; gap: 16px; }
+.ib-rws-head > .ib-lede { flex: 1; min-width: 0; margin: 0; }
+.ib-rws-note { margin-top: 12px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-spg[data-settings-section="rows"] { margin-right: 0; }
+  .ib-rws-top { margin-top: 14px; }
+  .ib-rws-fig-narrow, .ib-rws-ctl { flex: 1 1 100%; width: auto; }
+  .ib-rws-ctl > .ib-sgroup-first { margin-top: 4px; }
+}
+
+/* Settings → Rows, round 2 (listLook.ts): each rule needs its option's class on the list column, so with every option
+   at its default none applies. */
+/* The ⋮ menu's options are plain checkboxes (Tidy.tsx `MenuCheckbox`): the box takes the icon's place, so every label,
+   "Customize rows…" too, starts at one edge. */
+.ib-pmi-box { display: grid; place-items: center; width: 15px; height: 15px; flex: none; border: 1.5px solid color-mix(in oklab, var(--foreground) 38%, transparent); border-radius: 4px; }
+.ib-pmi-box[data-on] { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+.ib-pmi .ib-pmi-box .ib-ic { width: 11px; height: 11px; color: inherit; }
+.ib-pmi.ib-pmi-noicon { padding-left: 31px; }
+/* A phone's sheet: its icons stay 15 px (Icon's own size), its items 12 px apart. */
+.ib-pm-pos[data-phone] .ib-pmi.ib-pmi-noicon { padding-left: 39px; }
+/* The presets beside the lede ("Start from"), and "Custom" when the look matches none. The control rows sit 10 px
+   tighter than other Settings rows, so eight of them fit beside the narrow picture. */
+.ib-rws-head { flex-wrap: wrap; }
+.ib-rws-presets { display: flex; align-items: center; gap: 10px; flex: none; }
+.ib-rws-presets > .ib-l { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+/* The presets are buttons (pressed: the look's), so a key moves through them without choosing one. */
+.pn-inbox .ib-rws-presets .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rws-custom { padding: 3px 8px; border: 1px dashed var(--ib-line); border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-rws-ctl .ib-prow { min-height: 48px; padding-top: 7px; padding-bottom: 7px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-rws-head { gap: 12px; }
+  .ib-rws-presets { flex-wrap: wrap; width: 100%; }
+  .ib-rws-presets > .ib-l { flex: 1 1 100%; }
+  .ib-rws-ctl .ib-prow { min-height: 56px; }
+}
+/* Density "Roomy": more room above and below every row, on every shape. */
+.ib-lk-roomy .ib-nrow { padding-top: 14px; padding-bottom: 14px; gap: 4px; }
+.ib-lk-roomy .ib-row { height: 60px; }
+.ib-lk-roomy .ib-mrow { padding-top: 15px; padding-bottom: 16px; gap: 5px; }
+/* Unrendered rows' estimates, content boxes as for compact rows: the wider gaps (a wide row: its 10 px). */
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-rw { contain-intrinsic-size: auto none auto 60px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 88px; }
+.ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 70px; }
+/* The same for Subject preview "2 lines" (a second preview line: 18 px beside a thread, 19 px on a phone, each at
+   line-height 1.35) and First line "Thread name" (2 px more beside a thread; a phone's row keeps its height; compact
+   rows keep theirs). Each density with each. */
+.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 102px; }
+.ib-lk-tfirst:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 86px; }
+.ib-lk-pv2.ib-lk-tfirst:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
+.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 61px; }
+.ib-lk-roomy.ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 106px; }
+.ib-lk-roomy.ib-lk-tfirst .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 90px; }
+.ib-lk-roomy.ib-lk-pv2.ib-lk-tfirst .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 108px; }
+.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 85px; }
+.ib-lk-compact.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 66px; }
+.ib-lk-roomy.ib-lk-pv2 .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 89px; }
+/* Unread "Dot": an accent dot in the row's left gutter, on line 1 (a wide row: its middle). Its own ::after: a
+   three-line or wide row's ::before is its hover and selection pill and its focus ring, which the dot keeps. */
+.ib-lk-dot .ib-mrow { position: relative; }
+.ib-lk-dot :is(.ib-nrow, .ib-row, .ib-mrow).ib-u::after { content: ""; position: absolute; left: 3px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); pointer-events: none; }
+.ib-lk-dot .ib-nrow.ib-u::after { top: 17px; }
+.ib-lk-roomy.ib-lk-dot .ib-nrow.ib-u::after { top: 21px; }
+.ib-lk-dot .ib-row.ib-u::after { top: calc(50% - 3px); }
+.ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
+/* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
+.ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+/* First line "Thread name": the name on line 1, one line cut with "…", the time after it; the agents and the
+   project on line 2. */
+.ib-lk-tfirst .ib-nrow .ib-l1 > .ib-title, .ib-lk-tfirst .ib-m1 > .ib-m2 { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-lk-tfirst :is(.ib-nrow .ib-l1, .ib-m1) > .ib-rowkey { flex: 0 1 auto; min-width: 0; margin-right: auto; }
+.ib-lk-tfirst .ib-nrow .ib-l2-lead { display: flex; align-items: center; min-width: 0; margin-bottom: 2px; font-size: var(--ib-fs-14, 14px); }
+.ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-from { flex: 1 1 auto; min-width: 0; }
+.ib-lk-tfirst .ib-nrow .ib-l2-lead .ib-p { font-size: var(--ib-fs-13, 13px); font-weight: 500; line-height: 17px; color: var(--muted-foreground); }
+.ib-lk-tfirst .ib-m1-lead { min-height: 0; }
+
 /* Voice dictation: the microphone in the composer (components/VoiceMic.tsx). The button takes the paperclip's size in
    each host. The status shares the toolbar's row, so starting to listen moves nothing. */
 .ib-dtfoot { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 10px; }

@@ -105,7 +105,7 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
 import { VoiceIntro } from './components/VoiceIntro';
 import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
-import { readListLook, writeListLook } from './listLook';
+import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
@@ -1343,9 +1343,11 @@ function Inbox() {
 
   const refreshSettings = useCallback(async () => {
     try {
+      const mark = listLookReadMark();
       const next = await inboxApi.settings();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
+      adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffStyle(next.diff_style);
       adoptVoiceSettings(next.voice);
       setSettings(next);
@@ -1632,6 +1634,9 @@ function Inbox() {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
+        // How the rows look was saved (here, another window, a phone): every list takes it at once.
+        // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
+        onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
@@ -1667,6 +1672,8 @@ function Inbox() {
           void refreshDrafts();
           // A card record reads the Board: while it is open, it is read again too.
           if (routeRef.current.page === 'board') void refreshCards();
+          // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
+          void refreshSettings();
         },
         onLive: (live) => setStreamDead(!live),
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
@@ -4771,6 +4778,7 @@ function Inbox() {
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
           narrow={(route.thread !== null || panelView) && !stack.thread}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
+          onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
@@ -5185,8 +5193,8 @@ function Inbox() {
           awayMachines={machines.away}
           projectNames={projectNames}
           phone={phone}
-          onDone={(look) => {
-            writeListLook(look);
+          onDone={(look, opened) => {
+            void writeMenuLook(look, opened);
             setListIntro('shown');
           }}
           onKeep={() => setListIntro('shown')}
