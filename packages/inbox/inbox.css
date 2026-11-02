@@ -4147,8 +4147,6 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   :root[data-ib-keyboard] .ib-cp-body { padding-top: 8px; padding-bottom: 6px; overscroll-behavior: contain; }
   :root[data-ib-keyboard] .pn-inbox .ib-cp-field :is(.ib-rtext, .ib-rmirror) { min-height: 72px; }
   :root[data-ib-keyboard] :is(.ib-cp-thread, .ib-cp-error) { flex: 0 1 auto; min-height: 0; overflow-y: auto; }
-  /* Thread's chip line stays whole; only what it says under the chip (a refusal, an overflow note) gives way. */
-  :root[data-ib-keyboard] .ib-cp-thread { min-height: 52px; }
   .ib-cp-ask { flex-wrap: wrap; border-radius: 0; }
   .ib-cp-ask > span:first-child { flex-basis: 100%; }
   .ib-cp-picker[data-phone] { position: fixed; inset: 0; top: 0; left: 0; width: 100%; max-height: none; height: var(--ib-vvh, 100%); border-radius: 0; border: 0; box-shadow: none; background: var(--card); padding-top: env(safe-area-inset-top); z-index: 60; }
