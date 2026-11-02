@@ -97,7 +97,9 @@ describe('TurnTracker: question prompts carried to the next session', () => {
     const before = new TurnTracker()
     before.beginAsk('a1', 'why?', sink())
     let reject!: (error: Error) => void
-    before.followSubmit('a1', new Promise((_resolve, fail) => (reject = fail)))
+    const submit = new Promise((_resolve, fail) => (reject = fail))
+    submit.catch(() => undefined) // the bridge's own catch
+    before.followSubmit('a1', submit)
     const after = new TurnTracker()
     after.dropQueued(before.queuedPrompts())
     reject(new Error('discarded'))
