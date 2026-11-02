@@ -143,7 +143,7 @@ import { CardChip } from './board/CardChip';
 import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
-import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
+import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
@@ -1363,6 +1363,35 @@ function Inbox() {
       setSettingsReadFailed(true);
     }
   }, []);
+
+  // Settings → Storage's sizes (GET /api/inbox/settings/storage): the server walks every file for them, so only that
+  // panel asks, each time it is shown. Kept for the visit. One read at a time; a Delete's answer carries fresh sizes
+  // and wins over a read that started before it.
+  const [store, setStore] = useState<InboxStorageModel | null>(null);
+  const [storeError, setStoreError] = useState<string | null>(null);
+  const storeReading = useRef(false);
+  const storeTurn = useRef(0);
+  const adoptStore = useCallback((next: InboxStorageModel) => {
+    storeTurn.current += 1;
+    setStore(next);
+    setStoreError(null);
+  }, []);
+  const readStore = useCallback(() => {
+    if (storeReading.current) return;
+    storeReading.current = true;
+    const turn = storeTurn.current;
+    inboxApi
+      .storage()
+      .then(
+        (next) => {
+          if (turn === storeTurn.current) adoptStore(next);
+        },
+        (cause) => setStoreError(cause instanceof Error ? cause.message : String(cause)),
+      )
+      .finally(() => {
+        storeReading.current = false;
+      });
+  }, [adoptStore]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -3586,24 +3615,26 @@ function Inbox() {
     }
   };
 
-  // Settings' Delete thread / Delete project: the store, its blobs and the size read again.
+  // Settings' Delete thread / Delete project: the answer carries the sizes counted after it; the list is read again.
   const deleteThread = async (threadId: string) => {
     setSettingsError(null);
     try {
-      await inboxApi.deleteThread(threadId);
+      adoptStore((await inboxApi.deleteThread(threadId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
+      readStore();
     }
-    await Promise.all([refreshSettings(), refreshList(true)]);
+    await refreshList(true);
   };
   const deleteProject = async (projectId: string) => {
     setSettingsError(null);
     try {
-      await inboxApi.deleteProject(projectId);
+      adoptStore((await inboxApi.deleteProject(projectId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');
+      readStore();
     }
-    await Promise.all([refreshSettings(), refreshList(true)]);
+    await refreshList(true);
   };
 
   const projects = latest?.projects ?? [];
@@ -4590,6 +4621,9 @@ function Inbox() {
         onTestNotification={notifications.sendTest}
         onDeleteThread={deleteThread}
         onDeleteProject={deleteProject}
+        store={store}
+        storeError={storeError}
+        onReadStore={readStore}
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         archivedTotal={archivedTotal}

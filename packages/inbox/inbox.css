@@ -1466,6 +1466,14 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-stbl tr.ib-sub td:first-child { padding-left: 26px; color: var(--muted-foreground); }
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .ib-store-note { padding-left: 19px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* Settings → Storage while its sizes are counted (owner's choice "A · The calm wait", 2026-11-02): the card holds its
+   place, the total is a soft bar about a number wide, the words come only after 0.4 s, and the numbers fade in. */
+.ib-store-wait { min-height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-store-wait-t { animation: ib-store-in 200ms ease-out both; }
+.ib-store-bar { display: inline-block; width: 4.2em; height: 0.85em; vertical-align: -0.05em; border-radius: 4px; background: color-mix(in srgb, var(--muted-foreground) 18%, transparent); }
+.ib-store-in { animation: ib-store-in 160ms ease-out both; }
+@keyframes ib-store-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ib-store-wait-t, .ib-store-in { animation: none; } }
 .pn-inbox .ib-del-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
 /* Archived in Settings (owner ruling 2026-10-12): Settings' own rows, one per archived thread. */

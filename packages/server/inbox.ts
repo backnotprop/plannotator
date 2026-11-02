@@ -1946,7 +1946,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
     prompts: promptsState(!guest),
-    store: perfPhase("disk", () => store.diskUsage()),
+    /** Settings → Storage's folder, so its line is drawn before the count. The sizes are their own read: GET /api/inbox/settings/storage. */
+    store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
     /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
@@ -3074,6 +3075,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json(await agentsModel());
         }
         return json({ error: "Not found", code: "not_found" }, 404);
+      }
+      // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      if (path === "/api/inbox/settings/storage") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        return json(perfPhase("disk", () => store.diskUsage()));
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via)));

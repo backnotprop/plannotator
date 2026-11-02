@@ -313,6 +313,60 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(board.contains(switchNamed(el, 'Decision mode'))).toBe(false);
 });
 
+test.skipIf(!hasDom)('Storage asks for its sizes only when shown: the card holds its place, "Counting what is stored…" only after 0.4 s, then the numbers; a second visit shows them at once', async () => {
+  const { STORE_SLOW_MS } = await import('./components/Settings');
+  // The storage read is held until the test lets it go, as a slow count would be.
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let asked = 0;
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/api/inbox/settings/storage')) {
+      asked += 1;
+      await held;
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+  const counting = (el: ParentNode) => el.textContent?.includes('Counting what is stored…') === true;
+
+  const el = await renderApp('#settings/general');
+  await until(() => el.querySelector('[data-settings-notifications]') !== null, 'General');
+  // Settings itself never asks for the walk.
+  expect(asked).toBe(0);
+
+  act(() => navLink(el, 'storage').click());
+  const opened = performance.now();
+  await until(() => heading(el) === 'Storage' && asked === 1, 'Storage asking for its sizes');
+  // Before 0.4 s: the card in its place, a bar for the total, no words and no numbers.
+  expect(performance.now() - opened).toBeLessThan(STORE_SLOW_MS);
+  expect(el.querySelector('[data-store-wait]')).not.toBeNull();
+  expect(el.querySelector('[data-store-bar]')).not.toBeNull();
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+  expect(counting(el)).toBe(false);
+  expect(el.querySelector('.ib-lede')?.textContent).toContain('/data/inbox: messages, attached files');
+
+  await until(() => counting(el), '"Counting what is stored…"');
+  expect(performance.now() - opened).toBeGreaterThanOrEqual(STORE_SLOW_MS);
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+
+  release();
+  await until(() => el.querySelector('[data-store-bytes]') !== null, 'the sizes');
+  const onDisk = JSON.parse((await call(current!.port, '/api/inbox/settings/storage')).text) as { bytes: number; projects: { name: string }[] };
+  expect(Number(el.querySelector('[data-store-bytes]')!.getAttribute('data-store-bytes'))).toBe(onDisk.bytes);
+  expect([...el.querySelectorAll('[data-store-project]')].map((row) => row.getAttribute('data-store-project'))).toEqual(onDisk.projects.slice(0, 2).map((p) => p.name));
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  expect(el.querySelector('[data-store-bar]')).toBeNull();
+  expect(counting(el)).toBe(false);
+
+  // Back again: the sizes kept from this visit show at once, and are read again quietly.
+  act(() => navLink(el, 'about').click());
+  await until(() => heading(el) === 'About', 'About');
+  act(() => navLink(el, 'storage').click());
+  expect(el.querySelector('[data-store-bytes]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  await until(() => asked === 2, 'a second read');
+});
+
 test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switch saves inboxBoard to config.json, both ways', async () => {
   const config = () => {
     try {
@@ -385,7 +439,7 @@ test.skipIf(!hasDom)('Capabilities: no row for an Inbox with nothing to switch (
     inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
     notifications: { enabled: true, dismissed: false, allowed_origin: null },
     phones: false,
-    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+    store_dir: '/home/u/.plannotator/inbox',
   };
   const noop = () => {};
   const page = (section: 'general' | 'capabilities' | null, phoneList = false, settings: object = model) => (
