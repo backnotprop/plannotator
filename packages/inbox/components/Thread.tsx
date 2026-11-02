@@ -46,6 +46,7 @@ import { MessageMenu, ThreadMore, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
+import { registerReloadFlush } from '../stalePage';
 import { useReplyDraft } from '../replyDraft';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
@@ -2859,6 +2860,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     reportUnsentReply({ subject: unsentSubject, files: unsentFiles, writing: unsentWriting });
     return () => reportUnsentReply(null);
   }, [unsentSubject, unsentFiles, unsentWriting]);
+
+  // The stale page notice's Reload (stalePage.ts) saves first: the reply box's words as its draft, and every answer on
+  // the cards. Files in the box that the draft does not keep would be lost, so they stop the reload too, as do words in
+  // the box of another machine's thread (its drafts live on that machine, which keeps none from here).
+  const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
+  reloadFlush.current = async () => {
+    const current = boxRef.current;
+    const text = current.open ? current.text : null;
+    const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.pastedDraft(text)), pickQueue.settled()]);
+    const awayWords = !!machine && text !== null && text.trim() !== '';
+    return reply && answers && !unsentFiles && !awayWords;
+  };
+  useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
 
   const questionById = (id: string): InboxQuestion | undefined => {
     for (const message of threadRef.current.messages) {

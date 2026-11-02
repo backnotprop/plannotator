@@ -37,6 +37,7 @@ import { Tip } from '../components/Tip';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { registerReloadFlush } from '../stalePage';
 import {
   DRAFT_TOO_LONG,
   NOTHING_SENT_NO_AGENT,
@@ -404,6 +405,16 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (result) props.onSaved(result);
     else setQuestion(false);
   };
+
+  // The stale page notice's Reload (stalePage.ts): what is written here is kept as a draft first, as Close's Save draft
+  // keeps it. A draft another window changed, a file still uploading or a running take stops the reload instead.
+  const reloadFlush = useRef<() => Promise<boolean>>(async () => true);
+  reloadFlush.current = async () => {
+    if (!keepsDrafts || empty || !dirty) return true;
+    if (voice.busy || conflict) return false;
+    return (await save()) !== null;
+  };
+  useEffect(() => registerReloadFlush(() => reloadFlush.current()), []);
 
   const deleteDraft = async () => {
     if (!draft) return;
