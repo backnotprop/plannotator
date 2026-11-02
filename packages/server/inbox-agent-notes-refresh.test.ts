@@ -59,6 +59,10 @@ function v1Records(entries: Record<string, string>): void {
   writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify({ v: 1, notes }));
 }
 
+const OLD_REPLY = "otherwise call `wait_for_reply`";
+const NEW_REPLY = "otherwise read the thread later with `read_thread`";
+const swapped = (text: string) => text.replace(OLD_REPLY, NEW_REPLY);
+
 const results = (options?: Parameters<typeof refreshInboxNotes>[2]) => refreshInboxNotes(dataDir, e, options).map((r) => `${r.agent}:${r.result}`);
 
 test("every version's block is frozen: a released note's bytes never change without a new version", () => {
@@ -141,13 +145,116 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     expect(readInboxAgentNotes(dataDir).notes.codex?.version).toBe(1);
   });
 
-  test("one note the person edited: left as it is", () => {
+  test("one note the person edited: kept as theirs, only the retired reply sentence swapped", () => {
     const path = file(".codex", "AGENTS.md");
     const edited = `${V1_BLOCK.replace("Then keep working.", "Then keep working. Never at night.")}\n`;
     write(path, edited);
     v1Records({ codex: path });
     expect(results()).toEqual(["codex:edited"]);
-    expect(read(path)).toBe(edited);
+    expect(read(path)).toBe(swapped(edited));
+  });
+
+  describe("an edited block still telling agents to call wait_for_reply", () => {
+    const v6 = INBOX_NOTE_EARLIER_BLOCKS[5]!;
+    const recordFor = (path: string, block: string, version: number) => {
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(
+        join(dataDir, "inbox", "agent-notes.json"),
+        JSON.stringify({ v: 1, notes: { codex: { path: realpathSync(path), created: false, version, block_sha256: sha(block), at: "2026-10-31T00:00:00.000Z" } } }),
+      );
+    };
+
+    test("v6 edited: the sentence swapped, the person's text kept, status edited, the record untouched, a second run writes nothing", () => {
+      const path = file(".codex", "AGENTS.md");
+      const edited = `# Mine\n\n${v6.replace("One thread per work stream", "Always say hi. One thread per work stream")}\nAfter.\n`;
+      write(path, edited);
+      recordFor(path, v6, 6);
+      const recordBefore = read(join(dataDir, "inbox", "agent-notes.json"));
+      expect(results()).toEqual(["codex:edited"]);
+      const after = read(path);
+      expect(after).toBe(edited.replace(OLD_REPLY, NEW_REPLY));
+      expect(after).toContain("Always say hi.");
+      expect(after).not.toContain("wait_for_reply");
+      expect(noteStatus("codex", dataDir, e).state).toBe("edited");
+      expect(read(join(dataDir, "inbox", "agent-notes.json"))).toBe(recordBefore);
+      const ino = statSync(path).ino;
+      const snapshot = bytes(path);
+      expect(results()).toEqual(["codex:edited"]);
+      expect(bytes(path).equals(snapshot)).toBe(true);
+      expect(statSync(path).ino).toBe(ino);
+    });
+
+    test("a text outside the markers with the same phrase is unchanged", () => {
+      const path = file(".codex", "AGENTS.md");
+      const mine = `Mine: otherwise call \`wait_for_reply\`.\n\n`;
+      const edited = `${mine}${v6.replace("proactivity", "proactivity!")}\nTail: otherwise call \`wait_for_reply\`.\n`;
+      write(path, edited);
+      recordFor(path, v6, 6);
+      results();
+      const after = read(path);
+      expect(after.startsWith(mine)).toBe(true);
+      expect(after.endsWith("Tail: otherwise call `wait_for_reply`.\n")).toBe(true);
+      expect(after.slice(mine.length, after.length - "Tail: otherwise call `wait_for_reply`.\n".length)).toBe(`${v6.replace("proactivity", "proactivity!").replace(OLD_REPLY, NEW_REPLY)}\n`);
+    });
+
+    test("a reworded reply line is the person's own: unchanged", () => {
+      const path = file(".codex", "AGENTS.md");
+      const edited = `${v6.replace(OLD_REPLY, "otherwise just call `wait_for_reply`")}\n`;
+      write(path, edited);
+      recordFor(path, v6, 6);
+      expect(results()).toEqual(["codex:edited"]);
+      expect(read(path)).toBe(edited);
+    });
+
+    test("CRLF and a BOM are kept", () => {
+      const path = file(".codex", "AGENTS.md");
+      const edited = `﻿# Mine\r\n\r\n${v6.replace("One thread", "Mine. One thread").replace(/\n/g, "\r\n")}\r\n`;
+      write(path, edited);
+      recordFor(path, v6, 6);
+      results();
+      expect(read(path)).toBe(edited.replace(OLD_REPLY, NEW_REPLY));
+    });
+
+    test("a file two agents' records name is changed once", () => {
+      const real = file(".codex", "AGENTS.md");
+      const edited = `${v6.replace("One thread", "Mine. One thread")}\n`;
+      write(real, edited);
+      mkdirSync(file(".pi", "agent"), { recursive: true });
+      symlinkSync(real, file(".pi", "agent", "AGENTS.md"));
+      recordFor(real, v6, 6);
+      const notes = JSON.parse(read(join(dataDir, "inbox", "agent-notes.json")));
+      notes.notes.pi = { ...notes.notes.codex };
+      writeFileSync(join(dataDir, "inbox", "agent-notes.json"), JSON.stringify(notes));
+      expect(results()).toEqual(["codex:edited", "pi:edited"]);
+      expect(read(real)).toBe(edited.replace(OLD_REPLY, NEW_REPLY));
+      expect(lstatSync(file(".pi", "agent", "AGENTS.md")).isSymbolicLink()).toBe(true);
+    });
+
+    test("an untouched v6 block still updates to this version", () => {
+      const path = file(".codex", "AGENTS.md");
+      write(path, `${v6}\n`);
+      recordFor(path, v6, 6);
+      expect(results()).toEqual(["codex:refreshed"]);
+      expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    });
+
+    test("a marked block with no record is not reached", () => {
+      const path = file(".codex", "AGENTS.md");
+      const edited = `${v6.replace("One thread", "Mine. One thread")}\n`;
+      write(path, edited);
+      expect(results()).toEqual([]);
+      expect(read(path)).toBe(edited);
+    });
+
+    test("notes turned off: nothing changes", () => {
+      const path = file(".codex", "AGENTS.md");
+      const edited = `${v6.replace("One thread", "Mine. One thread")}\n`;
+      write(path, edited);
+      recordFor(path, v6, 6);
+      e = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, PLANNOTATOR_INBOX_NOTES: "0" } });
+      expect(results()).toEqual([]);
+      expect(read(path)).toBe(edited);
+    });
   });
 
   test("an earlier note with no record (agent-notes.json lost): not this function's to touch", () => {
@@ -254,7 +361,7 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     write(path, `${INBOX_NOTE_EARLIER_BLOCKS[1]}\n`);
     v1Records({ codex: path });
     expect(results()).toEqual(["codex:edited"]);
-    expect(read(path)).toBe(`${INBOX_NOTE_EARLIER_BLOCKS[1]}\n`);
+    expect(read(path)).toBe(swapped(`${INBOX_NOTE_EARLIER_BLOCKS[1]}\n`));
   });
 
   // The state a crash between the record write and the note's rename leaves (or a failed put-back): the
@@ -294,7 +401,7 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     recordAhead(path);
     expect(noteStatus("codex", dataDir, e).state).toBe("edited");
     expect(results()).toEqual(["codex:edited"]);
-    expect(read(path)).toBe(edited);
+    expect(read(path)).toBe(swapped(edited));
   });
 
   test("a file changed between the read and the write: not clobbered; the next start refreshes it with that change kept", () => {
