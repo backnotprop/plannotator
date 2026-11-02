@@ -270,10 +270,25 @@ describe("pi server hostname", () => {
 		expect(getServerHostname()).toBe("127.0.0.1");
 	});
 
-	test("binds remote sessions to all interfaces", () => {
+	test.each(["1", "true", "TRUE"])("explicit remote mode %s binds all interfaces", (value) => {
 		clearEnv();
-		process.env.PLANNOTATOR_REMOTE = "1";
+		process.env.PLANNOTATOR_REMOTE = value;
 		expect(getServerHostname()).toBe("0.0.0.0");
+	});
+
+	test.each(["SSH_TTY", "SSH_CONNECTION"])("%s alone keeps SSH sessions on loopback", (name) => {
+		clearEnv();
+		process.env[name] = "ssh-session";
+		expect(isRemoteSession()).toBe(true);
+		expect(getServerPort()).toEqual({ port: 19432, portSource: "remote-default" });
+		expect(getServerHostname()).toBe("127.0.0.1");
+	});
+
+	test.each(["0", "false", "", "invalid"])("override %s does not expose an SSH session", (value) => {
+		clearEnv();
+		process.env.SSH_CONNECTION = "127.0.0.1 50000 127.0.0.1 22";
+		process.env.PLANNOTATOR_REMOTE = value;
+		expect(getServerHostname()).toBe("127.0.0.1");
 	});
 });
 
