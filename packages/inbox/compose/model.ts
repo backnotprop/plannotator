@@ -6,6 +6,7 @@
 
 import { derivePersonThreadSubject, suggestPersonThreadName } from '@plannotator/core/inbox-questions';
 import { checkInboxThreadName, INBOX_HOST_NAMES, type InboxComposeLaunch, type InboxComposeProject, type InboxComposeSession, type InboxLaunchAgent, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { inboxScratchSlug } from '@plannotator/core/inbox-scratch';
 import { whenTime } from '../format';
 
 /** One live session with the project it works in: what To names. */
@@ -352,7 +353,28 @@ export interface ComposeStart {
   agent: InboxLaunchAgent;
   /** "Claude Code". */
   name: string;
+  /** A scratch start's is `scratchProject`: the root, not a project of the Inbox's. */
   project: LaunchProject;
+  /** A new scratch folder ("New scratch folder" in the folder menu), made when the person sends. */
+  scratch?: true;
+}
+
+/** The folder menu's "New scratch folder" as the pick (`ComposeStart.project.id`): never a project id (`prj_…`). */
+export const SCRATCH_PICK = 'scratch';
+
+/** A scratch start's stand-in project: the root it is made in (the folder itself is named when the person sends). */
+export function scratchProject(root: string): LaunchProject {
+  return { id: SCRATCH_PICK, name: 'New scratch folder', root, exists: true };
+}
+
+/** The scratch folder a Send would make for this thread name (the server adds `-2`, `-3` when it is taken). */
+export function scratchFolderOf(root: string, threadName: string): string {
+  return `${root.replace(/\/+$/, '')}/${inboxScratchSlug(threadName)}`;
+}
+
+/** The folder menu shows "New scratch folder" for no filter, or one its words match. */
+export function scratchMatches(query: string): boolean {
+  return queryWords(query).every((w) => 'new scratch folder'.includes(w));
 }
 
 const queryWords = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);

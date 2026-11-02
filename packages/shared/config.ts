@@ -6,7 +6,7 @@
  */
 
 import { childEnv } from "./child-env";
-import { join } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { getPlannotatorDataDir } from "./data-dir";
 import {
   readFileSync,
@@ -494,9 +494,12 @@ export interface PlannotatorConfig {
    * permissions" (bypass mode); never set, a launch follows the person's
    * login shell (CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS). `model`: config only, a model name such as
    * `haiku` for each launch's settings file (the manual smoke); anything that
-   * is not a plain model name is ignored.
+   * is not a plain model name is ignored. `scratchDir`: Settings → Agents'
+   * "Scratch folders", where "New scratch folder" makes each new folder (an
+   * absolute path; default `<dataDir>/scratch`). Moving it applies to new
+   * folders only.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; scratchDir?: string };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -1149,14 +1152,18 @@ export function resolveDefaultDiffTypeFor(
 /** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
 const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
-/** config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name. */
-export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null } {
+/**
+ * config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name;
+ * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
+ */
+export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
   const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
   return {
     enabled: coerceConfigBoolean(value.enabled, false),
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
+    scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
   };
 }
 

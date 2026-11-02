@@ -543,7 +543,7 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode]);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
   // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
   useEffect(() => {
     if (!launch?.enabled) return;
@@ -596,6 +596,73 @@ export function AgentsSettings({
       r={<Switch on={launchState.full_permissions} label="Start new sessions with full permissions" busy={launchBusy} onClick={() => void toggleFull()} />}
     />
   ) : null;
+  // "Scratch folders": where New message's "New scratch folder" makes each one (`inboxLaunch.scratchDir`).
+  const [scratchEdit, setScratchEdit] = useState<string | null>(null);
+  const saveScratch = async () => {
+    if (scratchEdit === null || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      setLaunchState((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
+      setScratchEdit(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const scratchRow =
+    launchState?.enabled && launchState.scratch_dir_shown !== undefined ? (
+      <Row
+        k="Scratch folders"
+        v={
+          scratchEdit === null ? (
+            <code data-launch-scratch-dir="">{launchState.scratch_dir_shown}</code>
+          ) : (
+            <input
+              className="ib-agpath"
+              type="text"
+              aria-label="Scratch folders"
+              placeholder="Empty: the default"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              value={scratchEdit}
+              readOnly={launchBusy}
+              data-launch-scratch-input=""
+              onChange={(event) => setScratchEdit(event.target.value)}
+              // Enter does not save (no new keys in the Inbox): only the Save button does.
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.preventDefault();
+              }}
+            />
+          )
+        }
+        sub={
+          <>
+            New scratch folders are made here, named after their thread. A change applies to new folders only. Pick a folder outside any git
+            repository.
+          </>
+        }
+        data={{ 'data-launch-scratch-row': '' }}
+        r={
+          scratchEdit === null ? (
+            <button type="button" className="ib-btn ib-sm" data-launch-scratch-change="" onClick={() => setScratchEdit(launchState.scratch_dir_shown ?? '')}>
+              Change
+            </button>
+          ) : (
+            <>
+              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => setScratchEdit(null)}>
+                Cancel
+              </button>
+              <button type="button" className="ib-btn ib-sm ib-pri" disabled={launchBusy} data-launch-scratch-save="" onClick={() => void saveScratch()}>
+                Save
+              </button>
+            </>
+          )
+        }
+      />
+    ) : null;
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -667,7 +734,7 @@ export function AgentsSettings({
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
             {...(context ? { platform: context.platform } : {})}
-            {...(row.id === 'claude-code' && launchRow ? { extra: launchRow } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

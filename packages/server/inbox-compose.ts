@@ -65,7 +65,7 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
-  launch?: Pick<InboxLaunch, "target" | "prepare" | "begin" | "composeBlock">;
+  launch?: Pick<InboxLaunch, "target" | "prepare" | "abandon" | "begin" | "composeBlock">;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
@@ -142,7 +142,10 @@ export function createInboxCompose(options: {
     // Launch: the folder and the agent are checked first; nothing is written when either fails.
     const launchTarget = options.launch?.target(body.to) ?? null;
     if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
-    const prepared = launchTarget ? await options.launch!.prepare(launchTarget) : null;
+    // A scratch launch makes its folder here, named from the thread's name (`abandon` removes it if no thread is written).
+    const prepared = launchTarget
+      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject })
+      : null;
     const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
@@ -152,9 +155,10 @@ export function createInboxCompose(options: {
     const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
-    const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+    let attachments: ReturnType<typeof inboxUploadAttachments> = [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
+      attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
       result = store.startPersonThread({
         project_id: project.id,
         body: body.body,
@@ -170,11 +174,15 @@ export function createInboxCompose(options: {
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
       throw error;
     }
     // Another Send with this key landed while this one waited on the project:
-    // its message stands, and the files written for this one are not used.
-    if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
+    // its message stands, and the files (and a scratch folder) made for this one are not used.
+    if (result.replayed) {
+      removeInboxAttachmentFiles(store.dir, attachments);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
+    }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else if (prepared) options.launch!.begin(result.message);
     // Sent: the uploads are attachments now, and the draft it came from is done.

@@ -50,6 +50,7 @@
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
+    "./inbox-scratch": "./inbox-scratch.ts",
     "./inbox-permission": "./inbox-permission.ts",
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",

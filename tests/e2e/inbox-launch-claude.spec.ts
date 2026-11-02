@@ -319,7 +319,9 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await d.locator('[data-compose-folder]').click();
   const menu = d.locator('[data-compose-folders]');
   await expect(menu.locator(`[data-compose-folder-option="${plannotatorId}"] .ib-cp-check svg`)).toHaveCount(1);
-  await expect(menu.locator('[data-compose-folder-option]')).toHaveCount(4);
+  // The four projects, then (PR 3) the New scratch folder row.
+  await expect(menu.locator('[data-compose-folder-option]:not([data-compose-folder-option="scratch"])')).toHaveCount(4);
+  await expect(menu.locator('[data-compose-folder-option]').last()).toHaveAttribute('data-compose-folder-option', 'scratch');
   await shot(page, '03-new-session-where');
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);

@@ -1277,11 +1277,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const launchAct = async (action: () => Promise<unknown>, done?: string) => {
+  const launchAct = async <T,>(action: () => Promise<T>, done?: string | ((result: T) => { lead: string; detail?: string })) => {
     setLaunchError(null);
     try {
-      await action();
-      if (done) onToast?.({ icon: 'check', lead: done });
+      const result = await action();
+      if (done) onToast?.({ icon: 'check', ...(typeof done === 'string' ? { lead: done } : done(result)) });
       onRunChanged?.();
     } catch (cause) {
       setLaunchError(cause instanceof InboxApiError ? cause.message : 'That did not work; try again.');
@@ -4436,7 +4436,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             <Icon name="warn" size={16} />
             <div>
               <b>Delete the {hostName(launched.agent)} session?</b>
-              <p>It stops, and its session files are removed. This thread stays.</p>
+              {launched.scratch ? (
+                <p>
+                  It stops, and its session files and its scratch folder <bdi>{launched.folder.split('/').pop()}</bdi>, with everything in it, are removed. This thread
+                  stays.
+                </p>
+              ) : (
+                <p>It stops, and its session files are removed. This thread stays.</p>
+              )}
               <span className="ib-acts">
                 <button type="button" className="ib-btn ib-ghost" onClick={() => setConfirmDelete(false)}>
                   Cancel
@@ -4447,7 +4454,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   data-launch-delete=""
                   onClick={() => {
                     setConfirmDelete(false);
-                    void launchAct(() => inboxApi.launchDelete(launched.id), 'Session deleted');
+                    // A scratch folder that was not the one the Inbox made (a link, another folder, gone) is kept: the toast says so.
+                    void launchAct(
+                      () => inboxApi.launchDelete(launched.id),
+                      (result) => (result.scratch_removed === false ? { lead: 'Session deleted', detail: 'its scratch folder was kept' } : { lead: 'Session deleted' }),
+                    );
                   }}
                 >
                   Delete session

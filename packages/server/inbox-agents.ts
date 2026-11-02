@@ -288,6 +288,13 @@ export function codexHome(e: AgentEnvironment): string {
 export function claudeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "CLAUDE_CONFIG_DIR") ?? join(e.homeDir, ".claude");
 }
+/** Claude Code's global config: `$CLAUDE_CONFIG_DIR/.claude.json` when that is set, else `~/.claude.json`. */
+export function claudeGlobalConfigPath(e: AgentEnvironment): string {
+  return join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json");
+}
+
+/** The most `.claude.json` a read-only lookup reads (it holds per-project history and often passes 1 MiB). */
+export const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
 export function piAgentDir(e: AgentEnvironment): string {
   return envDir(e, "PI_CODING_AGENT_DIR") ?? join(e.homeDir, ".pi", "agent");
 }
@@ -674,8 +681,7 @@ export function claudeBypassSetup(e: AgentEnvironment, folder: string | null = n
   const projectLocal = folder ? readClaudeSettings(join(folder, ".claude", "settings.local.json")) : null;
   const project = folder ? readClaudeSettings(join(folder, ".claude", "settings.json")) : null;
   const disabled = [managed, user, projectLocal, project].some((settings) => permissions(settings).disableBypassPermissionsMode === "disable");
-  const configDir = envDir(e, "CLAUDE_CONFIG_DIR");
-  const global = readAgentFile(configDir ? join(configDir, ".claude.json") : join(e.homeDir, ".claude.json"));
+  const global = readAgentFile(claudeGlobalConfigPath(e));
   let accepted = false;
   if (global.kind === "file") {
     try {
@@ -1731,9 +1737,6 @@ export function claudeCodeMcpEntry(e: AgentEnvironment, ours: readonly (readonly
   return classify(rawJsonEntry(claudeCodeMcpPath(e), ["mcpServers"], false, read), ours, true);
 }
 
-/** The most `.claude.json` the read-only MCP lookup reads. */
-const CLAUDE_JSON_MAX_BYTES = 32 * 1024 * 1024;
-
 /** Claude Code reaches the Inbox through Plannotator's plugin (its mod registers the tool); without the plugin only a person can connect it. */
 function claudeCodeWay(e: AgentEnvironment): ConnectWay {
   return claudeCodePluginEnabled(e) ? { kind: "tool", host: "claude-code" } : { kind: "manual", why: "install Plannotator's Claude Code plugin" };
@@ -1780,7 +1783,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
   // Claude Code connected by hand through MCP, where the plugin gives it no tool (not installed, disabled, or its mod off):
   // it reaches the Inbox (without the wake). Checked before the agent is called off.
   if (id === "claude-code" && (way.kind === "manual" || !claudeCodeModOn(e)) && claudeCodeMcpEntry(e, ourCommands(options, record)).kind === "ours") {
-    return { kind: "mcp", on: true, state: "connected", path: displayPath(join(envDir(e, "CLAUDE_CONFIG_DIR") ?? e.homeDir, ".claude.json"), e), locked: false, reason: null };
+    return { kind: "mcp", on: true, state: "connected", path: displayPath(claudeCodeMcpPath(e), e), locked: false, reason: null };
   }
   // Connected in another file than the environment names (`QWEN_HOME` differs): off here, the switch moves it.
   if (record && recordedElsewhere(spec, e, record)) {

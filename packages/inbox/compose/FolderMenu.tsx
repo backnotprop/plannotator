@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Keyb
 import { Icon } from '../icons';
 import { tildePath } from '../format';
 import { FolderPath } from './ToPicker';
-import { filterLaunchProjects, type LaunchProject } from './model';
+import { filterLaunchProjects, scratchMatches, SCRATCH_PICK, type LaunchProject } from './model';
 
 /**
  * The folder menu (launch, UX screen 03): where a new session starts, picked
@@ -11,6 +11,13 @@ import { filterLaunchProjects, type LaunchProject } from './model';
  * The To picker's look and keys: a filter, ↓ ↑ and Enter, Escape closes the
  * menu only. A project whose folder is gone is listed struck through, and
  * picking it gets compose's folder-missing note (screen 13).
+ *
+ * Last, under a line: "New scratch folder" and the folder a Send would make
+ * (`<root>/<thread-name slug>`). While the agent does not trust the root yet
+ * it reads "New scratch folder · trust it once", shows the root, and says
+ * under it that the first start asks to open the root in Terminal once: that
+ * start fails as untrusted, and its Open in Terminal runs the agent in the
+ * root, so one trust covers every scratch folder after it.
  */
 export function FolderMenu({
   projects,
@@ -18,6 +25,8 @@ export function FolderMenu({
   home,
   phone,
   onPick,
+  scratch,
+  onScratch,
   onClose,
 }: {
   projects: readonly LaunchProject[];
@@ -25,20 +34,29 @@ export function FolderMenu({
   home: string | null;
   phone: boolean;
   onPick: (project: LaunchProject) => void;
+  /**
+   * "New scratch folder": the folder a Send would make and its root (`~/…`), whether the agent (`agentName`)
+   * trusts the root already, else the row names the root and says how the first start asks for it. Null: no row.
+   */
+  scratch?: { folder: string; root: string; trusted: boolean; agentName: string } | null;
+  onScratch?: () => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
   const options = useMemo(() => filterLaunchProjects(projects, query), [projects, query]);
+  const scratchShown = !!scratch && !!onScratch && scratchMatches(query);
+  // The keys walk the projects, then the scratch row.
+  const ids = useMemo(() => [...options.map((p) => p.id), ...(scratchShown ? [SCRATCH_PICK] : [])], [options, scratchShown]);
   const [hlId, setHlId] = useState<string | null>(selected);
-  const found = options.findIndex((p) => p.id === hlId);
-  const hl = options.length === 0 ? -1 : found >= 0 ? found : 0;
+  const found = ids.indexOf(hlId ?? '');
+  const hl = ids.length === 0 ? -1 : found >= 0 ? found : 0;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const optionId = (i: number) => `ib-cp-f-${uid}-${i}`;
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    if (query !== '') setHlId(options[0]?.id ?? null);
+    if (query !== '') setHlId(ids[0] ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   useEffect(() => inputRef.current?.focus(), []);
@@ -65,15 +83,15 @@ export function FolderMenu({
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      if (options.length === 0) return;
+      if (ids.length === 0) return;
       const step = event.key === 'ArrowDown' ? 1 : -1;
-      setHlId(options[(hl + step + options.length) % options.length]!.id);
+      setHlId(ids[(hl + step + ids.length) % ids.length]!);
       return;
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const project = hl >= 0 ? options[hl] : undefined;
-      if (project) onPick(project);
+      if (hl >= 0 && ids[hl] === SCRATCH_PICK) onScratch?.();
+      else if (hl >= 0 && options[hl]) onPick(options[hl]);
     }
   };
 
@@ -107,7 +125,7 @@ export function FolderMenu({
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-flist-${uid}`} aria-label="Projects">
-        {options.length === 0 && <div className="ib-cp-none">No project matches.</div>}
+        {options.length === 0 && !scratchShown && <div className="ib-cp-none">No project matches.</div>}
         {options.map((project, i) => {
           const folder = tildePath(project.root, home);
           return (
@@ -141,7 +159,44 @@ export function FolderMenu({
             </div>
           );
         })}
+        {scratchShown && scratch && (
+          <>
+            {options.length > 0 && <div className="ib-cp-cap-line" role="presentation" />}
+            <div
+              id={optionId(options.length)}
+              role="option"
+              aria-selected={hl === options.length}
+              aria-label={scratch.trusted ? `New scratch folder, ${scratch.folder}` : `New scratch folder in ${scratch.root}. ${untrustedHint(scratch)}`}
+              className={`ib-cp-opt ib-cp-fopt ib-cp-scratch${hl === options.length ? ' ib-hl' : ''}`}
+              data-compose-folder-option={SCRATCH_PICK}
+              data-untrusted={scratch.trusted ? undefined : ''}
+              onPointerMove={() => hl !== options.length && setHlId(SCRATCH_PICK)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onScratch?.()}
+            >
+              <Icon name="folderPlus" size={15} />
+              <span className="ib-cp-op">
+                New scratch folder
+                {!scratch.trusted && <span className="ib-cp-trust"> · trust it once</span>}
+              </span>
+              <FolderPath path={scratch.trusted ? scratch.folder : scratch.root} />
+              <span className="ib-cp-check" aria-hidden="true">
+                {selected === SCRATCH_PICK && <Icon name="check" size={15} />}
+              </span>
+            </div>
+            {!scratch.trusted && (
+              <div className="ib-cp-scratch-hint" aria-hidden="true" data-compose-scratch-hint="">
+                {untrustedHint(scratch)}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
+}
+
+/** Under an untrusted "New scratch folder" row: what "trust it once" asks of the person. */
+function untrustedHint(scratch: { root: string; agentName: string }): string {
+  return `${scratch.agentName} doesn't trust ${scratch.root} yet. Your first Send asks you to open it in Terminal once; after that every scratch folder there starts.`;
 }

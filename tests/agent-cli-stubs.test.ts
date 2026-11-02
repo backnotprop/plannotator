@@ -112,7 +112,7 @@ describe("a stub", () => {
  * Specs that need the agents they set up under HOME found (the sandbox would hide them), so their PATH holds only
  * their own folder and the system's /usr/bin:/bin, never a folder that holds agents.
  */
-const OWN_FAKES = new Set(["inbox-first-run.spec.ts", "inbox-tailnet-owner.spec.ts", "inbox.spec.ts", "voice-inbox.ts", "inbox-launch-claude.spec.ts", "inbox-launch-permission.spec.ts"]);
+const OWN_FAKES = new Set(["inbox-first-run.spec.ts", "inbox-tailnet-owner.spec.ts", "inbox.spec.ts", "voice-inbox.ts", "inbox-launch-claude.spec.ts", "inbox-launch-permission.spec.ts", "inbox-launch-scratch.spec.ts"]);
 
 describe("an e2e spec that builds its own PATH", () => {
   test("gives that Inbox the test sandbox (or keeps the runner's PATH, where the stubs come first)", () => {
