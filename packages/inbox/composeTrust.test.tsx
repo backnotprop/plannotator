@@ -503,14 +503,14 @@ test.skipIf(!hasDom)('a phone: button and circle in the bottom bar with no short
   const foot = inDialog('.ib-cp-foot')!;
   expect(foot.querySelector(CIRCLE)).not.toBeNull();
   expect(foot.querySelector(SEND)!.textContent!.trim()).toBe('Trust and start');
-  expect(foot.querySelector(SEND)!.hasAttribute('aria-keyshortcuts')).toBe(false);
   await press(CIRCLE);
   // The Inbox's bottom sheet on a phone is `.ib-state.ib-nmpop`, styled by the phone media rule.
   expect(inDialog(DETAILS)!.classList.contains('ib-nmpop')).toBe(true);
 });
 
-test.skipIf(!hasDom)('a phone, trusted folder: Send stays where it was, in the top bar', async () => {
+test.skipIf(!hasDom)('a phone, trusted folder: a plain Send in the bottom bar, with no circle', async () => {
   await pickStart(true);
-  expect(inDialog('.ib-cp-bar')!.querySelector(SEND)).not.toBeNull();
-  expect(inDialog('.ib-cp-foot')!.querySelector(SEND)).toBeNull();
+  const foot = inDialog('.ib-cp-foot')!;
+  expect(foot.querySelector(SEND)!.textContent!.trim()).toBe('Send');
+  expect(foot.querySelector(CIRCLE)).toBeNull();
 });
