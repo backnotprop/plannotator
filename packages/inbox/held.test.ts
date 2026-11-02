@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -485,5 +485,40 @@ describe('putRowBack (Undo of Mark read on a seen update held in New)', () => {
     expect(putRowBack(gone, before, 'a')).toEqual(gone);
     expect(drawnSection(gone, 'a')).toBeNull();
     expect(drawnSection(null, 'a')).toBeNull();
+  });
+});
+
+// Snooze (approval "inbox-snooze"): the band is one more group to the held list.
+describe('the Snoozed band', () => {
+  const asleep = (r: InboxListRow) => ({ ...r, snoozed: { until: '2026-10-08T12:00:00Z', at: '2026-10-07T10:00:00Z' } }) as InboxListRow;
+  const model = (rows: InboxListRow[], snoozed: InboxListRow[]) => listGroups({ sections: sections(...rows), snoozed });
+
+  test("an agent's message in a snoozed thread is never news; its return is, and waits behind \"N new\" in the band", () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const shown = model([], [asleep(a)]);
+    expect(shown.map((s) => s.id)).toEqual(['waiting', 'snoozed']);
+    // The agent asks again while it sleeps: nothing to show.
+    const asked = model([], [asleep({ ...a, last_at: '2026-10-07T11:00:00Z', last_agent_at: '2026-10-07T11:00:00Z' } as InboxListRow)]);
+    expect(heldNotice(shown, asked).count).toBe(0);
+    // Its time came: back in Waiting with `snooze_back`. News, and held where it was drawn until shown.
+    const back = model([{ ...a, snooze_back: '2026-10-08T12:00:00Z', last_at: '2026-10-08T12:00:00Z' } as InboxListRow], []);
+    expect(heldNotice(shown, back)).toEqual({ count: 1, text: '1 new in billing-svc' });
+    const held = settleOwn(shown, back);
+    expect(held.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['a']);
+    expect(held.find((s) => s.id === 'waiting')!.threads).toEqual([]);
+  });
+
+  test('a snooze or Unsnooze made with the thread open moves it on Back; the band keeps soonest first', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent');
+    const inWaiting = model([a, b], []);
+    expect(settlesOnBack(inWaiting, asleep(a))).toBe(true);
+    const settled = settleThread(inWaiting, model([b], [asleep(a)]), 'a');
+    expect(drawnSection(settled, 'a')).toBe('snoozed');
+    expect(settlesOnBack(settled, a)).toBe(true);
+    expect(settlesOnBack(settled, asleep(a))).toBe(false);
+    const sooner = { ...asleep(b), snoozed: { until: '2026-10-07T18:00:00Z', at: '2026-10-07T10:00:00Z' } } as InboxListRow;
+    const both = settleThread(settled, model([], [asleep(a), sooner]), 'b');
+    expect(both.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['b', 'a']);
   });
 });

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { inboxSnoozeChoices, inboxSnoozeDays, inboxSnoozeFirstPick, inboxSnoozeKeepTime, inboxSnoozeTimes, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { Icon } from './icons';
@@ -44,7 +44,7 @@ export function SnoozeTimes({ view, onView, onBack, onPick, onClose }: SnoozeTim
   const now = useMemo(() => new Date(), []);
   const choices = useMemo(() => inboxSnoozeChoices(now), [now]);
   return (
-    <div ref={body} className="ib-zview" data-snooze-view={view}>
+    <div ref={body} data-snooze-view={view}>
       {view === 'pick' ? (
         <>
           <BackRow label="Pick a time" onBack={() => onView('times')} />
@@ -174,6 +174,8 @@ export function SnoozePicker({ now, onPick }: { now: Date; onPick: (until: strin
   const times = useMemo(() => inboxSnoozeTimes(day, now), [day, now]);
   const shownTime = inboxSnoozeKeepTime(times, time);
   const root = useRef<HTMLDivElement>(null);
+  // Option ids for `aria-activedescendant`, unique on the page.
+  const uid = useId();
   const until = times.find((entry) => entry.key === shownTime)?.until ?? null;
   const go = () => {
     if (until) onPick(until);
@@ -190,8 +192,8 @@ export function SnoozePicker({ now, onPick }: { now: Date; onPick: (until: strin
       }}
     >
       <div className="ib-zlists">
-        <PickList label="Day" id="ib-zday" options={days} value={day} onChange={setDay} onNeighbour={cross('Time')} onDone={go} centreOn="" />
-        <PickList label="Time" id="ib-ztime" options={times} value={shownTime ?? ''} onChange={setTime} onNeighbour={cross('Day')} onDone={go} centreOn={day} />
+        <PickList label="Day" id={`${uid}day`} options={days} value={day} onChange={setDay} onNeighbour={cross('Time')} onDone={go} centreOn="" />
+        <PickList label="Time" id={`${uid}time`} options={times} value={shownTime ?? ''} onChange={setTime} onNeighbour={cross('Day')} onDone={go} centreOn={day} />
       </div>
       <div className="ib-zfoot">
         <button type="button" className="ib-zgo" onClick={go} disabled={!until} data-snooze-go="">
