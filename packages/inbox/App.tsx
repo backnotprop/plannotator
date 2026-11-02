@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -86,7 +87,7 @@ import { Icon } from './icons';
 import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, tourComposeBody, tourComposeTransport, tourView, useReducedMotion, useTourFixture, useTourReplay } from './tour/Tour';
 import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
-import { TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded, type TourUi } from './tour/model';
+import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { ThreadWait } from './components/ThreadWait';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
@@ -1159,6 +1160,7 @@ function Inbox() {
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
+        perfFirstList(next.sections);
       }
       // Linked machines: the merged list names every machine and its state (an older Inbox names none).
       if (next.machines) setMachineViews(next.machines);
@@ -1279,6 +1281,8 @@ function Inbox() {
 
   const refreshThread = useCallback(async (threadId: string) => {
     const mine = ++threadReadSeq.current;
+    // A thread being opened (not a re-read of the one on screen): pn:thread-open runs until its messages are drawn.
+    if (threadLoaded.current?.thread_id !== threadId) perfThreadOpenStart(threadId);
     // The machine this read goes to: null is this Inbox (or an owner not learned yet).
     const askedOwner = machineOf(threadId);
     try {
@@ -1292,12 +1296,14 @@ function Inbox() {
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadLoad(null);
+        perfThreadReadLanded(threadId, next.thread.messages.length, true);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
-      }
+      } else perfThreadReadLanded(threadId, null, routeRef.current.thread === threadId);
       return next.thread;
     } catch (cause) {
+      perfThreadOpenDropped(threadId);
       // Not on this Inbox, asked before the list named each id's machine: once the first list is read (it may have landed
       // while this read was out; else wait a few seconds at most), read the thread on the machine it names.
       let waiting: string | null = null;
@@ -1560,11 +1566,17 @@ function Inbox() {
     let cancelled = false;
     const readAfterRecord = () => {
       if (timer) clearTimeout(timer);
+      // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
+      const heard = perfStart();
       timer = setTimeout(() => {
-        void refreshList(false).then((next) => next && flushNotifications(next));
+        const listRead = refreshList(false).then((next) => {
+          if (next) flushNotifications(next);
+        });
         void refreshDecisions();
         const open = routeRef.current.thread;
-        if (open) void refreshThread(open);
+        const threadRead = open ? refreshThread(open) : Promise.resolve(null);
+        // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
+        if (heard !== null) void Promise.allSettled([listRead, threadRead]).then(() => perfUntilNextFrame('record-refresh', heard));
         // Picks and comments are unsent work too: the Drafts row follows them.
         void refreshDrafts();
       }, 80);
@@ -1597,7 +1609,7 @@ function Inbox() {
             const threadId = event.message.thread_id;
             setTourArrivals((current) => ({ count: current.count + 1, thread: threadId }));
           }
-          // The replay (steps 1 to 9) in front: the chip says it, nothing rings. Everywhere else, step 10
+          // The tour's cards (steps 1 to 10) in front: the chip says it, nothing rings. Everywhere else, step 11
           // included (it sends the person to get their first question), and with the tab in the background,
           // notifications and the sound work as always, so nothing is ever passed over unseen.
           if (!(now.page === 'tour' && (now.step ?? 1) < TOUR_STEPS && tourPageInFront())) observeEvent(event);
@@ -2108,7 +2120,7 @@ function Inbox() {
   const close = (next: Route) => closeTo(next);
 
   const openSearch = (opener?: HTMLElement | null) => {
-    // Not over the tour’s replay (steps 1 to 9): search shows the person's own threads, which the tour keeps out of sight.
+    // Not over the tour’s cards (steps 1 to 10): search shows the person's own threads, which the tour keeps out of sight.
     if (routeRef.current.page === 'tour' && (routeRef.current.step ?? 1) < TOUR_STEPS) return;
     searchOpener.current = opener ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setSearchMounted(true);
@@ -3846,8 +3858,9 @@ function Inbox() {
   // ── The onboarding tour (approval "inbox-onboarding-tour") ──────────────
   // A replay of a real thread from building Plannotator, drawn with the
   // window's own list, thread and question card over the tour's fixture
-  // (tour/model.ts). Steps 1 to 9 never touch the person's store; step 10 is
-  // their own first-run screen. The person's Inbox stays loaded underneath
+  // (tour/model.ts). Steps 1 to 9 never touch the person's store; step 10,
+  // "Make it yours", sets their theme and text size; step 11 is their own
+  // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
   // Ask AI (PLANNOTATOR_INBOX_ASK_AI): off, this reads nothing and draws nothing. A linked machine's thread has no chat here.
@@ -3979,10 +3992,10 @@ function Inbox() {
     // The tour ended: its start point is forgotten with it.
     tourReturn.current = '';
     tourStartedHere.current = false;
-    // Left by the browser's Back (or anything else not through endTour): the same as Exit there, finished on
-    // step 10 (the entry screen does not come back).
+    // Left by the browser's Back (or anything else not through endTour): the same as Exit there, finished from
+    // step 10, "Make it yours", once the replay is over (the entry screen does not come back).
     if (!tourEnding.current) {
-      saveTour(tourEndRecord(tourState.step === TOUR_STEPS));
+      saveTour(tourEndRecord(tourState.step >= TOUR_SETTINGS_STEP));
       // The browser's Back took the tour's screen with the focus in it: focus lands on the Inbox, never the page.
       landFocusAfterTour();
     }
@@ -4008,20 +4021,20 @@ function Inbox() {
     saveTour({ seen: true });
     go({ page: 'tour', project: null, thread: null, step: 1 });
   };
-  /** What ending the tour records: finished once the person reached step 10, skipped before. */
+  /** What ending the tour records: finished once the person reached step 10 ("Make it yours", after the replay), skipped before. */
   const tourEndRecord = (finished: boolean): InboxTourChange =>
     finished
       ? { finished: true, notify_again: !(notifications.permission === 'granted' && settings?.notifications.enabled === true) }
       : { skipped: true };
   /**
    * Ends the tour: `kind` is what it records, `to` where it goes. A place named (the chip's thread, Settings, a
-   * sidebar row on step 10) takes the tour's own entry. Without one it goes back to where the tour was started, as
+   * sidebar row on step 11) takes the tour's own entry. Without one it goes back to where the tour was started, as
    * the browser's Back when that is the entry under the tour's own; else (a link or a reload) to that place, again
    * in the tour's entry. Either way a later Back never reopens #tour=N.
    */
   const endTour = (kind: 'exit' | 'finish', to?: Route) => {
     tourEnding.current = true;
-    saveTour(tourEndRecord(kind === 'finish'));
+    saveTour(tourEndRecord(kind === 'finish' || tourState.step >= TOUR_SETTINGS_STEP));
     if (to) writeRoute(to, { replace: true });
     else {
       const back = tourReturn.current;
@@ -4066,7 +4079,7 @@ function Inbox() {
     requestAnimationFrame(land);
   }
   // During the tour, focus that a control took with it (a screen redrawn by a step, a hash change, Try again)
-  // lands on the tour's own place: the coach card, the loading screen, step 10's heading, else Exit. Only focus
+  // lands on the tour's own place: the coach card, the loading screen, step 11's heading, else Exit. Only focus
   // that was LOST (the last focused element left the page): a click on empty space is left alone.
   useEffect(() => {
     if (!tourOn) return;
@@ -4141,8 +4154,8 @@ function Inbox() {
   /** New message in the tour's sidebar: live on step 9 until its Send; before it the coach says when, after it where the thread is. */
   const openTourComposeOrNudge = useCallback(
     (opener: HTMLElement) => {
-      if (tourState.step === TOUR_STEPS - 1 && tourState.compose === 'sent') nudgeTour('Your thread is started; it’s in the list.');
-      else if (tourState.step === TOUR_STEPS - 1) openTourCompose(opener);
+      if (tourState.step === TOUR_COMPOSE_STEP && tourState.compose === 'sent') nudgeTour('Your thread is started; it’s in the list.');
+      else if (tourState.step === TOUR_COMPOSE_STEP) openTourCompose(opener);
       else nudgeTour('New message comes later in the tour, at step 9.');
     },
     [tourState.step, tourState.compose, openTourCompose, nudgeTour],
@@ -4171,9 +4184,9 @@ function Inbox() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tourCoachKey]);
-  // The last step (10) is real: Back in the tour bar has no step to go to, and Finish ends it.
+  // The last step (11) is real: Back in the tour bar has no step to go to, and Finish ends it.
   const tourRealStep = tourOn && tourState.step === TOUR_STEPS;
-  /** A sidebar row: on step 10 (the real sidebar shows there) it ends the tour, finished, in the tour's own entry. */
+  /** A sidebar row: on step 11 (the real sidebar shows there) it ends the tour, finished, in the tour's own entry. */
   const leave = (to: Route) => (tourRealStep ? endTour('finish', to) : go(to));
   /** The last step’s notifications line: asked on the click only; hidden for the step by Not now (the first real thread asks once more). */
   const [tourAskHidden, setTourAskHidden] = useState(false);
@@ -5361,6 +5374,9 @@ function Inbox() {
             canForward={tourCanForward(tourState, tourCoachCard)}
             onForward={forwardTour}
             nudge={tourNudge}
+            onSkip={() => dispatchTour({ type: 'next' }, { focusCoach: true })}
+            onSettings={() => endTour('finish', { page: 'settings', project: null, thread: null, section: 'general' })}
+            settingsReady={settings !== null || settingsReadFailed}
           />
         </div>
       )}

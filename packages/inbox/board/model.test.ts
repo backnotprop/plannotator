@@ -14,7 +14,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, youLinkLabel, youThread, type CardMenuItem } from './model';
+import { boardCounts, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -45,17 +45,49 @@ function card(id: string, over: Partial<InboxCardWire> = {}): InboxCardWire {
   } as InboxCardWire;
 }
 
-test('the live lanes in order, only In review on the person; a card the person sent sits on top of Todo until it moves', () => {
+test('the five lanes in order, only In review on the person; a card the person sent sits on top of Todo until it moves', () => {
   const sent = card('sent', { column: 'todo', agent: CLAUDE, sent: { at: '2026-10-20T11:00:00.000Z', to: CLAUDE, thread_id: 'msg_1' }, moved_at: '2026-10-20T10:00:00.000Z' });
-  const lanes = boardLanes([card('a', { column: 'todo' }), card('b', { column: 'in_progress' }), sent, card('c', { column: 'done' }), card('d')]);
-  expect(lanes.map((lane) => lane.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review']);
-  expect(lanes.map((lane) => lane.label)).toEqual(['Backlog', 'Todo', 'In progress', 'In review']);
+  const lanes = boardLanes([card('a', { column: 'todo' }), card('b', { column: 'in_progress' }), sent, card('c', { column: 'done' }), card('d')], Date.parse('2026-10-21T10:00:00.000Z'));
+  expect(lanes.map((lane) => lane.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
+  expect(lanes.map((lane) => lane.label)).toEqual(['Backlog', 'Todo', 'In progress', 'In review', 'Done']);
   expect(lanes.filter((lane) => lane.onYou).map((lane) => lane.column)).toEqual(['in_review']);
   expect(lanes[1].cards.map((c) => c.id)).toEqual(['sent', 'a']);
   expect(lanes[0].cards.map((c) => c.id)).toEqual(['d']);
   expect(sentTo(sent)).toBe('Claude Code');
   // Once the agent moves it, it is just a card.
   expect(sentTo({ ...sent, column: 'in_progress', moved_at: '2026-10-20T12:00:00.000Z' })).toBeNull();
+});
+
+test('the Done lane holds the last seven days from when a card moved to Done; older ones only on All done', () => {
+  const now = Date.parse('2026-10-30T12:00:00.000Z');
+  const lanes = boardLanes(
+    [
+      card('fresh', { column: 'done', moved_at: '2026-10-30T11:00:00.000Z' }),
+      card('six', { column: 'done', moved_at: '2026-10-24T13:00:00.000Z' }),
+      card('eight', { column: 'done', moved_at: '2026-10-22T11:00:00.000Z' }),
+      // Made long ago, done yesterday: the move counts, not when it was made.
+      card('old-made', { column: 'done', created_at: '2026-09-01T10:00:00.000Z', moved_at: '2026-10-29T12:00:00.000Z' }),
+      card('live', { column: 'in_progress', moved_at: '2026-09-01T10:00:00.000Z' }),
+      card('gone', { column: 'dropped', moved_at: '2026-10-30T11:00:00.000Z' }),
+    ],
+    now,
+  );
+  expect(lanes.find((lane) => lane.column === 'done')!.cards.map((c) => c.id)).toEqual(['fresh', 'six', 'old-made']);
+  expect(lanes.flatMap((lane) => lane.cards).map((c) => c.id)).not.toContain('gone');
+  // Exactly seven days on is out.
+  expect(boardLanes([card('edge', { column: 'done', moved_at: '2026-10-23T12:00:00.000Z' })], now).at(-1)!.cards).toEqual([]);
+});
+
+test('"Waiting on you" comes from a linked thread the Inbox lists as waiting on the person, before In review only', () => {
+  const sections: Record<string, string> = { msg_stop: 'stopped', msg_hold: 'holding', msg_wait: 'waiting', msg_new: 'new', msg_quiet: 'quiet' };
+  const rowOf = (id: string) => (sections[id] ? { section: sections[id] } : null);
+  expect(waitingThread(card('a', { column: 'in_progress', threads: ['msg_quiet', 'msg_wait'] }), rowOf)).toBe('msg_wait');
+  expect(waitingThread(card('b', { column: 'todo', threads: ['msg_stop'] }), rowOf)).toBe('msg_stop');
+  expect(waitingThread(card('c', { column: 'backlog', threads: ['msg_hold'] }), rowOf)).toBe('msg_hold');
+  // Nothing waiting, a thread the window has no row for: none.
+  expect(waitingThread(card('d', { column: 'in_progress', threads: ['msg_new', 'msg_quiet', 'msg_gone'] }), rowOf)).toBeNull();
+  // In review has its own "You: …"; Done and Cancelled are over.
+  for (const column of ['in_review', 'done', 'dropped'] as const) expect(waitingThread(card('e', { column, threads: ['msg_wait'] }), rowOf)).toBeNull();
 });
 
 test('the header counts only what its two links hold: Done and Cancelled', () => {

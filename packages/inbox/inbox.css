@@ -5765,6 +5765,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* A narrow page: tighter gaps, so the links stay whole beside the Tidy ⋮ (the Project chip has its own row). */
 .ib-bhead[data-narrow] { gap: 8px; }
 .ib-bhead[data-narrow] .ib-blinks { gap: 4px; }
+/* A phone's Done fold ends in All done when older cards are done (its lane holds the last seven days). */
+.pn-inbox .ib-bdoneall { margin: 2px 14px 12px; }
 .ib-blinks { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-blinks a { color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; font-variant-numeric: tabular-nums; }
 .ib-blinks a:hover { color: var(--foreground); background: var(--ib-hover); }
@@ -6037,6 +6039,17 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rjira { color: var(--foreground); }
 .ib-crdp-rn:focus-visible { color: var(--foreground); text-decoration: underline; }
 @media (forced-colors: active) { .ib-crdp-rjira { color: CanvasText; } }
+/*
+ * A web link (user feedback #10): its label (host and path, already cut in the middle at 44
+ * characters) wraps anywhere on a narrow phone rather than losing its end to a second ellipsis.
+ * Its mark is a 15 px box: the link icon, and over it a favicon only once it has loaded
+ * (LinkFavicon), so the row never moves.
+ */
+.ib-crdp-rweb { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ib-crdp-rfav { position: relative; width: 15px; height: 15px; }
+.ib-crdp-rfav > svg { display: block; }
+.ib-crdp-rfav > img { position: absolute; inset: 0; width: 15px; height: 15px; object-fit: contain; opacity: 0; }
+.ib-crdp-rfav > img[data-shown] { opacity: 1; }
 /* A link-only ref's URL in its tooltip: wraps only after a slash (UrlTip's <wbr>), never at the key's dash. */
 .ib-tip-url { font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); }
 .ib-tip-url > span { white-space: nowrap; }
@@ -6216,6 +6229,55 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-tour-coach.ib-tc-wide { width: auto; }
   .pn-inbox .ib-tour-coach .ib-tc-next { min-height: 44px; padding: 0 16px; }
   .pn-inbox .ib-tour-coach .ib-tc-ff { min-height: 44px; padding: 0 12px; }
+}
+/* A coach card's title takes focus when the card changes (screen readers read it); a ring only after a key (Tour.tsx's focusTitle). */
+.ib-tour-coach h2[data-quiet-focus]:focus-visible { outline: none; }
+/* "Make it yours" (tour/TourSettings.tsx), step 10: the theme, three colour sets and the text size, as tiles over the tour's Inbox. */
+.ib-tour-coach.ib-tc-settings { width: 420px; }
+.ib-tset { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.ib-tset-grp { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ib-tset-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
+.ib-tset-l { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--foreground); }
+.ib-tset-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ib-tset-tile { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; padding: 6px; border: 1px solid var(--ib-line, var(--border)); border-radius: 10px; color: var(--muted-foreground); cursor: pointer; }
+.ib-tset-tile:hover { background: var(--ib-hover-s, var(--ib-hover)); color: var(--foreground); }
+.ib-tset-tile[data-on] { border-color: color-mix(in oklch, var(--primary) 70%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 70%, transparent); color: var(--foreground); }
+.ib-tset-tile input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.ib-tset-tile:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.pn-inbox .ib-tset-tile input:focus-visible { outline: none; }
+.ib-tset-cap { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 1.25; text-align: center; }
+.ib-tset-cap > span { min-width: 0; overflow-wrap: anywhere; }
+.ib-tset-tile[data-on] .ib-tset-cap { font-weight: 600; }
+.ib-tset-pic, .ib-tset-split { position: relative; display: block; height: 52px; }
+.ib-tset-win { position: absolute; inset: 0; display: flex; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 14%, transparent); }
+.ib-tset-split > .ib-tset-win:last-child { clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.ib-tset-side { width: 26%; display: flex; flex-direction: column; padding: 6px 4px; }
+.ib-tset-side > span { height: 5px; border-radius: 3px; opacity: 0.75; }
+.ib-tset-lines { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 7px 6px; }
+.ib-tset-lines > span { height: 4px; border-radius: 2px; }
+.ib-tset-lines > .ib-tset-btn { width: 34%; height: 7px; margin-top: auto; border-radius: 4px; }
+.ib-tset-pal { align-items: center; justify-content: center; padding: 10px 6px 8px; }
+.ib-tset-ck { position: absolute; top: 4px; right: 4px; color: var(--primary); }
+/* Until the first settings read answers (a moment), the controls wait: dimmed, not pickable. */
+.ib-tset[data-waiting] .ib-tset-tiles, .ib-tset[data-waiting] .ib-seg { opacity: 0.55; cursor: progress; }
+.ib-tset[data-waiting] label { cursor: progress; }
+.ib-tset-more { margin: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-tset-more a { color: var(--primary); font-weight: 550; text-decoration: underline; text-underline-offset: 2px; }
+/* The card's Next says what comes next ("Connect agents next →"): one line, the arrow after the words. */
+.ib-tc-settings .ib-tc-next { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+@media (forced-colors: active) {
+  .ib-tset-tile[data-on] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+/* Phones: the bottom sheet; the three tiles stay one row down to 320 px (the mode's caption stacks under its icon). */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-tour-coach.ib-tc-settings { width: auto; max-height: calc(100dvh - var(--ib-tour-bar-h, 52px) - 18px); overflow-y: auto; overscroll-behavior: contain; }
+  .ib-tset { gap: 10px; margin-top: 8px; }
+  .ib-tset-tiles { gap: 6px; }
+  .ib-tset-tile { min-height: 44px; padding: 5px; }
+  .ib-tset-pal { padding: 10px 4px 8px; }
+  .ib-tset-mode .ib-tset-cap { flex-direction: column; gap: 2px; }
+  .ib-tset-pic, .ib-tset-split { height: 44px; }
+  .ib-tset .ib-seg-o { height: 44px; min-width: 44px; justify-content: center; padding: 0 12px; }
 }
 /* Full screen in the tour starts under the tour bar, so Exit tour and the file's own toolbar both stay in reach. */
 .pn-inbox[data-tour] .ib-view.ib-full { top: var(--ib-tour-bar-h, 45px); }

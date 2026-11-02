@@ -5799,11 +5799,13 @@ export class InboxStore {
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
    * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
-   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
-   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
-   * Jira sites are two issues.
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira,
+   * YouTrack, a web link) is the same only by URL: its `ref` is a bare key or
+   * a label, and DEMO-1 on two Jira sites are two issues. A link the person
+   * gives is marked `by: "person"`, also when an agent linked it first (only
+   * such a link's favicon is ever fetched); an agent's link is left unmarked.
    */
-  private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
+  private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[], by: InboxAuthor): InboxCardRef[] {
     const out = [...known];
     const add = (value: unknown, hint: "pr" | "any") => {
       const ref = parseInboxCardRef(value, hint);
@@ -5812,12 +5814,17 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
+      const person = by.kind === "person";
+      const linked: InboxCardRef = { ...ref, via: hint === "pr" ? "pr" : "ref", ...(person ? { by: "person" as const } : {}) };
       const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
       const at = out.findIndex(same);
       if (at < 0) out.push(linked);
-      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
-      else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
+      else {
+        // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
+        if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
+        // The person linking what an agent linked makes it theirs.
+        if (person && out[at]!.by !== "person") out[at] = { ...out[at]!, by: "person" };
+      }
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
@@ -5911,7 +5918,7 @@ export class InboxStore {
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
     if (byAgent && isInboxCardPersonColumn(column) && you === null) throw this.youRequired(column);
-    const refs = this.cardRefs([], input.prs ?? [], input.refs ?? []);
+    const refs = this.cardRefs([], input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
@@ -6036,7 +6043,7 @@ export class InboxStore {
     const title = given(input.title) ? this.cardText(input.title, "title", INBOX_CARD_TITLE_MAX) : card.title;
     const threads = [...card.threads];
     for (const thread of this.cardThreads(input.threads ?? [], card.project_id)) if (!threads.includes(thread)) threads.push(thread);
-    const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? []);
+    const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
