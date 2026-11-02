@@ -132,7 +132,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-reply-draft-files-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '38'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '40'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -1130,4 +1130,30 @@ test.skipIf(!hasDom)("attach, then the pane is given another thread while its sa
   await until(async () => (await draftNames()).join() === 'moved.png', "the file in the first thread's draft");
   expect((await serverDraft())?.body).toBe('Phone words');
   await until(() => unsentReply() === null, 'the guard at rest');
+}, 30_000);
+
+test.skipIf(!hasDom)('words typed, then Cancel while the file save is on its way, the phone changes the words: Edit draft shows the conflict with the file, and Keep mine keeps it', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const slow = holdSaveWhere((body) => body.includes('"files_add":[{'));
+  attach(el, [image('mine.png', 261)]);
+  await until(slow.held, 'the file save held');
+  type(replyText(el)!, 'Hi there');
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  slow.release();
+  await settle(2000);
+  // Both windows hold words: a conflict, and the phone's words stay.
+  expect((await serverDraft())?.body).toBe('Phone words');
+  act(() => button(el, 'Edit draft').click());
+  await until(() => el.querySelector('[data-draft-conflict]') !== null, 'the conflict');
+  expect(replyText(el)?.value).toBe('Hi there');
+  expect(tiles(el)).toEqual(['mine.png:done']);
+  act(() => button(el, 'Keep mine').click());
+  await until(async () => (await serverDraft())?.body === 'Hi there', 'mine kept');
+  await settle(800);
+  expect(await draftNames()).toEqual(['mine.png']);
+  expect(await boxMatchesDraft(el)).toBe(true);
 }, 30_000);

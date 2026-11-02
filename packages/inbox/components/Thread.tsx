@@ -2934,8 +2934,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (!current.open) restoringRef.current = true;
     setBox({ open: true, text: kept });
     // Its files come back as tiles (a long paste's Put back still works), beside any the person attached before the
-    // draft was read. Words a conflict left here have none.
-    if (replyDraft.conflict === null) takeDraftFiles(draftFilesWithMine(replyDraft.draft?.files ?? []), kept, 'add');
+    // draft was read. With words a conflict left here too: this window's files waiting on the choice show, so Keep
+    // mine keeps them.
+    takeDraftFiles(draftFilesWithMine(replyDraft.draft?.files ?? []), kept, 'add');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
@@ -3270,12 +3271,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const text = kept.trim() ? kept : '';
     setBox({ open: true, text });
     // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft), with
-    // this window's changes not saved yet; the box's next save counts from them.
-    if (replyDraft.conflict === null) {
-      const files = draftFilesWithMine(replyDraft.draft?.files ?? []);
-      if (files.length > 0) takeDraftFiles(files, text);
-      else replyDraft.boxTook(thread.thread_id, replyFiles.draftFiles(text).map((file) => file.upload_id));
-    }
+    // this window's changes not saved yet; the box's next save counts from them. With a conflict too: a file whose save
+    // waits on the person's choice shows, so Keep mine keeps it (an empty box would send its removal).
+    const files = draftFilesWithMine(replyDraft.draft?.files ?? []);
+    if (files.length > 0) takeDraftFiles(files, text);
+    else replyDraft.boxTook(thread.thread_id, replyFiles.draftFiles(text).map((file) => file.upload_id));
     setError(null);
   };
 
