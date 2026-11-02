@@ -222,7 +222,7 @@ export const CARD_COMMAND_USAGE = [
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
-  "Every command takes [--project <folder>] (default: this folder) and [--json].",
+  "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
   `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",

@@ -72,7 +72,11 @@
  *   the name in `$.store` by session id, and each Inbox poll reads it.
  * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
  *   every process the session starts inherits, so a Plannotator server can be
- *   matched to the session that started it.
+ *   matched to the session that started it. Beside it,
+ *   `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the
+ *   folder the session files under in the Inbox, so its shell's
+ *   `plannotator inbox call` and `plannotator card` land where its
+ *   `plannotator_inbox` tool does, whatever folder the shell is in.
  *
  * Every `$` call is in this file (`claude plugin validate` follows `$`); the
  * logic lives behind `Host` in controller.ts.
@@ -210,6 +214,10 @@ function hostOf($: Engine, debugPath: string | null): Host {
       } catch {
         return false
       }
+    },
+    // Beside PLANNOTATOR_SESSION_TAG: the session's Inbox project folder (INBOX_SESSION_PROJECT_ENV in inbox.ts).
+    setSessionProject: async (value) => {
+      await $.env.set('PLANNOTATOR_SESSION_PROJECT', value)
     },
     loadedPlugin: () => readLoadedPlugin($),
     engineVersion: () => readEngineVersion($),
@@ -500,6 +508,8 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
     mod = instance
+    // Beside the tag, for the same session: the project its shell's `plannotator inbox call` / `card` file under.
+    await instance.exportSessionProject()
     await instance.restore().catch(() => undefined)
     return instance
   })()
@@ -754,6 +764,9 @@ export function register(on: On) {
     // loop: the same launch and result as the tool (take-over.ts); anything
     // the tool cannot represent, and every subagent's command, runs as written.
     if (allowed && e.tool === SHELL_TOOL) {
+      // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
+      // (written only on a change).
+      if (mod && !mod.isDisposed) await mod.exportSessionProject()
       const input = shellTakeOver(e.command, !!e.agentId)
       if (!input) return next(e)
       const instance = await currentMod($)
@@ -885,6 +898,8 @@ export function register(on: On) {
       const instance = await currentMod($).catch(() => null)
       // A subagent's start carries its id: the controller counts only the main loop's turns.
       if (instance) await instance.onTurnStart(e.turnId, typeof e.text === 'string' ? e.text : '', typeof e.agentId === 'string' ? e.agentId : undefined)
+      // A /cd since the last turn moved the project: the shell's Inbox commands follow it.
+      if (instance && !e.agentId) await instance.exportSessionProject()
     }
     return next(e)
   })

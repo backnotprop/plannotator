@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxProject, InboxProjectRepo } from "@plannotator/core/inbox-types";
-import { combineSuggestions } from "./inbox-combine-suggestions";
+import { COMBINE_WHY_STARTED_ABOVE, combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 
 let created = 0;
 function project(id: string, root: string, extra: Partial<InboxProject> = {}): InboxProject {
@@ -101,5 +101,55 @@ describe("combineSuggestions", () => {
   test("Windows paths are read the same", () => {
     const projects = [project("prj_app", "C:\\code\\app"), project("prj_left", "C:\\code\\app\\.worktrees\\fix-y")];
     expect(pairs({ projects, repoOf: () => null, threads: noThreads })).toEqual([["prj_left", "prj_app"]]);
+  });
+});
+
+// Audit D2: a session started in a plain folder above a repository files under the folder; the repository's own
+// sessions file under the repository. Offered only when every agent message of the folder is the repository's work.
+describe("combineSuggestions: work split by start folder", () => {
+  const PLAIN = new Set(["/code", "/code/notes", "/home/me"]);
+  const split = (work: Record<string, InboxAgentWork[]>, projects = [project("prj_code", "/code"), project("prj_a", "/code/a")], extra: Partial<Parameters<typeof combineSuggestions>[0]> = {}) =>
+    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: (root) => PLAIN.has(root), agentWork: (id) => work[id] ?? [], ...extra });
+  const at = (session: string | null, folder: string | null = null): InboxAgentWork => ({ session, folder });
+
+  test("offered into the repository when the folder's messages were sent from inside it, or by sessions that also wrote there", () => {
+    const fromInside = split({ prj_code: [at("claude-1", "/code/a"), at("claude-1", "/code/a/src")], prj_a: [at("codex-1")] });
+    expect(fromInside.map((row) => [row.from.id, row.into.id, row.why])).toEqual([["prj_code", "prj_a", COMBINE_WHY_STARTED_ABOVE]]);
+    // The same session wrote in both (its shell's calls before one session was one project, or a /cd).
+    const sameSession = split({ prj_code: [at("claude-1"), at("claude-1")], prj_a: [at("claude-1", null)] });
+    expect(sameSession.map((row) => [row.from.id, row.into.id])).toEqual([["prj_code", "prj_a"]]);
+  });
+
+  test("never for unrelated folders: other work in the folder, several projects inside it, or no messages", () => {
+    // One message from the folder itself by a session that never wrote in the repository: other work.
+    expect(split({ prj_code: [at("claude-1", "/code/a"), at("claude-2")], prj_a: [at("claude-1")] })).toEqual([]);
+    // A message from a sibling whose name starts the same is not inside it.
+    expect(split({ prj_code: [at("claude-1", "/code/ab")], prj_a: [at("codex-1")] })).toEqual([]);
+    // A folder that holds several projects is a folder of projects, even when all its work so far was one's.
+    const two = [project("prj_code", "/code"), project("prj_a", "/code/a"), project("prj_b", "/code/b")];
+    expect(split({ prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")] }, two)).toEqual([]);
+    // Nothing to judge by.
+    expect(split({ prj_a: [at("codex-1")] })).toEqual([]);
+    // An agent with no session that sent from the folder itself.
+    expect(split({ prj_code: [at(null)], prj_a: [at(null)] })).toEqual([]);
+  });
+
+  test("never out of a repository, the home folder or `/`, never into a plain folder, and not again once undone", () => {
+    const work = { prj_code: [at("claude-1", "/code/a")], prj_a: [at("claude-1")], prj_home: [at("claude-1", "/home/me/a")] };
+    // A repository with a nested one: separate by design (a submodule is its own project).
+    expect(split(work, undefined, { plainFolder: () => false })).toEqual([]);
+    // The home folder (plainFolder says no) holding one project.
+    expect(split(work, [project("prj_home", "/home/me"), project("prj_a", "/home/me/a")], { plainFolder: (root) => root !== "/home/me" && PLAIN.has(root) })).toEqual([]);
+    // Into a plain folder: two places, whatever their agents did.
+    expect(split({ prj_code: [at("claude-1", "/code/notes")], prj_notes: [at("claude-1")] }, [project("prj_code", "/code"), project("prj_notes", "/code/notes")])).toEqual([]);
+    // The person undid it.
+    expect(split(work, [project("prj_code", "/code", { separated_from: "prj_a" }), project("prj_a", "/code/a")])).toEqual([]);
+  });
+
+  test("reads messages only for a folder with one project inside it", () => {
+    const asked: string[] = [];
+    const projects = [project("prj_x", "/x"), project("prj_y", "/y"), project("prj_code", "/code"), project("prj_a", "/code/a"), project("prj_b", "/code/b")];
+    combineSuggestions({ projects, repoOf: () => null, threads: noThreads, plainFolder: () => true, agentWork: (id) => (asked.push(id), []) });
+    expect(asked).toEqual([]);
   });
 });

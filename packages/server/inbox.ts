@@ -113,7 +113,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { combineSuggestions } from "./inbox-combine-suggestions";
+import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
 import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -153,7 +153,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
-import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
+import { createInboxProjectRoots, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
@@ -394,6 +394,8 @@ export interface InboxServerOptions {
   refRunner?: RefRunner;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
+  /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
+  projectRootHome?: string | null;
   /**
    * How long after a Mark read the asking agents are told what it closed (the
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
@@ -881,7 +883,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
   // and live sessions, so they always agree.
-  const projectRoots = createInboxProjectRoots(options.projectRootGit ? { git: options.projectRootGit } : {});
+  const projectRoots = createInboxProjectRoots({
+    ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+    ...(options.projectRootHome !== undefined ? { home: options.projectRootHome } : {}),
+  });
+  /**
+   * The projects a guess (git past its time limit) may file into: repository
+   * projects (a `.git` on disk, no git run), never one at the home folder or
+   * `/`, which a dotfiles home or an older Inbox may have made: it would take
+   * every folder under it for good.
+   */
+  const repositoryProjects = () => store.allProjects().filter((project) => existsSync(join(project.root, ".git")) && !isHomeOrRootFolder(project.root, projectRoots.home));
   // Images messages show that have no captured file yet: copied in the background after a read of their thread (inbox-message-images.ts).
   const imageCapture = createInboxImageCapture(store);
   const projectLocks = new Map<string, Promise<InboxProject>>();
@@ -896,8 +908,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // from disk, no git), else the agent is told to try again. A folder
       // project (`~`, a notes folder) never takes a guess: a new worktree or
       // repository under it would be filed there for good.
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) return holder;
       throw new InboxError(
         "project_unresolved",
@@ -927,8 +938,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const existing = store.projectByRoot(root);
     if (existing) projects.push(existing);
     else if (!settled) {
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) projects.push(holder);
     }
     const earlier = worktree ? store.projectByRoot(worktree) : null;
@@ -2623,6 +2633,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
   });
 
+  /**
+   * Each project's agent messages (by its group's head) for Tidy's "started a
+   * folder above" suggestion: who sent each, and the folder it was sent from
+   * (`base_path`). Read only for a folder that may qualify, and once per
+   * store change (the event-log cursor), not on every list read.
+   */
+  let agentWorkIndex: { cursor: number; byProject: Map<string, InboxAgentWork[]> } | null = null;
+  const agentWorkOf = (projectId: string): InboxAgentWork[] => {
+    const cursor = store.cursor();
+    if (agentWorkIndex?.cursor !== cursor) {
+      const byProject = new Map<string, InboxAgentWork[]>();
+      for (const threadId of store.threadIds()) {
+        const root = store.message(threadId);
+        if (!root) continue;
+        const head = store.canonicalProjectId(root.project_id);
+        const work = byProject.get(head) ?? [];
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message?.author.kind === "agent") work.push({ session: message.author.session, folder: message.base_path ?? null });
+        }
+        byProject.set(head, work);
+      }
+      agentWorkIndex = { cursor, byProject };
+    }
+    return agentWorkIndex.byProject.get(store.canonicalProjectId(projectId)) ?? [];
+  };
+
   // Tidy (packages/server/inbox-tidy.ts): the list header's and the Board's ⋮ menu.
   const tidy = createInboxTidy({
     store,
@@ -2644,7 +2681,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return threads.get(id) ?? 0;
       };
-      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf, sameProject: (a, b) => store.sameProject(a, b) });
+      return combineSuggestions({
+        projects: store.listProjects(),
+        repoOf: (root) => repos.peek(root),
+        threads: threadsOf,
+        sameProject: (a, b) => store.sameProject(a, b),
+        // A folder above a repository (read from disk, no git): not a repository, the home folder or `/`.
+        plainFolder: (root) => !existsSync(join(root, ".git")) && !isHomeOrRootFolder(root, projectRoots.home),
+        agentWork: agentWorkOf,
+      });
     },
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });

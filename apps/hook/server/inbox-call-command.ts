@@ -41,7 +41,7 @@ import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxS
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
-import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -197,7 +197,8 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   const input = argumentsOf(text, deps.cwd);
   if ("error" in input) return refused(input.code, input.error, 2);
 
-  const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller);
+  // With no project_path, the session's own project (its host's PLANNOTATOR_SESSION_PROJECT), wherever the shell has cd'd to.
+  const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller, null, inboxSessionProjectFromEnv(deps.env));
   // Where the script runs is where its relative attachments and images are, wherever its project is.
   const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
   // Only on a read of one thread or message: a list has nothing to settle, and the peek would empty it.

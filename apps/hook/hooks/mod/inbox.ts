@@ -220,6 +220,36 @@ export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500
  */
 export const INBOX_PROJECT_FOLLOWS_SLASH_CD = true
 
+/**
+ * The variable the mod exports beside PLANNOTATOR_SESSION_TAG: the folder
+ * this session files under in the Inbox (`sessionProjectFolder`), as
+ * `claude-code:<session id>:<folder>`. A `plannotator inbox call` or
+ * `plannotator card` the session runs files there when it names no project,
+ * so a shell `cd` never splits one session into two projects
+ * (`inboxSessionProjectFromEnv` in apps/hook/server/inbox-mcp-shim.ts reads
+ * it, only for a call filed as this very session). `$.env.set` needs the
+ * name spelled as a literal in register.ts.
+ */
+export const INBOX_SESSION_PROJECT_ENV = 'PLANNOTATOR_SESSION_PROJECT'
+
+/** PLANNOTATOR_SESSION_PROJECT's value for this session and folder. */
+export function inboxSessionProjectEnvValue(sessionId: string, folder: string): string {
+  return `${INBOX_HOST}:${sessionId}:${folder}`
+}
+
+/**
+ * The folder a session files under (`InboxLink.projectFolder`'s rule): `live`
+ * (the root now, while INBOX_PROJECT_FOLLOWS_SLASH_CD), else `first` (the root
+ * first seen), each only while it exists; else the working folder. Null when
+ * nothing answers with an absolute path.
+ */
+export async function sessionProjectFolder(host: Host, live: string | null, first: string | null, cwd: string | null): Promise<string | null> {
+  const usable = async (folder: string | null): Promise<boolean> => !!folder && folder.startsWith('/') && (await host.exists(folder).catch(() => false))
+  if (live && (await usable(live))) return live
+  if (first && (await usable(first))) return first
+  return cwd && cwd.startsWith('/') ? cwd : null
+}
+
 /** The Inbox tools whose relative paths resolve against the folder the agent works in (INBOX_WORKING_FOLDER_META_KEY). */
 const INBOX_WORKING_FOLDER_ACTIONS: ReadonlySet<string> = new Set(['send_message', 'submit_guide'])
 
@@ -824,14 +854,10 @@ export class InboxLink {
    * folder. Null when nothing answers with an absolute path.
    */
   async projectFolder(): Promise<string | null> {
-    const usable = async (folder: string | null): Promise<boolean> =>
-      !!folder && folder.startsWith('/') && (await this.host.exists(folder).catch(() => false))
     const live = INBOX_PROJECT_FOLLOWS_SLASH_CD && this.options.root ? await this.options.root().catch(() => null) : null
-    if (live && (await usable(live))) return live
     const first = await this.folderNow()
-    if (first && (await usable(first))) return first
     const cwd = this.options.cwd ? await this.options.cwd().catch(() => null) : null
-    return cwd && cwd.startsWith('/') ? cwd : null
+    return sessionProjectFolder(this.host, live, first, cwd)
   }
 
   /** Where the session started, asked once (the first answer stands; a later /cd, host directory change or worktree move moves `$.session.root()`). */

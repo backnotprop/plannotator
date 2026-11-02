@@ -53,6 +53,8 @@ import {
 import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
+import { statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card"]);
 /** The tools that take the project but no session: search (its schema is strict, so no `agent_session`). */
@@ -102,6 +104,53 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   const qwen = env[INBOX_QWEN_SESSION_ENV];
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
   return null;
+}
+
+/**
+ * The variable an agent host sets beside its session (the Claude Code mod
+ * beside `PLANNOTATOR_SESSION_TAG`, the Pi extension beside `PI_SESSION_ID`):
+ * `<host>:<session id>:<folder>`, the folder that session files under in the
+ * Inbox (its `plannotator_inbox` tool's `project_path`). A command the
+ * session runs (`plannotator inbox call`, `plannotator card`) files there too
+ * when the agent names no project, wherever the shell has `cd`'d to, so one
+ * session is one project for every tool.
+ */
+export const INBOX_SESSION_PROJECT_ENV = "PLANNOTATOR_SESSION_PROJECT";
+
+/** A session's project folder, as its host exported it (`INBOX_SESSION_PROJECT_ENV`). */
+export interface InboxSessionProject {
+  host: string;
+  session: string;
+  folder: string;
+}
+
+/** `PLANNOTATOR_SESSION_PROJECT`, or null when it is absent or malformed (a known host, a session id, an absolute folder). */
+export function inboxSessionProjectFromEnv(env: Record<string, string | undefined>): InboxSessionProject | null {
+  const value = env[INBOX_SESSION_PROJECT_ENV];
+  if (typeof value !== "string") return null;
+  const first = value.indexOf(":");
+  const second = first > 0 ? value.indexOf(":", first + 1) : -1;
+  if (second < 0) return null;
+  const host = value.slice(0, first);
+  const session = value.slice(first + 1, second);
+  const folder = value.slice(second + 1);
+  if (!Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) || !isInboxSessionId(session) || !isAbsolute(folder)) return null;
+  return { host, session, folder };
+}
+
+/**
+ * The folder a call files under when the agent named no project: the
+ * session's own project folder when the call is filed as that very session
+ * (host and id) and the folder still exists, else `cwd`. A variable inherited
+ * from another session (a nested agent, a stale shell) never applies.
+ */
+export function inboxProjectFolderFor(sessionProject: InboxSessionProject | null, caller: { host?: string | null; session: string } | null | undefined, cwd: string): string {
+  if (!sessionProject || !caller || caller.session !== sessionProject.session || (caller.host ?? null) !== sessionProject.host) return cwd;
+  try {
+    return statSync(sessionProject.folder).isDirectory() ? sessionProject.folder : cwd;
+  } catch {
+    return cwd;
+  }
 }
 
 /**
@@ -172,6 +221,8 @@ export interface InboxMcpShimOptions {
   hostSession?: InboxHostSession | null;
   /** Where a Qwen Code session is read at each call (`inboxQwenShimContext`); absent: Qwen only through `hostSession`. */
   qwen?: InboxQwenShimContext | null;
+  /** The host session's own project folder (`inboxSessionProjectFromEnv`): a call filed as that session files there, not in `cwd`. */
+  sessionProject?: InboxSessionProject | null;
   /**
    * The shim runs in an agent Plannotator's Ask AI started (`isAskAiChild`):
    * it answers on its own with no tools (`askAiChildReply`), and never starts
@@ -202,8 +253,20 @@ function rpcError(id: string | number | null | undefined, message: string, code 
  * A call from Codex (`clientName` is `codex-mcp-client`, or the call carries
  * Codex's turn metadata) that names its thread (`params._meta.threadId`) is
  * that thread's: the host session is the thread, whatever the environment says.
+ *
+ * `project_path` is `cwd`, unless the call is filed as the session
+ * `sessionProject` names (its host's `PLANNOTATOR_SESSION_PROJECT`): then
+ * that session's own project folder (`inboxProjectFolderFor`), as its
+ * `plannotator_inbox` tool would send.
  */
-export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: string | null, hostSession?: (Pick<InboxHostSession, "session"> & Partial<InboxHostSession>) | null, clientName?: string | null): JsonRpc {
+export function fillInboxToolArguments(
+  message: JsonRpc,
+  cwd: string,
+  own: string | null,
+  hostSession?: (Pick<InboxHostSession, "session"> & Partial<InboxHostSession>) | null,
+  clientName?: string | null,
+  sessionProject?: InboxSessionProject | null,
+): JsonRpc {
   if (message.method !== "tools/call" || !message.params) return message;
   const codexThread = codexThreadOfCall(message.params._meta, clientName);
   if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
@@ -211,12 +274,17 @@ export function fillInboxToolArguments(message: JsonRpc, cwd: string, own: strin
   if (typeof name !== "string") return message;
   if (PROJECT_ONLY_TOOLS.has(name)) {
     const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
-    if (args.project_path === undefined && args.all_projects !== true) args.project_path = cwd;
+    if (args.project_path === undefined && args.all_projects !== true) args.project_path = inboxProjectFolderFor(sessionProject ?? null, hostSession, cwd);
     return { ...message, params: { ...message.params, arguments: args } };
   }
   if (!FILLED_TOOLS.has(name)) return message;
   const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
-  if (args.project_path === undefined && args.reply_to === undefined) args.project_path = cwd;
+  if (args.project_path === undefined && args.reply_to === undefined) {
+    // The session the call is filed as: the agent's own, else the host session it adopts below.
+    const adopts = hostSession && args.agent_session === undefined && (args.agent_host === undefined || args.agent_host === hostSession.host);
+    const caller = adopts ? hostSession : typeof args.agent_session === "string" ? { host: typeof args.agent_host === "string" ? args.agent_host : null, session: args.agent_session } : null;
+    args.project_path = inboxProjectFolderFor(sessionProject ?? null, caller, cwd);
+  }
   if (args.agent_session === undefined) {
     if (hostSession && (args.agent_host === undefined || args.agent_host === hostSession.host)) {
       args.agent_session = hostSession.session;
@@ -308,7 +376,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
     }
     // Qwen's session is read again for each call: /clear and /resume change it under the same Qwen process.
     const callHost = message?.method === "tools/call" ? inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName) : hostSession;
-    const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName);
+    const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName, options.sessionProject);
     let target: InboxRegistryEntry;
     try {
       target = await entry();

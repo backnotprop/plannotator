@@ -6,9 +6,12 @@
  * order:
  *
  *  1. The path must be an absolute path to an existing folder; it is taken
- *     by its realpath (`folder`).
+ *     by its realpath (`folder`). A filesystem root names the home folder:
+ *     `/` is never a project (`inboxProjectFolderOf`).
  *  2. Not in a git work tree (no git, not a repository, inside a `.git`
- *     folder, a repository git cannot open): the folder is the project.
+ *     folder, a repository git cannot open), or in one whose toplevel is the
+ *     home folder (a dotfiles home) or `/`: the folder is the project, as
+ *     under a plain home (`isHomeOrRootFolder`).
  *  3. In a git work tree: the work tree's toplevel is the project, except
  *     when that work tree is a LINKED worktree (`git worktree add`, which is
  *     how Claude Code isolates an agent in `.claude/worktrees/agent-…`).
@@ -54,7 +57,8 @@
  */
 
 import { realpathSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { extractDirName, extractRepoName } from "@plannotator/core/project";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 
@@ -172,6 +176,38 @@ export function inboxProjectFolder(path: string): string {
   throw new InboxError("validation_error", "project_path: no such folder.", { field: "project_path" });
 }
 
+/** This user's home folder as a realpath, or null when there is none to read. */
+function realHome(): string | null {
+  try {
+    return realpathSync(homedir());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A filesystem root, or the home folder (`home`, a realpath). Neither is ever
+ * a repository's project: a home that is a git work tree (dotfiles) would
+ * swallow every plain folder under it, and a git repository at `/` every
+ * folder on the machine. `/` is never a project at all (`inboxProjectFolderOf`).
+ */
+export function isHomeOrRootFolder(folder: string, home: string | null): boolean {
+  return folder === parse(folder).root || (home !== null && folder === home);
+}
+
+/**
+ * The folder a path names for the Inbox: its realpath (`inboxProjectFolder`),
+ * except a filesystem root, which names the home folder: an MCP client that
+ * starts its server at `/` (a desktop app) has no folder of its own, and `/`
+ * is no project. Without a home folder to use, `/` is refused.
+ */
+export function inboxProjectFolderOf(path: string, home: string | null): string {
+  const folder = inboxProjectFolder(path);
+  if (folder !== parse(folder).root) return folder;
+  if (home !== null && home !== parse(home).root) return home;
+  throw new InboxError("validation_error", "project_path: a filesystem root is not a project; name your project's folder.", { field: "project_path" });
+}
+
 /** Whether `path` is `root` or inside it (both realpaths). */
 export function isInsideFolder(path: string, root: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
@@ -265,18 +301,20 @@ async function mainWorktreeOf(git: InboxGitRunner, commonDir: string): Promise<{
 }
 
 /** The project root of a folder (a realpath). Never throws. */
-async function resolveFolder(folder: string, git: InboxGitRunner): Promise<Resolved> {
+async function resolveFolder(folder: string, git: InboxGitRunner, home: string | null): Promise<Resolved> {
   const answer = await ask(git, ["rev-parse", "--show-toplevel", "--git-dir", "--git-common-dir"], folder);
   if (answer.kind === "unavailable") return { root: folder, worktree: null, settled: false };
   // Not a work tree (or a repository git cannot open): the folder is the project.
   if (answer.kind === "refused") return { root: folder, worktree: null, settled: true };
   const toplevel = gitPath(answer.lines[0], folder) ?? folder;
+  // A work tree at the home folder (dotfiles) or at `/` is no project's repository: the folder stands alone, as under a plain home.
+  if (isHomeOrRootFolder(toplevel, home)) return { root: folder, worktree: null, settled: true };
   const gitDir = gitPath(answer.lines[1], folder);
   const commonDir = gitPath(answer.lines[2], folder);
   const linked = gitDir !== null && commonDir !== null && gitDir !== commonDir && dirname(gitDir) === join(commonDir, "worktrees");
   if (!linked) return { root: toplevel, worktree: null, settled: true };
   const main = await mainWorktreeOf(git, commonDir);
-  if (!main.root || main.root === toplevel) return { root: toplevel, worktree: null, settled: main.settled };
+  if (!main.root || main.root === toplevel || isHomeOrRootFolder(main.root, home)) return { root: toplevel, worktree: null, settled: main.settled };
   return { root: main.root, worktree: toplevel, settled: true };
 }
 
@@ -289,12 +327,15 @@ function rootFor(folder: string, resolved: Resolved): InboxProjectRoot {
  * The project root for a path an agent named, asked of git now (no cache).
  * Throws `validation_error` for a path that is not an existing folder.
  */
-export async function resolveInboxProjectRoot(path: string, options: { git?: InboxGitRunner } = {}): Promise<InboxProjectRoot> {
-  const folder = inboxProjectFolder(path);
-  return rootFor(folder, await resolveFolder(folder, options.git ?? inboxGitRunner()));
+export async function resolveInboxProjectRoot(path: string, options: { git?: InboxGitRunner; home?: string | null } = {}): Promise<InboxProjectRoot> {
+  const home = options.home === undefined ? realHome() : options.home;
+  const folder = inboxProjectFolderOf(path, home);
+  return rootFor(folder, await resolveFolder(folder, options.git ?? inboxGitRunner(), home));
 }
 
 export interface InboxProjectRoots {
+  /** The home folder these answers keep apart (`isHomeOrRootFolder`): a realpath, or null. */
+  readonly home: string | null;
   /**
    * The project root for a path an agent named. Waits for git only the first
    * time a folder is seen (or after an answer git could not give); later
@@ -305,8 +346,9 @@ export interface InboxProjectRoots {
 }
 
 /** Project roots cached per folder (realpath), shared by sends, live sessions and the image route. */
-export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?: number; now?: () => number; max?: number } = {}): InboxProjectRoots {
+export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?: number; now?: () => number; max?: number; home?: string | null } = {}): InboxProjectRoots {
   const git = options.git ?? inboxGitRunner();
+  const home = options.home === undefined ? realHome() : options.home;
   const ttlMs = options.ttlMs ?? INBOX_PROJECT_ROOT_TTL_MS;
   const now = options.now ?? Date.now;
   const max = Math.max(1, options.max ?? INBOX_PROJECT_ROOT_CACHE_MAX);
@@ -322,7 +364,7 @@ export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?:
   const run = (folder: string): Promise<InboxProjectRoot> => {
     const inFlight = pending.get(folder);
     if (inFlight) return inFlight;
-    const job = resolveFolder(folder, git)
+    const job = resolveFolder(folder, git, home)
       .then((resolved) => {
         const value = rootFor(folder, resolved);
         // Unsettled (git could not answer): used this once; a stale entry stays.
@@ -335,8 +377,9 @@ export function createInboxProjectRoots(options: { git?: InboxGitRunner; ttlMs?:
   };
 
   return {
+    home,
     async resolve(path) {
-      const folder = inboxProjectFolder(path);
+      const folder = inboxProjectFolderOf(path, home);
       const entry = entries.get(folder);
       if (!entry) return run(folder);
       if (now() - entry.at >= ttlMs) void run(folder).catch(() => {});
