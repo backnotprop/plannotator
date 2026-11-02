@@ -1401,6 +1401,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const keep = new Set(mergeReplyDraftFiles(base, replyFiles.draftFiles(text), theirs).map((file) => file.upload_id));
     const onlyHere = [...keep].filter((id) => !theirs.some((file) => file.upload_id === id));
     takeDraftFiles((draft.files ?? []).filter((file) => keep.has(file.upload_id)), text, 'replace', onlyHere);
+    // Saved is what the draft holds, not the box: a box that differs from it (a tile kept on top) saves itself.
+    const boxIds = replyFiles.draftFiles(text).map((file) => file.upload_id);
+    const same = boxIds.length === theirs.length && theirs.every((file) => boxIds.includes(file.upload_id));
+    filesSaved.current = same ? pastedSignature(replyFiles.draftFiles(text)) : pastedSignature(theirs);
   };
   // The sessions the reply box's text tags with `@` (approval "inbox-tag-agents"), as the field reports them.
   const [taggedIds, setTaggedIds] = useState<readonly string[]>([]);

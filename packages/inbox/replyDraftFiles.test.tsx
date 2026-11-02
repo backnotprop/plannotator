@@ -9,9 +9,11 @@
  *  - another window's file comes into a box with no edits, and a file it
  *    removed goes; two windows adding files at once both keep theirs, with no
  *    "Keep mine / Discard" line, which only different words bring;
- *  - a save taken from the box while a quiet merge is on its way (a slow
- *    phone link) still keeps the other window's file, and a file attached
- *    meanwhile stays beside it, in the box and the draft;
+ *  - a save taken from the box while a quiet merge (or the save it follows)
+ *    is on its way (a slow phone link) still keeps the other window's file;
+ *    a file attached or removed meanwhile stays so, in the box and the draft;
+ *    a file the other window swaps meanwhile is followed; a merged file whose
+ *    upload is gone before a later save runs is dropped once, with no loop;
  *  - a file still uploading when Cancel closes the box lands in the draft
  *    once in (the restart guard asks meanwhile), and the foot's Send carries
  *    it; so does one when the pane is given another thread, or closes;
@@ -23,7 +25,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -121,7 +123,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-reply-draft-files-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '12'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '16'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -428,6 +430,133 @@ test.skipIf(!hasDom)("a save queued while a quiet merge is on its way keeps the 
   await until(() => replyBox(el) === null, 'the box closed');
   expect(await draftNames()).toEqual(['theirs.png']);
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
+}, 30_000);
+
+/** A draft save is held on its way while `match` (on its JSON body) says so, once, until released. */
+function holdSaveWhere(match: (body: string) => boolean) {
+  let release = () => {};
+  const wait = new Promise<void>((done) => (release = done));
+  const state = { held: false };
+  gate = { match: (path, body) => path.includes('/draft') && !state.held && match(body) && (state.held = true), wait };
+  return {
+    held: () => state.held,
+    release: () => {
+      gate = null;
+      release();
+    },
+  };
+}
+/** The upload's bytes and record leave the pending store, as a Send elsewhere or the sweep takes them. */
+function forgetPendingUpload(uploadId: string) {
+  const found = (readdirSync(join(dir!, 'data'), { recursive: true }) as string[]).filter((path) => path.includes('pending') && path.includes(uploadId));
+  expect(found.length).toBeGreaterThan(0);
+  for (const path of found) rmSync(join(dir!, 'data', path), { recursive: true, force: true });
+}
+/** Every finished tile in the box is a file of the draft, and the other way round: nothing left for the sweep. */
+async function boxMatchesDraft(el: HTMLElement) {
+  return tiles(el).map((tile) => tile.replace(/:done$/, '')).sort().join() === (await draftNames()).sort().join();
+}
+
+test.skipIf(!hasDom)("a file attached while the save that will be refused is on its way: the draft keeps it beside the other window's, as the box shows", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const theirs = await uploadAsOther('theirs.png', 21);
+  await saveAsOther('Hi', [theirs.upload_id], (await serverDraft())!.updated_at);
+  // This window's next save (words only) is held: the other window's save is already in, so it will be refused.
+  const refused = holdSaveWhere((body) => body.includes('"Hi there"') && !body.includes('upl_'));
+  type(replyText(el)!, 'Hi there');
+  await until(refused.held, 'the save to be refused held');
+  attach(el, [image('mine.png', 22)]);
+  await until(() => tiles(el).join() === 'mine.png:done', 'my tile in');
+  await settle(800);
+  const before = posted.length;
+  refused.release();
+  await until(async () => (await draftNames()).sort().join() === 'mine.png,theirs.png', 'both files in the draft');
+  await until(() => tiles(el).sort().join() === 'mine.png:done,theirs.png:done', 'both tiles in the box');
+  await settle(1000);
+  expect(await boxMatchesDraft(el)).toBe(true);
+  // No save after the refusal left either file out on its way (the older save is not sent after the newer one).
+  const saves = posted.slice(before).filter((p) => p.path.endsWith('/draft'));
+  expect(saves.length).toBeGreaterThan(0);
+  for (const save of saves) expect((save.body.files as unknown[] | undefined)?.length).toBe(2);
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
+  await settle(300);
+  expect((await draftNames()).sort()).toEqual(['mine.png', 'theirs.png']);
+  expect((await serverDraft())!.body).toBe('Hi there');
+}, 30_000);
+
+test.skipIf(!hasDom)('a file removed while the save that will be refused is on its way stays removed, in the box and the draft', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  attach(el, [image('old.png', 23)]);
+  await until(async () => (await serverDraft())?.body === 'Hi' && (await draftNames()).join() === 'old.png', 'the words and the file saved');
+  const old = (await serverDraft())!.files![0]!.upload_id;
+  const theirs = await uploadAsOther('theirs.png', 24);
+  await saveAsOther('Hi', [old, theirs.upload_id], (await serverDraft())!.updated_at);
+  const refused = holdSaveWhere((body) => body.includes('"Hi there"'));
+  type(replyText(el)!, 'Hi there');
+  await until(refused.held, 'the save to be refused held');
+  act(() => (replyBox(el)!.querySelector('[data-compose-file] .ib-cp-fx') as HTMLButtonElement).click());
+  await until(() => tiles(el).length === 0, 'my tile removed');
+  await settle(800);
+  refused.release();
+  await until(async () => (await draftNames()).join() === 'theirs.png' && (await serverDraft())?.body === 'Hi there', 'their file alone in the draft');
+  await until(() => tiles(el).join() === 'theirs.png:done', 'their tile alone in the box');
+  await settle(1000);
+  expect(await draftNames()).toEqual(['theirs.png']);
+  expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+test.skipIf(!hasDom)("a save taken before a quiet merge whose merged file is gone by then saves the last words once, without looping", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const theirs = await uploadAsOther('theirs.png', 31);
+  await saveAsOther('Hi', [theirs.upload_id], (await serverDraft())!.updated_at);
+  const merged = holdSaveWhere((body) => body.includes(theirs.upload_id) && body.includes('"Hi there"'));
+  type(replyText(el)!, 'Hi there');
+  await until(merged.held, 'the merged save held');
+  // One more key while it is out (taken before the box has their file), itself held once the merge goes.
+  type(replyText(el)!, 'Hi there!');
+  await settle(800);
+  merged.release();
+  const late = holdSaveWhere((body) => body.includes('"Hi there!"'));
+  await until(late.held, 'the later save held');
+  await until(() => tiles(el).join() === 'theirs.png:done', 'their tile in the box');
+  // Their file goes meanwhile (the phone sent it, or the sweep took it).
+  forgetPendingUpload(theirs.upload_id);
+  const before = posted.length;
+  late.release();
+  await until(async () => (await serverDraft())?.body === 'Hi there!', 'the last words saved');
+  await settle(1500);
+  const saves = posted.slice(before).filter((p) => p.path.includes('/draft'));
+  expect(saves.length).toBeLessThan(6);
+  expect((await serverDraft())?.body).toBe('Hi there!');
+  expect(await draftNames()).toEqual([]);
+  await until(() => unsentReply() === null || tiles(el).length > 0, 'the guard settled');
+}, 30_000);
+
+test.skipIf(!hasDom)('a file the other window removes while the quiet merge saves stays removed', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const theirs = await uploadAsOther('theirs.png', 41);
+  await saveAsOther('Hi', [theirs.upload_id], (await serverDraft())!.updated_at);
+  const merged = holdSaveWhere((body) => body.includes(theirs.upload_id) && body.includes('"Hi there"'));
+  type(replyText(el)!, 'Hi there');
+  await until(merged.held, 'the merged save held');
+  // The other window swaps its file for another before the merged save arrives (taking it out alone would leave
+  // the draft as this window last saved it, which the Inbox counts as this window's own: `base_body`).
+  const swapped = await uploadAsOther('swapped.png', 42);
+  await saveAsOther('Hi', [swapped.upload_id], (await serverDraft())!.updated_at);
+  merged.release();
+  await until(async () => (await serverDraft())?.body === 'Hi there', 'the words saved over theirs');
+  await settle(1500);
+  expect(await draftNames()).toEqual(['swapped.png']);
+  await until(() => tiles(el).join() === 'swapped.png:done', 'the box follows');
+  expect(await boxMatchesDraft(el)).toBe(true);
 }, 30_000);
 
 test.skipIf(!hasDom)("a file attached while a quiet merge is on its way stays, in the box and the draft, beside the other window's", async () => {
