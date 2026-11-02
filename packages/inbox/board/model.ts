@@ -2,7 +2,7 @@
  * The Board page's rules, pure (approval "inbox-board", step 2; the look in
  * "inbox-board-look", the unread signal in "inbox-board-signal").
  *
- * - Lanes (approval "inbox-board-columns-v2"): Backlog, To do, In progress,
+ * - Lanes (approval "inbox-board-columns-v2"): Backlog, Todo, In progress,
  *   In review. Done and Cancelled (the Dropped column) are links to their
  *   own lists; the Icebox folded into Backlog.
  * - A card (variant C "Lean") is two lines: the title, then "You: …" in the
@@ -81,7 +81,7 @@ export function boardLanes(cards: readonly InboxCardWire[]): BoardLane[] {
     column,
     label: INBOX_CARD_COLUMN_LABELS[column],
     onYou: isInboxCardPersonColumn(column),
-    // A card the person sent to an agent sits at the top of To do until it moves (step 2 amendment).
+    // A card the person sent to an agent sits at the top of Todo until it moves (step 2 amendment).
     cards: cards
       .filter((card) => card.column === column)
       .map((card, index) => ({ card, index }))
@@ -274,14 +274,14 @@ export function youLinkLabel(you: string): string {
   return `You: ${you}, open the thread`;
 }
 
-/** The agent a sent card went to, while it waits in To do: "Sent to Codex". */
+/** The agent a sent card went to, while it waits in Todo: "Sent to Codex". */
 export function sentTo(card: InboxCardWire): string | null {
   return isInboxCardSentWaiting(card) && card.sent ? inboxAgentName(card.sent.to) : null;
 }
 
 /**
  * The opened card's foot: Send to an agent for a card nobody was asked about
- * (no agent, never sent), Start for a Backlog or To do card that has an agent
+ * (no agent, never sent), Start for a Backlog or Todo card that has an agent
  * and is not waiting on a send, Restore for a cancelled card, else Mark done;
  * Cancel… beside it where it applies.
  */
@@ -323,7 +323,7 @@ export function askWhereBody(card: Pick<InboxCardWire, 'id' | 'title'>): string 
   return `Where is “${card.title}”? (Board card ${card.id}) Move the card, or say where it stands with the card action.`;
 }
 
-/** Start (a Backlog or To do card that has an agent): the short message telling it to begin, with the card's title and notes. */
+/** Start (a Backlog or Todo card that has an agent): the short message telling it to begin, with the card's title and notes. */
 export function startBody(card: Pick<InboxCardWire, 'id' | 'title' | 'notes'>): string {
   const notes = card.notes?.trim() ? `\n\n${card.notes.trim()}` : '';
   return `Please start on “${card.title}” (Board card ${card.id}).${notes}\n\nMove the card as the work goes.`;

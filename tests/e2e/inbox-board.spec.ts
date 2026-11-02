@@ -253,7 +253,7 @@ test("an agent's cards appear live as it makes and moves them, bold until opened
   // Agents fill the Board while it is open.
   ids.auto = await make(claude, projects.plannotator, 'Auto-update for users', { say: 'Pick it up: read the issue first' });
   await expect(card(page, ids.auto)).toBeVisible();
-  // An agent's card starts in To do (work it was asked for).
+  // An agent's card starts in Todo (work it was asked for).
   await expect(lane(page, 'todo').locator(`[data-card-id="${ids.auto}"]`)).toBeVisible();
   await expect(card(page, ids.auto)).toHaveAttribute('data-unread', '');
   ids.polylane = await make(pi, projects.machine, 'Polylane plan evaluation', { say: 'Not picked up yet' });
@@ -380,7 +380,7 @@ test('the opened card: the panel beside the lanes, its links read once it opens,
   await expect(panel).toHaveCount(0);
 });
 
-test("Start: an agent's To do card goes to its live session, once; the lane card says Sent to", async () => {
+test("Start: an agent's Todo card goes to its live session, once; the lane card says Sent to", async () => {
   const { page, ids, dataDir } = world;
   await page.keyboard.press('Escape');
   // The card's session connects (its connection polls the bridge, as the Claude Code mod does): it is live.

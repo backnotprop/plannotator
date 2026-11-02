@@ -5771,7 +5771,7 @@ export class InboxStore {
 
   /**
    * A new card in `project_id`. From a thread (`threads`), the title defaults
-   * to the thread's subject. Unless a column is given it starts in To do when
+   * to the thread's subject. Unless a column is given it starts in Todo when
    * an agent makes it (it took an ask) and in Backlog when the person does; a
    * live column, or Done for work already finished; Dropped never. An agent
    * that puts it in In review says what the person owes (`you`). The agent
@@ -5828,10 +5828,10 @@ export class InboxStore {
         return { card: known, replayed: true };
       }
     }
-    // Sent to an agent: To do (the person asked for it). Otherwise an agent's card is work it took on (To do), the person's an idea (Backlog).
+    // Sent to an agent: Todo (the person asked for it). Otherwise an agent's card is work it took on (Todo), the person's an idea (Backlog).
     const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
     if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
-    if (target && column !== "backlog" && column !== "todo") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in To do.", { field: "thread_id" });
+    if (target && column !== "backlog" && column !== "todo") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Todo.", { field: "thread_id" });
     const said = input.say === undefined || input.say === null ? null : this.cardText(input.say, "say", INBOX_CARD_LINE_MAX);
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
@@ -5844,7 +5844,7 @@ export class InboxStore {
       id: inboxId("crd"),
       project_id: owner,
       title,
-      // A sent card goes to To do: the send asks the agent to do it.
+      // A sent card goes to Todo: the send asks the agent to do it.
       column: target ? "todo" : column,
       you,
       said,
@@ -6033,7 +6033,7 @@ export class InboxStore {
    * addressed to one session. The card links the thread and becomes that
    * agent's (`agent`, so the agent's `card list` shows it as its own), and
    * keeps `sent` so the Board says "Sent to <agent>" until the card moves.
-   * Only the person sends, only a Backlog or To do card (it lands in To do,
+   * Only the person sends, only a Backlog or Todo card (it lands in Todo,
    * as the person's move), only into a thread of the
    * card's own project that the person started.
    */
@@ -6046,10 +6046,10 @@ export class InboxStore {
       return card;
     }
     if (card.column !== "backlog" && card.column !== "todo") {
-      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog or To do card is sent to an agent.`, { field: "op" });
+      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog or Todo card is sent to an agent.`, { field: "op" });
     }
     const at = this.stamp();
-    // A send asks the agent to do it: the card is in To do from now (the person moved it).
+    // A send asks the agent to do it: the card is in Todo from now (the person moved it).
     const moves = card.column !== "todo";
     const next: InboxCard = {
       ...card,

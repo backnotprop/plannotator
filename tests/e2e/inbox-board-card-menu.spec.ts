@@ -176,11 +176,11 @@ test('a right-click on a lane card opens the approved items, its column checked,
   const { page, ids } = world;
   const popup = await openMenu(page, ids.qr);
   // The approved words and order (layout A), pinned on purpose: the opened card's Move menu, word for word.
-  await expect(menuItems(page)).toHaveText(['Open thread', 'Backlog', 'To do', 'In progress', 'In review', 'Done', 'Cancel…']);
+  await expect(menuItems(page)).toHaveText(['Open thread', 'Backlog', 'Todo', 'In progress', 'In review', 'Done', 'Cancel…']);
   await expect(popup).toHaveAttribute('aria-label', 'Phone pairing QR');
   await expect(popup.getByRole('group', { name: 'Column' })).toBeVisible();
   await expect(popup.getByRole('menuitemradio', { name: 'In progress' })).toHaveAttribute('aria-checked', 'true');
-  await expect(popup.getByRole('menuitemradio', { name: 'To do' })).toHaveAttribute('aria-checked', 'false');
+  await expect(popup.getByRole('menuitemradio', { name: 'Todo' })).toHaveAttribute('aria-checked', 'false');
   await expect(cardEl(page, ids.qr)).toHaveAttribute('data-menu', '');
   expect(page.url()).not.toContain('card=');
   await page.mouse.move(5, 5);
@@ -398,7 +398,7 @@ test('the Cancelled page: a cancelled card is a row with Restore, and a right-cl
   await expect(menu(page)).toHaveCount(0);
   expect(await lastContextMenuCancelled(page)).toBe(false);
   await page.keyboard.press('Escape');
-  // Restore: back to where it was (To do), no toast.
+  // Restore: back to where it was (Todo), no toast.
   await row.locator(`[data-card-restore="${ids.retry}"]`).click();
   await expect.poll(async () => (await stored(page, ids.retry))?.column).toBe('todo');
   await expectNoToast(page);

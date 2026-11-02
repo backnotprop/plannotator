@@ -1276,8 +1276,8 @@ export const inboxApi = {
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
   cards: () => get<CardsModel>(inboxUrl('/cards')),
   /**
-   * The person's New card: a title, notes and links, in Backlog (or To do); or sent: `thread_id` is
-   * the thread compose's Send just started for it (the card lands in To do, in that thread's project).
+   * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
+   * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
   createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
     post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),

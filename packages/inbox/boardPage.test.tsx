@@ -4,7 +4,7 @@
  * lines, bold while unread, no "on you" pill on a lane; the agents' drops above the
  * lanes with "Got it"; the opened card beside the lanes with its history,
  * its links read only once it opens, and Mark done, Cancel with a reason;
- * Start on an agent's To do card telling that agent in the card's thread
+ * Start on an agent's Todo card telling that agent in the card's thread
  * and marking the card sent; New card into Backlog; the empty Board's line;
  * the phone's stacked list with Done and Cancelled folded. What regresses: a
  * lane out of order, "You: …" in an agent's lane, a card fetching its links
@@ -370,7 +370,7 @@ test.if(hasDom)('the opened card: its history and links read now, then Mark done
   expect(drawn.opened).toContain(null);
 });
 
-test.if(hasDom)('Start on an agent’s To do card tells its live agent in the card’s thread and marks the card sent; it never moves it', async () => {
+test.if(hasDom)('Start on an agent’s Todo card tells its live agent in the card’s thread and marks the card sent; it never moves it', async () => {
   scriptFetch([{ project: { id: 'prj_1', name: 'web', root: '/Users/ada/src/web' }, sessions: [{ session: 'ses_claude', host: 'claude-code', started_at: OLD, last_seen_at: NEW, busy: false, idle_since: NEW, last_thread: null }] }]);
   const drawn = draw({ openCard: 'crd_auto' });
   await settle();

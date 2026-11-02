@@ -61,7 +61,7 @@ function refusal(run: () => unknown): string {
 }
 
 describe("cards: create", () => {
-  test("an agent's card starts in To do, belongs to the agent that made it, and is heard now", () => {
+  test("an agent's card starts in Todo, belongs to the agent that made it, and is heard now", () => {
     const { store, project } = world();
     const { card, replayed } = store.createCard({ project_id: project.id, by: AGENT, title: "  Hero   scene\ntimers ", say: "lane started" });
     expect(replayed).toBe(false);
@@ -141,7 +141,7 @@ describe("cards: create", () => {
 });
 
 describe("cards: who moves a card (columns v2)", () => {
-  test("an agent moves its work through the live columns, ships it, and a re-report goes back to To do", () => {
+  test("an agent moves its work through the live columns, ships it, and a re-report goes back to Todo", () => {
     const { store, project, advance } = world();
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Delivery ticks" });
     advance(60_000);
@@ -201,7 +201,7 @@ describe("cards: who moves a card (columns v2)", () => {
       moved_by: PERSON,
       prs: [{ ref: "backnotprop/plannotator#1786", url: "https://github.com/backnotprop/plannotator/pull/1786" }],
     });
-    // The person's Backlog idea, the same; their send makes it the agent's (To do).
+    // The person's Backlog idea, the same; their send makes it the agent's (Todo).
     const idea = store.createCard({ project_id: project.id, by: PERSON, title: "Polylane" }).card;
     expect(refusal(() => store.updateCard(idea.id, { by: AGENT, column: "todo" }))).toBe("card_backlog_person_only");
     expect(store.updateCard(card.id, { by: PERSON, column: "todo" }).moved_by).toEqual(PERSON);
@@ -353,7 +353,7 @@ describe("cards: on disk", () => {
     writeFileSync(file, written);
     const reopened = InboxStore.open(dir);
     for (const [card, , column, movedBy] of old) expect(reopened.card(card.id), card.title).toMatchObject({ column, moved_by: movedBy });
-    // Restoring the dropped card goes where its old column reads now (an agent's Backlog card: To do).
+    // Restoring the dropped card goes where its old column reads now (an agent's Backlog card: Todo).
     const dropped = old.at(-1)![0];
     expect(reopened.card(dropped.id)!.aside_from).toBe("todo");
     // The file is read, never rewritten.
@@ -477,9 +477,9 @@ describe("cards: the Board page's fields (step 2)", () => {
     expect(sent.sent).toMatchObject({ to: { host: "codex", session: "ses_x" }, thread_id: message.thread_id });
     expect(sent.threads).toEqual([message.thread_id]);
     expect(sent.heard_by).toEqual(PERSON);
-    // Sending asks the agent to do it: To do, moved by the person.
+    // Sending asks the agent to do it: Todo, moved by the person.
     expect(sent).toMatchObject({ column: "todo", moved_by: PERSON });
-    // Only through the person's addressed message, and only a Backlog or To do card.
+    // Only through the person's addressed message, and only a Backlog or Todo card.
     const agents = store.sendMessage({ project_id: project.id, author: AGENT, body: "hi" });
     expect(refusal(() => store.sendCard(card.id, { thread_id: agents.message.id }))).toBe("validation_error");
     // The same send again (a retry after a lost answer) writes nothing.
@@ -554,7 +554,7 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(store.autoShipCard(card.id, [PR1, PR2, PR3])!.column).toBe("done");
   });
 
-  test("only To do, In progress and In review ship; a card with no PR, or one gone, never does", () => {
+  test("only Todo, In progress and In review ship; a card with no PR, or one gone, never does", () => {
     const { store, project } = world();
     const parked = store.createCard({ project_id: project.id, by: PERSON, title: "Idea", prs: [PR1] }).card;
     expect(parked.column).toBe("backlog");
