@@ -6532,7 +6532,7 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 /* Ask AI (ask/): the shared chat window floats in this layer, over everything but the toast and the menus. The height
    follows the phone's keyboard (--ib-vvh, phone.ts). The layer lets the page take the clicks around the window. */
 .ib-ask-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 41; pointer-events: none; isolation: isolate; }
-.ib-ask-layer [data-chat-window] { pointer-events: auto; }
+.ib-ask-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
 .pn-inbox .ib-ask-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 28px; padding: 0 6px; border: none; border-radius: 8px; background: var(--muted); color: var(--foreground); cursor: pointer; }
 .pn-inbox .ib-ask-chip:hover, .pn-inbox .ib-ask-chip[data-popup-open] { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .pn-inbox .ib-ask-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
@@ -6542,11 +6542,12 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .pn-inbox .ib-pm .ib-pmi.ib-ask-row { gap: 10px; height: auto; min-height: 44px; padding: 6px 8px; white-space: normal; }
 .ib-ask-rowtext { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .ib-ask-rowname, .ib-ask-rowsub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ib-ask-rowname { font-size: var(--ib-fs-13, 13px); line-height: 18px; }
-.ib-ask-rowsub { font-size: var(--ib-fs-11-5, 11.5px); line-height: 16px; color: color-mix(in oklab, var(--muted-foreground) 85%, var(--popover)); }
+.ib-ask-rowname { font-size: var(--ib-fs-13, 13px); line-height: 17px; }
+.ib-ask-rowsub { font-size: var(--ib-fs-11-5, 11.5px); line-height: 15px; color: color-mix(in oklab, var(--muted-foreground) 85%, var(--popover)); }
 .pn-inbox .ib-ask-check { flex: none; color: var(--foreground); }
 /* The approved column: a state mark stands one slot left of the current chat's check. */
-.ib-ask-spin, .ib-ask-dot { margin-right: 23px; }
+.ib-ask-spin { margin-right: 32px; }
+.ib-ask-dot { margin-right: 34px; }
 .ib-ask-spin { flex: none; box-sizing: border-box; width: 12px; height: 12px; border: 1.5px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: ib-ask-spin 800ms linear infinite; }
 @keyframes ib-ask-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ib-ask-spin { animation: none; } }

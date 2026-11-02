@@ -26,7 +26,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { writeInboxAsk, type InboxAskConversation } from '../../packages/shared/inbox/ask';
 import { scratchProject } from '../../scripts/inbox-sim';
 import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
-import { aiSession, postAsk, runQuery, type AskAnswer } from '../helpers/inbox-ask-window';
+import { aiSession, postAsk, readAsk, runQuery, type AskAnswer } from '../helpers/inbox-ask-window';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
@@ -247,7 +247,7 @@ test('the dropdown lists the chats by the approved rows, states and groups', asy
 });
 
 test('picking a chat moves to its thread and shows that chat', async () => {
-  const { page, threads, url } = world;
+  const { page, threads } = world;
   await row(threads.invoice).click();
   await expect(page).toHaveURL(new RegExp(`#.*thread=${threads.invoice}`));
   await expect(chip()).toContainText('Invoice rounding rule');
@@ -258,8 +258,8 @@ test('picking a chat moves to its thread and shows that chat', async () => {
   await shot(page, '3-after-switching-light', 'light');
 
   await expect(async () => {
-    const read = (await (await fetch(new URL(`/api/inbox/threads/${threads.invoice}/ask`, url))).json()) as { conversation: InboxAskConversation };
-    expect(read.conversation.seen_at).not.toBeNull();
+    const read = await readAsk(world.target, threads.invoice);
+    expect(read.conversation?.seen_at ?? null).not.toBeNull();
   }).toPass({ timeout: 5_000 });
 
   await chip().click();
