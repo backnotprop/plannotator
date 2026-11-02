@@ -311,6 +311,13 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
           arm();
           return;
         }
+        // Dropped while the session is still registered and not idle: it may be closing slowly (its queue cleared,
+        // `agent/disposed` still to come), so wait for the close or for idle before calling it the person's removal.
+        const live = dropped ? agentOf(sessionId) : undefined;
+        if (live && live.status !== "idle") {
+          arm();
+          return;
+        }
         end(dropped ? new Error("it was taken out of the session's queue in DeepSeek Harness before a turn read it") : undefined);
       }
       const discarded = () => {
@@ -478,8 +485,10 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
       disposed = true;
       for (const wake of wakes.values()) wake.dispose();
       wakes.clear();
-      // Still queued in a session: it stays in the session's saved queue.
-      for (const entry of [...waiting.values()]) entry.end();
+      // Not taken by a turn yet. The plugin unloading may be DSH quitting, which then closes each ready session and
+      // clears its queue, so a reply waiting there is not counted as delivered: it goes back to the Inbox, and the
+      // next wake of the session delivers it (a plugin-only reload may deliver it a second time; never zero).
+      for (const entry of [...waiting.values()]) entry.end(new InboxDeliverLater("the plugin unloaded before a turn read it"));
       try {
         unregisterShellEnv?.();
       } catch {

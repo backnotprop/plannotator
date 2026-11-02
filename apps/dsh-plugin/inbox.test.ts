@@ -789,6 +789,54 @@ describe("DeepSeek Harness: delivered means a turn took it", () => {
     expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-not-ready" });
   });
 
+  test("DSH quits with the reply queued, the plugin unloading first: not marked delivered, and it goes in once after the next start", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-quit", w.project);
+    agent.hold = true;
+    const inbox = (await start(w, { deliveryCheckMs: CHECK }))!;
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Quitting?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Bye.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    // DSH's quit: the plugin unloads, then agent-loop closes the ready session and clears its queue.
+    inbox.dispose();
+    await w.dsh.dispose(agent);
+    expect(agent.inbox.nextTurn).toEqual([]);
+    await Bun.sleep(CHECK * 4);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    expect(w.dsh.warnings).toEqual([]);
+    // The next DSH start: the plugin loads, the session resumes.
+    const next = { ...w, dsh: new FakeDsh() };
+    const resumed = next.dsh.create("session-quit", w.project);
+    await start(next, { deliveryCheckMs: CHECK });
+    expect(await until(() => resumed.followups.length === 1)).toBe(true);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-quit" });
+    await Bun.sleep(TICK * 8);
+    expect(resumed.followups).toHaveLength(1);
+    expect(next.dsh.warnings).toEqual([]);
+  });
+
+  test("a slow close (queue cleared, the session still registered and not idle): the reply is not reported lost, and goes in once after the resume", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-slow-close", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Slow?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Slowly.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.status = "running";
+    agent.clearQueue();
+    await Bun.sleep(CHECK * 4);
+    expect(w.dsh.warnings).toEqual([]);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    await w.dsh.dispose(agent);
+    const resumed = w.dsh.create("session-slow-close", w.project);
+    expect(await until(() => resumed.followups.length === 1)).toBe(true);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-slow-close" });
+    await Bun.sleep(TICK * 8);
+    expect(resumed.followups).toHaveLength(1);
+    expect(w.dsh.warnings).toEqual([]);
+  });
+
   test("edited in the queue, then the session closes keeping its queue: the edit is not taken for a removal, and the reply is not given back for a second go", async () => {
     const w = await world();
     const agent = w.dsh.create("session-edit-close", w.project);
@@ -814,6 +862,21 @@ describe("DeepSeek Harness: delivered means a turn took it", () => {
     const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Quiet?" })).text);
     const answer = await reply(w.server, sent.message_id, "Yes.");
     expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-quiet" });
+  });
+
+  test("a DSH that never says claimed, with the turn that took it still running: taken, not held until idle", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-quiet-busy", w.project);
+    agent.silentClaims = true;
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Busy?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Yes.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.status = "running";
+    agent.claim(agent.followups[0]!.id);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-quiet-busy" });
+    expect(agent.status).toBe("running");
   });
 });
 
