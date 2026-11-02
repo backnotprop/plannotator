@@ -5,7 +5,7 @@ import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { SESSION_ASK_ERROR_CODES } from '@plannotator/ui/utils/aiProvider';
 import { generateId } from '@plannotator/ui/utils/generateId';
-import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskTurnWire } from '../api';
+import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskPosted, type InboxAskTurnWire } from '../api';
 import { isTouchPhone } from '../phone';
 import { errorText } from '../toastError';
 import { AskChatMenu } from './AskChatMenu';
@@ -51,8 +51,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
   const postingRef = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  /** The turn this window's stream belongs to, and its place in the hook's list (the list only grows). */
-  const [live, setLive] = useState<{ turnId: string; index: number } | null>(null);
+  /** The turn this window's stream belongs to, its place in the hook's list (the list only grows), and the session it went to. */
+  const [live, setLive] = useState<{ turnId: string; index: number; session: string } | null>(null);
   const liveTurn = live?.turnId ?? null;
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
@@ -104,16 +104,27 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest, canFocus]);
 
+  /**
+   * A pressed button goes away when the turn moves on, and focus would fall to
+   * the page, where the Inbox's keys take it for the thread's: Mod+Enter would
+   * send the reply draft. On a touch phone the transcript takes it, so the
+   * keyboard stays down.
+   */
+  const keepFocusHere = () => {
+    if (document.activeElement === composerRef.current) return;
+    (isTouchPhone() ? paneRef.current : composerRef.current)?.focus({ preventScroll: true });
+  };
+
   /** Start, or restart, the answer of a turn POST /ask accepted. */
-  const answer = (turnId: string, question: string, providerId: string, policy?: SessionAskAction) => {
-    setLive({ turnId, index: chat.messages.length });
+  const answer = (posted: InboxAskPosted, question: string, providerId: string, policy?: SessionAskAction) => {
+    setLive({ turnId: posted.turn.id, index: chat.messages.length, session: posted.turn.session });
     void chat.ask({ prompt: question, ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
   };
 
-  const post = async (turnId: string, question: string): Promise<string | null> => {
+  const post = async (turnId: string, question: string): Promise<InboxAskPosted> => {
     const posted = await inboxApi.askSend(threadId, turnId, question);
     onConversation(posted.conversation);
-    return posted.provider_id;
+    return posted;
   };
 
   const send = async () => {
@@ -122,14 +133,20 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     postingRef.current = true;
     setPosting(true);
     setProblem(null);
+    keepFocusHere();
+    // The kept copy goes now: a switch before the answer lands must not bring back words already sent.
+    saveAskWords(threadId, '');
     const turnId = generateId('ask');
     try {
-      const providerId = await post(turnId, question);
+      const posted = await post(turnId, question);
       // Only now: a refused question keeps its words, and words added meanwhile stay.
       setWords((box) => (box.trim() === question ? '' : box));
-      if (providerId) answer(turnId, question, providerId);
+      if (posted.provider_id) answer(posted, question, posted.provider_id);
     } catch (cause) {
+      if (!readAskWords(threadId)) saveAskWords(threadId, question);
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
+      // A damaged file was set aside by this refusal, so the read has changed.
+      onReload();
     } finally {
       postingRef.current = false;
       setPosting(false);
@@ -142,9 +159,14 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     postingRef.current = true;
     setPosting(true);
     setProblem(null);
+    keepFocusHere();
+    const shownFor = live?.session;
     try {
-      const providerId = await post(turn.id, turn.question);
-      if (providerId) answer(turn.id, turn.question, providerId, policy);
+      const posted = await post(turn.id, turn.question);
+      // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and
+      // after a hand-off that one gets its own note: it is never interrupted on a choice made about another.
+      if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined);
+      else if (posted.reason) setProblem(`${name} can't take this right now. Try again, or reply in the thread.`);
     } catch (cause) {
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
     } finally {
@@ -157,6 +179,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
   const stop = async () => {
     if (!runningTurn || stopping) return;
     setStopping(true);
+    keepFocusHere();
     try {
       await inboxApi.askStop(threadId, runningTurn);
       onReload();
@@ -166,10 +189,15 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     }
   };
 
+  const minimize = () => {
+    store.setMinimized(true);
+    onLeave();
+  };
+
   const name = agent.name || 'The agent';
   const mark = <HostMark host={agent.host} />;
 
-  const pendingLine = response?.status === 'waiting' ? `Waiting for ${name} to finish…` : response?.status === 'interrupting' ? `Interrupting ${name}…` : runningTurn && runningTurn !== liveTurn ? 'Answering…' : 'Connecting…';
+  const pendingLine = response?.status === 'waiting' ? `Waiting for ${name} to finish…` : response?.status === 'interrupting' ? `Interrupting ${name}…` : !posting && runningTurn && runningTurn !== liveTurn ? 'Answering…' : 'Connecting…';
   const hasWords = liveText ? liveText.text.length > 0 : false;
   const status: ChatStatus = !busy ? 'ready' : hasWords ? 'streaming' : 'submitted';
 
@@ -208,7 +236,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
             onClick={() => {
               onReply(turn.question);
               // A window that fills the screen would cover the reply it just opened.
-              if (store.fullscreen || phone) onLeave();
+              if (store.fullscreen || phone) minimize();
             }}
           >
             Reply in the thread
@@ -241,10 +269,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
       rootProps={{ 'data-popover-layer': '', 'data-ask-window': threadId }}
       header={() => <AskChatMenu current={current} phone={phone} onPick={onPick} />}
       onMinimize={onLeave}
-      onClose={() => {
-        store.setMinimized(true);
-        onLeave();
-      }}
+      onClose={minimize}
     >
       {() => (
         <>
@@ -272,9 +297,9 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
             placeholder="Ask about this thread"
             composerRef={composerRef}
             notices={
-              problem ? (
+              problem || model?.damaged ? (
                 <p role="alert" className="ib-ask-problem">
-                  {problem}
+                  {problem ?? "This chat's file is damaged and can't be shown. Your next question moves it aside and tells you where."}
                 </p>
               ) : undefined
             }

@@ -22,6 +22,8 @@ export interface ScriptedAskAgentOptions {
 export interface ScriptedAskAgent {
   /** Every message that reached the session. */
   asked: string[];
+  /** How many times its running work was interrupted. */
+  interrupts(): number;
   /** The next question finds the agent busy on its own work. */
   setBusy(busy: boolean): void;
   stop(): void;
@@ -33,9 +35,17 @@ export function startScriptedAskAgent(options: ScriptedAskAgentOptions): Scripte
   const stopped = new AbortController();
   const asked: string[] = [];
   let status: SessionBridgeStatus = "ready";
+  let interrupts = 0;
 
   const answer = async (text: string, sink: SessionBridgeSink, signal: AbortSignal) => {
-    const words = (await options.reply(text)).split(/(?<=\s)/);
+    let words: string[];
+    try {
+      words = (await options.reply(text)).split(/(?<=\s)/);
+    } catch (cause) {
+      status = "ready";
+      sink.error("failed", cause instanceof Error ? cause.message : String(cause));
+      return;
+    }
     for (const word of words) {
       if (signal.aborted) return;
       sink.delta(word);
@@ -62,6 +72,10 @@ export function startScriptedAskAgent(options: ScriptedAskAgentOptions): Scripte
         { once: true },
       );
       void answer(request.text, sink, signal);
+    },
+    interrupt() {
+      interrupts += 1;
+      status = "ready";
     },
   };
 
@@ -104,6 +118,7 @@ export function startScriptedAskAgent(options: ScriptedAskAgentOptions): Scripte
 
   return {
     asked,
+    interrupts: () => interrupts,
     setBusy: (busy) => {
       status = busy ? "busy" : "ready";
     },

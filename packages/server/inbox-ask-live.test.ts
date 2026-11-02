@@ -253,6 +253,9 @@ describe("off, the default", () => {
       await fromWindow(server, "/api/ai/capabilities"),
       await fromWindow(server, "/api/ai/session", { context: { mode: "annotate" } }),
       await fromWindow(server, "/api/ai/query", { sessionId: "x", prompt: "y" }),
+      await fromWindow(server, "/api/inbox/ask"),
+      await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/stop`, { turn_id: "turn-0001" }),
+      await fromWindow(server, `/api/inbox/threads/${thread_id}/ask/seen`, { seen_at: "2026-11-01T10:00:00.000Z" }),
       await fetch(`${base}${inboxAskBridgeBase("session-a")}${SESSION_BRIDGE_POLL_PATH}`, { method: "POST", headers: bearer, body: "{}" }),
     ]) {
       expect(response.status).toBe(404);

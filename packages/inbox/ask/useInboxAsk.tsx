@@ -58,19 +58,25 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
   };
   // Newest wins: a slow read must not paint over a later one, or over a send's own answer.
   const readSeq = useRef(0);
+  // The thread on screen now: a send that lands after a switch still calls this, and must read this thread, not its own.
+  const onScreen = useRef(askFor);
+  useLayoutEffect(() => {
+    onScreen.current = askFor;
+  }, [askFor]);
 
   const reload = useCallback(() => {
-    if (!askFor) return;
+    const reading = onScreen.current;
+    if (!reading) return;
     const seq = ++readSeq.current;
-    inboxApi.askRead(askFor).then(
+    inboxApi.askRead(reading).then(
       (model) => {
-        if (seq === readSeq.current) setRead({ threadId: askFor, model });
+        if (seq === readSeq.current) setRead({ threadId: reading, model });
       },
       () => {
         // Nothing to show for this thread; the next event reads again.
       },
     );
-  }, [askFor]);
+  }, []);
 
   useEffect(() => {
     reload();
@@ -81,11 +87,11 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
 
   const adopt = useCallback(
     (conversation: InboxAskConversationWire) => {
-      setRead((last) => (last?.threadId === askFor ? { ...last, model: { ...last.model, conversation } } : last));
+      setRead((last) => (last?.threadId === conversation.thread_id ? { ...last, model: { ...last.model, conversation } } : last));
       // POST /ask knows the conversation, not the running turn: the read after it does.
       reload();
     },
-    [askFor, reload],
+    [reload],
   );
 
   useLayoutEffect(() => {

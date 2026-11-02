@@ -6,7 +6,11 @@
  * ask; a question gets its answer under the real agent's name and icon, and the
  * surface the agent gets comes from the thread; the dropdown's pick moves
  * `#thread=`; the box's words stay across a thread switch; Mod+Enter in the
- * window never sends the reply draft; Escape in it never closes the thread.
+ * window never sends the reply draft, even after a pressed button goes away;
+ * Escape in it never closes the thread, and bare keys never reach the Inbox; a
+ * busy choice goes only to the session it was shown for; Ask again keeps one
+ * question; Reply in the thread leaves the reply in sight; a POST that lands
+ * after a switch harms neither thread; a damaged file keeps Ask AI and says so.
  *
  * The same in a real browser on the built Inbox: tests/e2e/inbox-ask-window.spec.ts.
  *
@@ -17,11 +21,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../../../tests/helpers/no-browser';
+import { writeInboxAsk } from '../../shared/inbox/ask';
+import { PHONE_QUERY, TOUCH_QUERY } from '../phone';
+import { emitAskChange } from './askEvents';
 
 setDefaultTimeout(30_000);
 
@@ -34,12 +41,19 @@ const claudeMark = renderToStaticMarkup(<HostMark host="claude-code" />);
 
 interface World {
   port: number;
+  control: number;
   serverSession: string;
   project: string;
   first: string;
   second: string;
   mine: string;
+  busy: string;
+  moved: string;
+  flaky: string;
+  note: string;
+  damaged: string;
   resolved: string;
+  inboxDir: string;
   stop: () => Promise<void>;
 }
 
@@ -54,6 +68,8 @@ let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 /** Every request the window made. */
 let requests: { method: string; path: string; body: Record<string, unknown> }[] = [];
+/** While set, the answers to POST /ask wait for it: the server has them, the window does not yet. */
+let postsLand: Promise<void> | null = null;
 
 async function startWorld(setting: 'on' | 'off'): Promise<World> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), `plannotator-inbox-ask-dom-${setting}-`)));
@@ -81,9 +97,10 @@ async function startWorld(setting: 'on' | 'off'): Promise<World> {
     line += new TextDecoder().decode(value);
   }
   reader.releaseLock();
-  const started = JSON.parse(line.trim()) as Omit<World, 'stop'>;
+  const started = JSON.parse(line.trim()) as Omit<World, 'stop' | 'inboxDir'>;
   return {
     ...started,
+    inboxDir: join(dir, 'data', 'inbox'),
     stop: async () => {
       child.kill();
       await child.exited;
@@ -121,12 +138,14 @@ afterAll(async () => {
 beforeEach(() => {
   if (!hasDom) return;
   requests = [];
+  postsLand = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
     const path = String(input);
     requests.push({ method, path, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {} });
     const answer = await loopback(world.port, path, method, init?.body ? String(init.body) : undefined, init?.signal);
+    if (postsLand && method === 'POST' && path.endsWith('/ask')) await postsLand;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -162,7 +181,7 @@ async function until(check: () => boolean | Promise<boolean>, what: string) {
     if (await check()) return;
     await wait(50);
   }
-  throw new Error(`timed out waiting for ${what}`);
+  throw new Error(`timed out waiting for ${what}; the window reads: ${askWindow()?.textContent?.slice(0, 300) ?? '(none)'}`);
 }
 
 async function openInbox(target: World, threadId: string): Promise<HTMLElement> {
@@ -205,6 +224,81 @@ async function openMenu() {
   const chip = askWindow()!.querySelector<HTMLElement>('[data-ask-chip]')!;
   act(() => chip.click());
   await until(() => document.querySelector('[data-ask-menu] [data-ask-chat]') !== null, 'the dropdown');
+}
+
+function switchTo(threadId: string) {
+  act(() => {
+    window.location.hash = `#thread=${threadId}`;
+    window.dispatchEvent(new Event('hashchange'));
+  });
+}
+
+/** A press as a browser makes it: the button takes focus, then the click. */
+function press(button: HTMLElement) {
+  act(() => {
+    button.focus();
+    button.click();
+  });
+}
+
+const buttonNamed = (name: string) => [...askWindow()!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === name);
+const noteOf = (kind: string) => askWindow()!.querySelector<HTMLElement>(`[data-ask-note="${kind}"]`);
+const footButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('section.ib-pane .ib-pfoot button')].find((button) => button.textContent?.trim() === name);
+const replySends = () => requests.filter((r) => r.method === 'POST' && r.path.endsWith('/reply')).length;
+const asksPosted = () => requests.filter((r) => r.method === 'POST' && r.path.endsWith('/ask'));
+const queries = () => requests.filter((r) => r.path === '/api/ai/query');
+
+/** The Send the key looks for must count as on screen (happy-dom lays nothing out). */
+async function laidOut(run: () => Promise<void>) {
+  const savedRects = HTMLElement.prototype.getClientRects;
+  HTMLElement.prototype.getClientRects = () => [{}] as unknown as DOMRectList;
+  try {
+    await run();
+  } finally {
+    HTMLElement.prototype.getClientRects = savedRects;
+  }
+}
+
+async function writeReplyDraft(words: string): Promise<HTMLTextAreaElement> {
+  act(() => footButton('Reply')!.click());
+  await until(() => document.querySelector('section.ib-pane textarea') !== null, 'the reply box');
+  const box = document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')!;
+  type(box, words);
+  await until(() => footButton('Send') !== undefined, 'the Send');
+  return box;
+}
+
+/** Focus is in the window, and Mod+Enter from it leaves the reply draft a draft. */
+async function replyStaysDraft(box: HTMLTextAreaElement, words: string) {
+  expect(askWindow()!.contains(document.activeElement)).toBe(true);
+  pressEnter(document.activeElement as HTMLElement, true);
+  await wait(150);
+  expect(replySends()).toBe(0);
+  expect(box.value).toBe(words);
+}
+
+const driveAgents = (path: string, body?: unknown) => loopback(world.control, path, body ? 'POST' : 'GET', body ? JSON.stringify(body) : undefined);
+const agentSaw = async (session: string) => JSON.parse((await driveAgents(`/agent?session=${session}`)).text) as { asked: string[]; interrupts: number };
+const savedTurns = async (threadId: string) => (JSON.parse((await loopback(world.port, `/api/inbox/threads/${threadId}/ask`, 'GET')).text) as { conversation: { turns: { id: string; answer?: string }[] } | null }).conversation?.turns ?? [];
+
+/** Answers to POST /ask land when the returned function is called. */
+function holdPosts(): () => void {
+  let land = () => {};
+  postsLand = new Promise((done) => {
+    land = done;
+  });
+  return () => {
+    postsLand = null;
+    land();
+  };
+}
+
+function aPhone() {
+  window.matchMedia = ((query: string) => ({ matches: query === PHONE_QUERY || query === TOUCH_QUERY, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
+}
+
+function saveUnanswered(threadId: string, session: string, question: string) {
+  writeInboxAsk(world.inboxDir, { v: 1, thread_id: threadId, seen_at: null, turns: [{ id: `saved-${threadId.slice(-12)}`, at: new Date().toISOString(), session, host: 'claude-code', question }] });
 }
 
 test('a resolved thread has no icon; an open one does, and it opens and minimizes the window', async () => {
@@ -286,33 +380,22 @@ test('Mod+Enter from the window never sends the reply draft', async () => {
   if (!hasDom) return;
   await openInbox(on, on.mine);
   await until(() => askButton() !== null, 'the icon');
-  // The Send the key looks for must count as on screen (happy-dom lays nothing out).
-  const savedRects = HTMLElement.prototype.getClientRects;
-  HTMLElement.prototype.getClientRects = () => [{}] as unknown as DOMRectList;
-  try {
-    const footButton = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('section.ib-pane .ib-pfoot button')].find((button) => button.textContent?.trim() === name);
-    act(() => footButton('Reply')!.click());
-    await until(() => document.querySelector('section.ib-pane textarea') !== null, 'the reply box');
-    const replyBox = document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')!;
-    type(replyBox, 'A reply that must stay a draft');
-    await until(() => footButton('Send') !== undefined, 'the Send');
+  await laidOut(async () => {
+    const replyBox = await writeReplyDraft('A reply that must stay a draft');
     await openChat();
     await wait(300);
-    const sends = () => requests.filter((r) => r.method === 'POST' && r.path.endsWith('/reply')).length;
     requests = [];
     for (const target of [askWindow()!.querySelector<HTMLElement>('[tabindex="0"]')!, askWindow()!.querySelector<HTMLElement>('[data-ask-chip]')!, askBox()!]) {
       act(() => target.focus());
       pressEnter(target, true);
       await wait(150);
-      expect(sends()).toBe(0);
+      expect(replySends()).toBe(0);
     }
     expect(replyBox.value).toBe('A reply that must stay a draft');
     // The same key from the thread does send: the checks above can fail.
     act(() => document.querySelector<HTMLElement>('section.ib-pane')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true })));
-    await until(() => sends() === 1, 'the Send from the thread');
-  } finally {
-    HTMLElement.prototype.getClientRects = savedRects;
-  }
+    await until(() => replySends() === 1, 'the Send from the thread');
+  });
 });
 
 test('Escape from the window leaves the thread where it is', async () => {
@@ -328,6 +411,195 @@ test('Escape from the window leaves the thread where it is', async () => {
   expect(window.location.hash).toContain(on.first);
   expect(document.querySelector('.ib-phead')).not.toBeNull();
   expect(askWindow()).not.toBeNull();
+});
+
+test('a bare key from the window stays out of the Inbox', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.first);
+  await openChat();
+  // `?` has no check on where the key came from, so only the window's overlay mark keeps it from the Inbox.
+  const pressMapKey = (target: HTMLElement) => act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: '?', code: 'Slash', shiftKey: true, bubbles: true, cancelable: true })));
+  const shortcutMap = () => document.querySelector('.ib-map');
+  for (const target of [askWindow()!.querySelector<HTMLElement>('[tabindex="0"]')!, askWindow()!.querySelector<HTMLElement>('[data-ask-chip]')!]) {
+    act(() => target.focus());
+    pressMapKey(target);
+    await wait(100);
+    expect(shortcutMap() === null).toBe(true);
+  }
+  // The same key from the thread does open it: the check above can fail.
+  pressMapKey(document.querySelector<HTMLElement>('section.ib-pane')!);
+  await until(() => shortcutMap() !== null, 'the shortcut map');
+});
+
+test('a busy agent gets a note, and its choice asks that session once, with focus kept in the window', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.busy);
+  await driveAgents('/busy', { session: 'session-busy', busy: true });
+  await until(() => askButton() !== null, 'the icon');
+  await laidOut(async () => {
+    const replyBox = await writeReplyDraft('A half-written reply');
+    await openChat();
+    type(askBox()!, 'Can you stop for this?');
+    pressEnter(askBox()!);
+    await until(() => noteOf('busy') !== null, 'the busy note');
+    expect(noteOf('busy')!.textContent).toContain('Claude Code is working on something else.');
+    expect((await agentSaw('session-busy')).asked.length).toBe(0);
+    requests = [];
+    press(buttonNamed('Interrupt and ask now')!);
+    await until(() => askWindow()!.textContent!.includes('Answered: Can you stop for this?'), 'the answer');
+    await replyStaysDraft(replyBox, 'A half-written reply');
+  });
+  const saw = await agentSaw('session-busy');
+  expect(saw.interrupts).toBe(1);
+  expect(saw.asked.length).toBe(1);
+  expect((await savedTurns(on.busy)).length).toBe(1);
+});
+
+test('a busy choice goes only to the session it was shown for: after a hand-off the new owner gets its own note', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.moved);
+  await driveAgents('/busy', { session: 'session-moved', busy: true });
+  await driveAgents('/busy', { session: 'session-new-owner', busy: true });
+  await openChat();
+  type(askBox()!, 'Who has this now?');
+  pressEnter(askBox()!);
+  await until(() => noteOf('busy') !== null, 'the first session being busy');
+  await driveAgents('/hand-off', {});
+
+  requests = [];
+  press(buttonNamed('Interrupt and ask now')!);
+  await until(() => queries().length === 1, 'the question to go out');
+  expect(queries()[0]!.body.busyPolicy).toBeUndefined();
+  await until(() => noteOf('busy') !== null, 'the new owner being busy');
+  expect((await agentSaw('session-new-owner')).interrupts).toBe(0);
+
+  // Now the person saw this session busy, and may choose.
+  press(buttonNamed('Interrupt and ask now')!);
+  await until(() => askWindow()!.textContent!.includes('Answered: Who has this now?'), 'the answer');
+  expect(queries()[1]!.body.busyPolicy).toBe('interrupt');
+  expect((await agentSaw('session-new-owner')).interrupts).toBe(1);
+  expect(await agentSaw('session-moved')).toEqual({ asked: [], interrupts: 0 });
+});
+
+test('Ask again asks the same turn, with focus kept in the window', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.flaky);
+  await until(() => askButton() !== null, 'the icon');
+  await laidOut(async () => {
+    const replyBox = await writeReplyDraft('Another half-written reply');
+    await openChat();
+    type(askBox()!, 'A flaky question');
+    pressEnter(askBox()!);
+    await until(() => {
+      // What the event stream does when the answer ends (the test's EventSource has none).
+      act(() => emitAskChange(on.flaky));
+      return buttonNamed('Ask again') !== undefined;
+    }, 'the note');
+    expect(noteOf('unanswered')!.textContent).toContain('The scripted agent failed this one.');
+    // The scripted agent's status reaches the Inbox on its 500 ms push: asking sooner finds it busy.
+    await wait(700);
+    requests = [];
+    press(buttonNamed('Ask again')!);
+    await until(() => askWindow()!.textContent!.includes('Answered: A flaky question'), 'the answer');
+    await replyStaysDraft(replyBox, 'Another half-written reply');
+  });
+  expect((await savedTurns(on.flaky)).map((turn) => turn.answer)).toEqual(['Answered: A flaky question']);
+  expect((await agentSaw('session-flaky')).asked.length).toBe(2);
+});
+
+test('Reply in the thread joins the draft, and a window filling the screen moves out of its way', async () => {
+  if (!hasDom) return;
+  world = on;
+  saveUnanswered(on.note, 'session-note', 'What was the plan?');
+  await openInbox(on, on.note);
+  await until(() => askButton() !== null, 'the icon');
+  const replyBox = await writeReplyDraft('Kept words');
+  await openChat();
+  await until(() => buttonNamed('Reply in the thread') !== undefined, 'the note');
+
+  // A floating window leaves the reply in sight, so it stays.
+  press(buttonNamed('Reply in the thread')!);
+  await until(() => replyBox.value === 'Kept words\n\nWhat was the plan?', 'the question in the reply');
+  expect(askWindow() !== null).toBe(true);
+
+  act(() => askWindow()!.querySelector<HTMLElement>('[aria-label="Fullscreen"]')!.click());
+  press(buttonNamed('Reply in the thread')!);
+  await until(() => replyBox.value === 'Kept words\n\nWhat was the plan?\n\nWhat was the plan?', 'the question in the reply again');
+  expect(askWindow() === null).toBe(true);
+  expect(askButton()!.getAttribute('aria-pressed')).toBe('false');
+});
+
+test('on a touch phone Enter is a new line, and Reply in the thread leaves the reply in sight', async () => {
+  if (!hasDom) return;
+  world = on;
+  saveUnanswered(on.note, 'session-note', 'What was the plan?');
+  aPhone();
+  await openInbox(on, on.note);
+  await openChat();
+  type(askBox()!, 'one');
+  requests = [];
+  pressEnter(askBox()!);
+  await wait(200);
+  expect(asksPosted().length).toBe(0);
+  expect(askBox()!.value).toBe('one');
+  await until(() => buttonNamed('Reply in the thread') !== undefined, 'the note');
+  press(buttonNamed('Reply in the thread')!);
+  await until(() => document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')?.value.includes('What was the plan?') === true, 'the question in the reply');
+  expect(askWindow() === null).toBe(true);
+});
+
+test('a POST that lands after a thread switch leaves the next thread its icon', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.first);
+  await openChat();
+  const land = holdPosts();
+  type(askBox()!, 'Landing late');
+  pressEnter(askBox()!);
+  await until(() => asksPosted().length === 1, 'the question to go out');
+  switchTo(on.mine);
+  await until(() => askButton() !== null && window.location.hash.includes(on.mine), 'the next thread');
+  await wait(100);
+  land();
+  await wait(400);
+  expect(askButton()).not.toBeNull();
+});
+
+test('words already sent do not come back when a POST lands after a thread switch', async () => {
+  if (!hasDom) return;
+  await openInbox(on, on.first);
+  await openChat();
+  const land = holdPosts();
+  type(askBox()!, 'Sent only once');
+  pressEnter(askBox()!);
+  await until(() => asksPosted().length === 1, 'the question to go out');
+  switchTo(on.mine);
+  await until(() => window.location.hash.includes(on.mine), 'the next thread');
+  await wait(100);
+  land();
+  await wait(100);
+  switchTo(on.first);
+  await until(() => askWindow()?.textContent?.includes('Sent only once') === true, 'the question in its chat');
+  expect(askBox()!.value).toBe('');
+});
+
+test('a damaged conversation keeps Ask AI, says so, and the next question sets it aside', async () => {
+  if (!hasDom) return;
+  world = on;
+  mkdirSync(join(on.inboxDir, 'ask'), { recursive: true });
+  writeFileSync(join(on.inboxDir, 'ask', `${on.damaged}.json`), '{"v":1,"thread_id":');
+  await openInbox(on, on.damaged);
+  await openChat();
+  await until(() => askWindow()!.querySelector('[role="alert"]')?.textContent?.includes('damaged') === true, 'the word on the page');
+  type(askBox()!, 'Still there?');
+  pressEnter(askBox()!);
+  await until(() => askWindow()!.querySelector('[role="alert"]')?.textContent?.includes('set aside') === true, 'where it went');
+  expect(askBox()!.value).toBe('Still there?');
+  const kept = readdirSync(join(on.inboxDir, 'ask')).filter((name) => name.startsWith(on.damaged));
+  expect(kept).toHaveLength(1);
+  expect(kept[0]).toMatch(/\.json\.\d+\.bad$/);
+  pressEnter(askBox()!);
+  await until(() => askWindow()!.textContent!.includes('Answered: Still there?'), 'a new conversation');
+  await until(() => askWindow()!.querySelector('[role="alert"]') === null, 'the word to go');
 });
 
 test('Stop works from a page that did not start the answer', async () => {

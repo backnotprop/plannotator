@@ -5,9 +5,9 @@
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
- *   GET  /api/inbox/threads/:id/ask        `{ subject, project, conversation, running, can_ask, agent }`: null when
- *                                          none, the turn id being answered, whether the icons show,
- *                                          and who answers
+ *   GET  /api/inbox/threads/:id/ask        `{ subject, project, conversation, damaged?, running, can_ask, agent }`:
+ *                                          null when none, the turn id being answered, whether the
+ *                                          icons show, and who answers
  *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: claim the owner's
  *                                          slot, save the question, wait for its client
  *   POST /api/inbox/threads/:id/ask/seen   `{ seen_at }`: the person saw the answers up to then
@@ -27,9 +27,11 @@
  * tells the window (`event: ask`), which reads the conversation again.
  *
  * A file that can't be read answers `503 ask_unreadable`, and one that doesn't
- * parse `409 ask_damaged`, on every route but End: never "no conversation".
- * A question refused for that saves nothing and overwrites nothing. The chat
- * list leaves such a file out: it lists, and that thread's own read says why.
+ * parse `409 ask_damaged`, on every route but End and the thread's read: never
+ * "no conversation". That read says `damaged: true` for one that doesn't parse,
+ * so the window keeps its icon and the person can ask the question that sets it
+ * aside. A question refused for that saves nothing and overwrites nothing. The
+ * chat list leaves such a file out: it lists, and that thread's own read says why.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -137,11 +139,21 @@ export function createInboxAsk(options: {
       const thread = store.thread(threadId);
       if (!thread) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
       const owner = ownerOf(thread);
+      // Not a refusal: the window needs its icon and a word to the person, or the question that sets the file aside can't be asked.
+      let conversation: ReturnType<typeof readInboxAsk> = null;
+      let damaged = false;
+      try {
+        conversation = readInboxAsk(store.dir, threadId);
+      } catch (error) {
+        if (!(error instanceof InboxError) || error.code !== "ask_damaged") throw error;
+        damaged = true;
+      }
       return json({
         serverSession,
         subject: thread.subject,
         project: thread.project.name,
-        conversation: readInboxAsk(store.dir, threadId),
+        conversation,
+        ...(damaged ? { damaged: true } : {}),
         running: live.running(threadId),
         can_ask: !!owner && live.canAnswer(owner.session),
         agent: agentOf(thread, owner ?? store.threadOwner(threadId)),

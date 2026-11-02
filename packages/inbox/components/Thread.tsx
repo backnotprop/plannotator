@@ -3964,13 +3964,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // Ask AI's Reply in the thread: the question joins the reply, and a draft's words stay above it.
   useEffect(() => {
-    if (!replyWords) return;
+    // While a Send is on its way the box takes no words: these wait for it to end.
+    if (!replyWords || sending) return;
     onReplyWordsTaken?.();
     const kept = boxRef.current.open ? boxRef.current.text : replyDraft.conflict ?? replyDraft.draft?.body ?? '';
     changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${replyWords}` : replyWords);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [replyWords]);
+  }, [replyWords, sending]);
 
   // Mark read: pressed while the thread is marked read, offered while something here waits on the person.
   const readAt = row?.read_at ?? null;

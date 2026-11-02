@@ -1380,6 +1380,8 @@ export interface InboxAskModel {
   subject: string | null;
   project: string;
   conversation: InboxAskConversationWire | null;
+  /** The file doesn't parse, so `conversation` is null: the next question sets it aside. */
+  damaged?: true;
   /** The turn being answered, or null. */
   running: string | null;
   /** The icons show: an open thread whose owner's connection can answer now. */
