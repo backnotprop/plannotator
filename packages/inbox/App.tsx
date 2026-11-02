@@ -2214,14 +2214,16 @@ function Inbox() {
    * reads show waits for the last one: one read for the lot. Only the records
    * of those questions wait, and only while the pane is open, so a save that
    * never answers holds back nothing else; any other record is read as it comes.
+   * `paneClosed` only ends the hold: nothing landed, and a read here would put
+   * the list on screen ahead of the close's own settle (settle.ts).
    */
-  const onPickSaves = useCallback((saving: ReadonlySet<string>) => {
+  const onPickSaves = useCallback((saving: ReadonlySet<string>, paneClosed = false) => {
     pickSaves.current.saving = saving;
     if (saving.size > 0) return;
     // While a thread is open the person's own writes never reorder the list
     // (owner ruling 2026-10-11): each row shows its new state in place, and
     // the list catches up when the thread closes (settle.ts).
-    void refreshList(!routeRef.current.thread, true);
+    if (!paneClosed) void refreshList(!routeRef.current.thread, true);
     if (!pickSaves.current.owed) return;
     pickSaves.current.owed = false;
     pickSaves.current.read();

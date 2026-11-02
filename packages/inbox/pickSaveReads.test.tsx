@@ -43,6 +43,8 @@ let reads: string[] = [];
 let slow = false;
 /** The next saves never answer, as on a connection that went away without a word. */
 let hang = false;
+/** The next saves are slow and their record never comes. */
+let unheard = false;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -59,7 +61,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
 
-const TESTS = 5;
+const TESTS = 8;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -108,6 +110,7 @@ beforeEach(() => {
   reads = [];
   slow = false;
   hang = false;
+  unheard = false;
   frames = new Map();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -117,6 +120,7 @@ beforeEach(() => {
     if (method === 'POST' && path.endsWith('/picks') && answer.status === 200) {
       saves += 1;
       if (hang) await new Promise(() => {});
+      if (unheard) await new Promise((r) => setTimeout(r, SAVE_MS));
       if (slow) {
         const { questions } = JSON.parse(answer.text) as { questions: { key: string }[] };
         // The record frame beats the save's own answer.
@@ -189,6 +193,14 @@ function type(field: HTMLInputElement, words: string) {
 const threadRoute = () => `/api/inbox/threads/${world.waiting}`;
 const count = (route: string) => reads.filter((path) => path === route).length;
 
+async function closePane() {
+  await act(async () => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
+}
+
 test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list, thread, drafts and files once', async () => {
   const field = await open();
   slow = true;
@@ -258,20 +270,43 @@ test.skipIf(!hasDom)("a save that never answers holds back only its own question
   expect(count(threadRoute())).toBe(1);
   expect(count('/api/inbox/drafts')).toBe(1);
 
-  // The pane closes on the save that never answered: the list reads now, and records read as they come.
-  reads = [];
-  await act(async () => {
-    window.location.hash = '';
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-  });
-  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
-  await until(() => count('/api/inbox/threads') > 0, 'the list read');
+  // The pane closes on the save that never answered: records read as they come.
+  await closePane();
   reads = [];
   seq += 1;
   frame('record', { seq, kind: 'question', id: 'qst_own', question: await ownQuestion() });
   await wait(120);
   expect(count('/api/inbox/threads')).toBeGreaterThan(0);
   expect(count('/api/inbox/drafts')).toBe(1);
+});
+
+test.skipIf(!hasDom)('closing a thread with nothing saving reads no list: the rows wait out the settle', async () => {
+  await open();
+  reads = [];
+  await closePane();
+  await wait(120);
+  expect(count('/api/inbox/threads')).toBe(0);
+});
+
+test.skipIf(!hasDom)('a save that lands after the pane closed reads the list then, not at the close', async () => {
+  const field = await open();
+  unheard = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  reads = [];
+  await closePane();
+  expect(count('/api/inbox/threads')).toBe(0);
+  await until(() => count('/api/inbox/threads') > 0, 'the list read as the save landed');
+});
+
+test.skipIf(!hasDom)('a record held for a save is read as the pane closes, the save still out', async () => {
+  const field = await open();
+  slow = true;
+  type(field, 'a');
+  await until(() => saves === 1, 'the save');
+  reads = [];
+  await closePane();
+  await until(() => count('/api/inbox/drafts') === 1, 'the read the record owed');
 });
 
 test.skipIf(!hasDom)('no stream at all: the list still follows a saved answer', async () => {

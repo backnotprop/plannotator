@@ -894,7 +894,7 @@ export interface ThreadPaneProps {
   /** The thread's questions changed through a pick (the response's questions for that message). */
   onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
   /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
-  onPickSaves?: (ids: ReadonlySet<string>) => void;
+  onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
   /** Something was written (a Send, resolve): read the thread and the list again. */
   onChanged: () => Promise<void>;
   /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
@@ -2793,7 +2793,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     return () => {
       paneGone.current = true;
       // Whatever still saves is no longer the person's run of answers: the window reads as records come.
-      onPickSavesNow.current?.(new Set());
+      onPickSavesNow.current?.(new Set(), true);
       if (pickQueue.unsaved() > 0) unsavedWhenGone();
     };
     // Only as the pane goes; `unsavedWhenGone` reads refs.
