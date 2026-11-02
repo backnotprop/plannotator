@@ -128,6 +128,18 @@ const LOOKS: [string, string[]][] = [
   ['all-three', ['highlight', 'compact', 'hide-agents']],
 ];
 const LOOK_CLASS: Record<string, string> = { highlight: 'ib-lk-pill', compact: 'ib-lk-compact', 'hide-agents': 'ib-lk-noagents' };
+/** The server's option name for each look (config.json `inboxRows`). */
+const LOOK_ROW: Record<string, string> = { highlight: 'highlight', compact: 'compact', 'hide-agents': 'hideAgents' };
+
+/**
+ * The look is the person's, kept by the Inbox (config.json `inboxRows`) and shown in every window; the server's look
+ * wins over a browser's old per-option cookies, which are only adopted once when the server has none. So a look is
+ * set there, and this browser's cookies are cleared so a page paints from the server's answer.
+ */
+async function setLook(context: BrowserContext, looks: string[]) {
+  await context.clearCookies();
+  await post('/api/inbox/settings', { rows: looks.map((c) => LOOK_ROW[c]!) });
+}
 
 interface PinGeometry {
   id: string;
@@ -309,8 +321,7 @@ const SHAPE_URL = (shape: Shape) => (shape === 'narrow' ? `${url}#thread=${opene
  * classes then prove the look is the one asked for.
  */
 async function show(context: BrowserContext, page: Page, shape: Shape, cookies: string[]) {
-  await context.clearCookies();
-  if (cookies.length) await context.addCookies(cookies.map((c) => ({ name: `plannotator-inbox-list-${c}`, value: '1', url })));
+  await setLook(context, cookies);
   await page.goto('about:blank');
   await page.goto(SHAPE_URL(shape));
   await expect(page.locator(`.ib-lbody .${ROW[shape]}`).first()).toBeVisible();
@@ -413,8 +424,7 @@ test("a wide list with no pinned row keeps today's six columns and its 84 px cou
   try {
     const page = await context.newPage();
     for (const [, cookies] of LOOKS) {
-      await context.clearCookies();
-      if (cookies.length) await context.addCookies(cookies.map((c) => ({ name: `plannotator-inbox-list-${c}`, value: '1', url })));
+      await setLook(context, cookies);
       await page.goto('about:blank');
       await page.goto(`${url}#project=${projects.unpinned}`);
       const row = page.locator('.ib-lbody .ib-row').first();

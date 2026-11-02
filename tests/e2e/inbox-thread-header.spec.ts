@@ -1,13 +1,16 @@
 /**
  * The thread header's order (owner, 2026-10-16: "the archive button needs to
  * move next to the close button. Mark read should be the furthest."; the
- * amendment in the "inbox-mark-read" approval). Proved in a real browser
- * against the compiled binary, in every layout the header has:
+ * amendment in the "inbox-mark-read" approval; approval "inbox-thread-header",
+ * 2026-11-02: the read button and a Snooze clock, as icons, before the
+ * subject). Proved in a real browser against the compiled binary, in every
+ * layout the header has:
  *
  *  - desktop beside the list: the thread's full screen ("Hide the sidebar and
- *    the list") leads, then Mark read; at the right, icons only (approval
- *    "inbox-thread-artifacts"): Artifacts, Expand all (chevrons), Archive,
- *    ⋯ More, a hairline, the ×;
+ *    the list") leads, then the read button (Mark read) and the Snooze clock,
+ *    then the subject; at the right, icons only (approval
+ *    "inbox-thread-artifacts"): Artifacts, Expand all (chevrons), ⋯ More
+ *    (Archive is in its menu), a hairline, the ×;
  *  - the thread in full screen (approval "inbox-files-tabs", amendment
  *    2026-10-30, B): the sidebar and the list hide, the thread keeps a centred
  *    760 px measure, ‹ Inbox leads in the button's place and there is no ×;
@@ -19,11 +22,12 @@
  *    window narrowed in full screen keeps the list beside the thread on the
  *    way out (the sidebar held closed); with the sidebar closed the button
  *    reads "Hide the list";
- *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read; Archive, then
- *    ⋯ More (the copy menu, design record "inbox-copy-message") end it;
+ *  - a stacked window (1000 px): ‹ Inbox leads, then Mark read and Snooze;
+ *    ⋯ More (the copy menu, design record "inbox-copy-message") ends it;
  *  - a file beside the thread: the same, with ‹ Inbox closing the file;
  *  - full screen: the file covers the thread;
- *  - a phone: ‹ Inbox, Mark read, then Archive and ⋯ More at the right edge, 44 px targets;
+ *  - a phone: ‹ Inbox, the subject, Artifacts, Expand, ⋯ More at the right edge, 44 px targets;
+ *    Mark read and Snooze lead the ⋯ sheet;
  *  - a thread that came back from the archive, and an archived thread
  *    (Unarchive in its foot, the header's Archive button reading Unarchive).
  *
@@ -79,6 +83,10 @@ async function headerOrder(pane: Locator): Promise<string[]> {
       .map((b) =>
         b.hasAttribute('data-mark-read')
           ? 'mark-read'
+          : b.hasAttribute('data-mark-unread')
+            ? 'mark-unread'
+          : b.hasAttribute('data-thread-snooze')
+            ? 'snooze'
           : b.hasAttribute('data-artifacts-button')
             ? 'artifacts'
           : b.hasAttribute('data-full-in')
@@ -157,14 +165,28 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop beside the list: full screen, then Mark read lead, Archive and ⋯ More sit beside the close; Tab follows that order', async () => {
+test('desktop beside the list: full screen, then Mark read and Snooze lead before the subject, ⋯ More sits beside the close; Tab follows that order', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
   await expect(pane.locator('[data-mark-read]')).toBeVisible();
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
-  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'artifacts', 'expand', 'more', 'close']);
+  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'snooze', 'artifacts', 'expand', 'more', 'close']);
+  // The title sits between the clock and Artifacts. A named thread shows its name at once (the list's rule, the owner's
+  // 2026-11-02 call); its tooltip shows the whole subject, the body's heading stays the subject, and the meta line has
+  // no pill repeating the name.
+  const subject = pane.locator('.ib-phead [data-header-subject]');
+  await expect(subject).toHaveText('invoices');
+  await expect(subject).toHaveAttribute('data-on', '');
+  await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Invoice list: cards or a table?');
+  await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
+  await subject.hover();
+  await expect(page.locator('[data-side].bg-popover')).toHaveText('Invoice list: cards or a table?');
+  await page.mouse.move(0, 0);
+  const [clockBox, subjectBox, artifactsBox] = await Promise.all([pane.locator('[data-thread-snooze]').boundingBox(), subject.boundingBox(), pane.locator('[data-artifacts-button]').boundingBox()]);
+  expect(subjectBox!.x).toBeGreaterThanOrEqual(clockBox!.x + clockBox!.width - 0.5);
+  expect(subjectBox!.x + subjectBox!.width).toBeLessThanOrEqual(artifactsBox!.x + 0.5);
   await expect(pane.locator('[data-full-in]')).toHaveAccessibleName('Hide the sidebar and the list');
   // Its hairline sets it apart from Mark read.
   expect(await pane.locator('[data-full-in]').evaluate((b) => b.nextElementSibling?.className)).toBe('ib-vsep');
@@ -177,6 +199,8 @@ test('desktop beside the list: full screen, then Mark read lead, Archive and ⋯
   await expect(pane.locator('[data-mark-read]')).toHaveAttribute('aria-pressed', 'false');
   // The keyboard walks the header left to right.
   await pane.locator('[data-mark-read]').focus();
+  await page.keyboard.press('Tab');
+  await expect(pane.locator('[data-thread-snooze]')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(pane.locator('[data-artifacts-button]')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -202,7 +226,7 @@ test('Archive is in the ⋯ menu, not the header: it archives with Undo, and a p
   await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
   await page.locator('[data-toast-undo]').click();
   await expect(page.locator('.ib-pfoot')).not.toContainText('Archived. The next message from');
-  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'artifacts', 'expand', 'more', 'close']);
+  expect(await headerOrder(pane)).toEqual(['full', 'mark-read', 'snooze', 'artifacts', 'expand', 'more', 'close']);
 
   const { defaultBrowserType: _ignored, ...options } = devices['Pixel 7'] as (typeof devices)['Pixel 7'] & { defaultBrowserType?: string };
   const context = await browser.newContext({ ...options, colorScheme: 'light' });
@@ -244,7 +268,7 @@ test('the thread in full screen: the sidebar and the list hide; ‹ Inbox, Escap
   await expect(sidebar).toBeHidden();
   await expect(leave).toBeFocused();
   await expect(leave).toHaveAccessibleName('Back to Inbox');
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
   await expect(pane.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   const measure = await pane.locator('.ib-pbody').evaluate((b) => {
     const s = getComputedStyle(b);
@@ -315,7 +339,7 @@ test('the thread in full screen with a file: the file opens beside it; closing t
   await expect(pane).not.toHaveAttribute('data-full', '');
   await expect(pane.locator('[data-file-back]')).toBeVisible();
   await expect(pane.locator('[data-full-back]')).toHaveCount(0);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
   await shot(page, '1c-thread-full-screen-with-file', ['light', 'dark']);
   // The file's ×: back to the thread in full screen, not to the list.
   await view.getByRole('button', { name: 'Close invoice-plan.md' }).click();
@@ -461,7 +485,7 @@ test('the thread in full screen, then a narrower window: leaving keeps the list 
   }
 });
 
-test('a stacked window: ‹ Inbox, then Mark read; Archive and ⋯ More end the header', async () => {
+test('a stacked window: ‹ Inbox, then Mark read and Snooze; ⋯ More ends the header', async () => {
   const { page, threads } = world;
   await page.setViewportSize({ width: 1000, height: 800 });
   try {
@@ -469,14 +493,14 @@ test('a stacked window: ‹ Inbox, then Mark read; Archive and ⋯ More end the 
     const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
     await expect(pane.locator('[data-stack-back]')).toBeVisible();
     await shot(page, '2-stacked-1000');
-    expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
+    expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
     await expect(pane.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   } finally {
     await page.setViewportSize({ width: 1440, height: 900 });
   }
 });
 
-test('a file beside the thread: ‹ Inbox, then Mark read; Archive and ⋯ More end the header; full screen covers it', async () => {
+test('a file beside the thread: ‹ Inbox, then Mark read and Snooze; ⋯ More ends the header; full screen covers it', async () => {
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.invoices}&file=${world.attachment}`);
   const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
@@ -484,13 +508,13 @@ test('a file beside the thread: ‹ Inbox, then Mark read; Archive and ⋯ More 
   await expect(view).toBeVisible();
   await expect(pane.locator('[data-file-back]')).toBeVisible();
   await shot(page, '3-file-beside', ['light', 'dark']);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
   await view.getByRole('button', { name: 'Full screen' }).click();
   await expect(view).toHaveClass(/ib-full/);
   await shot(page, '4-file-full-screen');
   await view.getByRole('button', { name: 'Side by side' }).click();
   await expect(view).not.toHaveClass(/ib-full/);
-  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
+  expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'snooze', 'artifacts', 'expand', 'more']);
 });
 
 test('a thread that came back from the archive, and an archived one: the same order, Unarchive in the foot', async () => {
@@ -500,7 +524,7 @@ test('a thread that came back from the archive, and an archived one: the same or
   await expect(backPane.locator('[data-came-back]')).toBeVisible();
   await shot(page, '5-came-back');
   // A thread that came back is not resolved for the window, so Mark read is offered and leads.
-  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'expand', 'more', 'close']);
+  expect(await headerOrder(backPane)).toEqual(['full', 'mark-read', 'snooze', 'expand', 'more', 'close']);
 
   await page.goto(`${world.url}#thread=${threads.archived}`);
   const archivedPane = page.locator(`section.ib-pane[data-thread-id="${threads.archived}"]`);
@@ -518,7 +542,7 @@ for (const phone of [
   { name: 'Pixel 7', options: devices['Pixel 7'] },
   { name: '320 px', options: { ...devices['Pixel 7'], viewport: { width: 320, height: 640 } } },
 ]) {
-  test(`a phone (${phone.name}): ‹ Inbox, Mark read, then Archive and ⋯ More at the right edge, 44 px targets`, async ({ browser }) => {
+  test(`a phone (${phone.name}): ‹ Inbox, the subject, Artifacts, Expand and ⋯ More at the right edge, 44 px targets; Mark read and Snooze lead ⋯`, async ({ browser }) => {
     const { threads } = world;
     const { defaultBrowserType: _ignored, ...options } = phone.options as typeof phone.options & { defaultBrowserType?: string };
     const context = await browser.newContext({ ...options, colorScheme: 'light' });
@@ -528,9 +552,18 @@ for (const phone of [
       const pane = page.locator(`section.ib-pane[data-thread-id="${threads.invoices}"]`);
       await expect(pane.locator('[data-phone-back]')).toBeVisible();
       await shot(page, `7-phone-${phone.name.replace(/\W+/g, '-').toLowerCase()}`, ['light', 'dark']);
-      expect(await headerOrder(pane)).toEqual(['back', 'mark-read', 'artifacts', 'expand', 'more']);
-      // Under 360 px Mark read shows its icon alone; its words stay its name.
-      await expect(pane.locator('[data-mark-read]')).toHaveAccessibleName(/Mark read/);
+      expect(await headerOrder(pane)).toEqual(['back', 'artifacts', 'expand', 'more']);
+      // The title (this named thread's name) is drawn with room to read (approval "inbox-thread-header").
+      const title = pane.locator('.ib-phead [data-header-subject][data-on]');
+      await expect(title).toHaveText('invoices');
+      expect(await title.evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
+      // The read button and Snooze moved into the ⋯ sheet, where they lead.
+      await pane.locator('[data-thread-more]').click();
+      const sheet = page.locator('[data-thread-menu]');
+      await expect(sheet.getByRole('menuitem').first()).toHaveText('Mark read');
+      await expect(sheet.getByRole('menuitem').nth(1)).toHaveText('Snooze');
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
       // The pin lives in ⋯ More's menu (a phone's way to pin), not the header.
       await expect(pane.locator('[data-pin-toggle]')).toHaveCount(0);
       // Every header control is a 44 px target and none overlaps another.

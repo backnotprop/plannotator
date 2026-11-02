@@ -138,6 +138,8 @@ import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_COLS_VERSION,
+  inboxCardAutoShip,
   INBOX_CARD_KEY_MAX,
   INBOX_CARD_LINE_MAX,
   INBOX_CARD_LINKS_MAX,
@@ -150,7 +152,9 @@ import {
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
+  inboxCardDonePrs,
   type InboxCardRef,
   type InboxCardHistoryEntry,
   isInboxCardDropUnseen,
@@ -776,10 +780,15 @@ export class InboxStore {
         break;
       case "card":
         // Cards are their own records: nothing here touches routing or the list.
-        // A card stored before Asked became Backlog reads as Backlog (inboxCardColumnOf).
+        // A card stored before columns v2 reads in the v2 columns (readInboxCard: the migration table, never a rewrite).
         {
-          const card = readInboxCard(line.record);
+          let card = readInboxCard(line.record);
           const prev = this.cards.get(card.id);
+          // A card in Done holds every PR it links (marked or not: a released Inbox wrote no `via`), with any
+          // list it had; a later line without the field keeps what the card had. So a card shipped and moved back
+          // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
+          if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
+          else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -1422,7 +1431,7 @@ export class InboxStore {
 
   /**
    * Whether `message` reaches `session` as the person's own reply in a thread
-   * that session already has. Not one: a root or a New message (no `reply_to`);
+   * that session already has. Not one: a root, or a New message to a session new to the thread (a New message to one that has it counts, Board Ask too);
    * the Inbox's own notes and a Re-ask, which are not an answer from the
    * person; and a wake that is the session's first sight of the thread
    * (tagged, added, handed the thread, a reply sent on from an ended session,
@@ -1432,7 +1441,10 @@ export class InboxStore {
    * An action report is a reply: it reaches the agent as one, in the same words.
    */
   private plainReplyFor(message: InboxMessage, session: string | null): boolean {
-    if (message.author.kind !== "person" || !message.reply_to) return false;
+    if (message.author.kind !== "person") return false;
+    // A New message (the window's, or a Board card's Ask) into a thread the session already has is as plain as a reply:
+    // its subject is just as stale. A session new to the thread has not seen the subject, so it keeps it.
+    if (!message.reply_to && !this.newMessageInKnownThread(message)) return false;
     if (isInboxNote(message) || (message.reask?.length ?? 0) > 0) return false;
     const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
     if (tag) {
@@ -1441,6 +1453,15 @@ export class InboxStore {
       return added?.id !== message.id;
     }
     return !handoffActive(message) && !this.redirectedFrom(message) && !this.continuesThread(message);
+  }
+
+  /** A New message (no `reply_to`) to a session that already has the thread: it started or answered in it, or was sent its first message. */
+  private newMessageInKnownThread(message: InboxMessage): boolean {
+    const session = message.to?.session;
+    if (!session || message.thread_id === message.id) return false;
+    const root = this.messages.get(message.thread_id);
+    if (root?.delivery?.session === session || root?.to?.session === session) return true;
+    return this.threadMessages(message.thread_id).some((m) => m.id !== message.id && m.author.kind === "agent" && m.author.session === session);
   }
 
   /**
@@ -5615,11 +5636,12 @@ export class InboxStore {
   // Approval "inbox-board" (2026-10-20). A card is its own record in its
   // project's cards.jsonl: append-only snapshots on the store's one seq
   // counter, so the event stream carries them, and read by nothing that
-  // routes or lists threads. Who may move a card (COLUMNS.md, set d): an agent
-  // moves its work through the live columns, ships it and may drop it with a
-  // reason; only the person puts a card in the Icebox or brings one back from
-  // it, and only the person restores a card they dropped. Nothing moves a card
-  // by guessing: a linked PR that merges is shown, never acted on.
+  // routes or lists threads. Who may move a card (approval
+  // "inbox-board-columns-v2"): an agent moves its work through the live
+  // columns, ships it and may drop it with a reason; an agent never moves out
+  // of Backlog a card the person put there (`moved_by`), and only the person
+  // restores a card they dropped. One rule moves a card by itself: every PR it
+  // links merged (autoShipCard); nothing else is guessed.
 
   card(id: string): InboxCard | null {
     return this.cards.get(id) ?? null;
@@ -5684,7 +5706,8 @@ export class InboxStore {
       at,
       kind: "card",
       id: card.id,
-      record: card,
+      // Every line since v2 says so: a line without it is read through the pre-v2 map (readInboxCardColumns).
+      record: { ...card, cols: INBOX_CARD_COLS_VERSION },
     });
     // An older Inbox never reads cards.jsonl: the floor keeps it from handing out a card's seq again.
     try {
@@ -5716,7 +5739,10 @@ export class InboxStore {
   /**
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
-   * (card-refs.ts), added to `known` each once (by URL).
+   * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
+   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
+   * Jira sites are two issues.
    */
   private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
     const out = [...known];
@@ -5727,7 +5753,12 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      if (!out.some((k) => k.url === ref.url || k.ref === ref.ref)) out.push(ref);
+      const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
+      const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
+      const at = out.findIndex(same);
+      if (at < 0) out.push(linked);
+      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
+      else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
@@ -5746,7 +5777,7 @@ export class InboxStore {
   }
 
   private cardColumn(value: unknown): InboxCardColumn {
-    // `asked` (the old name of Backlog) is still read, so a caller from before the rename keeps working.
+    // The ids before v2 (asked, designing, your_look, icebox, …) are still read, so an older agent keeps working.
     const column = inboxCardColumnOf(value);
     if (column === null) {
       throw new InboxError("validation_error", `column: one of ${Object.keys(INBOX_CARD_COLUMN_LABELS).join(", ")}.`, { field: "column" });
@@ -5756,11 +5787,12 @@ export class InboxStore {
 
   /**
    * A new card in `project_id`. From a thread (`threads`), the title defaults
-   * to the thread's subject. It starts in Backlog unless a column is given: a
-   * live column, or Shipped for work already done; the Icebox only by the
-   * person, Dropped never. An agent that puts it in Your look or Your review
-   * says what the person owes (`you`). The agent that makes a card is the
-   * session it belongs to. Idempotent on `idempotency_key` per project.
+   * to the thread's subject. Unless a column is given it starts in Todo when
+   * an agent makes it (it took an ask) and in Backlog when the person does; a
+   * live column, or Done for work already finished; Dropped never. An agent
+   * that puts it in In review says what the person owes (`you`). The agent
+   * that makes a card is the session it belongs to. Idempotent on
+   * `idempotency_key` per project.
    */
   createCard(input: {
     project_id: string;
@@ -5812,10 +5844,10 @@ export class InboxStore {
         return { card: known, replayed: true };
       }
     }
-    const column = input.column === undefined || input.column === null ? "backlog" : this.cardColumn(input.column);
-    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or shipped), never dropped.", { field: "column" });
-    if (column === "icebox" && byAgent) throw this.iceboxRefusal();
-    if (target && column !== "backlog") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Backlog.", { field: "thread_id" });
+    // Sent to an agent: Todo (the person asked for it). Otherwise an agent's card is work it took on (Todo), the person's an idea (Backlog).
+    const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
+    if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
+    if (target && column !== "backlog" && column !== "todo") throw new InboxError("validation_error", "thread_id: a card sent to an agent starts in Todo.", { field: "thread_id" });
     const said = input.say === undefined || input.say === null ? null : this.cardText(input.say, "say", INBOX_CARD_LINE_MAX);
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
@@ -5828,7 +5860,8 @@ export class InboxStore {
       id: inboxId("crd"),
       project_id: owner,
       title,
-      column,
+      // A sent card goes to Todo: the send asks the agent to do it.
+      column: target ? "todo" : column,
       you,
       said,
       threads,
@@ -5837,6 +5870,7 @@ export class InboxStore {
       created_at: at,
       created_by: input.by,
       moved_at: at,
+      moved_by: input.by,
       heard_at: at,
       heard_by: input.by,
       dropped: null,
@@ -5845,6 +5879,7 @@ export class InboxStore {
       notes: this.cardNotes(input.notes),
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
+      ...(column === "done" && !target ? { done_prs: inboxCardDonePrs({ refs, prs }) } : {}),
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -5854,12 +5889,13 @@ export class InboxStore {
    * One write to a card: any of a move (`column`), the agent's last word
    * (`say`), the person's line (`you`), a rename, more threads or PRs, and a
    * drop's `reason`. Every write counts as hearing from the card (`heard_at`).
-   * `restore` (the person) puts a card in the Icebox or Dropped back where it
-   * was. The rules are the column rules (COLUMNS.md, set d):
-   *  - only the person puts a card in the Icebox, or moves one out of it;
+   * `restore` (the person) puts a card in Dropped back where it was. The
+   * rules (approval "inbox-board-columns-v2"):
+   *  - an agent may put a card in Backlog, but moves one out of it only when
+   *    an agent put it there (`moved_by`): what the person parked stays;
    *  - an agent drops with a reason; only the person restores what they dropped;
-   *  - an agent that moves a card into Your look or Your review says what the
-   *    person owes (`you`), and `you` is kept only in those columns.
+   *  - an agent that moves a card into In review says what the person owes
+   *    (`you`), and `you` is kept only there.
    */
   updateCard(
     id: string,
@@ -5896,9 +5932,9 @@ export class InboxStore {
     }
     let column = card.column;
     if (input.restore) {
-      if (byAgent) throw new InboxError("card_person_only", "Only the person restores a card from the Icebox or Dropped.");
-      if (card.column !== "icebox" && card.column !== "dropped") {
-        throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}, not the Icebox or Dropped: nothing to restore.`);
+      if (byAgent) throw new InboxError("card_person_only", "Only the person restores a cancelled card.");
+      if (card.column !== "dropped") {
+        throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}, not Cancelled: nothing to restore.`);
       }
       column = card.aside_from ?? "backlog";
     } else if (given(input.column)) {
@@ -5906,12 +5942,15 @@ export class InboxStore {
     }
     const moves = column !== card.column;
     if (moves && byAgent) {
-      if (column === "icebox") throw this.iceboxRefusal();
-      if (card.column === "icebox") {
-        throw new InboxError("card_iceboxed", "The person put this card in the Icebox (paused); only they bring it back. You can still say or link.");
+      if (card.column === "backlog" && card.moved_by?.kind === "person") {
+        throw new InboxError(
+          "card_backlog_person_only",
+          "The person put this card in Backlog; only they move it out (they send it to an agent when it is to be done). You can still say or link.",
+          { field: "column" },
+        );
       }
       if (card.column === "dropped" && card.dropped?.by.kind === "person") {
-        throw new InboxError("card_dropped_by_person", "The person dropped this card; only they restore it. You can still say or link.");
+        throw new InboxError("card_dropped_by_person", "The person cancelled this card; only they restore it. You can still say or link.");
       }
     }
     let dropped = card.dropped;
@@ -5942,10 +5981,10 @@ export class InboxStore {
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
-    // Leaving a live column (or Shipped) for the Icebox or Dropped remembers it, so restoring goes back there.
+    // Leaving a live column (or Done) for Dropped remembers it, so restoring goes back there.
     const asideFrom =
-      moves && (column === "icebox" || column === "dropped")
-        ? isInboxCardLiveColumn(card.column) || card.column === "shipped"
+      moves && column === "dropped"
+        ? isInboxCardLiveColumn(card.column) || card.column === "done"
           ? card.column
           : card.aside_from
         : moves
@@ -5961,11 +6000,14 @@ export class InboxStore {
       prs,
       refs,
       moved_at: moves ? at : card.moved_at,
+      moved_by: moves ? input.by : (card.moved_by ?? null),
       heard_at: at,
       heard_by: input.by,
       dropped,
       aside_from: asideFrom,
       notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
+      // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
+      ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
     return next;
@@ -6007,7 +6049,8 @@ export class InboxStore {
    * addressed to one session. The card links the thread and becomes that
    * agent's (`agent`, so the agent's `card list` shows it as its own), and
    * keeps `sent` so the Board says "Sent to <agent>" until the card moves.
-   * Only the person sends, only a card in Backlog, only into a thread of the
+   * Only the person sends, only a Backlog or Todo card (it lands in Todo,
+   * as the person's move), only into a thread of the
    * card's own project that the person started.
    */
   sendCard(id: string, input: { thread_id: unknown }): InboxCard {
@@ -6018,12 +6061,17 @@ export class InboxStore {
     if (isInboxCardSentWaiting(card) && card.sent!.thread_id === thread && card.sent!.to.kind === "agent" && to.kind === "agent" && card.sent!.to.session === to.session) {
       return card;
     }
-    if (card.column !== "backlog") {
-      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog card is sent to an agent.`, { field: "op" });
+    if (card.column !== "backlog" && card.column !== "todo") {
+      throw new InboxError("validation_error", `Card ${id} is in ${INBOX_CARD_COLUMN_LABELS[card.column]}: only a Backlog or Todo card is sent to an agent.`, { field: "op" });
     }
     const at = this.stamp();
+    // A send asks the agent to do it: the card is in Todo from now (the person moved it).
+    const moves = card.column !== "todo";
     const next: InboxCard = {
       ...card,
+      column: "todo",
+      moved_at: moves ? at : card.moved_at,
+      moved_by: moves ? { kind: "person" } : (card.moved_by ?? null),
       threads: card.threads.includes(thread) ? card.threads : [...card.threads, thread],
       agent: to,
       heard_at: at,
@@ -6058,18 +6106,44 @@ export class InboxStore {
     }
   }
 
-  private iceboxRefusal(): InboxError {
-    return new InboxError(
-      "card_icebox_person_only",
-      "Only the person puts a card in the Icebox (a pause is their call). Keep it in its column and say where it stands, or drop it with a reason.",
-      { field: "column" },
-    );
+  /**
+   * The Inbox ships a card by itself (v2, Q3): every PR it links has merged
+   * and none is open (`prs`, the URLs inboxCardAutoShip answered). Rechecked
+   * here against the card as it stands, so a card that moved since the
+   * states were read, or was already moved to Done for these PRs, is left alone.
+   * Not an agent's write: `heard_by` is the person's side (no unread bold),
+   * and the history says "Done automatically". Answers the card, or null
+   * when nothing was done.
+   */
+  autoShipCard(id: string, prs: readonly string[]): InboxCard | null {
+    const card = this.cards.get(id);
+    if (!card) return null;
+    const merged = new Set(prs);
+    const urls = inboxCardAutoShip(card, (url) => (merged.has(url) ? "merged" : undefined));
+    if (!urls) return null;
+    const at = this.stamp();
+    const by: InboxAuthor = { kind: "person" };
+    const next: InboxCard = {
+      ...card,
+      column: "done",
+      you: null,
+      moved_at: at,
+      moved_by: by,
+      heard_at: at,
+      heard_by: by,
+      dropped: null,
+      aside_from: null,
+      auto_shipped: { at, prs: urls },
+      done_prs: inboxCardDonePrs(card, card.done_prs),
+    };
+    this.appendCard(next, at);
+    return next;
   }
 
   private youRefusal(): InboxError {
     return new InboxError(
       "validation_error",
-      "you: what the person owes shows only in Your look and Your review. Move the card there with it, or use say for your own last word.",
+      "you: what the person owes shows only in In review. Move the card there with it, or use say for your own last word.",
       { field: "you" },
     );
   }

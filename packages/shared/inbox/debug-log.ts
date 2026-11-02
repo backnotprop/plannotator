@@ -81,6 +81,9 @@ const WINDOW_EVENTS = new Set([
   "req_abort",
   "req_fail",
   "buffer_dropped",
+  "voice_press",
+  "voice_phase",
+  "voice_open",
 ]);
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 /** A request's method as the log may hold it: a raw client can send any token, and one off the list is `other`. */
@@ -88,7 +91,14 @@ export function debugMethod(method: string): string {
   return METHODS.has(method) ? method : "other";
 }
 /** The names a failed fetch or body read can carry. Another name is dropped: the line still says it failed. */
-const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError", "SecurityError", "NotAllowedError", "NotSupportedError", "InvalidStateError", "SyntaxError", "Error"]);
+const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError", "SecurityError", "NotAllowedError", "NotSupportedError", "InvalidStateError", "SyntaxError", "Error", "NotFoundError", "NotReadableError", "OverconstrainedError", "QuotaExceededError", "ReferenceError"]);
+/** Voice dictation's moments (packages/inbox/voiceSession.ts, voiceRecorder.ts): fixed words only, never audio or text. */
+const VOICE_INPUTS = new Set(["press", "release", "lost", "toggle"]);
+const VOICE_PHASES = new Set(["idle", "opening", "listening", "sending"]);
+const VOICE_MODES = new Set(["hold", "tap"]);
+const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff"]);
+const VOICE_STEPS = new Set(["context", "stream", "worklet", "ready"]);
+const AUDIO_STATES = new Set(["running", "suspended", "closed", "interrupted"]);
 /** `nextHopProtocol` as browsers report it. */
 const PROTOCOLS = new Set(["http/0.9", "http/1.0", "http/1.1", "h2", "h2c", "h3"]);
 const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined);
@@ -120,6 +130,15 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     persisted: typeof record.persisted === "boolean" ? record.persisted : undefined,
     open: count(record.open),
     n: count(record.n),
+    input: listed(record.input, VOICE_INPUTS),
+    phase: listed(record.phase, VOICE_PHASES),
+    mode: listed(record.mode, VOICE_MODES),
+    prompting: typeof record.prompting === "boolean" ? record.prompting : undefined,
+    slow: typeof record.slow === "boolean" ? record.slow : undefined,
+    trouble: listed(record.trouble, VOICE_TROUBLES),
+    step: listed(record.step, VOICE_STEPS),
+    ok: typeof record.ok === "boolean" ? record.ok : undefined,
+    audio: listed(record.audio, AUDIO_STATES),
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 }

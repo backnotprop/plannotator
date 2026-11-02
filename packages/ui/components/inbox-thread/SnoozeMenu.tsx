@@ -16,8 +16,11 @@ export type SnoozeView = 'times' | 'pick';
 export interface SnoozeTimesProps {
   view: SnoozeView;
   onView: (view: SnoozeView) => void;
-  /** Back to the menu these times swapped in for. */
-  onBack: () => void;
+  /**
+   * Back to the menu these times swapped in for (`‹ Snooze until`). Absent: the times are the menu itself (the thread
+   * header's clock, approval "inbox-thread-header"), and "Snooze until" is its title, with nothing to go back to.
+   */
+  onBack?: () => void;
   /** The person picked a moment (ISO, UTC). */
   onPick: (until: string) => void;
   /** Pick a time's Snooze has no menu item to close the menu: the host closes it. */
@@ -68,7 +71,13 @@ export function SnoozeTimes({ view, onView, onBack, onPick, onClose }: SnoozeTim
         </>
       ) : (
         <>
-          <BackRow label="Snooze until" onBack={onBack} />
+          {onBack ? (
+            <BackRow label="Snooze until" onBack={onBack} />
+          ) : (
+            <div className="ib-pm-title" aria-hidden="true" data-snooze-title="">
+              Snooze until
+            </div>
+          )}
           {choices.map((choice) => (
             <Menu.Item key={choice.id} className="ib-pmi ib-zi" label={choice.label} onClick={() => onPick(choice.until)} data-snooze-choice={choice.id}>
               {choice.label}
