@@ -188,6 +188,10 @@ export function checkInboxDraftFiles(
   listed.forEach((entry, index) => {
     const object = entry && typeof entry === "object" ? (entry as { upload_id?: unknown; pasted?: unknown }) : null;
     const uploadId = typeof entry === "string" ? entry : object ? object.upload_id : null;
+    // An entry that names no upload at all is a malformed save, not a file gone since: refused even with `skipGone`.
+    if (typeof uploadId !== "string") {
+      throw new InboxError("validation_error", `${list}[${index}]: an upload id, or { upload_id, pasted }.`, { field: `${list}[${index}]` });
+    }
     const pasted = checkPasted(object?.pasted, index, bodyLength, list);
     const upload = readInboxUpload(inboxDirPath, uploadId);
     if (!upload) {

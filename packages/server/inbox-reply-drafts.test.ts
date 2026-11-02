@@ -545,6 +545,37 @@ describe("reply drafts keep every attached file", () => {
   const ids = (draft: InboxReplyDraft | null | undefined) => (draft?.files ?? []).map((file) => file.upload_id);
   const pending = (server: InboxServer, id: string) => existsSync(join(server.store.dir, "uploads", "pending", `${id}.json`));
 
+  test("the phone's long paste keeps its place when this window's save (a step behind, its own words) changes the words", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here is the log.", "ses_r1");
+    const LOG = "2026-11-01T21:10:04Z worker-3 retry 2 status=failed\n".repeat(700);
+    const first = (await draftOf(await save(server, thread_id, { body: "Hello world", base: null, files_add: [], files_remove: [], files_place: [] })))!;
+    // The phone pastes a long log between "Hello " and "world" (a tile: its words do not change).
+    const log = await upload(server, "pasted-text.txt", LOG);
+    const phone = (await draftOf(
+      await save(server, thread_id, { body: "Hello world", base: first.updated_at, base_body: "Hello world", files_add: [{ upload_id: log.upload_id, pasted: { at: 6, preview: "2026-11-01" } }], files_remove: [], files_place: [] }),
+    ))!;
+    expect(phone.files!.map((f) => f.pasted?.at)).toEqual([6]);
+    // This window, a step behind, puts "Oh. " in front of its words: accepted (its own words), naming no file.
+    const mine = await save(server, thread_id, { body: "Oh. Hello world", base: first.updated_at, base_body: "Hello world", files_add: [], files_remove: [], files_place: [] });
+    expect(mine.status).toBe(200);
+    const after = (await draftOf(mine))!;
+    // The paste was between "Hello " and "world": after "Oh. Hello " now.
+    expect(after.files!.map((f) => f.pasted?.at)).toEqual([10]);
+    // Shorter words never leave it past their end.
+    const short = (await draftOf(await save(server, thread_id, { body: "Oh.", base: after.updated_at, base_body: "Oh. Hello world", files_add: [], files_remove: [], files_place: [] })))!;
+    expect(short.files!.map((f) => f.pasted?.at)).toEqual([3]);
+  });
+
+  test("a files_add entry with no upload id is refused (422), not skipped", async () => {
+    const { server, send } = await setup();
+    const { thread_id } = await send("Here.", "ses_r1b");
+    for (const entry of [123, {}, { upload_id: 5 }]) {
+      const refused = await save(server, thread_id, { body: "Hi", base: null, files_add: [entry], files_remove: [], files_place: [] });
+      expect(refused.status).toBe(422);
+    }
+  });
+
   test("saved beside the words and read back whole (as a phone's 7.62 read gets it); files alone keep the draft; the Drafts page names the file", async () => {
     const { server, send } = await setup();
     const { thread_id } = await send("Here is the dashboard.", "ses_f1");

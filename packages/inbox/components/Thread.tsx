@@ -1350,7 +1350,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   /** A save of this window's landed: the box takes the draft's files (set below, once the tiles exist). */
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
-  const replyDraft = useReplyDraft(thread.thread_id, { onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted) });
+  /** Only another window changed the words: the box takes them (set below, once the tiles exist). */
+  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => void>(() => {});
+  const replyDraft = useReplyDraft(thread.thread_id, {
+    onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
+    onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
+  });
   /** The words a Send carries: the box's, or (the box closed) those kept as its draft. */
   const boxWords = box.open ? box.text.trim() : ((replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '');
   /** The box closed: the files its draft keeps (attached, dropped, pasted, long pastes), which a Send carries too. */
@@ -1416,17 +1421,36 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
+  takeTheirWords.current = (threadId, draft, was) => {
+    if (threadId !== threadRef.current.thread_id || !boxRef.current.open || boxRef.current.text !== was) return;
+    // The box still holds the words this window last knew: it takes the other window's, with its files and this
+    // window's file changes not saved yet.
+    setBox({ open: true, text: draft.body });
+    takeDraftFiles(draftFilesWithMine(draft.files ?? []), draft.body);
+    announce('This reply changed in another window.');
+  };
   takeMergedFiles.current = (threadId, draft, wanted) => {
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;
     // A save of this window's landed: the box holds the draft's files (another window's included, one it removed
     // gone) with this window's changes still on their way (`wanted`). Unchanged: nothing moves (an undo stays armed).
     const text = boxRef.current.text;
-    const now = replyFiles.draftFiles(text).map((file) => file.upload_id);
     const want = new Set(wanted);
+    // A tile that finished uploading since the box's last save is in no save yet: it stays, and its own save adds it.
+    const held = new Set(replyDraft.heldOf(threadId));
+    const all = replyFiles.draftFiles(text).map((file) => file.upload_id);
+    const fresh = all.filter((id) => !held.has(id) && !want.has(id));
+    const now = all.filter((id) => !fresh.includes(id));
     if (now.length !== want.size || now.some((id) => !want.has(id))) {
       const inDraft = new Set((draft.files ?? []).map((file) => file.upload_id));
-      takeDraftFiles((draft.files ?? []).filter((file) => want.has(file.upload_id)), text, 'replace', wanted.filter((id) => !inDraft.has(id)));
-    } else replyDraft.boxTook(threadId, now);
+      // A long paste leaving the box takes words with it: said in the thread's live region.
+      const pastesGone = replyFiles.draftFiles(text).filter((file) => file.pasted && !want.has(file.upload_id) && !fresh.includes(file.upload_id)).length;
+      if (pastesGone > 0) announce(pastesGone === 1 ? 'A pasted text was sent or removed on another device.' : `${pastesGone} pasted texts were sent or removed on another device.`);
+      takeDraftFiles((draft.files ?? []).filter((file) => want.has(file.upload_id)), text, 'replace', [...wanted.filter((id) => !inDraft.has(id)), ...fresh]);
+    }
+    const saved = replyFiles.draftFiles().filter((file) => !fresh.includes(file.upload_id));
+    // Counted as saved without the fresh tiles, so the box's files effect still saves them.
+    if (fresh.length > 0) filesSaved.current = pastedSignature(saved);
+    replyDraft.boxTook(threadId, saved.map((file) => file.upload_id));
   };
   // The sessions the reply box's text tags with `@` (approval "inbox-tag-agents"), as the field reports them.
   const [taggedIds, setTaggedIds] = useState<readonly string[]>([]);

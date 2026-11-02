@@ -44,13 +44,41 @@ export interface ReplyDraftFileOps<F extends ReplyDraftFileRef = ReplyDraftFileR
 export const NO_FILE_OPS: ReplyDraftFileOps = { add: [], remove: [], place: [] };
 
 /**
+ * Where an anchor at `at` in `before` is in `after`, for one edit between them
+ * (typing, a deletion, a paste, a replace). The edit is the span between the
+ * texts' common start and common end. An anchor before it stays; one after it
+ * moves by the change in length; one inside a deleted or replaced span goes to
+ * that span's start. An insertion exactly at the anchor goes after the pasted
+ * text's place (the anchor stays), so typing on at the caret after a paste
+ * keeps the paste ahead of the new words, as a plain paste would.
+ */
+export function mapAnchor(before: string, after: string, at: number): number {
+  if (before === after) return at;
+  const max = Math.min(before.length, after.length);
+  let start = 0;
+  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;
+  let end = 0;
+  while (end < max - start && before.charCodeAt(before.length - 1 - end) === after.charCodeAt(after.length - 1 - end)) end++;
+  const removedEnd = before.length - end;
+  if (at <= start) return at;
+  if (at >= removedEnd) return at + (after.length - before.length);
+  return start;
+}
+
+/**
  * The draft's files after a save's changes: removed ids go, an added file joins
  * (once; one already there takes the added entry's place), and a long paste
  * still there takes its new place. A change for a file the draft does not hold
  * (removed, or placed) does nothing. Applying the same changes twice is the
- * same as once.
+ * same as once. `words`: the save changes the draft's words from `from` to
+ * `to`, so a long paste it neither adds nor places (another window's) moves
+ * with them (`mapAnchor`, within the new words).
  */
-export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(existing: readonly F[], ops: ReplyDraftFileOps<F>): F[] {
+export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(
+  existing: readonly F[],
+  ops: ReplyDraftFileOps<F>,
+  words?: { from: string; to: string },
+): F[] {
   const removed = new Set(ops.remove);
   const added = new Map(ops.add.map((file) => [file.upload_id, file]));
   const places = new Map(ops.place.map((entry) => [entry.upload_id, entry.pasted]));
@@ -60,7 +88,12 @@ export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(existing: re
       const again = added.get(file.upload_id);
       if (again) return again;
       const pasted = places.get(file.upload_id);
-      return pasted && file.pasted ? { ...file, pasted } : file;
+      if (pasted && file.pasted) return { ...file, pasted };
+      if (file.pasted && words && words.from !== words.to) {
+        const at = Math.max(0, Math.min(mapAnchor(words.from, words.to, file.pasted.at), words.to.length));
+        return { ...file, pasted: { ...file.pasted, at } };
+      }
+      return file;
     });
   const here = new Set(kept.map((file) => file.upload_id));
   return [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];

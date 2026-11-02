@@ -4729,7 +4729,8 @@ export class InboxStore {
           { draft: existing },
         );
       }
-      const after = applyReplyDraftFileOps(existing?.files ?? [], ops);
+      // Words changed: another window's long paste this save does not place moves with them.
+      const after = applyReplyDraftFileOps(existing?.files ?? [], ops, existing ? { from: existing.body, to: body } : undefined);
       if (body.trim() === "" && after.length === 0) {
         this.deleteReplyDraft(threadId);
         return null;

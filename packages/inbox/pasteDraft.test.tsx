@@ -120,7 +120,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '8'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '9'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -490,4 +490,27 @@ test.skipIf(!hasDom)('a draft brought back with a CRLF paste: Put back gives the
   await until(() => pastedTiles(el).length === 0, 'the words back');
   expect(replyText(el)!.value).toBe(BEFORE + LOG + AFTER);
   expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+test.skipIf(!hasDom)("the phone's long paste, taken into this box after this window changed the words, goes back where the phone put it", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, 'Hello world');
+  await until(async () => (await serverDraft())?.body === 'Hello world', 'the words saved');
+  // The phone pastes its log between "Hello " and "world" (a tile: the words do not change).
+  const log = await uploadAsOther('pasted-text-phone.txt', LOG);
+  const base = (await serverDraft())!.updated_at;
+  const saved = await loopback(
+    `/api/inbox/threads/${world.waiting}/draft`,
+    'POST',
+    JSON.stringify({ serverSession: await serverSession(), body: 'Hello world', base, base_body: 'Hello world', files_add: [{ upload_id: log.upload_id, pasted: { at: 6, preview: 'log' } }], files_remove: [], files_place: [] }),
+  );
+  expect(saved.status).toBe(200);
+  // Before this window hears of it, the person puts "Oh. " in front: the save lands (its own words), and the box takes the tile.
+  type(replyText(el)!, 'Oh. Hello world', 0);
+  await until(async () => (await serverDraft())?.body === 'Oh. Hello world', 'the words saved');
+  await until(() => pastedTiles(el).length === 1, "the phone's tile in the box");
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el).length === 0, 'the words back');
+  expect(replyText(el)!.value).toBe('Oh. Hello ' + LOG + 'world');
 }, 30_000);
