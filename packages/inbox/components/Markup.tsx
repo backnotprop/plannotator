@@ -38,7 +38,7 @@ export function OverWindow({ children }: { children: ReactNode }) {
 
 /** "Markup added to your reply · Undo": the window's toast, its Undo (and Z, where the toast takes it) removing the comment. */
 export function markupAddedToast(onUndo: () => void): Omit<InboxToastModel, 'id'> {
-  return { icon: 'check', lead: 'Markup added to your reply', speech: 'Markup added to your reply.', onUndo };
+  return { icon: 'check', lead: 'Markup added to your reply', phoneLead: 'Added to your reply', speech: 'Markup added to your reply.', onUndo };
 }
 
 /**

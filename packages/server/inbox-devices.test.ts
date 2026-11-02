@@ -8,7 +8,7 @@
  *    and data dir. Every contract exchange of sections 1 and 2 (7.1 to 7.25,
  *    7.36, 7.37) is replayed with real fetch and the answers compared to the
  *    contract's shapes. A "phone" (this script) pairs, reads threads, picks
- *    and sends, and the agent's wait_for_reply, through `plannotator inbox
+ *    and sends, and the agent's read_thread, through `plannotator inbox
  *    mcp` and the MCP SDK's stdio client, gets the answer.
  *  - "In process": what a process cannot show without waiting ten minutes
  *    or a real tailnet: the offer's expiry (the server's clock option), and
@@ -288,7 +288,7 @@ describe("the device door, on the binary", () => {
     const health = await door("health");
     expect(health.status).toBe(200);
     const h = (await health.json()) as Json;
-    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version"]);
+    expect(Object.keys(h).sort()).toEqual(["app", "event_streams", "inbox_id", "machine_links", "notify_reach", "ok", "peek", "pid", "serverSession", "update", "version"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });
   });
@@ -311,6 +311,13 @@ describe("the device door, on the binary", () => {
       // A reply draft is read only on the door (7.62): the phone writes none.
       ["POST", "threads/msg_x/draft"],
       ["POST", "threads/msg_x/draft/delete"],
+      // Ask AI answers only the person's own window: never a phone's door.
+      ["GET", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask"],
+      ["POST", "threads/msg_x/ask/seen"],
+      ["POST", "threads/msg_x/ask/end"],
+      ["POST", "ask/session-a/api/ai/bridge/poll"],
+      ["POST", "ask/session-a/api/ai/bridge/event"],
       // Shared drafts stay the window's (never seen by phones) until that is ruled otherwise.
       ["GET", "drafts"],
       ["POST", "drafts/drf_x"],
@@ -340,7 +347,7 @@ describe("the device door, on the binary", () => {
 
   test("7.5 to 7.9: the list, projects, a thread, seen (key required), the event stream", async () => {
     const list = (await (await door("threads")).json()) as Json;
-    expect(Object.keys(list).sort()).toEqual(["cursor", "notice", "pins", "project", "projects", "restart_agents", "restart_claude_code", "sections", "serverSession", "update", "update_check_failing", "updated", "version"]);
+    expect(Object.keys(list).sort()).toEqual(["cursor", "notice", "pins", "project", "projects", "restart_agents", "restart_claude_code", "sections", "serverSession", "snoozes", "update", "update_check_failing", "updated", "version"]);
     expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);
     expect(row).toMatchObject({ section: "waiting", unread: true, questions: { open: 2 } });
@@ -389,7 +396,7 @@ describe("the device door, on the binary", () => {
     expect(text).toMatch(new RegExp(`id: ${thread.cursor}\\nevent: record\\ndata: \\{"seq":${thread.cursor},`));
   });
 
-  test("7.10 and 7.11: a pick (replayed by its key, a stale revision refused), then Send, and the agent's wait_for_reply gets the answer", async () => {
+  test("7.10 and 7.11: a pick (replayed by its key, a stale revision refused), then Send, and the agent's read_thread gets the answer", async () => {
     const thread = (await (await door(`threads/${threadId}`)).json()) as Json;
     const q = thread.thread.messages[0].questions[0];
     const pickKey = keys();
@@ -415,7 +422,6 @@ describe("the device door, on the binary", () => {
     expect(reused.status).toBe(409);
     expect(((await reused.json()) as Json).code).toBe("idempotency_key_reused");
 
-    const waiting = agent.waitForReply(threadId, 50);
     const sendKey = keys();
     const send = await door(`messages/${threadId}/reply`, { body: { idempotency_key: sendKey, words: "Go ahead.", questions: [{ key: q.key, revision: 1 }] } });
     expect(send.status).toBe(200);
@@ -423,7 +429,7 @@ describe("the device door, on the binary", () => {
     expect(Object.keys(sent).sort()).toEqual(["message_id", "questions", "replayed", "reply"]);
     expect(sent).toMatchObject({ message_id: threadId, replayed: false, reply: { author: { kind: "person" }, idempotency_key: sendKey } });
     expect(sent.questions[0]).toMatchObject({ key: q.key, state: "sent", sent_revision: 1 });
-    const reply = await waiting;
+    const reply = await agent.nextReply(threadId);
     expect(JSON.stringify(reply)).toContain("Go ahead.");
     expect(JSON.stringify(reply)).toContain("Yes");
     // A retry of the same Send over another path writes nothing.
@@ -941,20 +947,28 @@ describe("the device door, in process", () => {
       await Bun.sleep(150);
       expect(atRestart).toBeUndefined();
 
-      // After a crash (kill -9): the mapping still points at the dead run's door listener.
+      // The mapping the Inbox made is recorded (port and target) while it may exist; a clean stop takes it down and keeps the port.
+      const recordFile = join(dataDir, "inbox", "tailnet-door.json");
+      const readRecord = () => JSON.parse(readFileSync(recordFile, "utf8"));
       const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
+      const record = readFileSync(recordFile, "utf8");
+      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true });
       crashed.stop();
+      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false });
+      // After a crash (kill -9) both stay: the mapping still points at the dead run's door listener.
       serve.set(8443, deadDoor);
+      writeFileSync(recordFile, record);
       // The next start that cannot publish takes that leftover down rather than leave it.
       down.serve = true;
       const unpublished = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       expect(serve.has(8443)).toBe(false);
+      expect(readRecord().published).toBe(false);
       unpublished.stop();
       down.serve = false;
-      // With the Inbox stopped, uninstall --purge's take-down finds it by door_port.
-      const leftover = `http://127.0.0.1:${JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")).tailnet.door_port}`;
-      serve.set(8443, leftover);
+      // With the Inbox stopped, uninstall --purge's take-down finds it by its record.
+      serve.set(8443, deadDoor);
+      writeFileSync(recordFile, record);
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("removed");
       expect(serve.has(8443)).toBe(false);
       expect(takeDownInboxTailnet(dataDir, tailscale)).toBe("none");
@@ -1119,6 +1133,34 @@ describe("the device door, in process", () => {
     expect(after.status).toBe(401);
     expect(asked.length).toBe(1);
   });
+
+  test("through the relay (asDevice), a phone's command never reaches a machine's accounts, while the same phone's other commands run", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-devices-relay-accounts-"));
+    roots.push(dataDir);
+    const asked: string[] = [];
+    const phones = createInboxDevices({
+      dataDir,
+      serverSession: "0".repeat(32),
+      port: () => 1,
+      registry: () => ({ v: 1, pid: process.pid, port: 1, url: "", version: "dev", token: "t".repeat(64), serverSession: "0".repeat(32), startedAt: "" }),
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      dispatch: async (req) => {
+        asked.push(new URL(req.url).pathname);
+        return new Response(ONE_PIXEL_PNG, { headers: { "Content-Type": "image/png" } });
+      },
+    });
+    const made = (await (await phones.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
+    const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+    const paired = (await (await phones.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl)).json()) as Json;
+    expect((await phones.asDevice(paired.device.id, { method: "GET", path: "/api/inbox/device/messages/msg_x/image?path=a.png" })).status).toBe(200);
+    expect(asked).toHaveLength(1);
+    for (const path of ["/api/inbox/device/accounts", "/api/inbox/device/accounts?fresh=1"]) {
+      const refused = await phones.asDevice(paired.device.id, { method: "GET", path });
+      expect(refused.status).toBe(404);
+      expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
+    }
+    expect(asked).toHaveLength(1);
+  });
 });
 
 describe("the door's parity routes, in process (7.39 to 7.49)", () => {
@@ -1201,7 +1243,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     await poll("ses-b", "pi");
 
     const sessions = (await (await door("sessions?session=ses-a")).json()) as Json;
-    expect(Object.keys(sessions).sort()).toEqual(["home", "projects", "serverSession", "session"]);
+    expect(Object.keys(sessions).sort()).toEqual(["home", "machine", "projects", "serverSession", "session"]);
     expect(sessions.session).toEqual({ session: "ses-a", live: true });
     expect(sessions.projects.map((group: Json) => group.project.root)).toEqual([ledger]);
     expect(sessions.projects[0].sessions.map((s: Json) => s.session).sort()).toEqual(["ses-a", "ses-b"]);

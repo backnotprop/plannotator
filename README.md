@@ -283,6 +283,11 @@ Host integrations are always part of uninstall. If a broken or unavailable
 host prevents safe cleanup, the command names the blocking plugin manager or
 configuration, gives exact manual cleanup instructions, and stops before
 deleting the binary. Complete that cleanup and rerun uninstall.
+It also keeps the binary when an agent's config file can't be read (another
+tool's too), or when a hook it did not install still runs Plannotator. The
+error names the file, the tool, and what to do. A `plannotator-inbox` entry
+you added yourself, or a Claude Code or Droid plugin installed for one project,
+is named with how to remove it and does not keep the binary.
 These mechanics keep the ordinary confirmation default-negative, make the
 irreversible outcome require a stronger explicit word, and still give package
 managers and scripts a conventional non-interactive flag.
@@ -520,7 +525,7 @@ implementation architecture.
 | `PLANNOTATOR_ORIGIN` | Override agent detection: `claude-code`, `amp`, `droid`, `opencode`, `codex`, `copilot-cli`, `gemini-cli`, `kiro-cli`, `pi` |
 | `PLANNOTATOR_JINA` | `0`/`false` to disable Jina Reader for URL annotation |
 | `JINA_API_KEY` | Jina Reader API key for higher rate limits |
-| `PLANNOTATOR_DATA_DIR` | Base directory for Plannotator-managed files (plans, history, drafts, `config.json`). Default: `~/.plannotator`; if that directory doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used instead |
+| `PLANNOTATOR_DATA_DIR` | Base directory for Plannotator-managed files (plans, history, drafts, `config.json`). Default: `~/.plannotator`; if that directory doesn't exist and `$XDG_DATA_HOME` is set to an absolute path, `$XDG_DATA_HOME/plannotator` is used instead (also when `~/.plannotator` holds none of Plannotator's data but the XDG folder does). `plannotator data-dir` prints the folder in use |
 
 Plannotator-managed files live under `~/.plannotator` by default. Some UI preferences are stored in functional browser cookies. To relocate the files (for example, for an XDG-clean home):
 

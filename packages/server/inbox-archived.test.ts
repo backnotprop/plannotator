@@ -11,8 +11,8 @@
  * - Unarchive brings a thread back to the list and out of the archived set;
  * - a thread's own read carries its row, an archived thread's too;
  * - a thread that came back (an agent's reply_to after the archive line) is
- *   answerable without unarchiving: the answer reaches the agent's
- *   wait_for_reply, the event stream says its question is open, and once
+ *   answerable without unarchiving: the agent reads the answer with
+ *   read_thread, the event stream says its question is open, and once
  *   handled it is archived again.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -207,7 +207,7 @@ describe("archived threads", () => {
     expect(read.row!.resolved_at).not.toBeNull();
   });
 
-  test("a came-back thread is answerable without unarchiving; the answer reaches wait_for_reply; events see the question open; handled, it is archived again", async () => {
+  test("a came-back thread is answerable without unarchiving; the agent reads the answer; events see the question open; handled, it is archived again", async () => {
     const { server, client, billing, send } = await setup();
     const t = await send(billing, "Release notes");
     await resolve(server, t.thread_id, true);
@@ -233,8 +233,7 @@ describe("archived threads", () => {
     const questionEvent = text.split("\n").find((line) => line.startsWith("data:") && line.includes('"kind":"question"') && line.includes(messageId))!;
     expect(JSON.parse(questionEvent.slice(5)).question.state).toBe("open");
 
-    // The agent waits; the person answers without unarchiving.
-    const waiting = client.callTool({ name: "wait_for_reply", arguments: { thread_id: t.thread_id, agent_session: "ses_arch", timeout_seconds: 20 } });
+    // The person answers without unarchiving.
     const thread = await getJson<{ thread: { messages: { id: string; questions?: { key: string; revision: number }[] }[] } }>(server, `/api/inbox/threads/${t.thread_id}`);
     const q = thread.thread.messages.find((m) => m.id === messageId)!.questions![0]!;
     const picked = await fetch(url(server, `/api/inbox/messages/${messageId}/picks`), {
@@ -249,8 +248,8 @@ describe("archived threads", () => {
       body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k-came-back", words: "Ship it.", questions: [{ key: q.key, revision: q.revision + 1 }] }),
     });
     expect(sent.status).toBe(200);
-    const got = (await waiting) as { structuredContent: { status?: string; reply?: { body: string } } };
-    expect(got.structuredContent.reply?.body).toContain("Ship it.");
+    const got = (await client.callTool({ name: "read_thread", arguments: { thread_id: t.thread_id, agent_session: "ses_arch" } })) as { structuredContent: { thread: { messages: { body: string }[] } } };
+    expect(got.structuredContent.thread.messages.at(-1)!.body).toContain("Ship it.");
     // The agent has the reply, nothing waits: the thread is archived again, by itself, still resolved.
     const archived = await getJson<ArchivedModel>(server, "/api/inbox/threads/archived");
     expect(ids(archived.threads)).toContain(t.thread_id);

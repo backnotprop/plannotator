@@ -20,15 +20,20 @@
  *    does not own the key's generation counter, so the SERVER stamps them one
  *    above the highest generation the key knows. That keeps the key monotonic
  *    for a single-file session that later resumes from it.
- *  - Sessions whose root has no file (plan review, an annotate session on a
- *    URL or on the last message) also keep a durable index of the copies they
- *    hold (`documentDraftIndexKey`), and their session draft load offers every
- *    listed document's comments by path (#1545). Draft Recovered then brings
- *    back every document's comments, each on its own document.
+ *  - Every session with per-document copies also keeps a durable index of the
+ *    copies it holds (`documentDraftIndexKey`), and its session draft load
+ *    offers every listed document's comments by path (#1545). Draft Recovered
+ *    then brings back every document's comments, each on its own document, so
+ *    a reload never leaves a document's comments behind until it is opened.
  *  - A decision (`settle`) clears the session's own keys plus the path key of
- *    every document it covered or lists and may serve. After that, document
- *    writes are refused. The index key comes from the root's text alone, so
- *    an entry another project listed under the same text is kept.
+ *    every document the deciding page read, wrote or restored. A page names
+ *    itself with a page id (`?client=`, as code review's local drafts do in
+ *    review-draft.ts), so a reloaded page never deletes the copies an earlier
+ *    page wrote and it never saw. A caller without a page id clears every
+ *    copy this session wrote, read or offered. A listed copy nothing in the
+ *    session saw is never cleared. After a decision, document writes are
+ *    refused. The index key comes from the root's text alone, so an entry
+ *    another project listed under the same text is kept.
  *
  * Generations and the `patchKey` / `patchKeys` stamps are server-side: a
  * client cannot forge them (saveReviewDraft strips them from every body, and
@@ -63,6 +68,15 @@ export function documentDraftIndexKey(sessionKey: string): string {
   return `docs-${contentHash(`v1|docs|${sessionKey}`)}`;
 }
 
+/**
+ * A page id (`?client=`), or null when absent or malformed. One page load
+ * makes one id; the store remembers which copies each page read, wrote or
+ * restored, so a decision clears only those (see `settle`).
+ */
+export function readDraftClientId(raw: unknown): string | null {
+  return typeof raw === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(raw) ? raw : null;
+}
+
 /** Most documents one write may carry. */
 export const MAX_DRAFT_DOCUMENTS_PER_WRITE = 500;
 
@@ -77,16 +91,12 @@ export interface AnnotateDraftSessionOptions {
   /**
    * Per-document copies. `isAllowed` decides which absolute paths this
    * session may read or write a document copy for (the paths its /api/doc may
-   * serve). Absent: the session has no document copies.
+   * serve). Absent: the session has no document copies. With them the
+   * session also keeps an index, so its session draft offers every
+   * document's comments on a reload (see DocumentDraftStoreOptions.indexKey).
    */
   documents?: {
-    isAllowed: (absolutePath: string) => boolean;
-    /**
-     * The session's root has no file of its own (a URL, the last message):
-     * keep an index so the session draft offers every document's comments
-     * (see DocumentDraftStoreOptions.indexKey).
-     */
-    indexed?: boolean;
+    isAllowed: (absolutePath: string, anyPath: boolean) => boolean;
   } | null;
 }
 
@@ -137,15 +147,20 @@ function parseDocumentWrites(body: unknown): DocumentWrite[] | string {
 }
 
 export interface DocumentDraftStoreOptions {
-  /** Which absolute paths this session may read or write a copy for (the paths its /api/doc may serve). */
-  isAllowed: (absolutePath: string) => boolean;
+  /**
+   * Which absolute paths this session may read or write a copy for (the paths
+   * its /api/doc may serve). `anyPath` is the requesting reader's /api/doc
+   * access (`isThisMachineReader`, this-machine-reader.ts); the index and the decision's cleanup
+   * pass false, so they stay on the session's own roots.
+   */
+  isAllowed: (absolutePath: string, anyPath: boolean) => boolean;
   /** A single-file session's own file: refused, the session draft carries it. */
   rootPath?: string | null;
   /**
-   * A session whose root document has no file of its own (plan review, an
-   * annotate session on a URL or on the last message) keeps a durable list of
-   * the copies it holds under this key (`documentDraftIndexKey` of its session
-   * draft key). Its session draft load then offers every listed document's
+   * The session keeps a durable list of the copies it holds under this key
+   * (`documentDraftIndexKey` of its session draft key): plan review, and
+   * every annotate session with copies (a file, a folder, a bundle, a URL,
+   * the last message). Its session draft load then offers every listed document's
    * comments (Draft Recovered), attributed by path, so they come back on a
    * reload without each document being opened first, and reach the feedback.
    */
@@ -160,18 +175,37 @@ export interface DocumentDraftStoreOptions {
 export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
   const rootPath = options.rootPath ?? null;
   const indexKey = options.indexKey ?? null;
-  /** Absolute paths whose document copy this session wrote or restored from. */
-  const coveredDocuments = new Set<string>();
+  /**
+   * Absolute paths whose document copy each page wrote, read or was offered,
+   * keyed by page id ("" for callers without one). A page lives for one load,
+   * not for the server's lifetime: a reload gets a new id.
+   */
+  const coveredByPage = new Map<string, Set<string>>();
+  const cover = (path: string, clientId: string | null | undefined) => {
+    const page = readDraftClientId(clientId) ?? "";
+    let paths = coveredByPage.get(page);
+    if (!paths) {
+      paths = new Set();
+      coveredByPage.set(page, paths);
+    }
+    paths.add(path);
+  };
+  /** Every path any page covered. */
+  const allCovered = (): Set<string> => {
+    const paths = new Set<string>();
+    for (const page of coveredByPage.values()) for (const path of page) paths.add(path);
+    return paths;
+  };
   /** The reviewer decided: document writes are refused. */
   let settled = false;
 
-  const resolveDocumentPath = (raw: unknown): { path: string } | { status: 400 | 403; error: string } => {
+  const resolveDocumentPath = (raw: unknown, anyPath: boolean): { path: string } | { status: 400 | 403; error: string } => {
     if (typeof raw !== "string" || raw.length === 0) return { status: 400, error: "Missing path" };
     const path = canonicalDocumentPath(raw);
     if (!path) return { status: 400, error: "Not an existing file" };
     // The root file's own path key is the session draft itself (one writer).
     if (rootPath && path === rootPath) return { status: 403, error: "The session's own file is saved with the session draft" };
-    if (!options.isAllowed(path)) return { status: 403, error: "Path not allowed" };
+    if (!options.isAllowed(path, anyPath)) return { status: 403, error: "Path not allowed" };
     return { path };
   };
 
@@ -184,7 +218,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
   const servable = (canonical: string): boolean =>
     canonicalDocumentPath(canonical) === canonical &&
     !(rootPath && canonical === rootPath) &&
-    options.isAllowed(canonical);
+    options.isAllowed(canonical, false);
 
   const clearDocumentCopy = (path: string) => {
     const key = annotateFileDraftKey(path);
@@ -252,7 +286,9 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
           continue;
         }
         if (!servable(canonical)) continue;
-        if (!settled) coveredDocuments.add(canonical);
+        // The session draft's load names no page: a page that restores a
+        // copy reads it again under its own id (useDocumentDrafts).
+        if (!settled) cover(canonical, null);
         documents.push({ path: clientPath, annotations: content.annotations, globalAttachments: content.globalAttachments });
         ts = Math.max(ts, content.ts);
       }
@@ -260,14 +296,14 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
       return { documents, ts };
     },
 
-    /** GET one document's copy (`?path=`). */
-    loadDocument(rawPath: unknown): DocumentDraftResult {
-      const resolved = resolveDocumentPath(rawPath);
+    /** GET one document's copy (`?path=`). `anyPath`: the reader's /api/doc access. */
+    loadDocument(rawPath: unknown, clientId?: string | null, anyPath = false): DocumentDraftResult {
+      const resolved = resolveDocumentPath(rawPath, anyPath);
       if ("error" in resolved) return { status: resolved.status, body: { error: resolved.error } };
       const content = storedContent(resolved.path);
       if (!content) return { status: 404, body: { found: false, error: "No draft" } };
       if (!settled) {
-        coveredDocuments.add(resolved.path);
+        cover(resolved.path, clientId);
         if (indexKey) {
           const index = readIndex();
           if (index.get(resolved.path) !== rawPath) {
@@ -280,7 +316,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
     },
 
     /** POST `{ documents: [{ path, annotations, globalAttachments? }] }`. */
-    saveDocuments(body: unknown): DocumentDraftResult {
+    saveDocuments(body: unknown, clientId?: string | null, anyPath = false): DocumentDraftResult {
       if (settled) return { status: 409, body: { ok: false, error: "The review is already decided" } };
       const writes = parseDocumentWrites(body);
       if (typeof writes === "string") return { status: 400, body: { ok: false, error: writes } };
@@ -289,7 +325,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
       const resolvedWrites: (DocumentWrite & { clientPath: string })[] = [];
       const rejected: string[] = [];
       for (const write of writes) {
-        const resolved = resolveDocumentPath(write.path);
+        const resolved = resolveDocumentPath(write.path, anyPath);
         if ("error" in resolved) rejected.push(write.path);
         else resolvedWrites.push({ ...write, path: resolved.path, clientPath: write.path });
       }
@@ -298,7 +334,7 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
       const indexBefore = index ? JSON.stringify([...index]) : "";
       let written = 0;
       for (const write of resolvedWrites) {
-        coveredDocuments.add(write.path);
+        cover(write.path, clientId);
         const key = annotateFileDraftKey(write.path);
         const stored = loadDraft(key) as Record<string, unknown> | null;
         const empty = write.annotations.length === 0 && write.globalAttachments.length === 0;
@@ -347,27 +383,31 @@ export function createDocumentDraftStore(options: DocumentDraftStoreOptions) {
     },
 
     /**
-     * The reviewer decided: clear every copy this session covered or lists
-     * (and may serve), then refuse writes. Entries this session cannot serve
-     * (another project's copies under the same root text) stay in the index;
-     * the index is deleted only when none remain.
+     * The reviewer decided. With a page id, clear only the copies that page
+     * read, wrote or restored: a copy an earlier page wrote (a tab that was
+     * reloaded or crashed) and this page never saw was not sent, so it stays,
+     * listed in the index, and the next session offers it again. Without a
+     * page id, clear every copy this session wrote, read or offered. A listed
+     * copy nothing in this session saw is never cleared. Then refuse writes.
+     * Entries left in the index stay listed; the index is deleted only when
+     * none remain.
      */
-    settle(): void {
-      const paths = new Set(coveredDocuments);
+    settle(clientId?: string | null): void {
+      const page = readDraftClientId(clientId);
       const index = readIndex();
-      for (const canonical of index.keys()) if (servable(canonical)) paths.add(canonical);
+      const paths = page !== null ? new Set(coveredByPage.get(page) ?? []) : allCovered();
       for (const path of paths) {
         clearDocumentCopy(path);
         index.delete(path);
       }
       writeIndex(index);
-      coveredDocuments.clear();
+      coveredByPage.clear();
       settled = true;
     },
 
     /** Unsent comments in every copy this session covered or lists (and may serve). */
     countUnsent(count: (draft: unknown) => number): number {
-      const paths = new Set(coveredDocuments);
+      const paths = allCovered();
       for (const canonical of readIndex().keys()) if (servable(canonical)) paths.add(canonical);
       let total = 0;
       for (const path of paths) total += count(loadDraft(annotateFileDraftKey(path)));
@@ -423,7 +463,7 @@ export function createAnnotateDraftSession(options: AnnotateDraftSessionOptions)
     ? createDocumentDraftStore({
         isAllowed: options.documents.isAllowed,
         rootPath: options.filePath ?? null,
-        indexKey: options.documents.indexed ? documentDraftIndexKey(options.contentKey) : null,
+        indexKey: documentDraftIndexKey(options.contentKey),
       })
     : null;
   /** The reviewer decided (feedback, approve, Close): saves are refused. */
@@ -489,12 +529,13 @@ export function createAnnotateDraftSession(options: AnnotateDraftSessionOptions)
 
     /**
      * The reviewer's decision (feedback, approve, Close): clear the session's
-     * keys and every document copy it covered or lists, then refuse further
-     * saves and document writes.
+     * keys and the document copies the deciding page (`clientId`) read, wrote
+     * or restored, or with no page id every copy this session wrote, read or
+     * offered; then refuse further saves and document writes.
      */
-    settle(draftGeneration?: number): void {
+    settle(draftGeneration?: number, clientId?: string | null): void {
       deleteReviewDraft(keys, draftGeneration);
-      store?.settle();
+      store?.settle(clientId);
       settled = true;
     },
 
@@ -523,16 +564,16 @@ export function createAnnotateDraftSession(options: AnnotateDraftSessionOptions)
       return total + (store ? store.countUnsent(count) : 0);
     },
 
-    /** GET one document's copy (`?path=`). */
-    loadDocument(rawPath: unknown): DocumentDraftResult {
+    /** GET one document's copy (`?path=`), for the page `clientId`. `anyPath`: the reader's `/api/doc` access. */
+    loadDocument(rawPath: unknown, clientId?: string | null, anyPath = false): DocumentDraftResult {
       if (!store) return { status: 404, body: { error: "Not available" } };
-      return store.loadDocument(rawPath);
+      return store.loadDocument(rawPath, clientId, anyPath);
     },
 
-    /** POST `{ documents: [{ path, annotations, globalAttachments? }] }`. */
-    saveDocuments(body: unknown): DocumentDraftResult {
+    /** POST `{ documents: [{ path, annotations, globalAttachments? }] }`, for the page `clientId`. `anyPath` as above. */
+    saveDocuments(body: unknown, clientId?: string | null, anyPath = false): DocumentDraftResult {
       if (!store) return { status: 404, body: { error: "Not available" } };
-      return store.saveDocuments(body);
+      return store.saveDocuments(body, clientId, anyPath);
     },
   };
 }
@@ -573,8 +614,8 @@ export function annotateDraftFilePath(input: { mode: string; filePath: string })
 /**
  * Whether an annotate session's root has no file of its own but can still
  * open linked documents: a URL or the last message. These sessions get
- * per-document copies WITH an index, like plan review (#1545). Live-app
- * sessions have no linked markdown documents and are left out.
+ * per-document copies too, like plan review (#1545). Live-app sessions have
+ * no linked markdown documents and are left out.
  */
 export function annotateSessionHasRootlessDocuments(input: { mode: string; filePath: string }): boolean {
   if (input.mode === "annotate-last") return true;

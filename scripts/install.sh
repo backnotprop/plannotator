@@ -11,7 +11,7 @@ INSTALL_DIR="$HOME/.local/bin"
 # `actions/attest-build-provenance` step, so `gh attestation verify` will
 # fail with "no attestations found" for them regardless of authenticity.
 # When provenance verification is enabled (via flag, env var, or
-# ~/.plannotator/config.json), the installer compares the resolved tag
+# config.json in the Plannotator data folder), the installer compares the resolved tag
 # against this constant and fails fast with a clear message instead of
 # downloading a binary, running SHA256, and then hitting a cryptic gh
 # failure. Bumped once at the first attested release via the release skill.
@@ -50,7 +50,7 @@ VERSION="latest"
 # which would otherwise silently overwrite the earlier value and 404.
 VERSION_EXPLICIT=0
 # Three-layer opt-in for SLSA build-provenance verification.
-# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# Precedence: CLI flag > env var > config.json in the data folder > default (off).
 # -1 = flag not set yet (fall through to lower layers); 0 = disable; 1 = enable.
 VERIFY_ATTESTATION_FLAG=-1
 # Three-layer opt-in for the CallDiff call-flow runtime (large on-disk
@@ -119,7 +119,8 @@ Options:
                          `gh attestation verify`. Fails the install if gh is
                          not available or the check does not pass.
   --skip-attestation     Force-skip provenance verification even if enabled
-                         via env var or ~/.plannotator/config.json.
+                         via env var or config.json in your Plannotator
+                         data folder (`plannotator data-dir`).
   --with-call-flow       Also install the optional pruned CallDiff core
                          (about 5 MB on macOS arm64, needs Node.js 22.18+).
                          By default it is NOT installed; the review UI offers
@@ -154,7 +155,8 @@ Options:
                          detected. Never removes an existing integration.
                          Also enabled by PLANNOTATOR_SKIP_CODEX_INSTALL=1 or
                          { "skipInstall": { "codex": true } } in
-                         ~/.plannotator/config.json (flag > env var > config).
+                         config.json in your Plannotator data folder
+                         (`plannotator data-dir`) (flag > env var > config).
   --skip-gemini          Same opt-out for the Gemini CLI integration
                          (~/.gemini policy, settings hook, commands). Env var:
                          PLANNOTATOR_SKIP_GEMINI_INSTALL; config key:
@@ -215,7 +217,7 @@ keep the defaults.
 Provenance verification is off by default. Enable it by any of:
   - passing --verify-attestation
   - exporting PLANNOTATOR_VERIFY_ATTESTATION=1
-  - setting { "verifyAttestation": true } in ~/.plannotator/config.json
+  - setting { "verifyAttestation": true } in config.json in your Plannotator data folder (`plannotator data-dir`)
 When enabled, the attestation bundle is fetched from GitHub's public
 attestations API and verified with `gh attestation verify --bundle`, so no
 gh login is required. The credential-free path needs one JSON tool on PATH
@@ -534,30 +536,48 @@ echo "Installing plannotator ${latest_tag}..."
 # provenance support. The three layers (config file, env var, CLI flag) are
 # all cheap to check — no reason to defer this past the arg parse.
 #
-# Precedence: CLI flag > env var > ~/.plannotator/config.json > default (off).
+# Precedence: CLI flag > env var > config.json in the data folder > default (off).
 verify_attestation=0
 
 # Layer 3: config file (lowest precedence of the opt-in sources).
 # Crude grep against a flat boolean — PlannotatorConfig has no nested
 # verifyAttestation, so false positives are not a concern.
-# Resolve the data directory, expanding ~ the same way the runtime does.
-# Unset: an existing ~/.plannotator (legacy default) always wins; otherwise
-# an explicitly-set absolute XDG_DATA_HOME places it at
+# Resolve the data directory, expanding ~ the same way the runtime does
+# (packages/shared/data-dir.ts). Unset: an existing ~/.plannotator (legacy
+# default) wins, unless it holds none of Plannotator's data while
+# $XDG_DATA_HOME/plannotator does (a stray folder, #2305); otherwise an
+# explicitly-set absolute XDG_DATA_HOME places it at
 # $XDG_DATA_HOME/plannotator; otherwise ~/.plannotator.
+# BEGIN data-dir resolution (tests/data-dir-mirrors.test.ts runs this block)
+_holds_plannotator_data() {
+    for _marker in history sessions drafts inbox claude-code-mod install-flags.json; do
+        [ -e "$1/$_marker" ] && return 0
+    done
+    return 1
+}
 _raw_dir="${PLANNOTATOR_DATA_DIR:-}"
 case "$_raw_dir" in
     "")
         _config_dir="$HOME/.plannotator"
-        if [ ! -d "$_config_dir" ]; then
-            case "${XDG_DATA_HOME:-}" in
-                /*) _config_dir="$XDG_DATA_HOME/plannotator" ;;
-            esac
+        _xdg_dir=""
+        # Trimmed like the runtime's XDG_DATA_HOME?.trim().
+        _xdg_home=$(printf '%s' "${XDG_DATA_HOME:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        case "$_xdg_home" in
+            /*) _xdg_dir="$_xdg_home/plannotator" ;;
+        esac
+        if [ -e "$_config_dir" ]; then
+            if [ -n "$_xdg_dir" ] && [ -e "$_xdg_dir" ] && _holds_plannotator_data "$_xdg_dir" && ! _holds_plannotator_data "$_config_dir"; then
+                _config_dir="$_xdg_dir"
+            fi
+        elif [ -n "$_xdg_dir" ]; then
+            _config_dir="$_xdg_dir"
         fi
         ;;
     "~")     _config_dir="$HOME" ;;
     "~/"*)   _config_dir="$HOME/${_raw_dir#\~/}" ;;
     *)       _config_dir="$_raw_dir" ;;
 esac
+# END data-dir resolution
 if [ -f "$_config_dir/config.json" ]; then
     if grep -q '"verifyAttestation"[[:space:]]*:[[:space:]]*true' "$_config_dir/config.json" 2>/dev/null; then
         verify_attestation=1
@@ -820,7 +840,7 @@ if [ "$verify_attestation" -eq 1 ]; then
         echo "  - Pin to ${MIN_ATTESTED_VERSION} or later: --version ${MIN_ATTESTED_VERSION}" >&2
         echo "  - Install without provenance verification: --skip-attestation" >&2
         echo "  - Or unset PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation" >&2
-        echo "    from ~/.plannotator/config.json" >&2
+        echo "    from config.json in your Plannotator data folder (\`plannotator data-dir\`)" >&2
         exit 1
     fi
 fi
@@ -1070,7 +1090,7 @@ sys.stdout.write("\n".join(lines) + "\n")
         echo "Install https://cli.github.com (no login is needed when the public" >&2
         echo "attestation bundle fetch succeeds), or unset" >&2
         echo "PLANNOTATOR_VERIFY_ATTESTATION / remove verifyAttestation from" >&2
-        echo "~/.plannotator/config.json / pass --skip-attestation." >&2
+        echo "config.json in your Plannotator data folder (\`plannotator data-dir\`) / pass --skip-attestation." >&2
         rm -f "$tmp_file"
         exit 1
     fi

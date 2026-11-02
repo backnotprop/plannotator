@@ -270,4 +270,21 @@ describe("OpenCode: the installed SDK's createOpencodeServer", () => {
 			else process.env.PLANNOTATOR_ASK_AI_CHILD = saved.marker;
 		}
 	}, 15_000);
+
+	// Newer `opencode serve` prints this line without the "opencode " prefix.
+	test.if(posix)("resolves on the unprefixed `server listening on <url>` line", async () => {
+		const binDir = mkdtempSync(join(dir, "bin-"));
+		writeFileSync(join(binDir, "opencode"), `#!/bin/sh\necho "server listening on http://127.0.0.1:4999"\nexec sleep 30\n`);
+		chmodSync(join(binDir, "opencode"), 0o755);
+		const savedPath = process.env.PATH;
+		process.env.PATH = `${binDir}${delimiter}${savedPath ?? ""}`;
+		let server: { url: string; close(): void } | undefined;
+		try {
+			server = await createOpencodeServer({ hostname: "127.0.0.1", port: 0, timeout: 3_000 });
+			expect(server.url).toBe("http://127.0.0.1:4999");
+		} finally {
+			server?.close();
+			process.env.PATH = savedPath;
+		}
+	}, 15_000);
 });

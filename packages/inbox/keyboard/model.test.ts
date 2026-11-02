@@ -118,8 +118,8 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
     expect(missing).toEqual([]);
     // Held keys must still be missing: once one lands in the registry, take it out of HELD.
     for (const key of Object.keys(HELD) as ModelKey[]) expect([key, registry.has(key)]).toEqual([key, false]);
-    // Every registry single key the model leaves out is one that only steps or undoes (no new view).
+    // Every registry single key the model leaves out is one that only steps, undoes or opens the open-items list (no new view).
     const unmodelled = [...registry].filter((key) => !(MODEL_BARE_KEYS as readonly string[]).includes(key)).sort();
-    expect(unmodelled).toEqual(['E', 'K', 'Shift+K', 'Z', '[', ']']);
+    expect(unmodelled).toEqual(['E', 'K', 'Q', 'Shift+K', 'Z', '[', ']']);
   });
 });

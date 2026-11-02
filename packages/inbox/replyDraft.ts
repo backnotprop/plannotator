@@ -28,11 +28,33 @@
  * an answer older than what the window learned since it went out. A save whose
  * answer never came (a lost answer, the keepalive as the page goes) is read
  * back, so the window's base follows what landed.
+ *
+ * The draft also keeps the box's long pastes (approval
+ * "inbox-paste-attachment"): `save(text, files)` carries each pasted tile's
+ * upload and its place in the words, and every comparison here (a read-back,
+ * the edits a reload weighs, a conflict) is of the words and those files
+ * together (`replyContentKey`). The save names the files it saved last
+ * (`base_files`) beside `base_body`.
  */
-import { inboxUrl } from './inboxUrl';
+import { inboxUrl, machineOf } from './inboxUrl';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, type InboxReplyDraft } from '@plannotator/core/inbox-types';
 import { inboxApi, InboxApiError, pageServerSession } from './api';
+import type { DraftPastedFile } from './compose/ComposeFiles';
+
+/** The long pastes a reply draft keeps beside its words (approval "inbox-paste-attachment"). */
+export type ReplyDraftFiles = readonly DraftPastedFile[];
+const NO_FILES: ReplyDraftFiles = [];
+
+/** What the box holds, as one string to compare: the words, and each long paste with its place. */
+export function replyContentKey(text: string, files: ReplyDraftFiles | InboxReplyDraft['files'] = NO_FILES): string {
+  const list = files ?? NO_FILES;
+  if (list.length === 0) return text;
+  return `${text}\u0000${list.map((file) => `${file.upload_id}@${file.pasted?.at ?? ''}`).join(',')}`;
+}
+const draftKey = (draft: InboxReplyDraft | null | undefined): string | null => (draft ? replyContentKey(draft.body, draft.files) : null);
+const draftFilesOf = (draft: InboxReplyDraft | null | undefined): ReplyDraftFiles =>
+  (draft?.files ?? []).flatMap((file) => (file.pasted ? [{ upload_id: file.upload_id, pasted: file.pasted }] : []));
 
 /** How long typing pauses before the words are saved. */
 export const REPLY_DRAFT_SAVE_MS = 500;
@@ -48,6 +70,11 @@ export interface ReplyDraftState {
    * until the person picks Keep mine or Discard.
    */
   conflict: string | null;
+  /**
+   * The box's words are longer than a draft holds (INBOX_DRAFT_BODY_MAX): they
+   * are not saved, and the line above the box says so, until they are shorter.
+   */
+  tooLong: boolean;
 }
 
 /** Saves waiting or in flight anywhere on the page, and words left unsaved by a conflict (the restart guard reads them). */
@@ -58,8 +85,15 @@ let unsaved = 0;
  * closes or another opens, and these words must come back when it reopens.
  */
 const conflictWords = new Map<string, string>();
+/** Threads whose box holds more words than a draft takes: not saved (the restart guard asks). */
+const tooLongThreads = new Set<string>();
+/**
+ * Threads whose last save was refused for another reason (`validation_error` not about the body's
+ * length): their words are not saved until a later save lands (the restart guard asks meanwhile).
+ */
+const refusedThreads = new Set<string>();
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || conflictWords.size > 0;
+  return unsaved > 0 || conflictWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0;
 }
 
 /** Told when replyDraftUnsaved() may have changed (unsent.ts keeps the page's beforeunload question in step). */
@@ -74,11 +108,11 @@ function unsavedChanged(): void {
 
 
 export function useReplyDraft(threadId: string) {
-  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null });
+  const [state, setState] = useState<ReplyDraftState>({ loadedFor: null, draft: null, conflict: null, tooLong: false });
   const stateRef = useRef(state);
   stateRef.current = state;
   const chain = useRef<Promise<void>>(Promise.resolve());
-  const pending = useRef<{ threadId: string; text: string } | null>(null);
+  const pending = useRef<{ threadId: string; text: string; files: ReplyDraftFiles } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const current = useRef(threadId);
   current.current = threadId;
@@ -90,7 +124,7 @@ export function useReplyDraft(threadId: string) {
   const claimed = useRef(new Set<string>());
   /** The words refused saves left unsaved, per thread (module-level: they outlive the pane). */
   const conflicts = useRef(conflictWords);
-  /** Per thread: the words the server held as this window last saved or read them (null: no draft). */
+  /** Per thread: what the server held as this window last saved or read it (`replyContentKey`; null: no draft). */
   const synced = useRef(new Map<string, string | null>());
   /**
    * Per thread: this window's own Send (unconfirmed) may have cleared the draft holding these words.
@@ -99,14 +133,18 @@ export function useReplyDraft(threadId: string) {
   const ownClears = useRef(new Map<string, string>());
   /** The words the last save queued here carries (or the draft read): the page's last save names them (`base_body`). */
   const lastWords = useRef<string | null>(null);
+  /** The long pastes the last save queued here carries (or the draft read): the page's last save names them (`base_files`). */
+  const lastFiles = useRef<ReplyDraftFiles>(NO_FILES);
   /** Per thread: the words of the last save this window sent, answered or not; the next save names them (`base_body`). */
   const sentWords = useRef(new Map<string, string>());
+  /** Per thread: the long pastes that save carried; the next save names their ids (`base_files`). */
+  const sentFiles = useRef(new Map<string, ReplyDraftFiles>());
   /** Raised by each `reload`: only the newest read applies its answer. */
   const readSeq = useRef(0);
   /** Raised each time this window learns the draft itself (its save, Send, Discard, a read-back): a read sent before is read again. */
   const learned = useRef(0);
   /** The keepalive save sent as the page went (its answer is never read): read back when the page comes back. */
-  const keptAlive = useRef<{ threadId: string; text: string; generation: number } | null>(null);
+  const keptAlive = useRef<{ threadId: string; text: string; files: ReplyDraftFiles; generation: number } | null>(null);
 
   const generationOf = (target: string) => generations.current.get(target) ?? 0;
   const bump = (target: string) => generations.current.set(target, generationOf(target) + 1);
@@ -119,49 +157,104 @@ export function useReplyDraft(threadId: string) {
   /** The server holds this draft for the thread now: its base and words, as this window knows them. */
   const adopt = (target: string, draft: InboxReplyDraft | null) => {
     bases.current.set(target, draft?.updated_at ?? null);
-    synced.current.set(target, draft?.body ?? null);
-    if (target === current.current) lastWords.current = draft?.body ?? null;
+    synced.current.set(target, draftKey(draft));
+    if (target === current.current) {
+      lastWords.current = draft?.body ?? null;
+      lastFiles.current = draftFilesOf(draft);
+    }
   };
   /** adopt, from this window's own save, Send, Discard or read-back (not from a `reload`). */
   const learn = (target: string, draft: InboxReplyDraft | null) => {
     adopt(target, draft);
     learned.current += 1;
   };
+  /** The box's words are (or are no longer) longer than a draft holds. */
+  const markTooLong = (target: string, on: boolean) => {
+    if (on === tooLongThreads.has(target)) return;
+    if (on) tooLongThreads.add(target);
+    else tooLongThreads.delete(target);
+    unsavedChanged();
+    if (target === current.current) setState((s) => ({ ...s, tooLong: on }));
+  };
+  /** The thread's words were refused for another reason (on), or a save of them landed or they went (off). */
+  const markRefused = (target: string, on: boolean) => {
+    if (on === refusedThreads.has(target)) return;
+    if (on) refusedThreads.add(target);
+    else refusedThreads.delete(target);
+    unsavedChanged();
+  };
   const show = (target: string, draft: InboxReplyDraft | null) => {
-    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null });
+    if (target === current.current) setState({ loadedFor: target, draft, conflict: conflicts.current.get(target) ?? null, tooLong: tooLongThreads.has(target) });
   };
   /**
    * A save of `text` went without its answer reaching here: it may have landed. The draft holding
    * those words is this window's own, so its base is that draft's (and the Send's clear_draft names it).
    */
-  const readBack = async (target: string, text: string, generation: number) => {
+  const readBack = async (target: string, text: string, generation: number, files: ReplyDraftFiles = NO_FILES) => {
     const latest = await readDraft(target);
-    if (latest?.body !== text || generation !== generationOf(target) || claimed.current.has(target)) return;
+    if (latest === undefined || draftKey(latest) !== replyContentKey(text, files) || generation !== generationOf(target) || claimed.current.has(target)) return;
     learn(target, latest);
     show(target, latest);
   };
 
-  const write = useCallback((target: string, text: string) => {
+  const write = useCallback((target: string, text: string, files: ReplyDraftFiles = NO_FILES) => {
     unsaved += 1;
     unsavedChanged();
     const generation = generationOf(target);
-    if (target === current.current) lastWords.current = text;
+    if (target === current.current) {
+      lastWords.current = text;
+      lastFiles.current = files;
+    }
     chain.current = chain.current.then(async () => {
+      // `base_body` / `base_files`: a save of this window's that landed without its answer still counts as its own.
+      const baseBody = sentWords.current.get(target);
+      const baseFiles = sentFiles.current.get(target);
+      /** Refused: these words never landed, so they are not this window's on the server. */
+      const unsend = () => {
+        if (baseBody === undefined) sentWords.current.delete(target);
+        else sentWords.current.set(target, baseBody);
+        if (baseFiles === undefined) sentFiles.current.delete(target);
+        else sentFiles.current.set(target, baseFiles);
+      };
       try {
         // Claimed by a Send, sent or discarded since this save was queued, or
         // waiting on the person's choice after a conflict: the words must not land.
         if (generation !== generationOf(target) || claimed.current.has(target) || conflicts.current.has(target)) return;
         let answer: { draft: InboxReplyDraft | null };
-        // `base_body`: a save of this window's that landed without its answer still counts as its own.
-        const baseBody = sentWords.current.get(target);
         sentWords.current.set(target, text);
+        sentFiles.current.set(target, files);
         try {
-          answer = await inboxApi.saveReplyDraft(target, text, baseOf(target), baseBody ?? null);
+          answer = await inboxApi.saveReplyDraft(
+            target,
+            text,
+            baseOf(target),
+            baseBody ?? null,
+            files,
+            (baseFiles ?? NO_FILES).map((file) => file.upload_id),
+          );
         } catch (cause) {
+          if (cause instanceof InboxApiError && cause.code === 'validation_error') {
+            // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
+            // says so; any other refusal is not "too long": the words stay unsaved (the restart guard asks) until
+            // the next pause in typing saves them.
+            unsend();
+            if (generation !== generationOf(target)) return;
+            if (cause.message.startsWith('body:')) markTooLong(target, true);
+            else markRefused(target, true);
+            return;
+          }
+          if (cause instanceof InboxApiError && cause.code === 'upload_not_found' && files.length > 0) {
+            // A long paste's upload is gone (sent or swept elsewhere): saved again without it, the other pastes kept
+            // (the refusal names it, `files[i]`; without that, the words alone). Its tile stays in the box, not in
+            // the draft, so the restart guard asks for it (Thread).
+            unsend();
+            const gone = /^files\[(\d+)\]$/.exec(cause.field ?? '');
+            const rest = gone ? files.filter((_, index) => index !== Number(gone[1])) : NO_FILES;
+            if (generation === generationOf(target)) write(target, text, rest);
+            return;
+          }
           if (!(cause instanceof InboxApiError) || cause.code !== 'draft_conflict') throw cause;
-          // Refused: these words never landed, so they are not this window's on the server.
-          if (baseBody === undefined) sentWords.current.delete(target);
-          else sentWords.current.set(target, baseBody);
+          unsend();
           // Another window saved, sent or discarded since: adopt the draft as it is
           // there, and keep these words here, not saved, for the person to choose.
           const latest = await readDraft(target);
@@ -172,22 +265,25 @@ export function useReplyDraft(threadId: string) {
             ownClears.current.delete(target);
             learn(target, latest);
             show(target, latest);
-            if (generation === generationOf(target)) write(target, text);
+            if (generation === generationOf(target)) write(target, text, files);
             return;
           }
           learn(target, latest);
           // A conflict only when both windows hold words: an empty box (or the same words) is not one,
           // and never deletes the other window's draft.
-          if (generation === generationOf(target) && text.trim() !== '' && text !== (latest?.body ?? '')) setConflict(target, text);
+          if (generation === generationOf(target) && (text.trim() !== '' || files.length > 0) && replyContentKey(text, files) !== (draftKey(latest) ?? '')) {
+            setConflict(target, text);
+          }
           show(target, latest);
           return;
         }
         if (generation !== generationOf(target)) return;
+        markRefused(target, false);
         learn(target, answer.draft ?? null);
         show(target, answer.draft ?? null);
       } catch {
         // No answer: read back what may have landed. Otherwise kept in the box; the next pause in typing tries again.
-        await readBack(target, text, generation);
+        await readBack(target, text, generation, files);
       } finally {
         unsaved -= 1;
         unsavedChanged();
@@ -201,22 +297,22 @@ export function useReplyDraft(threadId: string) {
     timer.current = null;
     const next = pending.current;
     pending.current = null;
-    if (next) write(next.threadId, next.text);
+    if (next) write(next.threadId, next.text, next.files);
   }, [write]);
 
   // The thread's draft, read when it opens; what waited for the last thread is saved first.
   useEffect(() => {
     let live = true;
-    setState({ loadedFor: null, draft: null, conflict: null });
+    setState({ loadedFor: null, draft: null, conflict: null, tooLong: tooLongThreads.has(threadId) });
     void chain.current.then(async () => {
       try {
         // An older Inbox answers 404 (caught below): no draft.
         const draft = (await inboxApi.replyDraft(threadId)).draft ?? null;
         if (!live) return;
         adopt(threadId, draft);
-        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null });
+        setState({ loadedFor: threadId, draft, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
       } catch {
-        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null });
+        if (live) setState({ loadedFor: threadId, draft: null, conflict: conflicts.current.get(threadId) ?? null, tooLong: tooLongThreads.has(threadId) });
       }
     });
     return () => {
@@ -234,20 +330,22 @@ export function useReplyDraft(threadId: string) {
       if (timer.current) clearTimeout(timer.current);
       if (claimed.current.has(next.threadId) || conflicts.current.has(next.threadId)) return;
       const session = pageServerSession();
+      // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
+      const full = {
+        body: next.text,
+        base: baseOf(next.threadId),
+        ...(next.files.length > 0 ? { files: next.files } : {}),
+        ...(lastWords.current !== null ? { base_body: lastWords.current, base_files: lastFiles.current.map((file) => file.upload_id) } : {}),
+        ...(session ? { serverSession: session } : {}),
+      };
       void fetch(inboxUrl(`/threads/${encodeURIComponent(next.threadId)}/draft`), {
         method: 'POST',
-        keepalive: true,
         headers: { 'Content-Type': 'application/json' },
-        // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
-        body: JSON.stringify({
-          body: next.text,
-          base: baseOf(next.threadId),
-          ...(lastWords.current !== null ? { base_body: lastWords.current } : {}),
-          ...(session ? { serverSession: session } : {}),
-        }),
+        ...keepaliveBody(full),
       }).catch(() => {});
       sentWords.current.set(next.threadId, next.text);
-      keptAlive.current = { threadId: next.threadId, text: next.text, generation: generationOf(next.threadId) };
+      sentFiles.current.set(next.threadId, next.files);
+      keptAlive.current = { threadId: next.threadId, text: next.text, files: next.files, generation: generationOf(next.threadId) };
     };
     // Back from the back/forward cache: the keepalive's answer was never read, and the `drafts` frames
     // sent meanwhile are not replayed. Read back what it saved.
@@ -255,7 +353,7 @@ export function useReplyDraft(threadId: string) {
       const kept = keptAlive.current;
       keptAlive.current = null;
       if (!event.persisted || !kept) return;
-      chain.current = chain.current.then(() => readBack(kept.threadId, kept.text, kept.generation));
+      chain.current = chain.current.then(() => readBack(kept.threadId, kept.text, kept.generation, kept.files));
     };
     window.addEventListener('pagehide', onHide);
     window.addEventListener('pageshow', onShow);
@@ -267,19 +365,30 @@ export function useReplyDraft(threadId: string) {
 
   /** The words changed: saved after a pause in typing (not while a Send holds the thread, nor after a conflict). */
   const save = useCallback(
-    (text: string) => {
+    (text: string, files: ReplyDraftFiles = NO_FILES) => {
       const target = current.current;
-      if (claimed.current.has(target)) return;
+      // Another machine's thread (linked machines): its drafts live on that machine, whose door takes none, so
+      // the words stay in this box only.
+      if (claimed.current.has(target) || machineOf(target)) return;
+      // Longer than a draft holds: never sent (the Inbox would refuse it), said above the box instead.
+      if (text.length > INBOX_DRAFT_BODY_MAX) {
+        pending.current = null;
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = null;
+        markTooLong(target, true);
+        return;
+      }
+      if (tooLongThreads.has(target)) markTooLong(target, false);
       if (conflicts.current.has(target)) {
         // Emptied, or the same words the server holds: no conflict left. Otherwise still not
         // saved: the person chooses (Keep mine / Discard).
-        if (text.trim() === '' || text === (synced.current.get(target) ?? '')) {
+        if ((text.trim() === '' && files.length === 0) || replyContentKey(text, files) === (synced.current.get(target) ?? '')) {
           setConflict(target, null);
           setState((s) => ({ ...s, conflict: null }));
         } else setConflict(target, text);
         return;
       }
-      pending.current = { threadId: target, text };
+      pending.current = { threadId: target, text, files };
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(flush, REPLY_DRAFT_SAVE_MS);
     },
@@ -296,8 +405,13 @@ export function useReplyDraft(threadId: string) {
     setConflict(target, null);
     // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    sentFiles.current.delete(target);
     learn(target, null);
-    setState({ loadedFor: target, draft: null, conflict: null });
+    tooLongThreads.delete(target);
+    refusedThreads.delete(target);
+    unsavedChanged();
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
+    if (machineOf(target)) return;
     chain.current = chain.current.then(() => inboxApi.discardReplyDraft(target).then(() => undefined, () => undefined));
   }, []);
 
@@ -336,6 +450,11 @@ export function useReplyDraft(threadId: string) {
     claimed.current.delete(target);
     // Sent: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    sentFiles.current.delete(target);
+    tooLongThreads.delete(target);
+    refusedThreads.delete(target);
+    unsavedChanged();
+    setState((s) => (s.tooLong ? { ...s, tooLong: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
     if (conflicts.current.has(target)) {
@@ -344,14 +463,14 @@ export function useReplyDraft(threadId: string) {
       return;
     }
     learn(target, null);
-    setState({ loadedFor: target, draft: null, conflict: null });
+    setState({ loadedFor: target, draft: null, conflict: null, tooLong: false });
   }, []);
 
   /**
    * Read the thread's draft again (`event: drafts`: another window, or a phone's
    * Send, saved, sent or discarded it; or the foot's Send wants the words as they
-   * are now). `boxWords` gives the open box's words as the answer comes (null:
-   * the box is closed).
+   * are now). `boxWords` gives the open box's words and long pastes as the answer
+   * comes (null: the box is closed).
    *
    * Only the newest read applies its answer, and one sent before this window
    * learned the draft itself (its save, Send or Discard answered meanwhile) is
@@ -367,7 +486,7 @@ export function useReplyDraft(threadId: string) {
    *
    * Answers undefined when it was not read (the thread changed, the read failed).
    */
-  const reload = useCallback(async (boxWords: () => string | null = () => null): Promise<{ draft: InboxReplyDraft | null; replaceBox: boolean } | undefined> => {
+  const reload = useCallback(async (boxWords: () => { text: string; files: ReplyDraftFiles } | null = () => null): Promise<{ draft: InboxReplyDraft | null; replaceBox: boolean } | undefined> => {
     const target = current.current;
     const read = ++readSeq.current;
     const generation = generationOf(target);
@@ -394,10 +513,10 @@ export function useReplyDraft(threadId: string) {
       return { draft, replaceBox: false };
     }
     const waitingHere = pending.current?.threadId === target;
-    const edits = local !== null && (waitingHere || local !== (synced.current.get(target) ?? ''));
+    const edits = local !== null && (waitingHere || replyContentKey(local.text, local.files) !== (synced.current.get(target) ?? ''));
     if (edits) {
       if (waitingHere) flush();
-      else write(target, local);
+      else write(target, local.text, local.files);
       return { draft, replaceBox: false };
     }
     adopt(target, draft);
@@ -407,11 +526,11 @@ export function useReplyDraft(threadId: string) {
 
   /** After a conflict: these words go over the newer draft (or make one again). */
   const keepMine = useCallback(
-    (text: string) => {
+    (text: string, files: ReplyDraftFiles = NO_FILES) => {
       const target = current.current;
       setConflict(target, null);
       setState((s) => ({ ...s, conflict: null }));
-      write(target, text);
+      write(target, text, files);
     },
     [write],
   );
@@ -445,4 +564,25 @@ async function readDraft(threadId: string): Promise<InboxReplyDraft | null | und
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A browser takes at most 64 KiB of keepalive bodies in flight (more is refused at once), so the save sent as the
+ * page goes stays under it, with room for another small keepalive.
+ */
+export const KEEPALIVE_BODY_MAX = 60 * 1024;
+
+/**
+ * The page's last save as a fetch's `body` and `keepalive`. Whole when it fits a keepalive. Larger (a long draft
+ * whose last save's words, `base_body`, double it), it goes without `base_body` and `base_files`: the words alone,
+ * compared on `base` only. Still larger (the words themselves over the limit), it goes as an ordinary fetch: sent
+ * as the page goes, it lands only if the page lives long enough to send it.
+ */
+export function keepaliveBody(full: Record<string, unknown>): { body: string; keepalive: boolean } {
+  const fits = (text: string) => new TextEncoder().encode(text).length <= KEEPALIVE_BODY_MAX;
+  const whole = JSON.stringify(full);
+  if (fits(whole)) return { body: whole, keepalive: true };
+  const { base_body: _baseBody, base_files: _baseFiles, ...words } = full;
+  const lean = JSON.stringify(words);
+  return { body: lean, keepalive: fits(lean) };
 }

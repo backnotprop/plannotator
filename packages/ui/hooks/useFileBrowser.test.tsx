@@ -162,6 +162,19 @@ describe("useFileBrowser", () => {
     await session.unmount();
   });
 
+  test.skipIf(!hasDom)("a Windows folder is named by its last segment, not its whole path", async () => {
+    globalThis.fetch = (async () => response({ tree: [] })) as unknown as typeof fetch;
+    const session = await mountHook();
+    await act(async () => {
+      session.result.current!.fetchAll(["C:\\work\\plannotator-docs"]);
+    });
+    await tick(0);
+
+    expect(session.result.current!.dirs[0]?.name).toBe("plannotator-docs");
+
+    await session.unmount();
+  });
+
   test.skipIf(!hasDom)("waits for all initial folder snapshots before opening the live watcher", async () => {
     installMockEventSource();
     const firstDir = "/tmp/plannotator-docs-a";

@@ -11,7 +11,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { markReadToast } from './markRead';
-import { InboxToast, toastSpeech, type InboxToastModel } from './components/Toast';
+import { InboxToast, splitErrorAction, toastSpeech, type InboxToastModel } from './components/Toast';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -38,9 +38,22 @@ describe('markReadToast: the approved words', () => {
     expect(markReadToast(row({ questions: questions({ stopped: true }) }), 'held')).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: '“Invoice list layout”', warn: true });
   });
 
+  test('a long agent name is cut to 40 in the toast, and said whole', () => {
+    const long = { ...author, name: 'Claude Code (worktree agent-a0316994da8440ab5)' } as InboxListRow['author'];
+    expect(markReadToast(row({ author: long, questions: questions({ stopped: true }) }), 'open')).toEqual({
+      lead: 'Marked read',
+      phoneLead: 'Read',
+      detail: 'Claude Code (worktree agent-a0316994da8… was stopped',
+      // A phone: what happened first, so the line's "…" only ever cuts the name.
+      phoneDetail: 'Stopped · Claude Code (worktree agent-a0316994da8…',
+      warn: true,
+      speech: 'Marked read. Claude Code (worktree agent-a0316994da8440ab5) was stopped.',
+    });
+  });
+
   test('an agent stopped or held up on it: a warning, in the open thread or from a row', () => {
     for (const place of ['open', 'list'] as const) {
-      expect(markReadToast(row({ questions: questions({ stopped: true }) }), place)).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Claude Code was stopped', warn: true });
+      expect(markReadToast(row({ questions: questions({ stopped: true }) }), place)).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Claude Code was stopped', phoneDetail: 'Stopped · Claude Code', warn: true });
       const held = markReadToast(row({ questions: questions({ holds_up: ['the deploy', 'the release'] }) }), place);
       expect(held).toEqual({ lead: 'Marked read', phoneLead: 'Read', detail: 'Held up 2 things', warn: true });
     }
@@ -62,8 +75,24 @@ test('toastSpeech: the live region reads the lead and the detail as sentences, a
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+const realMatchMedia = hasDom ? window.matchMedia : undefined;
+
+/** The window as a phone: a narrow one (the phone layout), and with `touch` a touch screen with no hover. */
+function phoneWindow(touch: boolean) {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || (touch && query.includes('pointer: coarse')),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
 
 afterEach(() => {
+  if (hasDom) window.matchMedia = realMatchMedia!;
   if (hasDom) delete (document.documentElement as { clientWidth?: number }).clientWidth;
   act(() => root?.unmount());
   host?.remove();
@@ -274,17 +303,81 @@ test.skipIf(!hasDom)('a desktop toast stays where it is whatever opens: a thread
 });
 
 test.skipIf(!hasDom)('a phone: "Read" for "Marked read", no Reply and no Z hint, Undo undoes, and the × closes it', () => {
+  phoneWindow(true);
   let undone = 0;
   const { warn, ...copy } = markReadToast(row({ questions: questions({ stopped: true }) }), 'open');
   const toast = show({ ...copy, icon: warn ? 'warn' : 'check', onUndo: () => undone++, onReply: () => {} }, true, undefined, () => {});
   expect(toast.classList.contains('ib-toast-phone')).toBe(true);
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Read');
-  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
+  expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Stopped · Claude Code');
   expect(buttons(toast)).toEqual(['Undo', '']);
   expect(toast.querySelector('[data-toast-dismiss]')?.getAttribute('aria-label')).toBe('Dismiss');
   expect(toast.querySelector('kbd')).toBeNull();
   act(() => (toast.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
   expect(undone).toBe(1);
+});
+
+test.skipIf(!hasDom)('a narrow desktop window (the phone layout, a mouse) keeps Reply and Undo\'s Z: no foot holds Reply there, and the keys work', () => {
+  phoneWindow(false);
+  let replied = 0;
+  const toast = show({ icon: 'check', lead: 'Marked read', phoneLead: 'Read', detail: 'Moves to Quiet', onUndo: () => {}, onReply: () => replied++ }, true, undefined, () => {});
+  expect(toast.classList.contains('ib-toast-phone')).toBe(true);
+  expect(buttons(toast)).toEqual(['Reply', 'Undo', '']);
+  const undo = toast.querySelector('[data-toast-undo]')!;
+  expect(undo.querySelector('kbd')?.getAttribute('data-keycap')).toBe('Z');
+  expect(undo.getAttribute('aria-keyshortcuts')).toBe('Z');
+  act(() => ([...toast.querySelectorAll('button')].find((b) => b.textContent === 'Reply') as HTMLButtonElement).click());
+  expect(replied).toBe(1);
+});
+
+test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and moves when a thread\'s foot appears under it', async () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  // A file open full screen on a phone: its bar starts at y 740.
+  const dock = document.createElement('div');
+  dock.className = 'ib-fvdock-phone';
+  const bar = document.createElement('div');
+  bar.className = 'ib-fvbar';
+  boxAt(bar, 0, 740, 390, 60);
+  dock.appendChild(bar);
+  page.appendChild(dock);
+  const toast = show({ icon: 'check', lead: 'Marked read', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe('68px');
+  // The file closes, a thread opens under the toast: its foot (y 700) is measured once it is there.
+  dock.remove();
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  boxAt(foot, 0, 700, 390, 100);
+  pane.appendChild(foot);
+  act(() => page.appendChild(pane));
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(toast.style.bottom).toBe('108px');
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test('splitErrorAction: what happened, then what to do (the last sentence), together the message itself', () => {
+  const two = 'The Inbox could not save your reply because the disk is full. Free some space and try again.';
+  expect(splitErrorAction(two)).toEqual({ head: 'The Inbox could not save your reply because the disk is full. ', action: 'Free some space and try again.' });
+  const three = 'It stopped. Nothing was lost! Try again?';
+  expect(splitErrorAction(three).action).toBe('Try again?');
+  expect(splitErrorAction(three).head + splitErrorAction(three).action).toBe(three);
+  // One sentence, or a dot that ends no sentence (a version, a file name): nothing to split.
+  expect(splitErrorAction('The thread did not change.')).toEqual({ head: 'The thread did not change.', action: '' });
+  expect(splitErrorAction('Could not open notes.v2.md')).toEqual({ head: 'Could not open notes.v2.md', action: '' });
+});
+
+test.skipIf(!hasDom)('an error of two sentences keeps its last, what to do, in its own span (inbox.css keeps it whole when the rest is cut)', () => {
+  const message = 'The Inbox could not save your reply because the disk is full. Free some space and try again.';
+  const toast = show({ icon: 'warn', lead: message, wrap: true }, false, undefined, () => {});
+  expect(toast.querySelector('.ib-tlead')?.textContent).toBe(message);
+  expect(toast.querySelector('.ib-taction')?.textContent).toBe('Free some space and try again.');
 });
 
 test.skipIf(!hasDom)('an error keeps its message whole and may wrap, with no actions but the ×', () => {

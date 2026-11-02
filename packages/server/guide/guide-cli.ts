@@ -56,7 +56,7 @@ export const GUIDE_CLI_USAGE = [
   "",
   "Export a Guided Review as one portable HTML file (the viewer loads from guides.show),",
   "or share it as a link on guides.show (or your own deployment of it: PLANNOTATOR_GUIDE_SHARE_URL,",
-  "or `guideShareUrl` in ~/.plannotator/config.json).",
+  "or `guideShareUrl` in config.json in the data dir; `plannotator data-dir` prints it).",
   "",
   "Options:",
   "  --id <id>          A guide Plannotator saved (see `plannotator guide list`)",
@@ -384,7 +384,7 @@ export async function runGuideShare(argv: string[], env: NodeJS.ProcessEnv = pro
   if (parsedSource.args.rest.length > 0) return { code: 2, stderr: `Unknown argument: ${parsedSource.args.rest[0]}\n\n${GUIDE_CLI_USAGE}\n` };
 
   if (!resolveSharingEnabled(loadConfig(), env)) {
-    return { code: 1, stderr: "Sharing is disabled (PLANNOTATOR_SHARE=disabled or share: \"disabled\" in ~/.plannotator/config.json). Use `plannotator guide export` for a local file instead.\n" };
+    return { code: 1, stderr: "Sharing is disabled (PLANNOTATOR_SHARE=disabled or share: \"disabled\" in the data dir's config.json). Use `plannotator guide export` for a local file instead.\n" };
   }
   const source = loadSnapshotSource(parsedSource.args, cwd, io);
   if (!source.ok) return source.result;

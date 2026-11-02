@@ -19,6 +19,7 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
+import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 
 // --- Exported state types ---
 
@@ -419,6 +420,17 @@ const excludedAncestor = (node: Node | null): HTMLElement | null => {
     ? (node as HTMLElement)
     : node.parentElement;
   return element?.closest<HTMLElement>(ANNOTATION_EXCLUDED_SELECTOR) ?? null;
+};
+
+/**
+ * The whole range sits inside one `.annotation-exclude` subtree of `container`
+ * (an Inbox action item or question card under text comments, a diagram):
+ * nothing in it can be annotated, so the selection is left to the person.
+ * An excluded element around the container itself does not count.
+ */
+export const rangeInsideExcluded = (container: HTMLElement, range: Range): boolean => {
+  const excluded = excludedAncestor(range.commonAncestorContainer);
+  return excluded !== null && excluded !== container && container.contains(excluded);
 };
 
 /**
@@ -1508,6 +1520,9 @@ export function useAnnotationHighlighter({
       trimWhitespaceOnlyBoundaryNodes(args[1] as SelectedNodeLike[])) as SelectedNodesTap);
 
     highlighterRef.current = highlighter;
+    // Whether the library's pointer-end handler is attached (`run()`), and whether this effect was cleaned up.
+    let listening = false;
+    let disposed = false;
 
     // Stored positions can resolve into chrome the reviewer could never have
     // selected; painting never enters such a subtree, so a boundary left there
@@ -1650,6 +1665,25 @@ export function useAnnotationHighlighter({
       // AROUND the document and whose end boundary is an empty <div> — the
       // exact shape that throws — so a containment bail here would hand that
       // selection straight to the serializer.
+      if (rangeInsideExcluded(container, range)) {
+        // Nothing here can be annotated (an Inbox action item or question
+        // card under text comments, a diagram): the selection is the
+        // person's to copy. The library's own pointer-end handler paints
+        // nothing for it and then removes the DOM selection anyway, so it
+        // sits this one event out (a listener removed during dispatch never
+        // runs) and listens again on the next task.
+        pendingRangeRunsRef.current = null;
+        if (listening) {
+          highlighter.stop();
+          listening = false;
+          window.setTimeout(() => {
+            if (disposed) return;
+            highlighter.run();
+            listening = true;
+          }, 0);
+        }
+        return;
+      }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
         pendingRangeRunsRef.current = null;
         selection.removeAllRanges();
@@ -1675,8 +1709,11 @@ export function useAnnotationHighlighter({
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
     // touchend would end the system selection and its edit menu first.
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
-    if (!(isTouchPrimary && hostComposesRef.current)) highlighter.run();
+    const isTouchPrimary = window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
+    if (!(isTouchPrimary && hostComposesRef.current)) {
+      highlighter.run();
+      listening = true;
+    }
 
     const handleMathMouseDown = (event: MouseEvent) => {
       mouseDownMathRef.current = closestMathElement(event.target as Node, containerRef.current);
@@ -1773,6 +1810,8 @@ export function useAnnotationHighlighter({
       if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
       if (!containerRef.current?.contains(sel.anchorNode)) return false;
       const range = sel.getRangeAt(0).cloneRange();
+      // Nothing to annotate there: the system selection and its copy menu stay the person's.
+      if (rangeInsideExcluded(containerRef.current, range)) return false;
       // Same fail-closed rule as the pointer-end guard (#881): touch
       // selections settle on block boundaries just as often.
       if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
@@ -1793,7 +1832,7 @@ export function useAnnotationHighlighter({
       ? () => {
           clearTimeout(selectionTimer);
           if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, 400);
+          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
         }
       : null;
 
@@ -1810,6 +1849,7 @@ export function useAnnotationHighlighter({
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       container.removeEventListener('mouseup', handlePointerEndCapture, true);
       container.removeEventListener('touchend', handlePointerEndCapture, true);
+      disposed = true;
       highlighter.dispose();
     };
   }, [clearPendingSelection, enabled]);

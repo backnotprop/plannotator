@@ -310,7 +310,7 @@ const TARGET_SELECTORS: Record<TourTarget, string> = {
   'film-send': '[data-tour-film-send]',
   'compose-btn': '[data-open-compose]',
   'compose-to': '[data-compose] [data-compose-to]',
-  'compose-send': '[data-compose] .ib-cp-foot [data-compose-send], [data-compose] .ib-cp-bar [data-compose-send]',
+  'compose-send': '[data-compose] .ib-cp-foot [data-compose-send]',
   arrival: '[data-tour-arrival-last]',
 };
 
@@ -601,10 +601,10 @@ export function TourCoach({
     const target = tourTargetElement(coach.target);
     if (!target) return;
     if (!NO_SCROLL.has(coach.target!)) target.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-    target.classList.remove('ib-tour-again');
+    target.classList.remove('ib-tour-mark');
     void target.offsetWidth;
-    target.classList.add('ib-tour-again');
-    setTimeout(() => target.classList.remove('ib-tour-again'), 1600);
+    target.classList.add('ib-tour-mark');
+    setTimeout(() => target.classList.remove('ib-tour-mark'), 1600);
   };
   return (
     <div
@@ -1056,6 +1056,8 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
       onOpen={(r) => dispatch({ type: 'open', thread: r.thread_id }, { focusCoach: true })}
       onCompose={state.step === 9 && state.compose !== 'sent' ? onCompose : undefined}
       phone={phone}
+      // The tour draws today's list whatever look this browser chose (as its sidebar ignores closed sections).
+      rememberLook={false}
     />
   );
 

@@ -49,24 +49,33 @@
  * for reviews); a delivery is also claimed once per reply (mkdir), so a lease
  * race can never deliver twice. A reply another process claimed and never
  * delivered (it quit while the turn waited) is said once, with a toast.
+ *
+ * Ask AI: a poll answer can say a question waits on this session, and only
+ * then does this link start a client on the session's Ask AI bridge
+ * (`startAskClient`; the Inbox's setting off means none ever waits).
  */
 
+import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import type { Host, HttpResult, LoadedPluginInfo } from './host'
 import {
+  INBOX_ASK_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
+  INBOX_SESSION_LABEL_INPUT_MAX,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
   inboxSessionThreadsText,
   inboxWakeText,
   mcpAnswerOfResponse,
+  parseInboxAskWaits,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -76,6 +85,7 @@ import {
 } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { privateDirArgv } from './launch'
+import type { TurnTracker } from './turns'
 
 /**
  * The first Claude Code whose published hooks-module API documents
@@ -114,31 +124,6 @@ export function pluginVersionOf(text: string | null): string | null {
 export const INBOX_HOST = 'claude-code'
 /** How the person sees this agent in the Inbox. */
 export const INBOX_AGENT_NAME = 'Claude Code'
-/** The `prompt.context` block that carries the Inbox reminder. */
-export const INBOX_REMINDER_BLOCK = 'plannotatorInbox'
-
-/**
- * The first message's context blocks with the Inbox reminder last
- * (`inboxReminderFor(custom, toolName)`: the person's own text from
- * config.json, else the fixed line, naming the tool as the engine registered
- * it, so tool search finds the deferred tool). Never twice: a block of that
- * name already there (a hook above added it) is left as it is.
- */
-export function withInboxReminder<T extends { name: string; text: string }>(blocks: readonly T[], toolName: string, custom: string | null = null): Array<T | { name: string; text: string }> {
-  if (blocks.some((block) => block?.name === INBOX_REMINDER_BLOCK)) return [...blocks]
-  return [...blocks, { name: INBOX_REMINDER_BLOCK, text: inboxReminderFor(custom, toolName) }]
-}
-
-/**
- * `$.store` key: whether this machine's Claude Code runs the mod's
- * `prompt.context` hook. `true`: seen running (the block reaches the model);
- * `false`: a conversation's first turn completed without it (a guard plugin
- * seated above the mod, Claude Code's `cc-plugin-sec-default` on
- * Team/Enterprise accounts, sent the event past it, #2159); absent: not
- * learned yet. Read once per process.
- */
-export const STORE_INBOX_REMINDER_CONTEXT_WORKS = 'inboxReminderContextWorks'
-
 /**
  * The variable the mod sets to the reminder text (with the tool's full
  * registered name) at session start, for the plugin's `SessionStart` command
@@ -151,62 +136,55 @@ export const STORE_INBOX_REMINDER_CONTEXT_WORKS = 'inboxReminderContextWorks'
 export const INBOX_REMINDER_ENV = 'PLANNOTATOR_INBOX_REMINDER'
 
 /**
- * A session whose `$.session.usage().startedAt` is this much older than the
- * process's first `session.start` was started by an earlier process (a
- * `--resume` / `--continue`, an in-process `/resume`): its first turn here is
- * not the conversation's first, so it teaches nothing about `prompt.context`.
+ * Whether the conversation already had a model turn when this process first
+ * saw it (its first `prompt.submit` or main-loop `turn.start` here): an
+ * assistant row in `$.session.messages()`. True for `--resume`, `--continue`,
+ * an in-process `/resume` and a fork (they carry their history); false for a
+ * conversation that starts here (startup, `/clear`), whose first prompt is
+ * not in the list yet. Anything unreadable counts as not resumed.
  */
-export const INBOX_REMINDER_RESUMED_SLACK_MS = 60_000
-
-/** The stored `inboxReminderContextWorks`: a boolean, or undefined for anything else. */
-export function readReminderContextWorks(value: unknown): boolean | undefined {
-  return value === true || value === false ? value : undefined
+export function conversationResumed(messages: unknown): boolean {
+  return Array.isArray(messages) && messages.some((message) => !!message && typeof message === 'object' && (message as { role?: unknown }).role === 'assistant')
 }
 
 /**
- * Whether a `prompt.submit` carries the reminder as `context` (the learned
- * fallback for a machine where `prompt.context` is skipped). Only on a
- * conversation that has not had it by either path, only while this machine
- * has no evidence that `prompt.context` runs, and never on a meta prompt or a
- * slash command (a command may run no model turn, and the copy would be
- * marked delivered for nothing).
+ * What the conversation's first prompt in this process carries as
+ * `prompt.submit` `context` (#2243): the reminder for a conversation that
+ * starts here, or a resumed one whose session id has no record that its first
+ * prompt got the reminder (a conversation from before this mod: the old
+ * `prompt.context` block was rebuilt per process and never stored in the
+ * transcript; or from before the Inbox ran here); the session's open Inbox
+ * threads for any resumed one. Nothing on a prompt after the first, a meta
+ * prompt or a slash command (a command may run no model turn, and the copy
+ * would be counted for nothing).
  */
-export function inboxReminderSubmitCopy(input: {
-  delivered: boolean
-  contextWorks: boolean | undefined
-  isMeta: boolean
-  command: boolean
-}): boolean {
-  return !input.delivered && input.contextWorks !== true && !input.isMeta && !input.command
+export function inboxFirstPromptContext(input: { delivered: boolean; resumed: boolean; recorded: boolean; isMeta: boolean; command: boolean }): { reminder: boolean; threads: boolean } | null {
+  if (input.delivered || input.isMeta || input.command) return null
+  return { reminder: !input.resumed || !input.recorded, threads: input.resumed }
 }
 
 /**
- * What the first main-loop `turn.complete` of a conversation teaches.
- * `done: false`: not decided yet, look again at the next one (an aborted turn
- * may end before the first request was built, before `prompt.context` had its
- * chance). `write: false`: store `inboxReminderContextWorks = false` (the
- * conversation's first request went out without the mod's `prompt.context`).
+ * `$.store` key: the session ids whose first prompt carried the reminder,
+ * each with when (`$.clock.now()` ms), so a resumed conversation that has it
+ * gets only its threads. Kept to the newest INBOX_REMINDER_SESSIONS_MAX.
  */
-export function inboxReminderFirstTurnLesson(input: {
-  contextRan: boolean
-  aborted: boolean
-  resumed: boolean
-  contextWorks: boolean | undefined
-}): { done: boolean; write: false | null } {
-  if (input.aborted) return { done: false, write: null }
-  if (input.contextRan || input.resumed || input.contextWorks === false) return { done: true, write: null }
-  return { done: true, write: false }
+export const STORE_INBOX_REMINDER_SESSIONS = 'inboxReminderSessions'
+export const INBOX_REMINDER_SESSIONS_MAX = 500
+
+/** The stored record: session id → when, anything else dropped. */
+export function readReminderSessions(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: Record<string, number> = {}
+  for (const [id, at] of Object.entries(value as Record<string, unknown>)) {
+    if (id && typeof at === 'number' && Number.isFinite(at)) out[id] = at
+  }
+  return out
 }
 
-/**
- * Whether the session was started by an earlier process: `startedAt` is the
- * session's first launch (`$.session.usage()`), `processStartedAt` this
- * process's first `session.start`, both in `$.clock.now()` milliseconds. An
- * unreadable `startedAt` counts as not resumed.
- */
-export function reminderSessionResumed(startedAt: unknown, processStartedAt: number | null): boolean {
-  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt) || processStartedAt === null) return false
-  return startedAt < processStartedAt - INBOX_REMINDER_RESUMED_SLACK_MS
+/** The record with `sessionId` added at `now`, the oldest beyond INBOX_REMINDER_SESSIONS_MAX dropped. */
+export function withReminderSession(record: Record<string, number>, sessionId: string, now: number): Record<string, number> {
+  const entries = Object.entries({ ...record, [sessionId]: now }).sort((a, b) => b[1] - a[1])
+  return Object.fromEntries(entries.slice(0, INBOX_REMINDER_SESSIONS_MAX))
 }
 
 /**
@@ -296,12 +274,6 @@ export const STORE_INBOX_TOOLS = 'inboxTools'
 export const INBOX_POLL_WAIT_MS = 20_000
 /** After a failed poll: 5 s, doubling to 60 s while the Inbox stays away, never giving up. */
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
-/**
- * wait_for_reply's longest hold through this tool: `$.http.fetch` gives up at
- * 30 s, so the call asks the Inbox for at most 25 s (the Inbox's own default
- * is 50 s, for MCP hosts with a 60 s tool timeout).
- */
-export const INBOX_WAIT_MAX_SECONDS = 25
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
 /** How often the lease is renewed or re-read. */
@@ -328,6 +300,64 @@ export function inboxRegistryPathOf(dataDir: string): string {
 /** This session's inbox folder in the mod's data: the lease and the delivery claims. */
 export function inboxSessionDirOf(dataDir: string, sessionId: string): string {
   return `${dataDir}/claude-code-mod/${sessionId}/inbox`
+}
+
+/**
+ * `$.store` key: what each session was named, for the Inbox's To picker. Kept in
+ * the store, by session id, because the engine tells a plugin a session's name
+ * nowhere else: no `$` call reads it and no module event carries it, and a
+ * `--resume` restores it for the engine alone. Kept to the newest
+ * INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_NAMES = 'inboxSessionNames'
+export const INBOX_SESSION_NAMES_MAX = 500
+
+/** The slash commands that change a session's name. `command.run` resolves their aliases (`/name`, `/reset`, `/new`). */
+export const INBOX_SESSION_NAME_COMMANDS = ['clear', 'rename'] as const
+
+export type InboxSessionNames = Record<string, { name: string; at: number }>
+
+/** The stored record: session id → its name and when it was set, anything else dropped. */
+export function readSessionNames(value: unknown): InboxSessionNames {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionNames = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { name, at } = (entry ?? {}) as { name?: unknown; at?: unknown }
+    if (id && name && typeof name === 'string' && typeof at === 'number' && Number.isFinite(at)) out[id] = { name, at }
+  }
+  return out
+}
+
+function withSessionName(record: InboxSessionNames, sessionId: string, given: string, now: number): InboxSessionNames {
+  // The server reads no further, so a longer name only grows the store and every poll.
+  const name = Array.from(given.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trimEnd()
+  if ((record[sessionId]?.name ?? '') === name) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * The record after a `/rename` or `/clear` ran. `before` and `after` are the
+ * session's id either side of it, since `/clear` moves it. The engine's rules:
+ * - `/rename <name>` names the session. A bare `/rename` also names it, with a
+ *   name the model makes up, which reaches no hook and no answer here: the session
+ *   then reads as unnamed, since the name it had is no longer its name.
+ * - `/clear` writes the name onto the new session id, so the name goes with it.
+ * - `/clear <name>` names the session it left, and the new one has no name.
+ */
+export function sessionNamesAfterCommand(
+  record: InboxSessionNames,
+  run: { command: unknown; args: unknown; before: string; after: string },
+  now: number,
+): InboxSessionNames {
+  const args = typeof run.args === 'string' ? run.args.trim() : ''
+  if (run.command === 'rename') return withSessionName(record, run.after, args, now)
+  // A `/clear` that left the session where it was did nothing to its name.
+  if (run.command !== 'clear' || run.before === run.after) return record
+  if (args) return withSessionName(record, run.before, args, now)
+  const carried = record[run.before]?.name
+  return carried ? withSessionName(record, run.after, carried, now) : record
 }
 
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
@@ -483,8 +513,18 @@ export interface InboxLinkOptions {
    * INBOX_PROJECT_FOLLOWS_SLASH_CD.
    */
   root?: () => Promise<string>
+  /**
+   * The name the person gave the session (`STORE_INBOX_SESSION_NAMES`), read
+   * for every poll, so a `/rename` reaches the Inbox with the next one. `''`
+   * says it has none, which clears it. A rejection says it is not known: the poll
+   * repeats the last word, since sending nothing would clear the label too. Set
+   * by the host, never by the model: it is no tool argument. Absent: no `label`.
+   */
+  label?: () => string | Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
+  /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
+  turns?: TurnTracker
 }
 
 export class InboxLink {
@@ -526,6 +566,8 @@ export class InboxLink {
   private delivering = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The last title that was known; what a poll repeats when it is not. */
+  private lastLabel = ''
   private busy: boolean | null = null
   private idleSince = 0
   /**
@@ -547,6 +589,8 @@ export class InboxLink {
   private loaded: Promise<{ plugin: LoadedPluginInfo | null; engine: string | null }> | null = null
   /** Where the session started, read once (`folderNow`). */
   private folder: Promise<string | null> | null = null
+  /** The Ask AI client, from a poll saying a question waits until it stops (`startAskClient`). */
+  private askClient: BridgeHandle | null = null
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -650,10 +694,6 @@ export class InboxLink {
       if (Array.isArray(attachments)) {
         call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
       }
-    }
-    if (call.name === 'wait_for_reply') {
-      const asked = typeof call.arguments.timeout_seconds === 'number' ? call.arguments.timeout_seconds : INBOX_WAIT_MAX_SECONDS
-      call.arguments.timeout_seconds = Math.max(1, Math.min(asked, INBOX_WAIT_MAX_SECONDS))
     }
     const running = await this.ensureRunning()
     if ('error' in running) return { deny: running.error }
@@ -868,6 +908,17 @@ export class InboxLink {
       .catch(() => null)
   }
 
+  /** The name this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no name source. */
+  private async labelNow(): Promise<string | null> {
+    if (!this.options.label) return null
+    try {
+      this.lastLabel = await this.options.label()
+    } catch {
+      // Not known now: the last word stands.
+    }
+    return this.lastLabel
+  }
+
   /**
    * The replies and messages the Inbox has for this session now (waitMs 0),
    * or null when it did not answer. The poll says where the session works and
@@ -878,9 +929,12 @@ export class InboxLink {
     const project = await this.projectFolder()
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
+    const label = await this.labelNow()
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       ...(project ? { project_path: project } : {}),
+      // The session's title (additive): the To picker's name for it; empty clears it.
+      ...(label === null ? {} : { label }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
@@ -891,8 +945,47 @@ export class InboxLink {
       ...(loaded.plugin ? { plugin: loaded.plugin } : {}),
       ...(loaded.engine ? { engine: loaded.engine } : {}),
       ...(folder ? { session_folder: folder } : {}),
+      // Ask AI: a question for this session can run here, and `ask_waits` will be read.
+      ...(this.options.turns ? { [INBOX_ASK_POLL_FIELD]: true } : {}),
     })
-    return response && response.status === 200 ? parseInboxBridgeCommands(response.text) : null
+    if (!response || response.status !== 200) return null
+    if (parseInboxAskWaits(response.text)) void this.startAskClient()
+    return parseInboxBridgeCommands(response.text)
+  }
+
+  /**
+   * A question from Ask AI waits on this session: the same client as a review
+   * server's "Ask this session", on the Inbox's own bridge for the session. It
+   * runs in the lease holder, the only process that polls, and stays while its
+   * process has a question running, so a lease move does not strand the answer.
+   */
+  private async startAskClient(): Promise<void> {
+    const { turns } = this.options
+    if (!turns) return
+    const registry = await this.registry()
+    // After the read: two polls can answer together, and the lease or the session can move.
+    if (!registry || this.askClient || this.disposed || !this.leader) return
+    const client = createBridge({
+      host: this.host,
+      baseUrl: `${bridgeBaseUrl(registry.port)}${inboxAskBridgeBase(this.options.sessionId)}`,
+      token: registry.token,
+      turns,
+      isLive: () => !this.disposed && (this.leader || turns.askInFlight),
+    })
+    this.askClient = client
+    this.host.debug('inbox: a question waits on this session; Ask AI client started')
+    void client.run().then(async (end) => {
+      this.host.debug(`inbox: Ask AI client stopped (${end.reason})`)
+      // This process let go: the next question makes a new bridge, and the Inbox
+      // tells the lease holder. Never when another client polls this bridge now.
+      if (end.reason === 'ended' && end.connected && !end.superseded) await client.leave()
+      if (this.askClient === client) this.askClient = null
+    })
+  }
+
+  /** A turn started or ended: the Ask AI client says so now, not at its next poll. */
+  pushAskStatus(): void {
+    this.askClient?.pushStatus()
   }
 
   private async poll(): Promise<void> {

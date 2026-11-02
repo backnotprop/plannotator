@@ -7,7 +7,9 @@
  *
  * - Two tabs on the card's top edge (a radio group): "Comment on this image"
  *   (the file's own comment row, drawn as is) and "Reply to <agent>" (the
- *   thread's reply). HTML is Reply only: its comments go on the page, with the pen.
+ *   thread's reply). HTML is Reply only: its comments go on the page, with the
+ *   pen. On a phone a pin or a selection gives it the Comment tab until the
+ *   comment is saved or dropped (HtmlPageComment.tsx).
  * - The reply is the thread's reply draft, not a copy: the field shows the
  *   thread's words, every keystroke goes through the reply box's own change
  *   (Thread.tsx `changeReply`), and Send is the thread's Send, with its rules
@@ -23,16 +25,24 @@
  *   paste or a drop on the card attaches as in the box. They are the box's
  *   files (one reply), shown here with the box's tiles.
  *
+ * - "N comments" opens the thread's list of comments (AnnotationsChip.tsx). The list is the card's sibling, never
+ *   its child: the card's backdrop filter would hold a phone's sheet, a fixed box, inside the card.
+ *
  * The card is the file's foot (`data-file-foot`, AttachmentPane measures it):
  * the toolbar on a phone, the chip and the notes sit above it. A phone's pill
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
-import { createContext, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
+import { VoiceFoot } from './VoiceMic';
+import { useVoiceSession } from '../voice';
 import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } from '../compose/ComposeFiles';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
+import { openItemsLabel } from '../openQuestions';
+import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
 export interface FullScreenReply {
@@ -50,6 +60,8 @@ export interface FullScreenReply {
   /** What rides the Send besides the words. */
   picks: number;
   annotations: number;
+  /** The thread's list of comments, and whether it is open. */
+  comments: AnnotationsListProps & { list: CommentsListAt | null; onList: (next: CommentsListAt | null) => void };
   actions: number;
   /** The reply box's files (pasted, dropped, picked), shown in the card as the box shows them. */
   files: readonly ComposeFile[];
@@ -61,8 +73,16 @@ export interface FullScreenReply {
   onPaste: (event: ClipboardEvent<HTMLElement>) => void;
   /** A file tile's ×. */
   onRemoveFile: (key: string) => void;
+  /** A pasted text tile's Undo or Put back: its words back in the reply, the caret after them in `field` (the card's). */
+  onPutBack: (key: string, field: HTMLTextAreaElement | null) => void;
   /** Questions in the thread still open (no pick). */
   openQuestions: number;
+  /**
+   * Action items in the thread still open (not marked). Named with the questions in the thread foot's words
+   * (`openItemsLabel`); the counts differ from the foot's in one way: the questions here are those with no pick,
+   * where the foot also counts picked questions not sent yet.
+   */
+  openActions: number;
   /** Another window changed the draft while this one held words (the thread's box offers Keep mine / Discard). */
   conflict: boolean;
   /** The thread's error after a refused Send (the thread's own line announces it). */
@@ -102,9 +122,36 @@ function useSentFlash(sentAt: number | null): boolean {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The chips of what rides the Send, and the open questions (a way to them, in the thread). */
-function Rides({ reply }: { reply: FullScreenReply }) {
+function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef: RefObject<HTMLButtonElement | null>; onComments: () => void }) {
+  const chips = useRef<HTMLSpanElement>(null);
+  const [form, setForm] = useState<OpenQuestionsLabelForm>('full');
+  const n = reply.openQuestions;
+  const a = reply.openActions;
+  const label = openItemsLabel(n, a);
+  // The thread foot's own fit (footFit.ts), on this row: the longest words ("2 open questions"), then "2 open", then
+  // "2", that keep the chips on one line and inside the row. Tried on the page before paint.
+  const fit = useCallback(() => {
+    const row = chips.current;
+    const button = row?.querySelector<HTMLElement>('[data-fcomp-questions]');
+    if (!row || !button) return;
+    const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
+    const fits = () => row.scrollWidth <= row.clientWidth + 1;
+    const next = fitFootRow(row, footFitCandidates('full').filter((c) => !c.tight), apply, fits) ?? { form: 'full' as const, tight: false };
+    apply(next);
+    setForm(next.form);
+  }, []);
+  useLayoutEffect(() => fit());
+  useEffect(() => {
+    const row = chips.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(row);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fit());
+    return () => observer.disconnect();
+  }, [fit]);
   return (
-    <span className="ib-fcomp-chips">
+    <span className="ib-fcomp-chips" ref={chips}>
       {reply.picks > 0 && (
         <span className="ib-fcomp-chip">
           <Icon name="check" size={12} />
@@ -118,15 +165,37 @@ function Rides({ reply }: { reply: FullScreenReply }) {
         </span>
       )}
       {reply.annotations > 0 && (
-        <span className="ib-fcomp-chip">
+        <button
+          ref={linkRef}
+          type="button"
+          className="ib-fcomp-chip"
+          data-fcomp-comments=""
+          data-comments-link=""
+          aria-expanded={reply.comments.list !== null}
+          aria-haspopup="dialog"
+          onClick={onComments}
+        >
           <Icon name="comment" size={12} />
           {plural(reply.annotations, 'comment')}
-        </span>
+        </button>
       )}
-      {reply.openQuestions > 0 && (
-        <button type="button" className="ib-fcomp-q" onClick={reply.onOpenThread} data-fcomp-questions="">
+      {/* The thread foot's words (openItemsLabel): "2 open questions", "1 open action item", "2 questions, 1 action item".
+          Its question count leaves out picked questions, which the foot counts until they are sent. */}
+      {reply.openQuestions + reply.openActions > 0 && (
+        <button
+          type="button"
+          className="ib-fcomp-q"
+          onClick={reply.onOpenThread}
+          data-fcomp-questions=""
+          // What footFit.ts draws each form from; a shorter form keeps the whole count as its name.
+          data-oq-n={n}
+          data-oq-actions={a}
+          data-oq-label={label}
+          data-label-form={form}
+          aria-label={form === 'full' ? undefined : label}
+        >
           <Icon name="question" size={12} />
-          {reply.openQuestions === 1 ? '1 question open' : `${reply.openQuestions} questions open`}
+          <span data-oq-words="">{openQuestionsFormText(n, form, a)}</span>
         </button>
       )}
     </span>
@@ -137,21 +206,31 @@ export function FullScreenComposer({
   value,
   noun,
   comment,
+  foldedByDefault = false,
+  onMinimized,
 }: {
   value: FullScreenComposerValue;
-  /** What a comment is on ("this image", "this video"). */
-  noun: 'image' | 'video' | null;
+  /** What a comment is on ("this image", "this video", "this page"). */
+  noun: 'image' | 'video' | 'page' | null;
   /** The file's own comment row (its field, Mark up, Comment), drawn as is in the Comment tab. Null: Reply only. */
   comment: ReactNode | null;
+  /** The card starts as its pill until the person opens it (an HTML page on a phone). */
+  foldedByDefault?: boolean;
+  /** The person minimized the card (a comment with no words yet drops its draft). */
+  onMinimized?: () => void;
 }) {
   const { reply, phone, threadId } = value;
   const takesComments = comment !== null;
   const hasDraft = reply.value.trim() !== '';
-  const state = useComposerState(threadId, hasDraft, takesComments);
+  const state = useComposerState(threadId, hasDraft, takesComments, foldedByDefault);
   const mode = state.mode;
   const cardRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
+  const commentsRef = useRef<HTMLButtonElement | null>(null);
+  /** The card's height when the list opened: the list sits just above the card. */
+  const [cardHeight, setCardHeight] = useState(0);
+  const voice = useVoiceSession();
   const tabsRef = useRef<HTMLDivElement | null>(null);
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
   const focusNext = useRef<'field' | 'pill' | null>(null);
@@ -178,7 +257,14 @@ export function FullScreenComposer({
     if (replyRef.current) replyRef.current.readOnly = reply.sending;
   });
 
-  const nounText = noun === 'video' ? 'this video' : 'this image';
+  // The list goes with the card's Reply tab: it opens from there, and the card can leave without a press outside.
+  const listAt = reply.comments.list;
+  const listShown = listAt !== null && !state.minimized && mode === 'reply' && !value.tucked;
+  useEffect(() => {
+    if (listAt && !listShown) reply.comments.onList(null);
+  });
+
+  const nounText = noun === 'video' ? 'this video' : noun === 'page' ? 'this page' : 'this image';
   const commentLabel = `Comment on ${nounText}`;
   const replyLabel = `Reply to ${reply.to}`;
   const label = mode === 'comment' ? commentLabel : replyLabel;
@@ -274,8 +360,16 @@ export function FullScreenComposer({
         ) : reply.conflict ? (
           <span className="ib-fcomp-note">This reply changed in another window.</span>
         ) : (
-          <Rides reply={reply} />
+          <Rides
+            reply={reply}
+            linkRef={commentsRef}
+            onComments={() => {
+              setCardHeight(cardRef.current?.offsetHeight ?? 0);
+              reply.comments.onList(listAt ? null : { at: null });
+            }}
+          />
         )}
+        <VoiceFoot voice={voice} phone={phone} />
         <button type="button" className="ib-fcomp-link" onClick={reply.onOpenThread} data-fcomp-open-thread="">
           Open in thread
         </button>
@@ -283,17 +377,44 @@ export function FullScreenComposer({
     ) : null;
 
   return (
+    <>
+    {listShown && (
+      <div className="ib-annat ib-anncard" style={{ '--ib-fcomp-h': `${cardHeight}px` } as CSSProperties}>
+        <div className="ib-annat-in">
+          <AnnotationsList
+            {...reply.comments}
+            at={listAt.at}
+            press={listAt.press}
+            onClose={(back) => {
+              reply.comments.onList(null);
+              // With no comment left there is no count. The card, on a phone: the reply field would raise the keyboard.
+              if (back) (commentsRef.current ?? (phone ? cardRef.current : replyRef.current))?.focus({ preventScroll: true });
+            }}
+          />
+        </div>
+      </div>
+    )}
     <div
       ref={cardRef}
       className={`ib-fcomp ib-mode-${mode}${phone ? ' ib-phone' : ''}`}
       role="group"
       aria-label={label}
+      tabIndex={-1}
       inert={value.tucked || undefined}
       data-fcomp=""
       data-fcomp-mode-on={mode}
       data-file-foot=""
       data-drop-over={drop.over ? '' : undefined}
       {...drop.handlers}
+      onKeyDown={(event) => {
+        // Mod+Enter sends the reply from anywhere in the card (the tabs, the buttons, the tags), as it does from the
+        // reply field, whose own handler has stopped it by now. Never from the comment tab (its Enter is the file's).
+        if (mode !== 'reply' || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
+        if (!reply.canSend || reply.sending) return;
+        event.preventDefault();
+        event.stopPropagation();
+        reply.onSend();
+      }}
     >
       <div className="ib-fcomp-top">
         {takesComments ? (
@@ -314,6 +435,7 @@ export function FullScreenComposer({
             onClick={() => {
               focusNext.current = 'pill';
               state.setMinimized(true);
+              onMinimized?.();
             }}
             aria-label="Hide the composer"
             aria-expanded={true}
@@ -330,6 +452,7 @@ export function FullScreenComposer({
             <div className="ib-fcomp-field" data-fcomp-field="" onPaste={reply.onPaste}>
               <InboxComposerField
                 textareaRef={replyRef}
+                voice={voice}
                 ariaLabel={replyLabel}
                 ariaDescribedBy={reply.error ? errorId : undefined}
                 placeholder={`${replyLabel}…`}
@@ -346,7 +469,7 @@ export function FullScreenComposer({
                   if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                     event.preventDefault();
                     event.stopPropagation();
-                    reply.onSend();
+                    if (!voice.busy) reply.onSend();
                   }
                 }}
               />
@@ -355,7 +478,7 @@ export function FullScreenComposer({
               type="button"
               className="ib-btn ib-pri ib-fcomp-send"
               onClick={reply.onSend}
-              disabled={reply.sending || !reply.canSend}
+              disabled={reply.sending || !reply.canSend || voice.busy}
               aria-busy={reply.sending || undefined}
               aria-label={phone ? `Send to ${reply.to}` : undefined}
               data-fcomp-send=""
@@ -381,6 +504,7 @@ export function FullScreenComposer({
               // The × goes with its tile: focus stays in the reply, as in the reply box.
               replyRef.current?.focus({ preventScroll: true });
             }}
+            onPutBack={(key) => reply.onPutBack(key, replyRef.current)}
           />
         </div>
       )}
@@ -392,5 +516,6 @@ export function FullScreenComposer({
         </div>
       )}
     </div>
+    </>
   );
 }

@@ -6,9 +6,10 @@
  *
  * Listed: every question of a live agent message (not one an archive closed)
  * that waits on the person: open, or picked and not sent. Replaced questions
- * (`superseded`) are left out and counted apart; action items are not
- * questions and are left out. Answering stays on the real card: the list only
- * takes the person there.
+ * (`superseded`) are left out and counted apart. Open action items are listed
+ * apart (`threadOpenActions`), after the questions, and the button counts both
+ * ("2 questions, 1 action item"). Answering stays on the real card: the list
+ * only takes the person there.
  */
 
 import type { InboxMessageWire, InboxQuestion } from './inbox-types';
@@ -65,16 +66,75 @@ export function threadOpenQuestions(
   return { questions, replaced };
 }
 
-/**
- * Whether the button is shown: whenever a question waits (owner, 2026-10-23:
- * the list now also holds Re-ask, so it must never be out of reach), or Re-ask
- * is offered with no question listed (only action items wait).
- */
-export function openQuestionsShown(questions: readonly OpenQuestion[], reaskShown = false): boolean {
-  return questions.length > 0 || reaskShown;
+/** One open action item in the list: a row that takes the person to its checklist row. */
+export interface OpenActionItem {
+  /** `<message id>/<key>`. */
+  id: string;
+  messageId: string;
+  key: string;
+  prompt: string;
+  /** The message's time (ISO), which the row names. */
+  at: string;
+  action: InboxQuestion;
 }
 
-/** "5 open questions" / "1 open question"; `noun` "action item" when only action items wait. */
+/**
+ * The thread's open action items, in thread order: an agent's action item in a
+ * live message that the person has not marked (`open`; one marked Done or
+ * Can't do it reads `picked` and waits on nobody). Replaced ones are left out.
+ * Reads a message's `actions` (where the window moves them) and its
+ * `questions` (as the server sends them), so either form counts the same.
+ */
+export function threadOpenActions(
+  messages: readonly InboxMessageWire[],
+  live: (message: InboxMessageWire) => boolean = () => true,
+): OpenActionItem[] {
+  const items: OpenActionItem[] = [];
+  for (const m of messages) {
+    if (m.author.kind !== 'agent' || !live(m)) continue;
+    for (const a of [...(m.questions ?? []), ...(m.actions ?? [])]) {
+      if (readInboxQuestionKind(a.kind) !== 'action' || a.state !== 'open' || !waits(a)) continue;
+      items.push({ id: `${m.id}/${a.key}`, messageId: m.id, key: a.key, prompt: a.prompt, at: m.created_at, action: a });
+    }
+  }
+  return items;
+}
+
+/**
+ * Whether the button is shown: whenever a question or an action item waits
+ * (owner, 2026-10-30: the button counts open action items too, with no
+ * question open), or Re-ask is offered (owner, 2026-10-23: the list holds
+ * Re-ask, so it must never be out of reach).
+ */
+export function openQuestionsShown(questions: readonly OpenQuestion[], reaskShown = false, actions = 0): boolean {
+  return questions.length > 0 || actions > 0 || reaskShown;
+}
+
+/**
+ * The button's words (owner, 2026-10-30): "3 open questions" or "2 open action
+ * items" when one kind waits; with both, "open" goes to save room and each
+ * kind is named: "12 questions, 10 action items", "1 question, 2 action items".
+ */
+export function openItemsLabel(questions: number, actions: number): string {
+  if (actions === 0) return openQuestionsLabel(questions);
+  if (questions === 0) return openQuestionsLabel(actions, 'action item');
+  const each = (n: number, noun: string) => `${formatCount(n)} ${noun}${n === 1 ? '' : 's'}`;
+  return `${each(questions, 'question')}, ${each(actions, 'action item')}`;
+}
+
+/** The list's accessible name: "2 questions, 1 action item in this thread" (not drawn). */
+export function openItemsHeading(questions: number, actions: number): string {
+  return `${openItemsLabel(questions, actions)} in this thread`;
+}
+
+/** The state an action item's row shows: Stopped, else Holds up, else nothing. */
+export function openActionState(a: OpenActionItem): OpenQuestionState {
+  if (a.action.stopped) return { kind: 'stopped' };
+  if (a.action.holds_up.length > 0) return { kind: 'holds', count: a.action.holds_up.length };
+  return null;
+}
+
+/** "5 open questions" / "1 open question"; `noun` "action item" when only action items wait (`openItemsLabel` names both). */
 export function openQuestionsLabel(n: number, noun: OpenQuestionsNoun = 'question'): string {
   return `${formatCount(n)} open ${noun}${n === 1 ? '' : 's'}`;
 }

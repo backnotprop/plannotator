@@ -16,10 +16,13 @@ packages/ui/components/html-viewer/htmlLiveProtocol.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.vimHud.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.bridgeAsset.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.sandbox.test.tsx
+packages/ui/components/html-viewer/bridgeTouchSelection.test.tsx
 packages/ui/components/html-embed/HtmlEmbedBlock.test.tsx
 packages/ui/components/LazyBlockBoundary.test.tsx
+packages/ui/components/inbox-thread/SnoozeMenu.test.tsx
 packages/ui/components/Viewer.vimMode.integration.test.tsx
 packages/ui/components/CodeFilePopout.lineScroll.test.tsx
+packages/ui/components/CodeFilePopout.windowsPath.test.tsx
 packages/ui/hooks/useVimSelection.test.tsx
 packages/ui/hooks/useVimSelection.selectionScope.test.tsx
 packages/ui/hooks/useModelCatalogs.dom.test.tsx
@@ -30,6 +33,11 @@ packages/ui/components/ai/SessionAskNotice.dom.test.tsx
 packages/ui/hooks/useAIChat.sessionAsk.test.tsx
 packages/ui/hooks/useAIChat.newChat.test.tsx
 packages/ui/components/ai/NewChatButton.dom.test.tsx
+packages/ui/components/chat/ChatFrame.dom.test.tsx
+packages/ui/components/chat/ChatComposer.dom.test.tsx
+packages/ui/components/chat/ChatTranscript.dom.test.tsx
+packages/ui/components/chat/chatSanitizer.dom.test.ts
+packages/ui/components/chat/chatRichMarkdown.dom.test.tsx
 packages/review-editor/hooks/useAIChat.newChat.test.tsx
 packages/ui/hooks/useAgentSettings.dom.test.tsx
 packages/ui/utils/codeHighlight.test.ts
@@ -52,6 +60,7 @@ packages/ui/components/Viewer.askAISelectionLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
 packages/ui/components/ImageLightbox.test.tsx
 packages/ui/components/ImageZoomStage.wheelHint.test.tsx
+packages/ui/components/ImageZoomStage.clear.test.tsx
 packages/ui/components/Viewer.imageRegions.test.tsx
 packages/ui/components/HostTitle.dom.test.tsx
 packages/ui/components/RefHoverCard.dom.test.tsx
@@ -64,11 +73,13 @@ packages/inbox/fileViewClean.test.tsx
 packages/inbox/documentContents.test.tsx
 packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
+packages/inbox/replyFeedback.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
 packages/inbox/whatsNewLink.test.tsx
 packages/inbox/whatsNewHeader.test.tsx
+packages/inbox/whatsNewTailnet.test.tsx
 packages/inbox/whatsNewImages.test.tsx
 packages/inbox/replaced.test.tsx
 packages/inbox/reask.test.tsx
@@ -107,8 +118,12 @@ packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
+packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
+packages/inbox/listLook.test.tsx
+packages/inbox/threadPanel.test.tsx
+packages/inbox/listIntroDialog.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
@@ -116,8 +131,11 @@ packages/inbox/tagAgents.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
+packages/inbox/pasteText.test.tsx
+packages/inbox/pasteDraft.test.tsx
 packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
+packages/inbox/markUnread.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/actionDraftSend.test.tsx
@@ -125,6 +143,7 @@ packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/wordsOnlyTwoAsks.test.tsx
 packages/inbox/firstRunNotifications.test.tsx
 packages/inbox/tour.test.tsx
+packages/inbox/tailnetOwner.test.tsx
 packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx
@@ -132,6 +151,7 @@ packages/inbox/replyDrafts.test.tsx
 packages/inbox/skipNote.test.tsx
 packages/inbox/picksWhileComposing.test.tsx
 packages/inbox/projectMenu.test.tsx
+packages/inbox/projectRenameWarning.test.tsx
 packages/inbox/rowMenu.test.tsx
 packages/inbox/copyMessage.test.tsx
 packages/inbox/pinnedThreads.test.tsx
@@ -140,6 +160,7 @@ packages/inbox/fileBack.test.tsx
 packages/inbox/archived.test.tsx
 packages/inbox/openStaysPut.test.tsx
 packages/inbox/clickToRefresh.test.tsx
+packages/inbox/ask/askWindow.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/tabCountWindow.test.tsx
@@ -164,6 +185,7 @@ packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/agentsSettings.test.tsx
+packages/inbox/accountsSection.test.tsx
 packages/inbox/promptsSettings.test.tsx
 packages/inbox/connectNextStep.test.tsx
 packages/inbox/settingsSections.test.tsx
@@ -171,6 +193,7 @@ packages/inbox/searchPalette.test.tsx
 packages/inbox/searchShortcut.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/htmlLinks.test.tsx
+packages/inbox/markdownLinks.test.tsx
 packages/inbox/videoAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
@@ -346,6 +369,7 @@ packages/editor/App.documentDrafts.test.tsx
 packages/editor/App.planLinkedDrafts.test.tsx
 packages/editor/App.bundle.test.tsx
 packages/editor/App.bundleBackScroll.test.tsx
+packages/editor/App.windowsPaths.test.tsx
 packages/editor/annotationDraftStaleRetry.test.tsx
 packages/ui/components/blocks/AlertBlock.title.test.tsx
 packages/ui/components/blocks/AlertBlock.seam.test.tsx
@@ -438,3 +462,10 @@ packages/review-editor/hooks/useRepoFiles.test.tsx
 packages/review-editor/components/RepoFileView.test.tsx
 packages/review-editor/components/GoToFile.test.tsx
 packages/ui/components/StartCutPath.test.tsx
+packages/inbox/heldPick.test.tsx
+packages/inbox/pickQueue.test.tsx
+packages/inbox/pickSaveReads.test.tsx
+packages/inbox/linkedMachines.test.tsx
+packages/inbox/voiceMirror.test.tsx
+packages/inbox/voiceComposeRenders.test.tsx
+packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx

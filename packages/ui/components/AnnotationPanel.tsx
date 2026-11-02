@@ -12,6 +12,7 @@ import { OverlayScrollArea } from './OverlayScrollArea';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { resolveReplyParents, resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import { ROOT_DOCUMENT_GROUP_KEY } from '../utils/annotationScope';
 import type { AnnotationScope, AnnotationDocumentGroup } from '../utils/annotationScope';
 import type { QuestionPanelRow } from '../utils/questionAnswers';
@@ -1342,7 +1343,7 @@ const CodeAnnotationCard: React.FC<{
   const lineRange = annotation.lineStart === annotation.lineEnd
     ? `line ${annotation.lineStart}`
     : `lines ${annotation.lineStart}-${annotation.lineEnd}`;
-  const fileName = annotation.filePath.split('/').pop() || annotation.filePath;
+  const fileName = basenameFromPath(annotation.filePath);
 
   const handleCancelEdit = () => {
     setIsEditing(false);

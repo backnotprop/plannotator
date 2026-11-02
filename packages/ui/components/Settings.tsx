@@ -7,6 +7,7 @@ import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal
 import type { Origin } from '@plannotator/core/agents';
 import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import type { TokenHoverDelay } from '@plannotator/core/token-hover';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import {
   configStore,
   useConfigValue,
@@ -2670,7 +2671,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                                   >
                                     {detectedVaults.map((vault) => (
                                       <option key={vault} value={vault}>
-                                        {vault.split('/').pop() || vault}
+                                        {basenameFromPath(vault)}
                                       </option>
                                     ))}
                                     <option value={CUSTOM_PATH_SENTINEL}>Custom path...</option>

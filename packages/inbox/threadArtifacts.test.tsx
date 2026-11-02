@@ -180,16 +180,22 @@ test.skipIf(!hasDom)('the header: an Artifacts button with the count, icons at t
   const expand = el.querySelector<HTMLButtonElement>('[data-expand-all]')!;
   expect(expand.textContent).toBe('');
   expect(expand.getAttribute('aria-label')).toMatch(/^(Expand all messages|Fold the earlier messages)$/);
+  // Expand all / Fold all are chevrons, never the four-arrow maximize glyph the Inbox draws elsewhere (an image's fit
+  // toggle), so no header icon reads as "maximize" (owner, 2026-10-30). The glyph matches the label.
+  const glyph = expand.querySelector('svg')?.getAttribute('data-icon');
+  expect(glyph).toBe(expand.getAttribute('aria-label') === 'Expand all messages' ? 'unfold' : 'fold');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
-  const order = [...head.querySelectorAll('[data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>
-    n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-archive') ? 'archive' : n.classList.contains('ib-vsep') ? '|' : 'close',
+  // The thread's full-screen button and its hairline lead (approval "inbox-files-tabs", amendment 2026-10-30, B).
+  const order = [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-thread-more], .ib-vsep, [aria-label="Close the thread"]')].map((n) =>
+    n.hasAttribute('data-full-in') ? 'full' : n.hasAttribute('data-artifacts-button') ? 'artifacts' : n.hasAttribute('data-expand-all') ? 'expand' : n.hasAttribute('data-thread-more') ? 'more' : n.classList.contains('ib-vsep') ? '|' : 'close',
   );
-  expect(order).toEqual(['artifacts', 'expand', 'archive', '|', 'close']);
+  // Archive is in the ⋯ menu now, not the header.
+  expect(order).toEqual(['full', '|', 'artifacts', 'expand', 'more', '|', 'close']);
   // A thread with no artifact has no button.
   act(() => root?.unmount());
   host?.remove();
   const plain = await renderApp(`#thread=${ids.waiting}`);
-  await until(() => plain.querySelector('section.ib-pane [data-archive]') !== null, 'the plain thread');
+  await until(() => plain.querySelector('section.ib-pane [data-thread-more]') !== null, 'the plain thread');
   await act(async () => {
     await new Promise((r) => setTimeout(r, 200));
   });
@@ -293,7 +299,7 @@ test.skipIf(!hasDom)('a phone: a screen of its own with its way back to the thre
   expect(back.textContent).toContain('Thread');
   // The header is the screen's: no Mark read, no Archive, no other back.
   expect(el.querySelector('section.ib-pane [data-mark-read]')).toBeNull();
-  expect(el.querySelector('section.ib-pane [data-archive]')).toBeNull();
+  expect(el.querySelector('section.ib-pane [data-thread-more]')).toBeNull();
   expect(el.querySelector('[data-artifacts-back]')).toBeNull();
   expect(el.querySelector('[data-artifacts-view] [data-open-in-more]')).toBeNull();
   act(() => back.click());

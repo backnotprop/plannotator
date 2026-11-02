@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxTidyMark } from "./inbox-tidy";
+import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
 
@@ -62,7 +63,7 @@ export function ulid(now: number = Date.now()): string {
 }
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -81,6 +82,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   crd: /^crd_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One press of Tidy (packages/core/inbox-tidy.ts). */
   tdy: /^tdy_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** An Inbox: the stable id other machines' links key on (packages/server/inbox-links.ts). */
+  ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -133,6 +136,37 @@ export function inboxThreadNameKey(name: string): string {
     .trim()
     .toUpperCase()
     .toLowerCase();
+}
+
+// ─────────────────────────────── Project names ───────────────────────────────
+
+/** The longest name a person can give a project (Rename… in the project menu), in characters. */
+export const INBOX_PROJECT_NAME_MAX = 64;
+
+/**
+ * A project's display name as the person typed it: trimmed, runs of
+ * whitespace as one space, NFC, 1..64 characters, no control characters or
+ * line breaks, no bidi controls, and something visible in it. The same rules
+ * as a thread name, with a shorter cap: the name has to fit the sidebar.
+ */
+export function checkInboxProjectName(value: unknown): { ok: true; name: string } | { ok: false; message: string } {
+  if (typeof value !== "string") return { ok: false, message: "must be a string or null." };
+  if (THREAD_NAME_CONTROL.test(value.replace(/[\t\n\r]/g, " "))) return { ok: false, message: "must not contain control characters." };
+  const name = value.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (name === "" || inboxThreadNameKey(name) === "") return { ok: false, message: "must not be empty." };
+  if ([...name].length > INBOX_PROJECT_NAME_MAX) return { ok: false, message: `at most ${INBOX_PROJECT_NAME_MAX} characters.` };
+  if (THREAD_NAME_BIDI.test(name)) return { ok: false, message: "must not contain bidirectional control characters." };
+  return { ok: true, name };
+}
+
+/**
+ * A project record's `display_name` when it can be shown: a non-empty
+ * string, else null. A hand-edited file or another machine's list could
+ * carry anything, and a label must always be a string.
+ */
+export function inboxProjectDisplayName(project: { display_name?: unknown }): string | null {
+  const name = project.display_name;
+  return typeof name === "string" && name !== "" ? name : null;
 }
 
 // ─────────────────────────────── Subjects ───────────────────────────────
@@ -205,6 +239,22 @@ export interface InboxProject {
   /** Absolute realpath of the repository root (git toplevel) or folder. */
   root: string;
   created_at: string;
+  /**
+   * The name the person gave the project (Rename… in the project menu),
+   * shown as it is in place of its folder's name. Additive: absent until
+   * someone renames, and absent again after Reset name. Id, key, `name` (the
+   * slug) and root never change with it.
+   */
+  display_name?: string;
+  /**
+   * The project this one was combined into (approval "project-combine"). Every
+   * reader shows this project's threads under the end of that chain; nothing of
+   * this project moves, and an older reader ignores the field. A target that is
+   * gone, or a loop, counts as not combined, so a project can only reappear.
+   */
+  merged_into?: string;
+  /** The project this one's last undone combine went into: Tidy does not suggest the pair again. */
+  separated_from?: string;
 }
 
 /**
@@ -362,8 +412,8 @@ export interface InboxMessage {
    * On the note that carries a 👍 Looks good to the agent (amended
    * 2026-10-16): the agent message the person marked. Written once the
    * ack's Undo window passed (its body is `inboxAckLine`), as a reply to
-   * that message, and delivered like any reply (the wake, wait_for_reply's
-   * `acknowledged`) while the ack still names it (`InboxAck.note_id`). The
+   * that message, and delivered like any reply (the wake)
+   * while the ack still names it (`InboxAck.note_id`). The
    * window and read_thread do not list it: the ack on the message says it.
    * Absent on every other message.
    */
@@ -386,7 +436,7 @@ export interface InboxMessage {
   tidy?: InboxTidyMark;
   /**
    * On a root: the seq up to which the asking agent has read the person's
-   * replies (wait_for_reply returned one, or read_thread read the thread),
+   * replies (a wake delivered one, or read_thread read the thread),
    * and when. A Sent row moves to Quiet once its reply is checked.
    */
   agent_checked_seq?: number | null;
@@ -515,8 +565,8 @@ export interface InboxMessage {
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the
-   * agent receives for this message (the delivered turn, wait_for_reply,
-   * read_thread) carries `inboxBoardRequestBlock` after it. Absent on every
+   * agent receives for this message (the delivered turn, read_thread)
+   * carries `inboxBoardRequestBlock` after it. Absent on every
    * other message.
    */
   board_request?: true;
@@ -558,8 +608,8 @@ export interface InboxMessage {
    * message, handed to its owner and to every tagged session; each records
    * its own delivery in its entry, so each gets its own line and Send now.
    * A message with tags is settled for each recipient only by that
-   * recipient's own delivery or its own wait_for_reply, never by another
-   * agent's read. Absent on every other message and on older records.
+   * recipient's own delivery, or for one not woken its own read, never by
+   * another agent's read. Absent on every other message and on older records.
    */
   tags?: InboxTag[];
   /**
@@ -609,10 +659,10 @@ export interface InboxTag {
    * Its connection wakes it (the Claude Code mod, Pi, OpenCode 2, with the
    * tag capability): the reply arrives as a turn. False: an agent that reads
    * the Inbox only (MCP, OpenCode 1); it sees the tag the next time it reads
-   * the thread or waits for a reply.
+   * the thread.
    */
   wakes: boolean;
-  /** It reached the session (its connection delivered it, or its own wait_for_reply returned it). */
+  /** It reached the session (its connection delivered it). */
   delivery?: InboxDelivery | null;
   /** The person pressed Send now for this session (or the Inbox did, after the wait: `deliver_now_by`). */
   deliver_now_at?: string | null;
@@ -703,8 +753,8 @@ export type InboxThreadNaming =
 
 /**
  * The one line an agent is handed while a thread the person started still
- * has no name an agent gave and that agent may name it: in `wait_for_reply`
- * and `read_thread` beside `name_this_thread: true`. The wake of the thread
+ * has no name an agent gave and that agent may name it: in `read_thread`
+ * beside `name_this_thread: true`. The wake of the thread
  * (INBOX_NAME_THREAD_LINE in shared/inbox/connection.ts) carries the same ask.
  */
 export const INBOX_NAME_THIS_THREAD_HINT =
@@ -727,8 +777,7 @@ export interface InboxAck {
   made_read?: boolean;
   /**
    * Set once the Undo window passed with the ack standing (the seq of that
-   * line, and when): agents see it from then on (read_thread, and
-   * wait_for_reply's `acknowledged`). Null before.
+   * line, and when): agents see it from then on (read_thread). Null before.
    */
   settled_seq?: number | null;
   settled_at?: string | null;
@@ -746,7 +795,7 @@ export interface InboxAck {
    * it; the window says it was not sent. Absent on every other ack.
    */
   not_sent?: "replied" | "wrote_again" | null;
-  /** When an agent read it (read_thread, or wait_for_reply returned it). Null until then. */
+  /** When an agent read it (read_thread, or the wake delivered its note). Null until then. */
   seen_at?: string | null;
   /**
    * The window's thread only (`GET /api/inbox/threads/:id`): when the 👍
@@ -1219,6 +1268,12 @@ export const INBOX_SECTIONS: readonly { readonly id: InboxSectionId; readonly la
  */
 export interface InboxListRow extends InboxThreadSummary {
   project: { id: string; name: string };
+  /**
+   * The machine whose Inbox owns the thread (its stable `ibx_` id), on rows of
+   * the merged view only (`GET /api/inbox/threads?machines=1`; linked
+   * machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
+   */
+  machine?: string;
   /** The thread's name (send_message's `thread`), or null for a session's default thread. */
   thread_name: string | null;
   section: InboxSectionId;
@@ -1247,6 +1302,18 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Additive: absent from an older Inbox.
    */
   pinned_at?: string | null;
+  /**
+   * The thread is snoozed (approval "inbox-snooze"; the rules are core's
+   * inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the
+   * window and the phone read, never on anything an agent reads. Additive:
+   * absent from an older Inbox.
+   */
+  snoozed?: InboxRowSnooze | null;
+  /**
+   * The thread came back from a snooze at this time and has not been read
+   * since: the row's small clock. Only on the list model, like `snoozed`.
+   */
+  snooze_back?: string | null;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1374,8 +1441,11 @@ export const INBOX_ROW_WAIT_TEXT_MAX = 200;
 export const INBOX_ROW_WAIT_HOLDS_MAX = 8;
 export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
+/** A group the list draws: a section, or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`), which no row is placed in. */
+export type InboxListGroupId = InboxSectionId | "snoozed";
+
 export interface InboxListSection {
-  id: InboxSectionId;
+  id: InboxListGroupId;
   label: string;
   threads: InboxListRow[];
 }
@@ -1396,12 +1466,14 @@ export function inboxRowWaitsOnPerson(row: Pick<InboxListRow, "section" | "unsee
  * person, and the thread is open or came back from the archive (Mark read
  * sends a came-back thread back to the archive). Never on a thread whose Mark
  * read still stands: unsent work can keep it in New ("inbox-reply-drafts"),
- * and marking it again then undoing would drop the earlier Mark read.
+ * and marking it again then undoing would drop the earlier Mark read. A
+ * standing Mark read that Mark unread took the look back from (`unseen`) does
+ * take it: the store only gives the look back, and writes no new Mark read.
  */
 export function inboxRowOffersMarkRead(
   row: Pick<InboxListRow, "section" | "unseen" | "answered_not_sent" | "resolved_at" | "back_from_archive"> & { read_at?: string | null },
 ): boolean {
-  return (row.resolved_at === null || row.back_from_archive === true) && (row.read_at ?? null) === null && inboxRowWaitsOnPerson(row);
+  return (row.resolved_at === null || row.back_from_archive === true) && ((row.read_at ?? null) === null || row.unseen > 0) && inboxRowWaitsOnPerson(row);
 }
 
 export interface InboxThread {
@@ -1470,6 +1542,10 @@ export interface InboxHealth {
    * project for every folder that compacts or resumes.
    */
   peek?: true;
+  /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
+  inbox_id?: string;
+  /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
+  machine_links?: number;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1766,6 +1842,60 @@ export interface InboxAgentRow {
   wakes?: boolean;
 }
 
+/** One usage limit of a Claude account, as `cswap list --json` reports it. A window it does not report is null, never 0. */
+export interface InboxUsageWindow {
+  pct: number;
+  resetsAt: string | null;
+  countdown: string | null;
+  clock: string | null;
+}
+
+/** A limit on one model family; `name` is what the window calls it ("Fable"). */
+export interface InboxScopedUsageWindow extends InboxUsageWindow {
+  name: string;
+}
+
+export interface InboxAccountUsage {
+  fiveHour: InboxUsageWindow | null;
+  sevenDay: InboxUsageWindow | null;
+  scoped: InboxScopedUsageWindow[];
+}
+
+/** One Claude account on this computer. Field names are `cswap`'s; nothing else of its row reaches the window. */
+export interface InboxAccount {
+  number: number;
+  alias: string | null;
+  /** Null for an API-key account: its placeholder address is never passed on. */
+  email: string | null;
+  organizationName: string | null;
+  isOrganization: boolean;
+  active: boolean;
+  usageStatus: string | null;
+  usageError: string | null;
+  usageRetryAt: string | null;
+  /** Null: no reading. */
+  usage: InboxAccountUsage | null;
+  /** How old `cswap` says the reading is. It serves the last good one when a fetch fails. */
+  usageAgeSeconds: number | null;
+}
+
+/** Why a read of the accounts failed: a fixed code, never `cswap`'s own words. */
+export type InboxAccountsFailure = "timed_out" | "run_failed" | "bad_output" | "unknown_schema";
+
+/** `GET /api/inbox/accounts` (Settings → Accounts). */
+export type InboxAccountsRead =
+  | { state: "not_installed" }
+  | { state: "failed"; reason: InboxAccountsFailure }
+  | { state: "accounts"; accounts: InboxAccount[] };
+
+/**
+ * `GET /api/inbox/accounts/<machine>`: a linked machine's read, or why there is
+ * none: `offline`, no answer at all; `needs_update`, a version apart;
+ * `unreachable`, it answered something else (a 500, a refused token). None is
+ * an error.
+ */
+export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
@@ -1991,10 +2121,17 @@ export type InboxToolCostHost = "pi" | "opencode";
  * Then `project_path`'s description says it defaults to the folder the
  * session started in (INBOX_AGENT_PROJECT_PATH_DESCRIPTION): about +86
  * bytes (0.9%, estimated, inside the 5% drift test); the stated cost stands.
+ * Then the action item's command sentence (each command in its own fenced
+ * block, so it gets a copy button; `Run:` left out of the short list):
+ * measured on Pi, 10,303 bytes (both changes; tokens estimated at about
+ * 4 bytes each). With the Board on 11,722 (11,490 + 232, estimated).
+ * Then wait_for_reply removed (its action, lead, `timeout_seconds` and
+ * `cursor` fields): 461 bytes off the entry as the tool builds it, so 9,842
+ * (estimated, about 115 tokens fewer), and 11,261 with the Board on.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10071, tokens: 2700 };
+const INBOX_TOOL_COST_NOW = { bytes: 9842, tokens: 2650 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11490, tokens: 3100 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11261, tokens: 3050 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -2015,6 +2152,9 @@ export function inboxNoteAgentList(ids: readonly InboxNoteAgentId[]): string {
 
 /** The most one uploaded file may hold (decision 1a: under the Inbox's 128 MiB request bound). The window names it too. */
 export const INBOX_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+/** The longest draft body (compose drafts and reply drafts), in characters: the window says so before the server refuses one. */
+export const INBOX_DRAFT_BODY_MAX = 1_000_000;
 
 /**
  * A file the person uploaded from the window for a thread they start, not
@@ -2089,7 +2229,30 @@ export interface InboxReplyDraft {
   body: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Long pastes kept as files beside the words (approval "inbox-paste-attachment"), each an upload not sent
+   * yet with where it goes back in `body`. Absent: none (and on a draft an older Inbox wrote).
+   */
+  files?: InboxDraftFile[];
 }
+
+/**
+ * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
+ * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's
+ * space), `preview` the tile's name line (the paste's first words). The text itself is the upload's bytes.
+ */
+export interface InboxDraftPasted {
+  at: number;
+  lead?: string;
+  preview: string;
+}
+
+/** A draft's file: an upload not sent yet, and, for a long paste, where it goes back. */
+export type InboxDraftFile = InboxUpload & { pasted?: InboxDraftPasted };
+
+/** The longest pasted-text preview a draft keeps, and the longest `lead`. */
+export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
+export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 
 /**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
@@ -2118,7 +2281,7 @@ export interface InboxDraft {
   to: InboxDraftTo | null;
   /** The project it was written in (the chosen session's, or the one open in the list). */
   project: { id: string | null; root: string; name: string } | null;
-  files: InboxUpload[];
+  files: InboxDraftFile[];
   /**
    * The thread's name the person typed in compose (the chip), as typed.
    * Absent while the chip follows the message (compose's suggestion, worked
@@ -2148,6 +2311,10 @@ export interface InboxComposeSession {
   idle_since: string | null;
   /** The thread it last wrote in, or null when it has not written in the Inbox. */
   last_thread: { id: string; subject: string | null; at: string } | null;
+  /** Where it works, when that is another folder of a combined project than the group's `root`. */
+  root?: string;
+  /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
+  label?: string;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
@@ -2260,7 +2427,7 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
     editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
@@ -2274,3 +2441,51 @@ export interface InboxPromptsChange {
     runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
   };
 }
+
+/** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */
+export type InboxVoiceEngine = "codex" | "api";
+
+/** Where the API key comes from. A page never gets the key: the last 4 of a saved one at most. */
+export interface InboxVoiceKeyState {
+  source: "saved" | "env" | null;
+  last4: string | null;
+}
+
+/** Settings → Voice (`GET /api/inbox/settings` `voice`). */
+export interface InboxVoiceSettings {
+  on: boolean;
+  phones_only: boolean;
+  engine: InboxVoiceEngine;
+  key: InboxVoiceKeyState;
+  /** This computer's name, for a page over the tailnet; null on the computer itself. */
+  computer: string | null;
+  /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
+  intro_due: boolean;
+  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
+  guest: boolean;
+}
+
+/**
+ * Whether voice can work here (`GET /api/inbox/voice/status`). `off`: nothing was asked. `ready`: Codex has a ChatGPT
+ * login, or a key is there. `missing`, `signedout`, `apikey`, `other`: what Codex says of itself. `nokey`: the API
+ * engine has no key. `unknown`: Codex did not answer.
+ */
+export interface InboxVoiceStatus {
+  state: "off" | "ready" | "missing" | "signedout" | "apikey" | "other" | "nokey" | "unknown";
+  plan: string | null;
+}
+
+/** Why a clip came back with no words: the `code` of a `POST /api/inbox/voice/transcribe` failure. */
+export type InboxVoiceFailure =
+  | "voice_off"
+  | "voice_not_ready"
+  | "voice_bad_clip"
+  | "voice_expired"
+  | "voice_refused"
+  | "voice_key_refused"
+  | "voice_unreachable"
+  | "voice_codex_failed"
+  | "voice_empty";
+
+/** The largest clip the Inbox takes: a 2:00 clip at 24 kHz, 16-bit mono is 5.76 MB. */
+export const INBOX_VOICE_MAX_CLIP_BYTES = 6 * 1024 * 1024;

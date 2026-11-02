@@ -47,6 +47,8 @@ let posted: { path: string; body: Record<string, unknown> }[] = [];
 let replyDelay = 0;
 /** The window's event streams (a stand-in EventSource), to hand it an `event: drafts`. */
 let streams: { listeners: Map<string, ((event: { data: string }) => void)[]> }[] = [];
+/** Records emitted so far: each gets a seq above the last and past the list's cursor, as the server's are. */
+let emitted = 0;
 function emit(type: string, data: unknown) {
   for (const stream of streams) for (const listener of stream.listeners.get(type) ?? []) listener({ data: JSON.stringify(data) });
 }
@@ -668,7 +670,7 @@ test.skipIf(!hasDom)('after a lost answer, the same words sent later to a new qu
   const first = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   // The agent asks something new in the thread; the person answers "Yes." again.
   const asked = await agentSend(['One more:', '', ':::question', 'Ship it today?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'), world.waiting);
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   leave();
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => again.textContent!.includes('Ship it today?'), 'the new question');
@@ -820,7 +822,7 @@ test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is fin
   await until(() => !!el.textContent?.includes('The reply may not have gone.'), 'the error');
   globalThis.fetch = real;
   // The Inbox answers again: the stream's next record reads the thread, and the reply is there.
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   await until(() => box(el) === null, 'the box closed');
   await until(() => liveText(el).includes('Your reply went.'), 'said in the live region');
   expect(await personReplies('Landed, seen on a read.')).toHaveLength(1);
@@ -875,7 +877,7 @@ test.skipIf(!hasDom)('a thread read finds the lost Send landed: what was added s
   const choice = [...el.querySelectorAll('fieldset[data-question-key] label')].find((l) => l.textContent?.includes('Pagefind')) as HTMLElement;
   act(() => choice.click());
   await until(() => el.textContent!.includes('in your draft'), 'the pick saved');
-  await act(async () => emit('record', { seq: 1 }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
   await until(() => box(el) === null, 'the box closed');
   await until(() => liveText(el).includes('Your reply went. Not sent yet: 1 pick.'), 'the pick said');
 }, 30_000);

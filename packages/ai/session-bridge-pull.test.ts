@@ -87,7 +87,7 @@ afterEach(() => {
  * A Plannotator server's AI runtime with a pull bridge, plus a host process
  * simulated by the real pull client talking to it through `fetch`.
  */
-function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(), wire: { olderServer?: boolean } = {}) {
+function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(), wire: { olderServer?: boolean } = {}, client: { statusIntervalMs?: number } = {}) {
   const pull = createPullSessionBridge({
     token: TOKEN,
     host: "opencode",
@@ -126,7 +126,7 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
       bridge: host.bridge,
       signal: controller.signal,
       pollWaitMs: 100,
-      statusIntervalMs: 10,
+      statusIntervalMs: client.statusIntervalMs ?? 10,
       deltaFlushMs: 5,
       maxFailures: 2,
       fetch: fetchShim,
@@ -139,6 +139,34 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
 }
 
 describe("pull session bridge", () => {
+  test("once `connected`, status is what the host reported, not a new bridge's ready", async () => {
+    const host = fakeHost("busy");
+    const { pull, startHost } = setup({}, host);
+    expect(pull.connected).toBe(false);
+    expect(pull.bridge.status()).toBe("ready");
+    void startHost();
+    await waitFor(() => pull.connected);
+    expect(pull.bridge.status()).toBe("busy");
+  });
+
+  test("an event before any poll is contact, and not a connection: it reported no status", async () => {
+    const { pull, call } = setup();
+    const event = await call(SESSION_BRIDGE_EVENT_PATH, {
+      method: "POST",
+      headers: { authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ type: "done", askId: "an-earlier-question", answer: "Late." }),
+    });
+    expect(event.status).toBe(409);
+    expect(pull.connected).toBe(false);
+  });
+
+  test("a body past the limit is refused, and the limit is 1,000,000 unless a server sets its own", async () => {
+    const body = JSON.stringify({ type: "status", status: "busy", pad: "x".repeat(1_000_000) });
+    const post = (call: ReturnType<typeof setup>["call"]) => call(SESSION_BRIDGE_EVENT_PATH, { method: "POST", headers: { authorization: `Bearer ${TOKEN}` }, body });
+    expect((await post(setup().call)).status).toBe(400);
+    expect((await post(setup({ maxBodyChars: 2_000_000 }).call)).status).toBe(200);
+  });
+
   test("a host that never interrupts says so on its polls; every other host's advert is unchanged", async () => {
     // What regresses: the capability leaking onto other hosts' adverts (absent = interruptible).
     const ordinary = setup();
@@ -260,6 +288,21 @@ describe("pull session bridge", () => {
     await run.done;
     expect(run.messages[0]).toEqual({ type: "status", status: "interrupting" });
     expect(run.messages.at(-1)).toMatchObject({ type: "result", result: "done" });
+  });
+
+  // The failure this guards: the client called the host's interrupt on a bridge
+  // that already reads `gone`, and told the server it had worked.
+  test("an interrupt that reaches a session already gone never calls the host, and reports ok: false", async () => {
+    const host = fakeHost("busy");
+    const { startHost, pull } = setup({}, host, {}, { statusIntervalMs: 60_000 });
+    void startHost();
+    await waitFor(() => pull.bridge.status() === "busy");
+
+    // The status push has not gone out, so the server still thinks it is busy.
+    host.setStatus("gone");
+    const refused = await Promise.resolve(pull.bridge.interrupt!()).then(() => "reported ok", (error: Error) => error.message);
+    expect(host.interrupts).toBe(0);
+    expect(refused).toBe("The session is no longer available.");
   });
 
   test("stopping a running question cancels it on the host, and frees the slot when the host confirms", async () => {

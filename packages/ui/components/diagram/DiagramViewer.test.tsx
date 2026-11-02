@@ -199,6 +199,15 @@ function pointer(type: string, target: Element, init: { x: number; y: number; sh
   target.dispatchEvent(event);
 }
 
+/** A finger on node D: the first one down is the primary pointer, as in a browser. */
+function touch(type: string, x: number, { pointerId = 7, isPrimary = true } = {}): void {
+  const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
+  const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId, pointerType: 'touch', isPrimary } : {}) } as MouseEventInit);
+  if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
+  if ((event as PointerEvent).isPrimary !== isPrimary) Object.defineProperty(event, 'isPrimary', { value: isPrimary });
+  host!.querySelector('[id$="-flowchart-D-1"]')!.dispatchEvent(event);
+}
+
 async function clickPart(target: Element, shift = false): Promise<void> {
   await act(async () => {
     pointer('pointerdown', target, { x: 10, y: 10, shift });
@@ -709,16 +718,27 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
   test('a finger gets a wider click threshold than a mouse: an 8 px wobble is still a tap', async () => {
     await mount(viewer({ onCreateComment: noop }));
     await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
-    const touch = (type: string, x: number) => {
-      const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
-      const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId: 7, pointerType: 'touch' } : {}) } as MouseEventInit);
-      if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
-      nodeD().dispatchEvent(event);
-    };
     await act(async () => {
       touch('pointerdown', 10);
       touch('pointermove', 18);
       touch('pointerup', 18);
+    });
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+  });
+
+  test('a second finger makes it a pinch: neither finger opens the composer, and the next tap does', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerdown', 40, { pointerId: 8, isPrimary: false });
+      touch('pointerup', 10);
+      touch('pointerup', 40, { pointerId: 8, isPrimary: false });
+    });
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerup', 10);
     });
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
   });

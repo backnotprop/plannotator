@@ -73,6 +73,8 @@ test('the resolver routes only a message or Markdown attachment marker; anything
   expect(inboxImageSrcResolver('a.png', inboxMessageImageBase(ID))).toBe(`/api/inbox/messages/${ID}/image?path=a.png`);
   // An image inside an attached Markdown file loads from that attachment's route, for the version on screen (#2228).
   expect(inboxImageSrcResolver('shots/a b.png', inboxMarkdownImageBase('att_01K7Z', 'sent'))).toBe('/api/inbox/attachments/att_01K7Z/markdown-image?path=shots%2Fa%20b.png&version=sent');
+  // One in a Markdown file a link in it opened: that document's own images, named by its path in the folder (#2230).
+  expect(inboxImageSrcResolver('../a.png', inboxMarkdownImageBase('att_01K7Z', 'current', 'sub/peer notes.md'))).toBe('/api/inbox/attachments/att_01K7Z/markdown-image?path=..%2Fa.png&version=current&document=sub%2Fpeer%20notes.md');
   expect(inboxImageSrcResolver('a.png', 'inbox-message:../../evil')).toBe('/api/image?path=a.png&base=inbox-message%3A..%2F..%2Fevil');
   expect(inboxImageSrcResolver('a.png')).toBe('/api/image?path=a.png');
 });

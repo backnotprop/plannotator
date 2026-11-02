@@ -178,11 +178,11 @@ const APPLIES: Record<PluginHost, string> = {
 export interface EmptyStateProps {
   /** The CLI's command and address, for the MCP lines and the picker. */
   context: ConnectContext | null;
-  /** GET /api/inbox/agents; null while it loads or where it is refused (a page opened over the tailnet). */
+  /** GET /api/inbox/agents; null while it loads or where it is refused (a tailnet guest's page). */
   agents: InboxAgentsModel | null;
   /**
-   * The agents could not be read: `tailnet`, a page opened over the tailnet
-   * (the agents route is local only); `failed`, a read on this computer that
+   * The agents could not be read: `tailnet`, a tailnet guest's page
+   * (the agents route refuses it); `failed`, a read on this computer that
    * did not answer. The screen then offers the commands without this
    * computer's state.
    */

@@ -12,8 +12,55 @@ function grouped(hex: string): string {
   return hex.match(/.{1,4}/g)?.join(' ') ?? hex;
 }
 
-/** Remove, asked twice like Delete thread: "Remove? Click again", then the phone's token stops working. */
+/**
+ * Remove, asked twice like Delete thread: "Remove? Click again", then the
+ * phone's token stops working. Its words, shown and spoken, are the phone
+ * list's own and stay as they are; Settings → Machines' Unlink has its own
+ * (UnlinkLink).
+ */
 function RemoveLink({ name, onRemove }: { name: string; onRemove: () => Promise<void> }) {
+  return (
+    <AskTwiceButton
+      onRemove={onRemove}
+      text="Remove"
+      label={`Remove ${name}`}
+      confirmText="Remove? Click again"
+      confirmLabel={`Remove ${name}: click again to remove`}
+    />
+  );
+}
+
+/**
+ * Settings → Machines: Unlink, asked twice the same way. `warning`: what the
+ * second click costs, said in the confirm itself (answers that will not be sent).
+ */
+export function UnlinkLink({ name, onRemove, warning }: { name: string; onRemove: () => Promise<void>; warning?: string }) {
+  const confirmText = warning ? `Unlink? ${warning} Click again` : 'Unlink? Click again';
+  return (
+    <AskTwiceButton
+      onRemove={onRemove}
+      text="Unlink"
+      label={`Unlink ${name}`}
+      confirmText={confirmText}
+      confirmLabel={warning ? `Unlink ${name}: ${warning} Click again to unlink` : `Unlink ${name}: click again to unlink`}
+    />
+  );
+}
+
+/** The button both ask with: the first click asks (for 4 s), the second acts. `label`/`confirmLabel`: what a screen reader says in each state. */
+function AskTwiceButton({
+  onRemove,
+  text,
+  label,
+  confirmText,
+  confirmLabel,
+}: {
+  onRemove: () => Promise<void>;
+  text: string;
+  label: string;
+  confirmText: string;
+  confirmLabel: string;
+}) {
   const [state, setState] = useState<'idle' | 'confirm' | 'busy'>('idle');
   useEffect(() => {
     if (state !== 'confirm') return;
@@ -25,7 +72,7 @@ function RemoveLink({ name, onRemove }: { name: string; onRemove: () => Promise<
       type="button"
       className={`ib-del-l${state === 'confirm' ? ' ib-confirm' : ''}`}
       disabled={state === 'busy'}
-      aria-label={state === 'confirm' ? `Remove ${name}: click again to remove` : `Remove ${name}`}
+      aria-label={state === 'confirm' ? confirmLabel : label}
       onClick={() => {
         if (state === 'idle') return setState('confirm');
         if (state !== 'confirm') return;
@@ -33,7 +80,7 @@ function RemoveLink({ name, onRemove }: { name: string; onRemove: () => Promise<
         onRemove().finally(() => setState('idle'));
       }}
     >
-      {state === 'confirm' ? 'Remove? Click again' : 'Remove'}
+      {state === 'confirm' ? confirmText : text}
     </button>
   );
 }

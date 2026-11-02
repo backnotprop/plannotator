@@ -3,8 +3,9 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
-import { plural, whenTime } from '../format';
+import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import type { InboxToastModel } from './Toast';
@@ -30,17 +31,20 @@ export interface CopyMenuHost {
   phone: boolean;
 }
 
-/** The message as the toast and the sheet's title name it: "Claude Code, 7:34 PM". */
-function who(message: InboxMessageWire): string {
-  return `${copyAuthor(message)}, ${whenTime(message.created_at)}`;
+/** The message as the toast and the menu's name say it: "Claude Code, 7:34 PM" (`short`: a long agent name cut, for the toast). */
+function who(message: InboxMessageWire, short = false): string {
+  const name = copyAuthor(message);
+  return `${short ? shortAgentName(name) : name}, ${whenTime(message.created_at)}`;
 }
 
 function useCopies({ thread, linkOf, onToast }: CopyMenuHost) {
-  const say = (ok: boolean, lead: string, detail: string) => onToast?.(ok ? { icon: 'check', lead, detail } : { icon: 'warn', lead: "Couldn't copy" });
+  const say = (ok: boolean, lead: string, detail: string, speech?: string) =>
+    onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
+  const named = (lead: string, message: InboxMessageWire) => say(true, lead, who(message, true), `${lead}. ${who(message)}`);
   const subject = `“${thread.subject ?? '(no subject)'}”`;
   return {
-    message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => say(ok, 'Message copied', who(message))),
-    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => say(ok, 'Link copied', who(message))),
+    message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => (ok ? named('Message copied', message) : say(false, '', ''))),
+    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
     thread: () => void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message'))),
     threadLink: () => void copyTextToClipboard(linkOf()).then((ok) => say(ok, 'Link copied', subject)),
     threadId: () => void copyTextToClipboard(thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject)),
@@ -131,14 +135,36 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
 /**
  * The thread header's ⋯ More: Pin thread (Unpin thread while pinned) first, in its own group, as the row menu
  * leads with it (only when the Inbox keeps pins: `pin` is absent on an older one, and a phone's way to pin
- * is here, it has no row menu); then Copy thread, Copy link and Copy thread ID (a phone's only way to them).
+ * is here, it has no row menu), and Mark unread on a read thread (`markUnread`; markRead.ts `canMarkUnread`,
+ * also while the list still holds the row in New, or with a Mark read standing); then Copy thread, Copy link and
+ * Copy thread ID (a phone's only way to them); last, in its own group, Archive thread (Unarchive thread on an
+ * archived one), which used to be an icon in the header (the owner, 2026-11-01: move it into the ⋯). It has no key.
+ * Snooze leads the first group (a phone's only way to it, approval "inbox-snooze"): the menu swaps in place for its
+ * times, and a snoozed thread also offers Unsnooze.
  */
-export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void } }) {
-  const { thread, phone, pin } = props;
+export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void }; snooze?: { snoozed: boolean; onPick: (until: string) => void; onUnsnooze: () => void } }) {
+  const { thread, phone, pin, markUnread, archive, snooze } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<SnoozeView | null>(null);
+  // Back from the times: focus goes to Snooze again, not to the item now at its old index.
+  const backed = useRef(false);
+  const popup = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (view !== null || !backed.current) return;
+    backed.current = false;
+    return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-thread-snooze-item]'));
+  }, [view]);
   return (
-    <Menu.Root modal={false}>
+    <Menu.Root
+      modal={false}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setView(null);
+      }}
+    >
       <Tip content="More">
         <Menu.Trigger ref={ref} className="ib-iconbtn ib-tmore" aria-label="More" data-thread-more="">
           <Icon name="dots" size={18} />
@@ -147,32 +173,78 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
-          <Menu.Popup className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="">
-            <div className="ib-pm-title" dir="auto" aria-hidden="true">
-              {thread.subject ?? '(no subject)'}
-            </div>
-            {pin && (
+          <Menu.Popup ref={popup} className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="">
+            {view && snooze ? (
+              <SnoozeTimes
+                view={view}
+                onView={setView}
+                onBack={() => {
+                  backed.current = true;
+                  setView(null);
+                }}
+                onPick={snooze.onPick} onClose={() => setOpen(false)} />
+            ) : (
               <>
-                <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
-                  <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
-                  {pin.pinned ? 'Unpin thread' : 'Pin thread'}
+                <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                  {thread.subject ?? '(no subject)'}
+                </div>
+                {snooze && (
+                  <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} onClick={() => setView('times')} data-thread-snooze-item="">
+                    <Icon name="clock" size={15} />
+                    Snooze
+                    <span className="ib-zsub">
+                      <Icon name="chevR" size={13} />
+                    </span>
+                  </Menu.Item>
+                )}
+                {snooze?.snoozed && (
+                  <Menu.Item className="ib-pmi" label="Unsnooze" onClick={snooze.onUnsnooze} data-thread-unsnooze-item="">
+                    <Icon name="inbox" size={15} />
+                    Unsnooze
+                  </Menu.Item>
+                )}
+                {pin && (
+                  <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
+                    <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
+                    {pin.pinned ? 'Unpin thread' : 'Pin thread'}
+                  </Menu.Item>
+                )}
+                {markUnread && (
+                  <Menu.Item className="ib-pmi" label="Mark unread" onClick={markUnread} data-thread-unread-item="">
+                    <Icon name="envelope" size={15} />
+                    Mark unread
+                  </Menu.Item>
+                )}
+                {(snooze || pin || markUnread) && <Menu.Separator className="ib-pm-sep" />}
+                <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
+                  <Icon name="stack" size={15} />
+                  Copy thread
                 </Menu.Item>
                 <Menu.Separator className="ib-pm-sep" />
+                <Menu.Item className="ib-pmi" label="Copy link" onClick={() => copies.threadLink()} data-copy-item="thread-link">
+                  <Icon name="link" size={15} />
+                  Copy link
+                </Menu.Item>
+                <Menu.Item className="ib-pmi" label="Copy thread ID" onClick={() => copies.threadId()} data-copy-item="thread-id">
+                  <Icon name="hash" size={15} />
+                  Copy thread ID
+                </Menu.Item>
+                {archive && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.Item
+                      className="ib-pmi"
+                      label={archive.archived ? 'Unarchive thread' : 'Archive thread'}
+                      onClick={archive.onToggle}
+                      data-thread-archive-item=""
+                    >
+                      <Icon name="archive" size={15} />
+                      {archive.archived ? 'Unarchive thread' : 'Archive thread'}
+                    </Menu.Item>
+                  </>
+                )}
               </>
             )}
-            <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
-              <Icon name="stack" size={15} />
-              Copy thread
-            </Menu.Item>
-            <Menu.Separator className="ib-pm-sep" />
-            <Menu.Item className="ib-pmi" label="Copy link" onClick={() => copies.threadLink()} data-copy-item="thread-link">
-              <Icon name="link" size={15} />
-              Copy link
-            </Menu.Item>
-            <Menu.Item className="ib-pmi" label="Copy thread ID" onClick={() => copies.threadId()} data-copy-item="thread-id">
-              <Icon name="hash" size={15} />
-              Copy thread ID
-            </Menu.Item>
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

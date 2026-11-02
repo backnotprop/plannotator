@@ -11,6 +11,8 @@
  * the window shortens it. Pure.
  */
 
+import { inboxProjectDisplayName } from '@plannotator/core/inbox-types';
+
 /** The parts of a path, either separator, without empty ones. */
 function segments(path: string): string[] {
   return path.split(/[\\/]+/).filter((part) => part.length > 0);
@@ -20,6 +22,9 @@ function segments(path: string): string[] {
 function sameKey(name: string): string {
   return name.normalize('NFC').toLocaleLowerCase();
 }
+
+/** What the window names a project by: its folder, or the name the person gave it (`display_name`). */
+export type LabeledProject = { id: string; root: string; name: string; display_name?: unknown };
 
 /** The folders that hold a repository's checkouts (Workspaces' `<repo>/worktrees/<branch>`). */
 const CHECKOUTS = new Set(['worktrees', '.worktrees']);
@@ -50,18 +55,24 @@ export function labelPath(root: string): { parts: string[]; checkout: string | n
  * clash. Two checkouts of one repository (`appnotes/worktrees/main` and
  * `appnotes/worktrees/fix`) differ only by the checkout, which then names them
  * ("appnotes · main", "appnotes · fix"). A project whose root has no last
- * segment (a filesystem root) keeps `name`.
+ * segment (a filesystem root) keeps `name`. A project the person renamed
+ * (`display_name`) reads that name as it is, and takes no part in clashes.
  */
-export function shortProjectNames(projects: readonly { id: string; root: string; name: string }[]): Map<string, string> {
+export function shortProjectNames(projects: readonly LabeledProject[]): Map<string, string> {
   const base = new Map<string, { parts: string[]; name: string; checkout: string | null }>();
+  const out = new Map<string, string>();
   for (const project of projects) {
+    const given = inboxProjectDisplayName(project);
+    if (given !== null) {
+      out.set(project.id, given);
+      continue;
+    }
     const { parts, checkout } = labelPath(project.root);
     const last = parts[parts.length - 1];
     base.set(project.id, { parts, checkout, name: last ? last.normalize('NFC') : project.name });
   }
   const groups = new Map<string, string[]>();
   for (const [id, { name }] of base) groups.set(sameKey(name), [...(groups.get(sameKey(name)) ?? []), id]);
-  const out = new Map<string, string>();
   for (const ids of groups.values()) {
     if (ids.length === 1) {
       out.set(ids[0]!, base.get(ids[0]!)!.name);
@@ -103,7 +114,7 @@ export function shortProjectNames(projects: readonly { id: string; root: string;
  * `projects` has no entry: the caller falls back to the server's name.
  */
 export function windowProjectNames(input: {
-  projects: readonly { id: string; root: string; name: string }[];
+  projects: readonly LabeledProject[];
   sidebar: readonly { id: string }[];
   sections: readonly { threads: readonly { project: { id: string } }[] }[];
   pins?: readonly { project: { id: string } }[];

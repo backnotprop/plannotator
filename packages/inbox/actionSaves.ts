@@ -23,6 +23,11 @@ export function registerActionFlush(flush: () => void): () => void {
   return () => flushes.delete(flush);
 }
 
+/** A Done, Can't do it or note save is on its way (a Send's key waits for it). */
+export function actionSavesPending(): boolean {
+  return inFlight.size > 0;
+}
+
 /** Saves every note still in its typing pause, then resolves once every save has answered (a refused one included). */
 export async function actionSavesSettled(): Promise<void> {
   for (const flush of [...flushes]) flush();

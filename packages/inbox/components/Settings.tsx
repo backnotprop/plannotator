@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, SettingsModel } from '../api';
+import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, MachineView, SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { AccountsSection } from './Accounts';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -15,12 +16,15 @@ import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
 import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
+import { VoiceSettings } from './VoiceSettings';
+import { useVoiceSettings } from '../voice';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
@@ -31,8 +35,11 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   agents: 'chip',
+  accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
+  machines: 'system',
+  voice: 'mic',
   archived: 'archive',
   storage: 'disk',
   about: 'info',
@@ -79,7 +86,7 @@ export interface SettingsPageProps {
   /**
    * Settings → General's first row: the version and the sidebar's update
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
-   * (a page opened over the tailnet).
+   * (a tailnet guest's page).
    */
   updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
@@ -106,6 +113,13 @@ export interface SettingsPageProps {
   onAgents?: (next: InboxAgentsModel) => void;
   /** Settings → Prompts saved a change: the server's model of it. */
   onPrompts?: (next: InboxPromptsSettings) => void;
+  /**
+   * Settings → Machines (components/Machines.tsx): every machine the merged view knows, this one included. Absent or
+   * empty: an Inbox that cannot link machines, and the section is not listed.
+   */
+  machines?: MachineView[];
+  /** A link or an Unlink happened: read the machines again. */
+  onMachinesChanged?: () => void;
 }
 
 /**
@@ -113,14 +127,15 @@ export interface SettingsPageProps {
  * code review and annotate show in their Settings too: config.json
  * `urlHost: "plannotator.localhost"`. Locked (with the reason) while
  * PLANNOTATOR_URL_HOST is set or config.json holds another `urlHost`, which it
- * never replaces. The server leaves it out for a page that came through the tailnet.
+ * never replaces. The server leaves it out for a tailnet guest's page. From the owner's
+ * phone (`remote`) it is still the computer's browser that the switch changes, so the heading says so.
  */
-function CookieHostGroup({ cookieHost, onToggle }: { cookieHost: InboxCookieHost; onToggle: (next: boolean) => void }) {
+function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCookieHost; remote: boolean; onToggle: (next: boolean) => void }) {
   const locked = cookieHost.env !== null || cookieHost.url_host !== null;
   const state = cookieHost.env !== null ? 'locked-env' : cookieHost.url_host !== null ? 'locked-url-host' : cookieHost.on ? 'on' : 'off';
   return (
     <section className="ib-sgroup" data-settings-cookie-host={state} aria-labelledby="ib-g-browser">
-      <h2 id="ib-g-browser">This browser</h2>
+      <h2 id="ib-g-browser">{remote ? 'The computer’s browser' : 'This browser'}</h2>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-txt">
@@ -411,7 +426,7 @@ function GeneralSection({
           Notifications are allowed per address, so a browser on another device asks once there.
         </div>
       </section>
-      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} onToggle={onToggleCookieHost} />}
+      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} remote={settings.via === 'tailnet'} onToggle={onToggleCookieHost} />}
     </>
   );
 }
@@ -621,6 +636,9 @@ function StoreTable({
                 <button type="button" className="ib-fold" onClick={() => setOpen(isOpen ? null : project.id)} aria-expanded={isOpen}>
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={13} /> {project.name}
                 </button>
+                {/* Each folder keeps its own size and Delete: Delete project never reaches a combined project's threads. */}
+                {project.combined_into && <div className="ib-store-note">In {project.combined_into}</div>}
+                {project.combined && <div className="ib-store-note">Deleting it leaves {project.combined.join(', ')}, as {project.combined.length === 1 ? 'its own project' : 'their own projects'}</div>}
               </td>
               <td className="ib-n ib-n-threads">{plural(project.threads.length, 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>
@@ -662,8 +680,11 @@ function StoreTable({
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
+  machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
+  voice: 'Speak a reply instead of typing it.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
@@ -757,7 +778,13 @@ export function SettingsPage(props: SettingsPageProps) {
   // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
-  const sections = SETTINGS_SECTIONS.filter((id) => id !== 'capabilities' || board !== null || experimental !== null);
+  // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
+  const machines = props.machines ?? [];
+  const linkedMachines = machines.filter((machine) => !machine.self);
+  const voice = useVoiceSettings();
+  const sections = SETTINGS_SECTIONS.filter(
+    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+  );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
     { label: 'Settings', ids: sections.filter((id) => SETTINGS_SECTIONS.indexOf(id) <= SETTINGS_SECTIONS.indexOf('capabilities')) },
@@ -778,6 +805,8 @@ export function SettingsPage(props: SettingsPageProps) {
     if (id === 'about' && aboutDot)
       return <span className="ib-dot" aria-label={aboutDot === 'check-failing' ? 'Checking for updates is failing' : 'A new version is available'} role="img" />;
     if (id === 'devices' && devicesDot) return <span className="ib-dot ib-warn" aria-label="Something here is not working" role="img" />;
+    if (id === 'machines' && linkedMachines.some((machine) => machine.state === 'needs_update' || machine.state === 'revoked'))
+      return <span className="ib-dot ib-warn" aria-label="A machine needs attention" role="img" data-machines-dot="" />;
     if (id === 'agents' && agentsNeedRestart(props.agents)) return <span className="ib-dot ib-warn" aria-label="Sessions need a reload" role="img" data-agents-dot="" />;
     return null;
   };
@@ -801,17 +830,23 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'accounts':
+        return '';
       case 'prompts':
         return settings.prompts ? promptsSummary(settings.prompts) : '';
       case 'devices':
         if (phonesOn && phones.devices && phones.devices.length > 0) return plural(phones.devices.length, 'phone');
         return settings.tailscale?.on ? 'Over your tailnet' : '';
+      case 'machines':
+        return linkedMachines.length > 0 ? plural(linkedMachines.length, 'machine') : '';
       case 'archived':
         return archivedTotal ? formatCount(archivedTotal) : '';
       case 'storage':
         return formatBytes(settings.store.bytes);
       case 'about':
         return settings.version;
+      case 'voice':
+        return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
         const on = [board?.on ? 'Board' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
@@ -841,6 +876,9 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
         break;
+      case 'accounts':
+        body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
+        break;
       case 'prompts':
         body = settings.prompts ? (
           <PromptsSection prompts={settings.prompts} onPrompts={props.onPrompts} configFile={`${settings.data_dir}/config.json`} home={settings.home} />
@@ -863,6 +901,9 @@ export function SettingsPage(props: SettingsPageProps) {
             onPairing={(open) => onPairing?.(open)}
           />
         );
+        break;
+      case 'machines':
+        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} />;
         break;
       case 'archived':
         body = archived ?? (
@@ -893,6 +934,9 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'about':
         body = about;
         break;
+      case 'voice':
+        body = <VoiceSettings />;
+        break;
       case 'capabilities':
         body =
           (board && props.onToggleBoard) || experimental ? (
@@ -921,7 +965,7 @@ export function SettingsPage(props: SettingsPageProps) {
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
       <p className="ib-lede">Browsers on your other devices.</p>
-    ) : section ? (
+    ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
 

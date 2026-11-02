@@ -1,4 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
+import { basenameFromPath } from '@plannotator/core/source-save';
 import type { Block, Annotation } from '../types';
 import {
   buildTocHierarchy,
@@ -146,7 +147,7 @@ export function TableOfContents({
               )}
             </div>
             <p className="text-[11px] text-foreground/70 truncate mt-0.5" title={linkedDocFilepath}>
-              {linkedDocFilepath.split('/').pop()}
+              {basenameFromPath(linkedDocFilepath)}
             </p>
           </div>
         )}

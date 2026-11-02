@@ -19,7 +19,6 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import {
-  basename,
   dirname,
   isAbsolute,
   join,
@@ -29,10 +28,18 @@ import {
   resolve,
 } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { parseT3HookCommand, T3_SETTINGS_BACKUP_SUFFIX } from "@plannotator/shared/t3-hook-command";
+import { T3_SETTINGS_BACKUP_SUFFIX } from "@plannotator/shared/t3-hook-command";
+import { isManagedHook, remainingHookReferences, type ManagedHookSpec } from "./uninstall-hooks";
+import { remainingInboxReferences } from "./uninstall-inbox-references";
+import {
+  pluginReferences, enabledPluginReferences, piPackageReferences, directoryReferences, vscodeReferences,
+  type HostReferences, type Unreadable,
+} from "./uninstall-host-references";
+import { describeFsError } from "./agent-files";
 import { runningT3Workers, stopT3Workers } from "@plannotator/shared/t3-workers";
 import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/inbox/registry";
-import { INBOX_TAILNET_HTTPS_PORT, takeDownInboxTailnet } from "./inbox-devices";
+import { takeDownInboxTailnet } from "./inbox-devices";
+import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-door";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
@@ -313,17 +320,17 @@ type MutableUninstallResult = {
   preserved: string[];
   warnings: string[];
   errors: string[];
+  /** Files already named in an error (unreadable, or not rewritten), so each is said once. */
+  reported: Set<string>;
 };
 
-type HookCleanupSpec = {
-  readonly event: string;
-  readonly matcher?: string;
-  readonly suffix: "" | "improve-context" | "t3-hook";
-};
+type HookCleanupSpec = ManagedHookSpec;
 
 type HookCleanupPolicy = {
   readonly allowRelocatedBinary: boolean;
   readonly removeFileWhenEmpty: boolean;
+  /** The host the file belongs to, as the person knows it. */
+  readonly owner: string;
 };
 
 type HostCleanupRecovery = {
@@ -390,6 +397,7 @@ export async function runPlannotatorUninstall(
     preserved: [],
     warnings: [],
     errors: [],
+    reported: new Set(),
   };
 
   const initialDataDirIdentity = readPathIdentity(state.dataDir);
@@ -402,8 +410,9 @@ export async function runPlannotatorUninstall(
     ) ?? inspectDataDir(state.dataDir);
 
   if (request.purge && dataDirSafetyIssue) {
+    const { reported: _reported, ...result } = state;
     return {
-      ...state,
+      ...result,
       ok: false,
       errors: [
         `Refusing to purge ${state.dataDir}: ${dataDirSafetyIssue}.`,
@@ -437,14 +446,18 @@ export async function runPlannotatorUninstall(
         );
       }
     }
-    // "Reach from my tailnet": a mapping a crashed Inbox left behind (a clean stop already took its own down).
-    if (!inboxBlocksPurge && !othersInbox && readInboxRegistry(state.dataDir)?.tailnet) {
+    // "Reach from my tailnet": the door mapping a crashed Inbox left behind, by its record (a clean stop already took its own down),
+    // or by inbox.json's `tailnet` when an older build left it (then only a mapping to exactly its door_port is taken down).
+    const record = inboxBlocksPurge || othersInbox ? null : readTailnetDoorRecord(state.dataDir);
+    const legacy = inboxBlocksPurge || othersInbox || hasTailnetDoorRecord(state.dataDir) ? undefined : readInboxRegistry(state.dataDir)?.tailnet;
+    const door = record?.published ? record : legacy?.door_port ? { https_port: legacy.https_port } : null;
+    if (door) {
       if (request.dryRun) {
-        state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
+        state.planned.push(`Take down the Plannotator Inbox's tailnet address (tailscale serve --https=${door.https_port})`);
       } else {
         const tailnet = takeDownInboxTailnet(state.dataDir);
-        if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT})`);
-        if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${INBOX_TAILNET_HTTPS_PORT} off`);
+        if (tailnet === "removed") state.removed.push(`Took down the Plannotator Inbox's tailnet address (tailscale serve --https=${door.https_port})`);
+        if (tailnet === "failed") state.warnings.push(`Could not check or remove the Inbox's tailnet address; run: tailscale serve --https=${door.https_port} off`);
       }
     }
     // "Over your tailnet": the window's mapping a crashed Inbox left behind (a clean stop, including the stop above, takes its own down).
@@ -480,7 +493,7 @@ export async function runPlannotatorUninstall(
   removeHostConfigEntries(request, environment, paths, state);
   // Plain uninstall too: with the binary gone, an agent's plannotator-inbox
   // entry would fail to start at every launch.
-  await removeInboxAgentConnections(request, environment, state);
+  await removeInboxAgentConnections(request, environment, paths.binaryPaths, state);
   removeInstalledFiles(request, environment, paths, state);
   if (dataDirSafetyIssue) {
     state.warnings.push(
@@ -506,6 +519,26 @@ export async function runPlannotatorUninstall(
     }
   }
 
+  // A dry run checked each file as it planned it; a real run checks what the cleanup left.
+  // It only reads, and runs even after another error, so one run names every blocker.
+  if (!request.dryRun) {
+    for (const [owner, filePath, allowRelocatedBinary] of [
+      ["Claude Code", join(paths.claudeDir, "settings.json"), false],
+      ["Codex", join(paths.codexDir, "hooks.json"), true],
+      ["Gemini CLI", join(environment.homeDir, ".gemini", "settings.json"), false],
+      ["Mistral Vibe", join(paths.vibeDir, "hooks.toml"), false],
+    ] as const) {
+      const config = filePath.endsWith(".toml")
+        ? readVibeHooks(filePath, request, state)
+        : readJsonRecord(
+          owner, filePath, "remaining host hooks",
+          { manualCleanup: `Make ${filePath} a readable, writable strict JSON object and remove only hooks that invoke Plannotator; preserve unrelated settings.` },
+          request, state,
+        );
+      reportRemainingHookReferences(owner, config, filePath, paths.binaryPaths, environment.platform, allowRelocatedBinary, request, state);
+    }
+  }
+
   if (state.errors.length === 0) {
     await removeBinaries(request, environment, paths, state);
   }
@@ -520,8 +553,9 @@ export async function runPlannotatorUninstall(
     }
   }
 
+  const { reported: _reported, ...result } = state;
   return {
-    ...state,
+    ...result,
     ok: state.errors.length === 0,
   };
 }
@@ -576,12 +610,15 @@ function agentEnvironmentOf(environment: UninstallEnvironment): AgentEnvironment
  * agents on this computer (inbox-agents.ts): only the recorded ones that still
  * run Plannotator. An entry the person changed to run something else is theirs
  * and is named; so is one that runs this binary but has no record (agents.json
- * lost), which the person may have added by hand. A failure is a warning,
- * never a reason to keep the CLI.
+ * lost), which the person may have added by hand, and any other entry that
+ * still runs Plannotator. A failure is a warning, never a reason to keep the
+ * CLI. Only an agent's config that cannot be read keeps it: it is not known
+ * what that file runs.
  */
 async function removeInboxAgentConnections(
   request: UninstallRequest,
   environment: UninstallEnvironment,
+  binaryPaths: readonly string[],
   state: MutableUninstallResult,
 ): Promise<void> {
   const agents = agentEnvironmentOf(environment);
@@ -592,11 +629,19 @@ async function removeInboxAgentConnections(
   // Plannotator's trusted-sender token in Qwen Code (inbox-qwen-trust.ts): revoked in Qwen, whoever added the MCP entry.
   const trust = agentHomeAllowed(agents) ? qwenTrustRemoval(state.dataDir, agents) : null;
   for (const skipped of [...plan.skipped, ...notes.skipped]) state.warnings.push(`Skipped: ${skipped}.`);
+  // Every other entry that still runs Plannotator, whoever added it: named, so the person can remove it.
+  const reportOthers = () => {
+    const handled = new Set([...plan.items.filter((item) => !item.stray).map((item) => item.agent), ...plan.named]);
+    const scan = remainingInboxReferences(agents, binaryPaths, handled);
+    state.warnings.push(...scan.warnings);
+    for (const unreadable of scan.unreadable) reportUnreadableConfig(unreadable.owner, unreadable, request, state);
+  };
   if (request.dryRun) {
     for (const item of plan.items) state.planned.push(item.describe);
     for (const note of notes.items) state.planned.push(note.describe);
     if (trust?.runnable) state.planned.push(trust.describe);
     else if (trust) state.warnings.push(`Skipped: ${trust.describe}: qwen is not on PATH; run \`${trust.manual}\`.`);
+    reportOthers();
     return;
   }
   if (trust) {
@@ -623,6 +668,7 @@ async function removeInboxAgentConnections(
     state.removed.push(item.describe);
     removed.push(item.agent);
   }
+  reportOthers();
   // A plain uninstall keeps the data: forget these records so a reinstall connects them again. An agent with an
   // entry left (one of two a move left could not go) keeps its whole record, so the next uninstall tries again.
   if (!request.purge) forgetInboxAgents(state.dataDir, removed.filter((id) => !kept.has(id)));
@@ -644,6 +690,66 @@ function reportHostCleanupFailure(
   state.errors.push(
     `${summary}: ${problem}. Manual cleanup: ${recovery.manualCleanup} Then rerun \`${formatUninstallRetryCommand(request)}\`.`,
   );
+}
+
+/**
+ * A config uninstall must read to finish, but cannot: it keeps the CLI, since
+ * the file may run Plannotator. Said once per file, with what to do.
+ */
+function reportUnreadableConfig(
+  owner: string,
+  { file, reason }: Unreadable,
+  request: UninstallRequest,
+  state: MutableUninstallResult,
+): void {
+  if (state.reported.has(file)) return;
+  state.reported.add(file);
+  state.errors.push(
+    `Could not read ${owner}'s ${file}: ${reason}. Plannotator did not change it. To continue, fix that (or put back a working copy of the file), then run \`${formatUninstallRetryCommand(request)}\` again.`,
+  );
+}
+
+/** Hooks that still run Plannotator but are not ones uninstall removes itself: one error per file, naming each. */
+function reportRemainingHookReferences(
+  owner: string,
+  config: unknown,
+  filePath: string,
+  binaryPaths: readonly string[],
+  platform: NodeJS.Platform,
+  allowRelocatedBinary: boolean,
+  request: UninstallRequest,
+  state: MutableUninstallResult,
+  projectedRemovals: readonly ManagedHookSpec[] = [],
+  removedVibeIndices: ReadonlySet<number> = new Set(),
+): void {
+  const fields = remainingHookReferences(config, binaryPaths, platform, allowRelocatedBinary, projectedRemovals, removedVibeIndices);
+  if (fields.length === 0) return;
+  state.errors.push(
+    `${owner}'s ${filePath} still runs Plannotator at ${fields.join(", ")}. Plannotator removes only the hooks it installs exactly as it wrote them, so it did not change ${fields.length === 1 ? "this one" : "these"}. To continue, remove only ${fields.length === 1 ? "that hook" : "those hooks"} (keep the rest of the file), then run \`${formatUninstallRetryCommand(request)}\` again.`,
+  );
+}
+
+/** Vibe's hooks.toml, parsed; null when missing or unreadable (said). */
+function readVibeHooks(filePath: string, request: UninstallRequest, state: MutableUninstallResult): unknown {
+  if (state.reported.has(filePath)) return null;
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (!isMissingPathError(error)) reportUnreadableConfig("Mistral Vibe", { file: filePath, reason: describeFsError(error) }, request, state);
+    return null;
+  }
+  return parseVibeHooks(filePath, content, request, state);
+}
+
+function parseVibeHooks(filePath: string, content: string, request: UninstallRequest, state: MutableUninstallResult): unknown {
+  try {
+    return Bun.TOML.parse(content);
+  } catch (error) {
+    const detail = formatError(error).replace(/^TOML Parse error:\s*/, "");
+    reportUnreadableConfig("Mistral Vibe", { file: filePath, reason: `it is not valid TOML (${detail})` }, request, state);
+    return null;
+  }
 }
 
 function resolveOwnedPaths(environment: UninstallEnvironment) {
@@ -691,9 +797,18 @@ async function removeHostPlugins(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): Promise<void> {
-  const actions = [
+  const pluginId = "plannotator@plannotator";
+  const actions: ReadonlyArray<{
+    label: string;
+    /** The host, as the person knows it. */
+    owner: string;
+    command: string;
+    args: readonly string[];
+    references: () => HostReferences;
+  }> = [
     {
       label: "Claude Code plugin plannotator@plannotator",
+      owner: "Claude Code",
       command: "claude",
       args: [
         "plugin",
@@ -704,32 +819,24 @@ async function removeHostPlugins(
         ...(request.purge ? [] : ["--keep-data"]),
         "--yes",
       ],
-      installed:
-        hasEnabledPlugin(
-          join(paths.claudeDir, "settings.json"),
-          "plannotator@plannotator",
-        ) ||
-        hasInstalledPlugin(
-          join(paths.claudeDir, "plugins", "installed_plugins.json"),
-          "plannotator@plannotator",
-        ),
+      references: () => pluginReferences(paths.claudeDir, pluginId),
     },
     {
+      // Copilot CLI keeps one install per user: nothing in another scope to leave.
       label: "GitHub Copilot CLI plugin plannotator-copilot@plannotator",
+      owner: "GitHub Copilot CLI",
       command: "copilot",
-      args: ["plugins", "remove", "plannotator-copilot@plannotator", "--plugin"],
-      installed:
-        hasEnabledPlugin(
-          join(paths.copilotDir, "settings.json"),
-          "plannotator-copilot@plannotator",
-        ) ||
-        hasDirectoryWithPrefix(
-          join(paths.copilotDir, "installed-plugins", "plannotator"),
-          "plannotator-copilot",
-        ),
+      // Copilot CLI 1.0.68: `copilot plugin uninstall <name>` (`plugins remove … --plugin` is refused).
+      args: ["plugin", "uninstall", "plannotator-copilot@plannotator"],
+      references: () => {
+        const enabled = enabledPluginReferences(join(paths.copilotDir, "settings.json"), "plannotator-copilot@plannotator");
+        const installed = directoryReferences(join(paths.copilotDir, "installed-plugins", "plannotator"), "plannotator-copilot");
+        return { references: [...enabled.references, ...installed.references], otherScopes: [], unreadable: [...enabled.unreadable, ...installed.unreadable] };
+      },
     },
     {
       label: "Droid plugin plannotator@plannotator",
+      owner: "Droid",
       command: "droid",
       args: [
         "plugin",
@@ -738,68 +845,84 @@ async function removeHostPlugins(
         "--scope",
         "user",
       ],
-      installed:
-        hasEnabledPlugin(
-          join(paths.factoryDir, "settings.json"),
-          "plannotator@plannotator",
-        ) ||
-        hasInstalledPlugin(
-          join(paths.factoryDir, "plugins", "installed_plugins.json"),
-          "plannotator@plannotator",
-        ),
+      references: () => pluginReferences(paths.factoryDir, pluginId),
     },
     {
       label: "Pi extension npm:@plannotator/pi-extension",
+      owner: "Pi",
       command: "pi",
       args: ["remove", "npm:@plannotator/pi-extension"],
-      installed: hasPiPackage(
-        join(
-          environment.env.PI_CODING_AGENT_DIR || join(environment.homeDir, ".pi", "agent"),
-          "settings.json",
-        ),
-      ),
+      references: () => {
+        const filePath = join(environment.env.PI_CODING_AGENT_DIR || join(environment.homeDir, ".pi", "agent"), "settings.json");
+        return piPackageReferences(filePath);
+      },
     },
     {
       // The installers add it with `qwen extensions install`; Qwen's own
       // command removes it from its extension store.
       label: "Qwen Code extension plannotator",
+      owner: "Qwen Code",
       command: "qwen",
       args: ["extensions", "uninstall", "plannotator"],
-      installed: existsSync(join(paths.qwenDir, "extensions", "plannotator", "qwen-extension.json")),
+      references: () => {
+        const folder = join(paths.qwenDir, "extensions", "plannotator");
+        return { references: existsSync(join(folder, "qwen-extension.json")) ? [folder] : [], otherScopes: [], unreadable: [] };
+      },
     },
     {
       label: "VS Code extension backnotprop.plannotator-webview",
+      owner: "VS Code",
       command: "code",
       args: ["--uninstall-extension", "backnotprop.plannotator-webview"],
-      installed: hasDirectoryWithPrefix(
-        join(environment.homeDir, ".vscode", "extensions"),
-        "backnotprop.plannotator-webview-",
-      ),
+      references: () => vscodeReferences(join(environment.homeDir, ".vscode", "extensions")),
     },
-  ] as const;
+  ];
 
+  const retry = formatUninstallRetryCommand(request);
   for (const action of actions) {
-    if (!action.installed) continue;
-    if (request.dryRun) {
-      state.planned.push(action.label);
+    const scan = action.references();
+    if (scan.unreadable.length > 0) {
+      for (const unreadable of scan.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);
       continue;
     }
-
+    // `--scope user` leaves a project's install: named, never waited for (every retry would stop on it).
+    for (const other of scan.otherScopes) {
+      const where = other.project ? ` for ${other.project}` : "";
+      const how = other.project && (other.scope === "project" || other.scope === "local")
+        ? `; to remove it, run \`${action.command} plugin uninstall ${pluginId} --scope ${other.scope}\` in ${other.project}`
+        : "";
+      state.warnings.push(`Skipped: ${action.label} installed in ${other.scope} scope${where} (${other.field}), which uninstall leaves. Its hooks need the plannotator command${how}.`);
+    }
+    const references = scan.references;
+    if (references.length === 0) continue;
     const executable = environment.which(action.command);
     const manualCommand = [action.command, ...action.args].join(" ");
+    const byHand = (entries: readonly string[]) => `remove only these Plannotator entries by hand: ${entries.join("; ")}. Keep everything else, then run \`${retry}\` again.`;
     if (!executable) {
       state.errors.push(
-        `${action.label} was detected but ${action.command} is unavailable; it was not removed. Manual cleanup: restore ${action.command} on PATH and run \`${manualCommand}\`. After it succeeds, rerun \`${formatUninstallRetryCommand(request)}\`.`,
+        `${action.label} was detected but ${action.command} is unavailable; it was not removed. Manual cleanup: restore ${action.command} on PATH and run \`${manualCommand}\`. After it succeeds, rerun \`${retry}\`. If ${action.owner} was uninstalled for good, ${byHand(references)}`,
       );
       continue;
     }
 
+    if (request.dryRun) {
+      state.planned.push(action.label);
+      continue;
+    }
     const result = await environment.runCommand(executable, action.args);
     if (result.exitCode === 0) {
-      state.removed.push(action.label);
+      // Only what that command removes counts: another scope's install was named above.
+      const remaining = action.references();
+      for (const unreadable of remaining.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);
+      if (remaining.unreadable.length > 0) continue;
+      if (remaining.references.length > 0) {
+        state.errors.push(`${action.label} is still there after \`${manualCommand}\` reported success. To continue, ${byHand(remaining.references)}`);
+      } else {
+        state.removed.push(action.label);
+      }
     } else {
       state.errors.push(
-        `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). Manual cleanup: run \`${manualCommand}\` directly and resolve the host error until it succeeds. Then rerun \`${formatUninstallRetryCommand(request)}\`.`,
+        `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). Manual cleanup: run \`${manualCommand}\` directly and resolve the host error until it succeeds. Then rerun \`${retry}\`. If ${action.command} keeps refusing because ${action.owner} no longer has it installed, ${action.command === "claude" ? `run \`claude plugin disable ${pluginId} --scope user\` to turn off its settings key, or ` : ""}${byHand(references)}`,
       );
     }
   }
@@ -823,6 +946,7 @@ function removeHostConfigEntries(
     {
       allowRelocatedBinary: false,
       removeFileWhenEmpty: false,
+      owner: "Claude Code",
     },
     "managed Claude Code hooks",
     `Make ${join(paths.claudeDir, "settings.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.PermissionRequest entries whose matcher is "ExitPlanMode", hooks.PreToolUse entries whose matcher is "EnterPlanMode", and Plannotator t3-hook commands in Bash entries, then save the file.`,
@@ -841,6 +965,7 @@ function removeHostConfigEntries(
     {
       allowRelocatedBinary: true,
       removeFileWhenEmpty: true,
+      owner: "Codex",
     },
     "managed Codex Stop hook",
     `Make ${join(paths.codexDir, "hooks.json")} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.Stop entries, then save the file; delete it only if no other settings remain.`,
@@ -861,7 +986,7 @@ function removeHostConfigEntries(
     state,
   );
 
-  cleanupVibeHooks(join(paths.vibeDir, "hooks.toml"), request, state);
+  cleanupVibeHooks(join(paths.vibeDir, "hooks.toml"), paths.binaryPaths, environment.platform, request, state);
 
   for (const configDir of paths.configDirs) {
     for (const name of ["opencode.json", "opencode.jsonc"]) {
@@ -1360,6 +1485,7 @@ function cleanupHooksJson(
 ): void {
   const recovery = { manualCleanup };
   const parsed = readJsonRecord(
+    policy.owner,
     filePath,
     label,
     recovery,
@@ -1367,6 +1493,7 @@ function cleanupHooksJson(
     state,
   );
   if (!parsed) return;
+  if (request.dryRun) reportRemainingHookReferences(policy.owner, parsed, filePath, binaryPaths, platform, policy.allowRelocatedBinary, request, state, specs);
 
   const hooks = asRecord(parsed.hooks);
   if (!hooks) return;
@@ -1422,7 +1549,9 @@ function cleanupHooksJson(
     else hooks[spec.event] = nextEntries;
   }
 
-  if (!changed) return;
+  if (!changed) {
+    return;
+  }
   if (Object.keys(hooks).length === 0) delete parsed.hooks;
   else parsed.hooks = hooks;
 
@@ -1452,13 +1581,8 @@ function cleanupCodexConfig(
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    reportHostCleanupFailure(
-      `Could not inspect ${filePath}`,
-      formatError(error),
-      recovery,
-      request,
-      state,
-    );
+    // The Inbox check reads this file too: said once.
+    reportUnreadableConfig("Codex", { file: filePath, reason: describeFsError(error) }, request, state);
     return;
   }
 
@@ -1490,10 +1614,11 @@ const VIBE_MANAGED_END = "# <<< plannotator-managed-vibe-hooks";
  */
 function cleanupVibeHooks(
   filePath: string,
+  binaryPaths: readonly string[],
+  platform: NodeJS.Platform,
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
-  if (!existsSync(filePath)) return;
   const recovery = {
     manualCleanup: `Make ${filePath} readable and writable. Remove the lines between and including the "${VIBE_MANAGED_START}" and "${VIBE_MANAGED_END}" markers; keep every other hook. Delete the file only if nothing remains.`,
   };
@@ -1501,13 +1626,7 @@ function cleanupVibeHooks(
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    reportHostCleanupFailure(
-      `Could not inspect ${filePath}`,
-      formatError(error),
-      recovery,
-      request,
-      state,
-    );
+    if (!isMissingPathError(error)) reportUnreadableConfig("Mistral Vibe", { file: filePath, reason: describeFsError(error) }, request, state);
     return;
   }
 
@@ -1515,8 +1634,14 @@ function cleanupVibeHooks(
   const nextLines: string[] = [];
   let skipping = false;
   let sawStart = false;
+  let hookIndex = -1;
+  const removedHookIndices = new Set<number>();
   for (const line of lines) {
     const trimmed = line.trim();
+    if (/^\[\[\s*(?:hooks|"hooks"|'hooks')\s*\]\]/.test(trimmed)) {
+      hookIndex++;
+      if (skipping) removedHookIndices.add(hookIndex);
+    }
     if (!skipping && trimmed.startsWith(VIBE_MANAGED_START)) {
       skipping = true;
       sawStart = true;
@@ -1531,6 +1656,12 @@ function cleanupVibeHooks(
     nextLines.push(line);
   }
 
+  // Parsed before anything is written: a file it cannot read as TOML is left exactly as it was.
+  const original = parseVibeHooks(filePath, content, request, state);
+  if (state.reported.has(filePath)) return;
+  if (request.dryRun) {
+    reportRemainingHookReferences("Mistral Vibe", original, filePath, binaryPaths, platform, false, request, state, [], removedHookIndices);
+  }
   if (!sawStart) return;
 
   const remaining = nextLines.filter((line) => line.trim().length > 0);
@@ -1554,6 +1685,7 @@ function cleanupVibeHooks(
     );
     state.removed.push(`${label} in ${filePath}`);
   } catch (error) {
+    state.reported.add(filePath);
     reportHostCleanupFailure(
       `Could not rewrite ${filePath}`,
       formatError(error),
@@ -1575,6 +1707,7 @@ function cleanupGeminiSettings(
     manualCleanup: `Make ${filePath} a readable, writable strict JSON object. Remove only Plannotator command hooks from hooks.BeforeTool entries whose matcher is "exit_plan_mode", then save the file.`,
   };
   const parsed = readJsonRecord(
+    "Gemini CLI",
     filePath,
     "managed Gemini hooks",
     recovery,
@@ -1582,6 +1715,8 @@ function cleanupGeminiSettings(
     state,
   );
   if (!parsed) return;
+  if (request.dryRun) reportRemainingHookReferences("Gemini CLI", parsed, filePath, binaryPaths, platform, false, request, state,
+    [{ event: "BeforeTool", matcher: "exit_plan_mode", suffix: "" }]);
   const wasInstallerTemplate = isGeminiInstallerTemplate(
     parsed,
     binaryPaths,
@@ -1590,7 +1725,9 @@ function cleanupGeminiSettings(
 
   const hooks = asRecord(parsed.hooks);
   const beforeTool = hooks?.BeforeTool;
-  if (!hooks || !Array.isArray(beforeTool)) return;
+  if (!hooks || !Array.isArray(beforeTool)) {
+    return;
+  }
 
   let changed = false;
   const nextEntries: unknown[] = [];
@@ -1620,7 +1757,13 @@ function cleanupGeminiSettings(
     nextEntries.push({ ...entry, hooks: nextHooks });
   }
 
-  if (!changed) return;
+  if (!changed) {
+    return;
+  }
+  if (nextEntries.length === 0) delete hooks.BeforeTool;
+  else hooks.BeforeTool = nextEntries;
+  if (Object.keys(hooks).length === 0) delete parsed.hooks;
+  else parsed.hooks = hooks;
   if (request.dryRun) {
     state.planned.push(`managed Gemini hook in ${filePath}`);
     return;
@@ -1631,10 +1774,6 @@ function cleanupGeminiSettings(
     return;
   }
 
-  if (nextEntries.length === 0) delete hooks.BeforeTool;
-  else hooks.BeforeTool = nextEntries;
-  if (Object.keys(hooks).length === 0) delete parsed.hooks;
-  else parsed.hooks = hooks;
   writeJson(
     filePath,
     parsed,
@@ -1659,13 +1798,7 @@ function cleanupOpenCodeConfig(
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    reportHostCleanupFailure(
-      `Could not inspect ${filePath}`,
-      formatError(error),
-      recovery,
-      request,
-      state,
-    );
+    reportUnreadableConfig("OpenCode", { file: filePath, reason: describeFsError(error) }, request, state);
     return;
   }
 
@@ -1784,6 +1917,7 @@ function cleanupRecognizableKiroAgent(
     manualCleanup: `Make ${filePath} a readable, writable strict JSON object without changing its intent. If it is the installer-provided Plannotator Kiro agent, delete it; otherwise keep the repaired custom agent at that path.`,
   };
   const parsed = readJsonRecord(
+    "Kiro",
     filePath,
     "the Plannotator Kiro agent",
     recovery,
@@ -1820,13 +1954,7 @@ function cleanupRecognizableAmpPlugin(
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    reportHostCleanupFailure(
-      `Could not inspect ${filePath}`,
-      formatError(error),
-      recovery,
-      request,
-      state,
-    );
+    reportUnreadableConfig("Amp", { file: filePath, reason: describeFsError(error) }, request, state);
     return;
   }
 
@@ -1843,24 +1971,21 @@ function cleanupRecognizableAmpPlugin(
 }
 
 function readJsonRecord(
+  owner: string,
   filePath: string,
   integration: string,
   recovery: HostCleanupRecovery,
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): JsonRecord | null {
-  if (!existsSync(filePath)) return null;
+  // Already said this run (a host's plugin check reads the same settings.json): once is enough.
+  if (state.reported.has(filePath)) return null;
   let content: string;
   try {
     content = readFileSync(filePath, "utf8");
   } catch (error) {
-    reportHostCleanupFailure(
-      `Could not inspect ${filePath}`,
-      formatError(error),
-      recovery,
-      request,
-      state,
-    );
+    if (isMissingPathError(error)) return null;
+    reportUnreadableConfig(owner, { file: filePath, reason: describeFsError(error) }, request, state);
     return null;
   }
 
@@ -1900,6 +2025,7 @@ function reportMalformedSharedConfig(
   request: UninstallRequest,
   state: MutableUninstallResult,
 ): void {
+  state.reported.add(filePath);
   reportHostCleanupFailure(
     `Preserved ${filePath}`,
     `${reason}, so ${integration} cannot be classified safely`,
@@ -1931,6 +2057,7 @@ function writeJson(
     );
     state.removed.push(`${label} in ${filePath}`);
   } catch (error) {
+    state.reported.add(filePath);
     reportHostCleanupFailure(
       `Could not update ${filePath}`,
       formatError(error),
@@ -1953,6 +2080,7 @@ function writeTextUpdate(
     writeFileSync(filePath, content, "utf8");
     state.removed.push(`${label} in ${filePath}`);
   } catch (error) {
+    state.reported.add(filePath);
     reportHostCleanupFailure(
       `Could not update ${filePath}`,
       formatError(error),
@@ -2082,6 +2210,7 @@ function removePath(
     stat = lstatSync(path);
   } catch (error) {
     if (isMissingPathError(error)) return;
+    state.reported.add(path);
     if (recovery) {
       reportHostCleanupFailure(
         `Could not inspect ${path}`,
@@ -2111,6 +2240,7 @@ function removePath(
     }
     state.removed.push(path);
   } catch (error) {
+    state.reported.add(path);
     if (recovery) {
       reportHostCleanupFailure(
         `Could not remove ${path}`,
@@ -2123,59 +2253,6 @@ function removePath(
       state.errors.push(`Could not remove ${path}: ${formatError(error)}`);
     }
   }
-}
-
-function isManagedHook(
-  value: unknown,
-  binaryPaths: readonly string[],
-  suffix: "" | "improve-context" | "t3-hook",
-  platform: NodeJS.Platform,
-  allowRelocatedBinary = false,
-): boolean {
-  const hook = asRecord(value);
-  if (!hook || hook.type !== "command" || typeof hook.command !== "string") {
-    return false;
-  }
-
-  const command = hook.command.trim();
-  if (suffix === "t3-hook") {
-    const parsed = parseT3HookCommand(command);
-    return parsed !== undefined && (parsed.executable === "plannotator" || binaryPaths.some((path) => sameCommand(parsed.executable, path, platform)));
-  }
-  const expectedBare = suffix ? `plannotator ${suffix}` : "plannotator";
-  if (command === expectedBare) return true;
-
-  for (const binaryPath of binaryPaths) {
-    const candidates = suffix
-      ? [`${binaryPath} ${suffix}`, `"${binaryPath}" ${suffix}`]
-      : [binaryPath, `"${binaryPath}"`];
-    if (candidates.some((candidate) => sameCommand(command, candidate, platform))) {
-      return true;
-    }
-  }
-  return allowRelocatedBinary && isRelocatedPlannotatorCommand(command, suffix);
-}
-
-function isRelocatedPlannotatorCommand(
-  command: string,
-  suffix: "" | "improve-context",
-): boolean {
-  const commandSuffix = suffix ? ` ${suffix}` : "";
-  if (commandSuffix && !command.endsWith(commandSuffix)) return false;
-
-  const executable = commandSuffix
-    ? command.slice(0, -commandSuffix.length).trim()
-    : command;
-  const unquoted =
-    executable.length >= 2 &&
-      executable.startsWith('"') &&
-      executable.endsWith('"')
-      ? executable.slice(1, -1)
-      : executable;
-  if (!isAbsolute(unquoted)) return false;
-
-  const executableName = basename(unquoted).toLowerCase();
-  return executableName === "plannotator" || executableName === "plannotator.exe";
 }
 
 function isGeminiInstallerTemplate(
@@ -2227,19 +2304,6 @@ function isPlannotatorOpenCodePlugin(value: unknown): boolean {
   return spec !== null && /^@plannotator\/opencode(?:@|$)/.test(spec);
 }
 
-function hasEnabledPlugin(filePath: string, pluginId: string): boolean {
-  const parsed = tryReadJsonRecord(filePath);
-  const enabled = parsed ? asRecord(parsed.enabledPlugins) : null;
-  return enabled?.[pluginId] === true;
-}
-
-function hasInstalledPlugin(filePath: string, pluginId: string): boolean {
-  const parsed = tryReadJsonRecord(filePath);
-  const plugins = parsed ? asRecord(parsed.plugins) : null;
-  const installs = plugins?.[pluginId];
-  return Array.isArray(installs) && installs.length > 0;
-}
-
 /**
  * Qwen Code's user folder: $QWEN_HOME (the folder itself, a leading ~
  * expanded, a relative path taken from the current folder) or ~/.qwen, as in
@@ -2251,44 +2315,6 @@ function resolveQwenDir(qwenHome: string | undefined, homeDir: string): string {
   if (value === "~") return homeDir;
   if (value.startsWith("~/") || value.startsWith("~\\")) return join(homeDir, value.slice(2));
   return resolve(value);
-}
-
-function hasPiPackage(filePath: string): boolean {
-  const parsed = tryReadJsonRecord(filePath);
-  const packages = parsed?.packages;
-  if (!Array.isArray(packages)) return false;
-
-  return packages.some((entry) => {
-    const record = asRecord(entry);
-    const source =
-      typeof entry === "string"
-        ? entry
-        : typeof record?.source === "string"
-          ? record.source
-          : null;
-    return (
-      typeof source === "string" &&
-      /^npm:@plannotator\/pi-extension(?:@|$)/.test(source)
-    );
-  });
-}
-
-function tryReadJsonRecord(filePath: string): JsonRecord | null {
-  if (!existsSync(filePath)) return null;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(filePath, "utf8"));
-    return asRecord(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function hasDirectoryWithPrefix(directory: string, prefix: string): boolean {
-  try {
-    return readdirSync(directory).some((entry) => entry.startsWith(prefix));
-  } catch {
-    return false;
-  }
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -2303,18 +2329,6 @@ function hasOnlyKeys(
 ): boolean {
   const allowedSet = new Set(allowed);
   return Object.keys(value).every((key) => allowedSet.has(key));
-}
-
-function sameCommand(
-  left: string,
-  right: string,
-  platform: NodeJS.Platform,
-): boolean {
-  const normalizedLeft = left.replace(/\\/g, "/");
-  const normalizedRight = right.replace(/\\/g, "/");
-  return platform === "win32"
-    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
-    : normalizedLeft === normalizedRight;
 }
 
 function sameLexicalPath(

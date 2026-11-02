@@ -99,6 +99,109 @@ describe("parseInboxActionBlocks", () => {
     expect(prose!.replaces).toEqual([]);
     expect(prose!.why).toBe("Replaces: the manual promote step");
   });
+
+  test("commands in fences stay in the why, in order, each a fence of its own; a label-looking line inside a fence is the command", () => {
+    const [block] = parseInboxActionBlocks(
+      [
+        ":::action",
+        "Publish the two npm tarballs, in order",
+        "The registry wants your security key.",
+        "",
+        "```",
+        "npm pack ./packages/core",
+        "```",
+        "",
+        "```sh",
+        "Where: ./dist",
+        "Run: npm publish dist/core.tgz",
+        "```",
+        "Stopped: the release",
+        ":::",
+      ].join("\n"),
+    );
+    expect(block!.why).toBe("The registry wants your security key.\n\n```\nnpm pack ./packages/core\n```\n\n```sh\nWhere: ./dist\nRun: npm publish dist/core.tgz\n```");
+    expect(block!.action).toEqual({ where: null, where_url: null, run: null, watching: null });
+    expect(block!.stopped).toBe("the release");
+  });
+
+  test("a task list item with indented fences under it: the task box leaves the first line, the fences lose the shared indent", () => {
+    const body = [
+      ":::action",
+      "- [ ] Let this MacBook's key into the Mac mini, in Terminal:",
+      "",
+      "  ```",
+      "  ssh-copy-id -i ~/.ssh/id_ed25519.pub user@host",
+      "  ```",
+      "",
+      "  **Or on the Mini itself**, in Terminal:",
+      "",
+      "  ```",
+      "    mkdir -p ~/.ssh",
+      "  ```",
+      ":::",
+    ].join("\n");
+    const [block] = parseInboxActionBlocks(body);
+    expect(block!.prompt).toBe("Let this MacBook's key into the Mac mini, in Terminal:");
+    expect(block!.key).toBe(inboxActionKey("Let this MacBook's key into the Mac mini, in Terminal:"));
+    // Only the indent every line shares goes: a deeper line keeps its own.
+    expect(block!.why).toBe("```\nssh-copy-id -i ~/.ssh/id_ed25519.pub user@host\n```\n\n**Or on the Mini itself**, in Terminal:\n\n```\n  mkdir -p ~/.ssh\n```");
+    const [checked] = parseInboxActionBlocks(":::action\n* [x] Approve the deploy\n:::");
+    expect(checked!.prompt).toBe("Approve the deploy");
+  });
+
+  test("a command written as prose gets a fence (a copy button): the owner's \"Run in Terminal on this MacBook: …\", a line that is only inline code", () => {
+    const [owner] = parseInboxActionBlocks(
+      [
+        ":::action",
+        "Publish @plannotator/ui 0.55.0 to npm",
+        "Run in Terminal on this MacBook: npm publish /path/to/plannotator-ui-0.55.0.tgz --access public",
+        "Watching: npm showing @plannotator/ui 0.55.0",
+        ":::",
+      ].join("\n"),
+    );
+    expect(owner!.why).toBe("Run in Terminal on this MacBook:\n\n```\nnpm publish /path/to/plannotator-ui-0.55.0.tgz --access public\n```");
+    expect(owner!.action.watching).toBe("npm showing @plannotator/ui 0.55.0");
+    const [inline] = parseInboxActionBlocks(":::action\nSign in to npm\nIn your terminal:\n`npm login`\nThen `npm whoami` should name you.\n:::");
+    expect(inline!.why).toBe("In your terminal:\n\n```\nnpm login\n```\n\nThen `npm whoami` should name you.");
+  });
+
+  test("\"Run in/on/from …:\" is a command only when the words before the colon name a shell and what follows is not a sentence", () => {
+    const why = (line: string) => parseInboxActionBlocks(`:::action\nCheck the deploy\n${line}\n:::`)[0]!.why;
+    for (const prose of [
+      "Run in the morning: check the dashboard first.",
+      "Run on staging: the migration is safe there",
+      "Run from the repo root: it needs the .env file",
+      "Run on CI: it failed twice",
+      // Names a shell, but what follows is a sentence: prose.
+      "Run it in a fresh terminal: the old one has a stale token.",
+    ]) {
+      expect(why(prose)).toBe(prose);
+    }
+    // The same lead-in before a command is a command.
+    expect(why("Run it in a fresh terminal: npm login")).toBe("Run it in a fresh terminal:\n\n```\nnpm login\n```");
+    expect(why("Run from PowerShell: winget install Plannotator")).toBe("Run from PowerShell:\n\n```\nwinget install Plannotator\n```");
+  });
+
+  test("a fence indented under a numbered step copies the command without the step's indent", () => {
+    const [block] = parseInboxActionBlocks(
+      [":::action", "Sign in to npm", "Because the token expired.", "", "1. Log in:", "", "   ```", "   npm login", "   ```", "", "2. Check:", "", "   ```", "   npm whoami", "     --registry https://registry.npmjs.org", "   ```", ":::"].join("\n"),
+    );
+    expect(block!.why).toBe(
+      "Because the token expired.\n\n1. Log in:\n\n```\nnpm login\n```\n\n2. Check:\n\n```\nnpm whoami\n  --registry https://registry.npmjs.org\n```",
+    );
+  });
+
+  test("one Run: line is the item's command; several are fenced in place, in order, none dropped", () => {
+    const [one] = parseInboxActionBlocks(":::action\nSign in to npm\nRun: `npm login`\n:::");
+    expect(one!.action.run).toBe("npm login");
+    expect(one!.why).toBeNull();
+    const [two] = parseInboxActionBlocks(
+      ":::action\nPublish both tarballs, in order\nCore first.\nRun: npm publish dist/core.tgz\nRun: `npm publish dist/ui.tgz`\nStopped: the release\n:::",
+    );
+    expect(two!.action.run).toBeNull();
+    expect(two!.why).toBe("Core first.\n\n```\nnpm publish dist/core.tgz\n```\n\n```\nnpm publish dist/ui.tgz\n```");
+    expect(two!.stopped).toBe("the release");
+  });
 });
 
 describe("plan review's question grammar is unchanged", () => {

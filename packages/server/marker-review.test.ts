@@ -19,6 +19,7 @@ import {
   type MarkerReviewOutput,
 } from "./marker-review";
 import type { ResolvedReviewProfile } from "@plannotator/shared/review-profiles";
+import { planAgentJobSpawn } from "@plannotator/ai/providers/command-path";
 
 const cursor = MARKER_ENGINES.cursor;
 const opencode = MARKER_ENGINES.opencode;
@@ -153,6 +154,38 @@ describe("buildMarkerCommand: opencode", () => {
     expect(withCwd).not.toContain("--dir");
     expect(withCwd).not.toContain("/repo");
     expect(buildMarkerCommand(opencode, "p").command).not.toContain("--dir");
+  });
+});
+
+// #2372: on Windows Pi is a .cmd shim, which a job starts through cmd.exe,
+// and a Guided Review prompt (line breaks, quotes, the diff itself) cannot
+// cross cmd.exe. The failure: the prompt is dropped or cut, or the job is
+// refused, instead of the same run with the prompt on stdin.
+describe("Pi on Windows: the job's prompt moves to stdin for a .cmd shim", () => {
+  const piCmd = String.raw`C:\Users\me\.pi\agent\bin\pi.cmd`;
+  const prompt = 'Organize this diff.\n\n+const s = "100% & done";';
+
+  test("the built argv runs as the same Pi call through cmd.exe, prompt on stdin", () => {
+    const { command } = buildMarkerCommand(pi, prompt, "anthropic/claude-sonnet-4-5", "/repo", { thinking: "high" });
+    const launch = planAgentJobSpawn(command, {
+      which: (name) => (name === "pi" ? piCmd : null),
+      promptOnStdin: pi.promptOnStdin,
+      platform: "win32",
+      exists: () => false,
+      comspec: "cmd.exe",
+    });
+    expect(launch.unsafeScript).toBeUndefined();
+    expect(launch.stdinPrompt).toBe(prompt);
+    expect(launch.verbatim).toBe(true);
+    expect(launch.command.slice(0, 4)).toEqual(["cmd.exe", "/d", "/s", "/c"]);
+    const quoted = [piCmd, ...command.slice(1, -1)].map((arg) => `"${arg}"`).join(" ");
+    expect(launch.command[4]).toBe(`"${quoted}"`);
+    expect(command.slice(-2)).toEqual(["-p", prompt]);
+  });
+
+  test("an argv that does not end in -p <prompt> is not Pi's to move", () => {
+    expect(pi.promptOnStdin!(["pi", "--list-models"])).toBeNull();
+    expect(pi.promptOnStdin!(["pi"])).toBeNull();
   });
 });
 

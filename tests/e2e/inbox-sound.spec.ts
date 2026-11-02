@@ -119,7 +119,11 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   // An Inbox that ran before on an older version: this run is an update.
-  if (options.updatedFrom) writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+  if (options.updatedFrom) {
+    writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: options.updatedFrom }));
+    // Due on a used Inbox, and its check would run the `codex` on this PATH.
+    writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxVoiceIntro: { shownAt: '2026-10-01T10:00:00.000Z' } }));
+  }
   const env = {
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
     HOME: home,

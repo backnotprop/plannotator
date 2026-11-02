@@ -47,7 +47,7 @@ const opencodeConfigs = [
   { label: 'opencode.json (OpenCode 2)', config: '{ "plugins": [{ "package": "@plannotator/opencode@latest" }] }' },
   { label: 'opencode.json (OpenCode 1)', config: '{ "plugin": ["@plannotator/opencode@latest"] }' },
 ];const cursorConfig = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotator", "args": ["inbox", "mcp"] } } }';
-const testRequest = 'Send me a test question in the Plannotator Inbox, then wait for my answer.';
+const testRequest = 'Send me a test question in the Plannotator Inbox, and read my answer when I tell you I sent it.';
 const steps = [
   {
     title: 'An agent writes to the Inbox while it works.',
@@ -209,7 +209,7 @@ const steps = [
                       <code>{codexCommand}</code>
                       <button type="button" class="copy-btn" data-copy={codexCommand} aria-label="Copy the command" set:html={copyIcon} />
                     </div>
-                    <p>Then restart Codex. Codex reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p>Then restart Codex. With Codex 0.149 or later your reply arrives in the thread that asked as a new turn; otherwise Codex reads it when it calls <code>read_thread</code>.</p>
                     <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-cu" aria-labelledby="ib-t-cu" hidden>
@@ -218,7 +218,7 @@ const steps = [
                       <code>{cursorConfig}</code>
                       <button type="button" class="copy-btn" data-copy={cursorConfig} aria-label="Copy the config" set:html={copyIcon} />
                     </div>
-                    <p>Cursor reads your reply when it calls <code>wait_for_reply</code>.</p>
+                    <p>Cursor reads your reply when it calls <code>read_thread</code>.</p>
                     <p class="ib-step-note">If it can't find plannotator, use the full path from <code>command -v plannotator</code>.</p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-ot" aria-labelledby="ib-t-ot" hidden>

@@ -44,6 +44,8 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 let pushRecord: ((data: unknown) => void) | null = null;
+/** The stand-in stream's last record id: past any cursor the list reads in these tests. */
+let fakeEventId = 1000;
 let tailnetPage = false;
 let savedNotification: unknown;
 let savedHasFocus: typeof document.hasFocus;
@@ -116,14 +118,15 @@ beforeEach(async () => {
     if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     const answer = await loopback(path, method, body);
     if (method === 'GET' && path.startsWith('/api/inbox/settings') && answer.status === 200 && tailnetPage) {
-      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet' });
+      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet', guest: true });
     }
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': answer.type } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
     addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
-      if (type === 'record') pushRecord = (data) => listener({ data: JSON.stringify(data), lastEventId: '999' } as MessageEvent<string>);
+      // Each record a seq above the last, as the server's are (the window drops one at or below what it passed).
+      if (type === 'record') pushRecord = (data) => listener({ data: JSON.stringify(data), lastEventId: String(++fakeEventId) } as MessageEvent<string>);
     }
     close() {}
   };
@@ -480,6 +483,52 @@ test.skipIf(!hasDom)('Fast-forward through every step writes nothing and ends ea
   expect((await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '')).toBe(before);
 }, 120_000);
 
+test.skipIf(!hasDom)('step 9: 32 KB pasted into the thread name goes to the message as words, never an upload (the tour takes no files)', async () => {
+  const el = await openOnEntry();
+  const uploads: string[] = [];
+  const savedXhr = (globalThis as Record<string, unknown>).XMLHttpRequest;
+  (globalThis as Record<string, unknown>).XMLHttpRequest = class {
+    upload = { onprogress: null };
+    open(_method: string, path: string) {
+      uploads.push(path);
+    }
+    setRequestHeader() {}
+    send() {}
+    abort() {}
+  };
+  try {
+    await click($(el, '[data-tour-start]'));
+    await pastIntro(el);
+    for (const key of ['2', '3', '4', '5', '6', '7', '8-open', '9']) {
+      await click($(el, '[data-tour-forward]'));
+      await until(() => coachKey(el) === key, `step ${key} fast-forwarded`);
+    }
+    await click([...el.querySelectorAll<HTMLElement>('[data-open-compose]')][0]);
+    await until(() => document.querySelector('[data-compose] [data-compose-to]') !== null, 'compose');
+    await click(document.querySelector('[data-compose] [data-compose-to]'));
+    await until(() => document.querySelector('[data-compose] [role="option"]') !== null, 'the picker');
+    await click(document.querySelector('[data-compose] [role="option"]'));
+    await until(() => document.querySelector('[data-compose] input[aria-label="Thread name"]') !== null, 'the thread-name chip');
+    const area = document.querySelector('[data-compose] textarea') as HTMLTextAreaElement;
+    const words = area.value;
+    const log = Array.from({ length: 800 }, (_, i) => `2026-11-01T21:10:${String(i % 60).padStart(2, '0')}Z worker retry ${i} charged`).join('\n') + '\n';
+    const chip = document.querySelector('[data-compose] input[aria-label="Thread name"]') as HTMLInputElement;
+    const items = [{ kind: 'string', type: 'text/plain', getAsFile: () => null }];
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', { value: { files: [], items, types: ['text/plain'], getData: (t: string) => (t === 'text/plain' ? log : '') } });
+    await act(async () => {
+      chip.dispatchEvent(event);
+    });
+    await until(() => area.value.length > words.length, 'the words in the message');
+    expect(area.value.endsWith(log)).toBe(true);
+    expect(document.querySelectorAll('[data-compose] [data-pasted-text]')).toHaveLength(0);
+    await wait(200);
+    expect(uploads).toEqual([]);
+  } finally {
+    (globalThis as Record<string, unknown>).XMLHttpRequest = savedXhr;
+  }
+}, 120_000);
+
 test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send answer a click; the card itself points again', async () => {
   const el = await openOnEntry();
   await walkTo(el, 3);
@@ -492,7 +541,9 @@ test.skipIf(!hasDom)('a sent question card, Mark read, Archive and an early Send
   await until(() => ($(el, '[data-tour-nudge]')?.textContent ?? '').includes('after the tour'), 'Mark read answers');
   // A click on the card's words shows its target again.
   await click($(el, '[data-tour-coach] h2'));
-  await until(() => document.querySelector('.ib-tour-again') !== null, 'the target pointed at again');
+  await until(() => document.querySelector('.ib-tour-mark') !== null, 'the target pointed at again');
+  // The highlight is its own class: it never lands on the first-run line, which keeps `ib-tour-again` for its text.
+  expect(document.querySelector('.ib-tour-again.ib-tour-mark')).toBeNull();
   expect(writes()).toEqual([]);
 }, 90_000);
 

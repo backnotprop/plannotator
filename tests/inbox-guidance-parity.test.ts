@@ -187,7 +187,7 @@ describe("Inbox guidance parity across harnesses", () => {
     // The tool: OpenCode 1 lacks only the wake note.
     expect(SURFACES["tool: OpenCode 1 (no wake)"]).toBe(SURFACES["tool: Pi, OpenCode 2 (wake)"].replace(`\n\n${INBOX_TOOL_WAKE_NOTE}`, ""));
     // The reminder: one sentence each.
-    expect(INBOX_REMINDER_TEXT_NO_WAKE).toBe(INBOX_REMINDER_TEXT.replace("Their reply comes back here.", "Call wait_for_reply when you need their answer."));
+    expect(INBOX_REMINDER_TEXT_NO_WAKE).toBe(INBOX_REMINDER_TEXT.replace("Their reply comes back here.", "Their reply does not come back here by itself: read the thread later with read_thread."));
   });
 
   test("the reminder's shortened chat-or-Inbox sentence is the channel rule's first sentence, said in the chat", () => {
@@ -198,7 +198,9 @@ describe("Inbox guidance parity across harnesses", () => {
   test("in the reminder, the follow-through rule follows the send, before anything about the chat", () => {
     for (const surface of reminders) {
       const text = SURFACES[surface]!;
-      expect(text).toContain(`send_message and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      expect(text).toContain(`and keep going. ${INBOX_FOLLOW_THROUGH_RULE}`);
+      // Decisions reach the Inbox as question blocks, so every surface's reminder names the block.
+      expect(text.slice(0, text.indexOf("and keep going."))).toContain("`:::question` block");
       expect(text.indexOf(INBOX_FOLLOW_THROUGH_RULE)).toBeLessThan(text.indexOf("when the person writes here"));
     }
   });

@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { VaultNode } from "../types";
+import { basenameFromPath } from "@plannotator/core/source-save";
 import type { WorkspaceStatusPayload } from "@plannotator/core/workspace-status-types";
 
 export interface DirState {
@@ -200,7 +201,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
   }, []);
 
   const fetchTree = useCallback(async (dirPath: string, options: { quiet?: boolean } = {}) => {
-    const name = dirPath.split("/").pop() || dirPath;
+    const name = basenameFromPath(dirPath);
 
     setDirs((prev) => {
       const exists = prev.find((d) => d.path === dirPath);
@@ -291,7 +292,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
         const vaultDirs = prev.filter((d) => d.isVault);
         const regularDirs = directories.map((path) => ({
           path,
-          name: path.split("/").pop() || path,
+          name: basenameFromPath(path),
           tree: [],
           // Keep initial roots loading until their first snapshot resolves. If
           // the SSE watcher starts before /api/reference/files finishes,
@@ -313,7 +314,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
   }, []);
 
   const addVaultDir = useCallback(async (vaultPath: string) => {
-    const name = vaultPath.split("/").pop() || vaultPath;
+    const name = basenameFromPath(vaultPath);
 
     // Atomically replace any existing vault dirs (handles vault path change without accumulating stale entries)
     setDirs((prev) => {

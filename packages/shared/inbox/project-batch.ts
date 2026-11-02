@@ -32,6 +32,12 @@ export interface ProjectReadBatch {
   /** The threads marked read, in list order. */
   read: string[];
   /**
+   * The threads whose Mark read stood and only got their look back (Mark
+   * unread had taken it): no new Mark read, so their Undo is Mark unread
+   * again, never a Move back.
+   */
+  looked: string[];
+  /**
    * The loop stopped partway (a write failed): the threads above are the
    * ones it changed, which the Undo and the set-aside notes still cover; the
    * rest did not change. Absent when every thread was done.
@@ -68,31 +74,40 @@ function projectRows(store: InboxStore, projectId: string): InboxListRow[] {
 /** Mark all as read: `markRead(t, true)` for every thread single Mark read is offered on. */
 export function markProjectRead(store: InboxStore, projectId: string): ProjectReadBatch {
   const read: string[] = [];
+  const looked: string[] = [];
+  // A batch never ends a snooze: those threads are out of the list the person is clearing.
+  const snoozed = store.snoozedThreads();
   for (const row of projectRows(store, projectId)) {
-    if (!inboxRowOffersMarkRead(row)) continue;
+    if (snoozed.has(row.thread_id)) continue;
+    // A thread back from a snooze and otherwise Quiet: nothing to mark, only its clock to take away.
+    if (!inboxRowOffersMarkRead(row)) {
+      if (store.snoozes().some((entry) => entry.thread_id === row.thread_id)) store.endSnooze(row.thread_id);
+      continue;
+    }
     try {
       store.markRead(row.thread_id, true);
     } catch (error) {
       // A failed write stops the batch; what was done stays done, and is answered so it can be undone.
-      return { read, error: failure(error) };
+      return { read, looked, error: failure(error) };
     }
-    read.push(row.thread_id);
+    ((row.read_at ?? null) === null ? read : looked).push(row.thread_id);
   }
-  return { read };
+  return { read, looked };
 }
 
 /** Archive all: resolve every listed open thread; Mark read on one that came back. */
 export function archiveProject(store: InboxStore, projectId: string): ProjectArchiveBatch {
   const resolved: string[] = [];
   const read: string[] = [];
+  const snoozed = store.snoozedThreads();
   for (const row of projectRows(store, projectId)) {
-    if (inboxRowArchived(row)) continue;
+    if (inboxRowArchived(row) || snoozed.has(row.thread_id)) continue;
     try {
       if (row.resolved_at !== null) {
         store.markRead(row.thread_id, true);
         read.push(row.thread_id);
       } else {
-        store.resolveThread(row.thread_id, true);
+        store.resolveThread(row.thread_id, true, "person");
         resolved.push(row.thread_id);
       }
     } catch (error) {
@@ -105,7 +120,7 @@ export function archiveProject(store: InboxStore, projectId: string): ProjectArc
 /** The thread, when it is one of this project's threads (its root). */
 function ownThread(store: InboxStore, projectId: string, threadId: string): boolean {
   const root = store.message(threadId);
-  return root !== null && root.thread_id === threadId && root.project_id === projectId;
+  return root !== null && root.thread_id === threadId && store.sameProject(root.project_id, projectId);
 }
 
 function each(store: InboxStore, projectId: string, threadIds: readonly string[], write: (threadId: string) => void, out: ProjectUndoResult): void {
@@ -124,11 +139,12 @@ function each(store: InboxStore, projectId: string, threadIds: readonly string[]
   }
 }
 
-/** Undo of Mark all as read: `markRead(t, false)` for exactly the named threads. */
-export function unmarkProjectRead(store: InboxStore, projectId: string, threadIds: readonly string[]): ProjectUndoResult {
+/** Undo of Mark all as read: `markRead(t, false)` for exactly the named threads, Mark unread for the ones it only looked at (`looked`). */
+export function unmarkProjectRead(store: InboxStore, projectId: string, threadIds: readonly string[], looked: readonly string[] = []): ProjectUndoResult {
   if (!store.project(projectId)) throw new InboxError("project_not_found", `No project ${projectId}.`);
   const out: ProjectUndoResult = { done: [], skipped: [] };
   each(store, projectId, threadIds, (id) => store.markRead(id, false), out);
+  each(store, projectId, looked, (id) => store.markUnread(id), out);
   return out;
 }
 

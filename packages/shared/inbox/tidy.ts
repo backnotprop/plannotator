@@ -16,6 +16,8 @@ import {
   INBOX_TIDY_PERSON_LAST_MS,
   INBOX_TIDY_RUN_SHOWN_MS,
   inboxAgentName,
+  inboxSessionRef,
+  inboxTidySessionLine,
   isInboxNote,
   type InboxCard,
   type InboxCardColumn,
@@ -133,7 +135,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       return {
         thread_id: threadId,
         subject: store.threadSubject(threadId) ?? "(no subject)",
-        project: { id: root.project_id, name: projectName(root.project_id) },
+        project: { id: store.canonicalProjectId(root.project_id), name: projectName(root.project_id) },
         reasons: [],
         reply_to: last.id,
         lines: [],
@@ -154,7 +156,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   for (const threadId of store.threadIds()) {
     const root = store.message(threadId);
     if (!root || root.resolved_at !== null) continue;
-    if (projectId && root.project_id !== projectId) continue;
+    if (projectId && !store.sameProject(root.project_id, projectId)) continue;
     if (options.surface === "board" && !boardThreads.has(threadId)) continue;
     const messages = store.threadMessageIds(threadId).map((id) => store.message(id)!).filter(Boolean);
     const reasked = store.reaskListedIds(threadId);
@@ -235,7 +237,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       const item = itemOf(session, card.agent.host, name, reach, `card:${card.id}`, () => ({
         thread_id: null,
         subject: card.title,
-        project: { id: card.project_id, name: projectName(card.project_id) },
+        project: { id: store.canonicalProjectId(card.project_id), name: projectName(card.project_id) },
         reasons: [],
         reply_to: null,
         lines: [],
@@ -257,7 +259,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
 
 function openThreadInScope(store: InboxStore, threadId: string, projectId: string | null): boolean {
   const root = store.message(threadId);
-  return !!root && root.thread_id === threadId && root.resolved_at === null && (!projectId || root.project_id === projectId);
+  return !!root && root.thread_id === threadId && root.resolved_at === null && (!projectId || store.sameProject(root.project_id, projectId));
 }
 
 function cardLine(card: InboxCard, idle: number): string {
@@ -298,7 +300,8 @@ export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
         : `${i + 1}. ${oneLine(item.subject, 100)} · ${item.project.name}`;
     return [head, ...item.lines.map((line) => `   ${line.startsWith("  ") ? `  ${line.trim()}` : `- ${line}`}`)].join("\n");
   });
-  return [INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, ...items].join("\n\n");
+  const ref = inboxSessionRef(agent.host, agent.session);
+  return [INBOX_TIDY_INSTRUCTION, ref ? `${INBOX_TIDY_HOW} ${inboxTidySessionLine(ref)}` : INBOX_TIDY_HOW, ...items].join("\n\n");
 }
 
 /**

@@ -30,8 +30,8 @@ export interface Replacement {
   message: Pick<InboxMessageWire, 'id' | 'created_at'> & { author: InboxAuthor };
 }
 
-/** Where a jump lands: one question's card, or a message. */
-export type JumpTarget = { kind: 'question'; messageId: string; key: string } | { kind: 'message'; messageId: string };
+/** Where a jump lands: a question's card, an action item's checklist row, or a message. */
+export type JumpTarget = { kind: 'question' | 'action'; messageId: string; key: string } | { kind: 'message'; messageId: string };
 
 /** The answer's words, as the card's "Your pick" shows them; a picked label as its plain words (`plainLabel`). */
 export function pickWords(answer: QuestionAnswer): string {
@@ -317,7 +317,7 @@ export function StaleGuard({
   const rest = [
     words ? 'your words' : '',
     otherPicks > 0 ? `${otherPicks} other ${otherPicks === 1 ? 'pick' : 'picks'}` : '',
-    annotations > 0 ? `${annotations} ${annotations === 1 ? 'annotation' : 'annotations'}` : '',
+    annotations > 0 ? `${annotations} ${annotations === 1 ? 'comment' : 'comments'}` : '',
   ].filter(Boolean);
   const restText = rest.length > 1 ? `${rest.slice(0, -1).join(', ')} and ${rest.at(-1)}` : (rest[0] ?? '');
   const heading = questions.length === 1 ? `${questionName(first)} changed before you sent` : `${questions.length} questions changed before you sent`;

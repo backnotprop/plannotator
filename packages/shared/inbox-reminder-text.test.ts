@@ -52,9 +52,10 @@ describe("no prompts.inbox: every host gets the built-in line, byte for byte", (
       expect(line).toContain("never also ask it in the chat with a blocking question tool");
       expect(line).not.toContain("isn't here");
     }
-    // Only the line for a host without the wake sends the agent to wait_for_reply.
-    expect(INBOX_REMINDER_TEXT).not.toContain("wait_for_reply");
-    expect(INBOX_REMINDER_TEXT_NO_WAKE).toContain("wait_for_reply");
+    // Only the line for a host without the wake sends the agent to read_thread.
+    expect(INBOX_REMINDER_TEXT).not.toContain("read_thread");
+    expect(INBOX_REMINDER_TEXT_NO_WAKE).toContain("read_thread");
+    expect(INBOX_REMINDER_TEXT_NO_WAKE).not.toContain("wait_for_reply");
   });
 
   for (const [index, config] of UNSET.entries()) {
@@ -106,9 +107,9 @@ describe("custom reminder text", () => {
   });
 
   test("every whole word plannotator_inbox becomes the host's registered tool name, nothing else", () => {
-    const text = "Use plannotator_inbox send_message; plannotator_inbox's wait_for_reply too. Not my_plannotator_inbox or plannotator_inbox2, and mcp__x__plannotator_inbox stays.";
+    const text = "Use plannotator_inbox send_message; plannotator_inbox's read_thread too. Not my_plannotator_inbox or plannotator_inbox2, and mcp__x__plannotator_inbox stays.";
     expect(inboxReminderFor(text, MOD_TOOL)).toBe(
-      `Use ${MOD_TOOL} send_message; ${MOD_TOOL}'s wait_for_reply too. Not my_plannotator_inbox or plannotator_inbox2, and mcp__x__plannotator_inbox stays.`,
+      `Use ${MOD_TOOL} send_message; ${MOD_TOOL}'s read_thread too. Not my_plannotator_inbox or plannotator_inbox2, and mcp__x__plannotator_inbox stays.`,
     );
     // A tool name with `$` is inserted as it is (no replacement patterns).
     expect(inboxReminderFor("plannotator_inbox", "a$&b")).toBe("a$&b");

@@ -165,7 +165,8 @@ export class ClaudeSession {
   turns: { id: string; text: string }[] = []
   /** Keep the plugin's turns running until `endTurn` (default: they answer at once). */
   holdPluginTurns = false
-  private idleWaiters: (() => void)[] = []
+  private idleWaiters: ((discarded: boolean) => void)[] = []
+  private discarding = false
   private sequence = 0
 
   private constructor(host: RealHost, mod: PlannotatorMod, inboxTools: readonly InboxToolInfo[] | null, private readonly dataDir: string, private readonly cwd: string) {
@@ -194,13 +195,24 @@ export class ClaudeSession {
 
   /** `/clear`: `session.end` disposes the instance; the next hook makes one for the new id (register.ts `currentMod`). */
   clear(newSessionId: string): void {
-    this.mod.dispose()
+    const previous = this.mod
+    previous.dispose()
     this.mod = new PlannotatorMod(this.host, {
       sessionId: newSessionId,
       dataDir: this.dataDir,
       interactive: true,
       ...(this.inboxTools ? { inboxTools: this.inboxTools, inboxToolName: CLAUDE_INBOX_TOOL_NAME, cwd: async () => this.cwd } : {}),
     })
+    this.mod.carryQueued(previous)
+  }
+
+  /**
+   * An engine that discards the plugin prompts still waiting for idle (a build
+   * that does so at `/clear`): their `$.prompt.submit` rejects when the running
+   * turn ends, and no turn starts for them.
+   */
+  discardQueuedPrompts(): void {
+    this.discarding = true
   }
 
   /** The process quits (or the session ends for good). */
@@ -229,12 +241,15 @@ export class ClaudeSession {
     if (this.running) this.mod.onMainStep(this.running.id)
   }
 
-  endTurn(answer = 'Done.'): void {
+  /** The running turn completes; `aborted` as the engine reports a turn `$.turn.abort` stopped. */
+  endTurn(answer = 'Done.', aborted = false): void {
     const turn = this.running
     if (!turn) return
     this.running = null
-    this.mod.onTurnComplete(turn.id, answer, false)
-    for (const wake of this.idleWaiters.splice(0)) wake()
+    this.mod.onTurnComplete(turn.id, answer, aborted)
+    const discarded = this.discarding
+    this.discarding = false
+    for (const wake of this.idleWaiters.splice(0)) wake(discarded)
   }
 
   /** The person presses Enter: at idle it starts a turn; mid-turn it joins the running one (take-over). */
@@ -259,7 +274,10 @@ export class ClaudeSession {
 
   /** `$.prompt.submit`: waits for idle, then its turn starts under the plugin's frame. */
   private async pluginTurn(text: string): Promise<void> {
-    while (this.running) await new Promise<void>((resolve) => this.idleWaiters.push(resolve))
+    while (this.running) {
+      const discarded = await new Promise<boolean>((resolve) => this.idleWaiters.push(resolve))
+      if (discarded) throw new Error('The engine discarded the prompt.')
+    }
     await this.startTurn(`${PLUGIN_FRAME}${text}`)
     if (!this.holdPluginTurns) setTimeout(() => this.endTurn('Thanks, on it.'), 20)
   }

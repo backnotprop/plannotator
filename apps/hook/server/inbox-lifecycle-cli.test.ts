@@ -105,6 +105,25 @@ function standIn(argv: string[]): number {
   return proc.pid;
 }
 
+describe("PLANNOTATOR_INBOX_DEBUG", () => {
+  test("names the way to turn it on when an Inbox is already running; agents still read just the URL, and otherwise there is no note", async () => {
+    const box = sandbox();
+    const debug = { ...box, env: { ...box.env, PLANNOTATOR_INBOX_DEBUG: "1" } };
+    const first = await cli(debug, ["inbox", "--background"]);
+    expect(first.code).toBe(0);
+    track(box);
+    expect(first.stderr).not.toContain("PLANNOTATOR_INBOX_DEBUG");
+
+    const again = await cli(debug, ["inbox", "--background"]);
+    expect(again.code).toBe(0);
+    expect(again.stdout.trim()).toBe(first.stdout.trim());
+    expect(again.stderr).toContain("plannotator inbox stop");
+    expect(again.stderr).toContain("inboxDebug");
+
+    expect((await cli(box, ["inbox", "--background"])).stderr).not.toContain("PLANNOTATOR_INBOX_DEBUG");
+  });
+});
+
 describe("plannotator inbox status", () => {
   test("an Inbox that never ran: exit 1, and stop starts nothing and exits 0", async () => {
     const box = sandbox();
