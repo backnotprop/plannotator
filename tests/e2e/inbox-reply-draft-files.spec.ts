@@ -77,7 +77,7 @@ test.afterAll(async () => {
 });
 
 test('a draft started on the computer with a picture and a file opens on the phone with its tiles, and the phone sends them', async ({ browser }: { browser: Browser }) => {
-  const draftUrl = `${world.url.replace(/#.*$/, '')}/api/inbox/threads/${world.thread}/draft`;
+  const draftUrl = new URL(`/api/inbox/threads/${world.thread}/draft`, world.url).href;
 
   // The computer: words and two files, attached with the paperclip; then the page goes.
   const desk = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
@@ -111,10 +111,17 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await expect(tiles).toHaveCount(2);
   await expect(tiles.nth(0)).toHaveAttribute('data-compose-file-name', 'header-jump.png');
   await expect(tiles.nth(1)).toHaveAttribute('data-compose-file-name', 'header-notes.md');
-  // Each tile's × is a finger's target on a phone.
+  // Each tile's × is a finger's target on a phone: its drawn 26 px grows to a
+  // 44 px hit area, so a tap 8 px outside the drawn box still lands on it.
   for (const tile of await tiles.all()) {
-    const remove = (await tile.locator('.ib-cp-fx').boundingBox())!;
-    expect(Math.min(remove.width, remove.height)).toBeGreaterThanOrEqual(44);
+    const hits = await tile.locator('.ib-cp-fx').evaluate((button) => {
+      const r = button.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const at = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('.ib-cp-fx') === button;
+      return [at(cx, r.top - 8), at(cx, r.bottom + 8), at(r.left - 8, cy), at(r.right + 8, cy)];
+    });
+    expect(hits).toEqual([true, true, true, true]);
   }
   await tiles.nth(1).scrollIntoViewIfNeeded();
   await mobile.screenshot({ path: join(shotsDir, 'phone-draft-tiles-390.png') });

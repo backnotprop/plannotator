@@ -58,6 +58,7 @@
   "inbox-refresh.spec.ts": 17,
   "inbox-reload-hosts.spec.ts": 31,
   "inbox-replaced.spec.ts": 12,
+  "inbox-reply-draft-files.spec.ts": 6,
   "inbox-reply-drafts.spec.ts": 16,
   "inbox-restart.spec.ts": 27,
   "inbox-row-badges.spec.ts": 27,
