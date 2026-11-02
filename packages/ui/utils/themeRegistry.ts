@@ -46,9 +46,10 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
     name: 'Plannotator Modern',
     builtIn: true,
     modeSupport: 'both',
+    syntaxHighlighting: true,
     colors: {
       dark: { primary: '#3392ff', secondary: 'oklch(0.789 0.154 211.53)', accent: 'oklch(0.705 0.213 47.604)', background: '#171717', foreground: '#fafafa' },
-      light: { primary: 'oklch(0.546 0.245 262.881)', secondary: 'oklch(0.45 0.085 224.283)', accent: 'oklch(0.47 0.157 37.304)', background: '#f7f7f7', foreground: '#0a0a0a' },
+      light: { primary: 'oklch(0.515 0.245 263)', secondary: 'oklch(0.45 0.085 224.283)', accent: 'oklch(0.47 0.157 37.304)', background: '#f7f7f7', foreground: '#0a0a0a' },
     },
   },
   {

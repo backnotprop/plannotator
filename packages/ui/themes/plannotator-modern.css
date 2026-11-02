@@ -17,8 +17,8 @@
   --secondary: oklch(0.789 0.154 211.53);
   --secondary-foreground: #0a0a0a;
   --muted: #262626;
-  /* Not BoardUI's: its #737373 is 3.2:1 on --muted. Raised only as far as 4.5:1 there. */
-  --muted-foreground: #8f8f8f;
+  /* Not BoardUI's: its #737373 is 2.9:1 on the lightest chip it sits on (#2c2c2c). Raised only as far as 4.5:1 there. */
+  --muted-foreground: #949494;
   --accent: oklch(0.705 0.213 47.604);
   --accent-foreground: #0a0a0a;
   --destructive: oklch(0.704 0.191 22.216);
@@ -46,13 +46,14 @@
   --card-foreground: #0a0a0a;
   --popover: #ffffff;
   --popover-foreground: #0a0a0a;
-  --primary: oklch(0.546 0.245 262.881);
+  /* BoardUI's blue-600 (#155dfc), a hair darker: the Inbox and code review draw this as text on its own tint, 4.12:1 at blue-600. */
+  --primary: oklch(0.515 0.245 263);
   --primary-foreground: #ffffff;
   --secondary: oklch(0.45 0.085 224.283);
   --secondary-foreground: #ffffff;
   --muted: #ebebeb;
-  /* Not BoardUI's: its #737373 is 3.98:1 on --muted. Lowered only as far as 4.5:1 there. */
-  --muted-foreground: #6a6a6a;
+  /* Not BoardUI's: its #737373 is 3.6:1 on the darkest chip it sits on (#e2e2e2). Lowered only as far as 4.5:1 there. */
+  --muted-foreground: #646464;
   --accent: oklch(0.47 0.157 37.304);
   --accent-foreground: #ffffff;
   --destructive: oklch(0.505 0.213 27.518);
