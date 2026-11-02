@@ -328,7 +328,7 @@ function SafeMarkdown({ markdown }: { markdown: string }) {
       <div
         ref={bodyRef}
       >
-        <RenderedMarkdown markdown={markdown} resolveImage={NO_IMAGES} resolveLocalLink={NO_LOCAL_LINKS} />
+        <RenderedMarkdown markdown={markdown} softLineBreaks resolveImage={NO_IMAGES} resolveLocalLink={NO_LOCAL_LINKS} />
       </div>
       {confirm ? (
         <div className="mt-1.5 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2 py-1.5 text-[11.5px]" role="group" aria-label="Open this link?" data-ref-card-confirm="">

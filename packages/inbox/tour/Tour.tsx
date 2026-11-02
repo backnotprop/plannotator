@@ -601,10 +601,10 @@ export function TourCoach({
     const target = tourTargetElement(coach.target);
     if (!target) return;
     if (!NO_SCROLL.has(coach.target!)) target.scrollIntoView({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
-    target.classList.remove('ib-tour-again');
+    target.classList.remove('ib-tour-mark');
     void target.offsetWidth;
-    target.classList.add('ib-tour-again');
-    setTimeout(() => target.classList.remove('ib-tour-again'), 1600);
+    target.classList.add('ib-tour-mark');
+    setTimeout(() => target.classList.remove('ib-tour-mark'), 1600);
   };
   return (
     <div

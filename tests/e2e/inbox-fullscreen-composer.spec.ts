@@ -30,6 +30,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -76,6 +77,7 @@ interface World {
   errors: string[];
   threadId: string;
   ids: Record<string, string>;
+  project: string;
 }
 
 let world: World;
@@ -119,6 +121,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
+    // No agent lookups (the voice setting probes Codex otherwise), and no agent config of the real computer.
+    PLANNOTATOR_TEST_SANDBOX: root,
+    CLAUDE_CONFIG_DIR: join(root, 'claude'),
+    CODEX_HOME: join(root, 'codex'),
+    OPENCODE_CONFIG_DIR: join(root, 'opencode'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -156,6 +163,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     errors,
     threadId: '',
     ids: {},
+    project,
   };
   const sent = await world.claude.send({
     project_path: project,
@@ -396,6 +404,165 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await shot(page, '2A-phone-min');
     await pill(page).click();
     await expect(replyField(page)).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+/** The open questions pill in the card's foot: one line, inside the row, clear of its neighbours (owner's iPhone, 2026-11-01). */
+async function pillLayout(page: Page) {
+  return card(page).evaluate((root) => {
+    const q = root.querySelector<HTMLElement>('[data-fcomp-questions]')!;
+    // The words are the text inside the pill, whatever wraps them.
+    const range = document.createRange();
+    const text = document.createTreeWalker(q, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent!.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode()!;
+    range.selectNodeContents(text);
+    const box = q.getBoundingClientRect();
+    const chips = q.parentElement!.getBoundingClientRect();
+    const link = root.querySelector('[data-fcomp-open-thread]')!.getBoundingClientRect();
+    const mic = root.querySelector('[data-voice-mic]')?.getBoundingClientRect() ?? null;
+    return {
+      text: q.textContent!.trim(),
+      form: q.getAttribute('data-label-form'),
+      lines: range.getClientRects().length,
+      height: Math.round(box.height),
+      left: box.left,
+      right: box.right,
+      chipsLeft: chips.left,
+      chipsRight: chips.right,
+      next: Math.min(link.left, mic?.left ?? Infinity),
+      mic: !!mic,
+    };
+  });
+}
+
+test('the open questions pill in the card’s foot never wraps: one line, inside the row, from 320 to 430 px, with and without the mic', async ({ browser }: { browser: Browser }) => {
+  const manyBody = [
+    ...Array.from({ length: 12 }, (_, i) => [':::question', `Question ${i + 1}: which way?`, '', '- [ ] This', '- [ ] That', ':::', ''].join('\n')),
+    ':::action',
+    'Run the migration',
+    'Needs your badge.',
+    ':::',
+    '',
+    ':::action',
+    'Rotate the key',
+    'Needs your badge.',
+    ':::',
+  ].join('\n');
+  const oneAndAction = [BODY, '', ':::action', 'Run the migration', 'Needs your badge.', ':::'].join('\n');
+  const send = async (subject: string, body: string) => {
+    const sent = await world.claude.send({ project_path: world.project, thread: subject.toLowerCase().replace(/\W+/g, '-'), subject, body, attachments: ['shots/checkout.png'] });
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
+    return `${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`;
+  };
+  const cases: { name: string; url: string; full: string }[] = [
+    { name: 'one question', url: await send('Pill: one', BODY), full: '1 open question' },
+    { name: 'one question, one action item', url: await send('Pill: one and one', oneAndAction), full: '1 question, 1 action item' },
+    { name: 'twelve questions, two action items', url: await send('Pill: many', manyBody), full: '12 questions, 2 action items' },
+  ];
+  const settings = (await (await fetch(new URL('/api/inbox/settings', world.url))).json()) as { serverSession: string };
+  const voice = async (on: boolean) => {
+    const answer = await fetch(new URL('/api/inbox/settings', world.url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: new URL(world.url).origin },
+      body: JSON.stringify({ serverSession: settings.serverSession, voice: { on } }),
+    });
+    expect(answer.status).toBe(200);
+  };
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await context.grantPermissions(['microphone'], { origin: new URL(world.url).origin });
+    for (const withMic of [false, true]) {
+      await voice(withMic);
+      for (const c of cases) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(c.url);
+        await page.reload();
+        await expect(card(page)).toBeVisible();
+        await card(page).getByRole('radio', { name: 'Reply' }).tap();
+        await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
+        for (const width of [430, 390, 360, 320]) {
+          await page.setViewportSize({ width, height: 844 });
+          await expect.poll(async () => (await pillLayout(page)).mic, { message: `mic ${withMic} at ${width}` }).toBe(withMic);
+          const where = `${c.name}, ${width} px, mic ${withMic}`;
+          // The fit runs on a resize: let it settle.
+          await expect
+            .poll(async () => {
+              const now = await pillLayout(page);
+              return now.lines === 1 && now.right <= now.chipsRight + 1 && now.right <= now.next + 1;
+            }, { message: where })
+            .toBe(true);
+          const got = await pillLayout(page);
+          expect(got.height, where).toBeLessThanOrEqual(24);
+          expect(got.right, `${where}: past the row's end (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.chipsRight + 1);
+          expect(got.right, `${where}: over the next button (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.next + 1);
+          // Short words only when the long ones do not fit: with the room (no mic, 430) the whole words show.
+          if (!withMic && width === 430 && c.name === 'one question') expect(got.text, where).toBe(c.full);
+          if (got.form && got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
+        }
+      }
+    }
+  } finally {
+    await voice(false);
+    await context.close();
+  }
+});
+
+test('on a computer the pill keeps its whole words', async () => {
+  const sent = await world.claude.send({ project_path: world.project, thread: 'pill-computer', subject: 'Pill: computer', body: BODY, attachments: ['shots/checkout.png'] });
+  const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
+  await world.page.goto(`${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`);
+  await expect(card()).toBeVisible();
+  await card().getByRole('radio', { name: 'Reply' }).click();
+  await expect(card().locator('[data-fcomp-questions]')).toHaveText('1 open question');
+  await expect(card().locator('[data-fcomp-questions]')).toHaveAttribute('data-label-form', 'full');
+});
+
+test('a phone: Hide, then Show tools, brings the reply back working (the card, and the pill when minimized), without pressing the pin', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(fileUrl('checkout.png'));
+    await expect(pane(page)).toHaveAttribute('data-full-view', '');
+    const dock = page.locator('[data-full-view-dock]');
+    for (const minimized of [false, true]) {
+      if (minimized) await card(page).locator('[data-fcomp-minimize]').tap({ timeout: 10_000 });
+      else await expect(card(page)).toBeVisible();
+      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
+      await expect(dock).toHaveAttribute('data-bar', 'tucked');
+      // Hidden: the reply goes with the tools.
+      await expect(page.locator(minimized ? '[data-fcomp-pillwrap]' : '[data-fcomp]')).toHaveJSProperty('inert', true);
+      await page.locator('[data-full-view-handle]').tap({ timeout: 10_000 });
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      if (minimized) {
+        await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', false);
+        await pill(page).tap({ timeout: 10_000 });
+      }
+      // The reply works as it is: not inert, and a tap in it types.
+      await expect(card(page)).toHaveJSProperty('inert', false);
+      // A tap, then a real finger (touch events from the DevTools protocol), each focus the field and leave the
+      // tools out. Focus moving off the handle into the reply used to tuck the toolbar, which took the reply with it.
+      await replyField(page).tap({ timeout: 10_000 });
+      await expect(replyField(page)).toBeFocused();
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      const box = (await replyField(page).boundingBox())!;
+      const touch = await finger(page, 'chromium');
+      await touch.down(box.x + box.width / 2, box.y + box.height / 2, 0, 0, 0);
+      await touch.up();
+      await expect(replyField(page)).toBeFocused();
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await page.keyboard.type(' ok');
+      // The words land where the finger put the caret.
+      await expect(replyField(page)).toHaveValue(/ ok/);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      // Pin the tools back (the revealed toolbar's last button) for the next round.
+      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
+      await expect(dock).toHaveAttribute('data-bar', 'pinned');
+    }
   } finally {
     await context.close();
   }
