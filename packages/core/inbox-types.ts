@@ -2432,7 +2432,7 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false through the tailnet (it reaches every agent on this computer). */
+    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
     editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */

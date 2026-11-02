@@ -1,16 +1,16 @@
 /**
  * What's new over the tailnet: a page the owner opened through the tailnet
- * (`via: 'tailnet'` in the settings read) is offered What's new (the
- * sidebar's quiet link after an update, and Settings → About) and nothing
- * that needs the local-only update routes (Update, Check now, the update
- * switches); another allowed login's page is offered neither.
+ * (`via: 'tailnet'`, `guest: false` in the settings read) is offered What's
+ * new (the sidebar's quiet link after an update, and Settings → About) and,
+ * as on the computer, the update control (approval "inbox-tailnet-owner");
+ * another allowed login's page is offered neither.
  *
  * The whole window (InboxApp) over a REAL Inbox server in a temp data dir
  * (tests/helpers/inbox-dom-server.ts `whats-new` mode: this Inbox is 0.28.19,
  * the release API a fake on loopback). The page's fetch goes to that server,
- * with two changes that stand for the tailnet: the settings answer names
- * `via: 'tailnet'` and `guest`, and any /api/inbox/update* request answers
- * 403 local_only (and is counted: the window must make none).
+ * with what stands for the tailnet: the settings answer names `via: 'tailnet'`
+ * and `guest`, and for a guest any /api/inbox/update* request answers 403
+ * local_only. Those requests are counted: the window must make none that acts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -36,8 +36,10 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let guest = false;
+/** False: the list says no update, so the sidebar shows the quiet What's new link in the Update button's place, as on the computer. */
+let offered = true;
 let updateCalls: string[] = [];
-/** What the window asked the update routes to DO (it also reads GET /api/inbox/update when Settings opens; that is refused and harmless). */
+/** What the window asked the update routes to DO (it also reads GET /api/inbox/update when Settings opens). */
 const updateActions = () => updateCalls.filter((call) => !call.startsWith('GET '));
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -87,17 +89,19 @@ afterAll(async () => {
 beforeEach(() => {
   if (!hasDom) return;
   updateCalls = [];
+  offered = true;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const route = path.split('?')[0]!;
     if (route === '/api/inbox/update' || route.startsWith('/api/inbox/update/')) {
       updateCalls.push(`${init?.method ?? 'GET'} ${path}`);
-      return new Response(JSON.stringify({ error: 'This answers only on this computer, not over the tailnet.', code: 'local_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      if (guest) return new Response(JSON.stringify({ error: 'This answers only on this computer, not over the tailnet.', code: 'local_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
     const answer = await loopback(path, init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     let text = answer.text;
     if (route === '/api/inbox/settings' && answer.status === 200) text = JSON.stringify({ ...JSON.parse(text), via: 'tailnet', guest });
+    if (route === '/api/inbox/threads' && !offered && answer.status === 200) text = JSON.stringify({ ...JSON.parse(text), update: null });
     return new Response(text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -148,26 +152,21 @@ function renderApp() {
 
 const buttonsNamed = (el: HTMLElement, pattern: RegExp) => [...el.querySelectorAll('button')].filter((b) => pattern.test(b.textContent ?? '') || pattern.test(b.getAttribute('aria-label') ?? ''));
 
-test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings → About open What's new, with no update control anywhere", async () => {
+test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings → About open What's new", async () => {
   guest = false;
+  offered = false;
   const el = renderApp();
   await until(() => !!el.querySelector('[data-whats-new-link="0.28.19"]'), "the sidebar's What's new link");
-  // The fixture really offers an update (a loopback page would show the Update button), and this page shows none of it.
-  expect(JSON.parse((await loopback('/api/inbox/threads')).text).update).toMatchObject({ state: 'available', version: '0.28.25' });
   expect(el.querySelector('.ib-upd')).toBeNull();
-  expect(buttonsNamed(el, /Update/)).toEqual([]);
 
-  // Settings → About: the version and the link, none of what needs the update routes.
+  // Settings → About: the computer's block, with the link to the release this Inbox runs.
   act(() => {
     window.location.hash = '#settings/about';
   });
   await until(() => !!el.querySelector('[data-settings-about]'), 'Settings → About');
-  expect(el.querySelector('[data-settings-about]')?.getAttribute('data-settings-about')).toBe('tailnet');
+  expect(el.querySelector('[data-settings-about]')?.getAttribute('data-settings-about')).toBe('');
   const aboutLink = el.querySelector('[data-about-whats-new="0.28.19"]') as HTMLButtonElement;
   expect(aboutLink.textContent).toContain("What's new in 0.28.19");
-  expect(el.querySelector('[data-settings-about] [role="switch"]')).toBeNull();
-  expect(buttonsNamed(el, /Check now|Update/)).toEqual([]);
-  expect(el.querySelector('[data-about-update], [data-general-update], [data-general-check]')).toBeNull();
 
   // It opens the notes the server read for that release; no Update button on the page.
   act(() => aboutLink.click());
@@ -181,31 +180,51 @@ test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings 
   act(() => (el.querySelector('[data-whats-new-link="0.28.19"]') as HTMLButtonElement).click());
   await until(() => !!el.querySelector('[data-whats-new-page="0.28.19"]'), 'the notes from the sidebar link');
 
-  // The release that IS offered: its What's new page has no Update button on this page.
+  expect(updateActions()).toEqual([]);
+});
+
+test.skipIf(!hasDom)("the owner over the tailnet with a release to install: the update control is offered in the sidebar, in About and on that release's What's new page", async () => {
+  guest = false;
+  const el = renderApp();
+  await until(() => !!el.querySelector('.ib-upd'), "the sidebar's Update button");
+  expect(JSON.parse((await loopback('/api/inbox/threads')).text).update).toMatchObject({ state: 'available', version: '0.28.25' });
+
+  act(() => {
+    window.location.hash = '#settings/about';
+  });
+  await until(() => !!el.querySelector('[data-about-update]'), "About's Update now");
+  expect(el.querySelector('[data-settings-about] [role="switch"]')).not.toBeNull();
+  // The running release's link stays beside the one on offer.
+  expect(el.querySelector('[data-about-whats-new="0.28.19"]')).not.toBeNull();
+
   act(() => {
     window.location.hash = '#whats-new=0.28.25';
   });
   await until(() => !!el.querySelector('[data-whats-new-page="0.28.25"]') && !!el.querySelector('.ib-wn-hero'), 'the offered release notes');
-  await settle();
-  expect(el.querySelector('[data-whats-new-update]')).toBeNull();
-  expect(el.querySelector('.ib-upd')).toBeNull();
+  await until(() => !!el.querySelector('[data-whats-new-update]'), "the page's Update button");
 
   expect(updateActions()).toEqual([]);
 });
 
-test.skipIf(!hasDom)("another allowed login over the tailnet: no What's new link, in the sidebar or in Settings → About", async () => {
+test.skipIf(!hasDom)("another allowed login over the tailnet: no What's new link and no update control, in the sidebar or in Settings → About", async () => {
   guest = true;
   const el = renderApp();
   await until(() => !!el.querySelector('.ib-listcol, [data-section-id], .pn-inbox'), 'the window');
   await settle();
   expect(el.querySelector('[data-whats-new-link]')).toBeNull();
+  // The fixture really offers an update (a page on this computer would show the Update button), and this page shows none of it.
+  expect(JSON.parse((await loopback('/api/inbox/threads')).text).update).toMatchObject({ state: 'available', version: '0.28.25' });
+  expect(el.querySelector('.ib-upd')).toBeNull();
+  expect(buttonsNamed(el, /Update/)).toEqual([]);
   act(() => {
     window.location.hash = '#settings/about';
   });
   await until(() => !!el.querySelector('[data-settings-about]'), 'Settings → About');
   await settle();
+  expect(el.querySelector('[data-settings-about]')?.getAttribute('data-settings-about')).toBe('tailnet');
   expect(el.querySelector('[data-about-whats-new]')).toBeNull();
   expect(el.querySelector('[data-settings-about] [role="switch"]')).toBeNull();
   expect(buttonsNamed(el, /Check now|Update|What's new/)).toEqual([]);
+  expect(el.querySelector('[data-about-update], [data-general-update], [data-general-check]')).toBeNull();
   expect(updateActions()).toEqual([]);
 });
