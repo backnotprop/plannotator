@@ -4,7 +4,7 @@
  * from the filled working folder so the connection resolves it.
  */
 import { expect, test } from "bun:test";
-import { INBOX_AGENT_PROJECT_PATH_DESCRIPTION, inboxAgentTool, inboxToolCall, type InboxToolInfo } from "./connection";
+import { INBOX_AGENT_PROJECT_PATH_DESCRIPTION, INBOX_REMOVED_ACTION_TEXT, inboxAgentTool, inboxToolCall, parseInboxToolList, type InboxToolInfo } from "./connection";
 
 const tools: InboxToolInfo[] = [
   {
@@ -42,6 +42,11 @@ test("a call without project_path fills the working folder; with one, it comes b
   if ("error" in named) return;
   expect(named.projectPath).toBe("../api");
   expect(named.arguments.project_path).toBe("/work/notes");
+});
+
+test("wait_for_reply, gone from the Inbox: the list an older Inbox serves drops it, and an old skill's call says what to do", () => {
+  expect(parseInboxToolList({ tools: [{ name: "send_message", inputSchema: {} }, { name: "wait_for_reply", inputSchema: {} }] }).map((t) => t.name)).toEqual(["send_message"]);
+  expect(inboxToolCall({ action: "wait_for_reply", thread_id: "msg_1" }, tools, filled)).toEqual({ error: INBOX_REMOVED_ACTION_TEXT });
 });
 
 test("a malformed project_path, or one on a tool that takes none, is refused", () => {

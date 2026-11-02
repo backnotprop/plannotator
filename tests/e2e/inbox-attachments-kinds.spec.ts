@@ -360,15 +360,13 @@ test('the code file opens in the code view and takes a line comment', async () =
 test('Send carries the image comment with its marked-up copy and the code comment with its lines; the agent reads both', async () => {
   const page = world.page;
   await page.locator('[data-attachment-pane]').getByRole('button', { name: /^Close / }).click();
-  const waiting = world.claude.waitForReply(world.threadId, 40);
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   await expect(page.locator('[data-annotations-chip]')).toHaveText('2 comments');
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes, one on the phone shot and one on the worker.');
   await shot('8-reply-with-annotations');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threadId, 40);
+  const body = reply.body as string;
   expect(body).toContain('## shots/retry-policy-phone.png');
   expect(body).toContain('The on-call note wraps onto three lines');
   const markup = /- \[retry-policy-phone, marked up\] `([^`]+)`/.exec(body);

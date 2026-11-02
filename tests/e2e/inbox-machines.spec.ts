@@ -344,15 +344,12 @@ test("2d. right after Studio restarts with MacBook asleep, a reload of MacBook's
   await expect.poll(() => stateOf(studio, macbook), { timeout: 45_000 }).toBe('online');
 });
 
-test("3. answering MacBook's thread from Studio wakes MacBook's agent", async () => {
+test("3. answering MacBook's thread from Studio reaches MacBook's agent", async () => {
   const onMac = await agentOn(macbook);
-  const waiting = onMac.waitForReply(macThread, 45);
   await page.goto(`${studio.url}#thread=${macThread}`);
   await expect(page.locator('section.ib-pane .ib-subject')).toHaveText('Ledger export: keep the CSV columns stable?');
   await reply('Keep the order fixed. Append new columns at the end.');
-  const woke = await waiting;
-  expect(woke.status).toBe('replied');
-  expect((woke.reply as { body: string }).body).toContain('Keep the order fixed.');
+  expect((await onMac.nextReply(macThread, 45)).body).toContain('Keep the order fixed.');
   // One reply on MacBook, shown in Studio's thread.
   const there = await json<{ thread: { messages: { id: string; author: { kind: string } }[] } }>(macbook, `/api/inbox/threads/${macThread}`);
   expect(there.thread.messages.filter((m) => m.author.kind === 'person')).toHaveLength(1);
@@ -409,8 +406,7 @@ test('4. MacBook asleep: greyed rows under "MacBook asleep since"; an answer wai
   expect(replies[0]!.body).toContain('Split it per account first');
   // MacBook's agent, back after the restart, gets the answer that waited.
   const back = await agentOn(macbook);
-  const woke = await back.waitForReply(macHeldThread, 15);
-  expect(woke.status).toBe('replied');
+  expect((await back.nextReply(macHeldThread, 15)).body).toContain('Split it per account first');
 });
 
 test('4b. a pick for MacBook while it sleeps says it is waiting, stays picked, and is saved there when MacBook is back', async () => {

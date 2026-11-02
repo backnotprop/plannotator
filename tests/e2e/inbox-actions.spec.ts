@@ -16,7 +16,7 @@
  *    option A): the row is struck with its note field and "in your draft", no
  *    toast, the foot reads "Draft · 1 done" beside Send, the thread stays in
  *    Stopped on you, a reload keeps it, and nothing reaches the agent until
- *    Send; then wait_for_reply returns ONE reply whose first line joins the
+ *    Send; then read_thread returns ONE reply whose first line joins the
  *    answers' ("Answered 1 question, did 1 action item."), with "Action items
  *    you asked for" and the note, and the sent message reads "You did 1
  *    action item";
@@ -327,9 +327,8 @@ test('Send carries the Done and its note with the answer: one first line, the se
   await expect(going.locator('.ib-ranswer-a')).toHaveText('Done · Note: Signed in with the YubiKey; the token is good for 30 days.');
   await shot(page, '05b-reply-box');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.npm, 40);
-  expect(answer.status).toBe('replied');
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.npm, 40);
+  const body = answer.body as string;
   expect(body.startsWith('Answered 1 question, did 1 action item.\n\n')).toBe(true);
   const section = body.slice(body.indexOf('## Action items you asked for'));
   expect(section.startsWith('## Action items you asked for\n\n1 of 1 done.\n\n### A1. Sign in to npm in your terminal\nDone, ')).toBe(true);
@@ -385,8 +384,8 @@ test("Can't do it: the reason, with the Send, word for word", async () => {
   await shot(page, '08b-cant-in-draft');
   expect(await personMessages(threads.vercel)).toBe(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.vercel, 40);
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.vercel, 40);
+  const body = answer.body as string;
   expect(body.startsWith("Couldn't do 1 action item.\n\n## Action items you asked for")).toBe(true);
   expect(body).toContain("### A1. Approve the production deploy on Vercel\nCan't do it: Only Dana can promote to production; I asked her.");
   await expect(card).toHaveAttribute('data-action-state', 'cant', { timeout: 20_000 });
@@ -420,8 +419,8 @@ test("the agent marks its own action item done while the person's Done waits in 
   // Nothing from the person yet: the agent's two messages only.
   expect(await personMessages(threads.merge)).toBe(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const answer = await claude.waitForReply(threads.merge, 40);
-  const body = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(threads.merge, 40);
+  const body = answer.body as string;
   expect(body).toContain('### A1. Merge PR #1937 on GitHub\nYou saw it done, ');
   expect(body).toContain('\nNote: Merged with a squash; kept the changelog line.');
   await expect(card.locator('[data-action-draft-note]')).toHaveCount(0, { timeout: 20_000 });

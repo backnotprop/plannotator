@@ -394,13 +394,11 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await shot('4.3-guide-comments-in-the-reply');
   await page.keyboard.press('Escape');
 
-  // Send: the agent's wait_for_reply returns the comments as the review app's export.
-  const waiting = claude.waitForReply(sent.thread_id, 40);
+  // Send: the agent's read_thread returns the comments as the review app's export.
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the diff.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await claude.nextReply(sent.thread_id, 40);
+  const body = reply.body as string;
   expect(body.indexOf('Two notes on the diff.')).toBeLessThan(body.indexOf('# Feedback on the guided review'));
   for (const part of [
     '"Comment on the diffs"',

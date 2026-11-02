@@ -9,7 +9,7 @@
  *    names the part, and pointing at it from there brings it back;
  *  - a reload draws the badge again from the draft, and the same comment from
  *    the full-screen popout lands on the same message;
- *  - Send carries them, and the agent's wait_for_reply reads which part;
+ *  - Send carries them, and the agent's read_thread reads which part;
  *  - an archived message, a sent reply and the person's own message open
  *    nothing, as they take no comment on their words;
  *  - on a phone: a tap opens the composer inside the window, a swipe scrolls
@@ -241,9 +241,8 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   await page.locator('.ib-rbox textarea').fill('Two notes on the flow.');
   await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.locator('.ib-rbox')).toHaveCount(0);
-  const answer = await claude.waitForReply(sent.thread_id as string, 10);
-  expect(answer.status).toBe('replied');
-  const text = (answer.reply as { body: string }).body;
+  const answer = await claude.nextReply(sent.thread_id as string, 10);
+  const text = answer.body as string;
   expect(text).toContain('# Feedback on your messages');
   expect(text).toContain('Feedback on: "Tests pass?"');
   expect(text).toContain(`Diagram node Tests pass? (B), line ${B_LINE}`);
@@ -365,8 +364,8 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await openReply(page);
     await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
     await expect(page.locator('.ib-rbox')).toHaveCount(0);
-    const answer = await claude.waitForReply(sent.thread_id as string, 10);
-    expect((answer.reply as { body: string }).body).toContain('Diagram node Tests pass? (B)');
+    const answer = await claude.nextReply(sent.thread_id as string, 10);
+    expect(answer.body).toContain('Diagram node Tests pass? (B)');
   } finally {
     await context.close();
   }
