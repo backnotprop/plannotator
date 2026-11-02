@@ -43,7 +43,7 @@ import {
 } from './api';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { hasMovingDelivery } from './rowDelivery';
 import {
@@ -693,6 +693,12 @@ function Inbox() {
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);
   shownRef.current = shown;
+  /**
+   * The thread whose opening look is on its way (sent, the list not read again
+   * since): its row on screen and the header read it as looked at
+   * (held.ts `lookedRow`), so both offer Mark unread at once.
+   */
+  const [looking, setLooking] = useState<string | null>(null);
   const [thread, setThread] = useState<InboxThread | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
@@ -1758,11 +1764,15 @@ function Inbox() {
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
       // The look covers what this read showed, not a message that lands before the server takes it.
-      // The row reads as looked at from now (held.ts markHeldRowLooked): its hover action is Mark unread at once.
-      setShown((current) => (current ? markHeldRowLooked(current, threadId) : current));
+      // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
+      setLooking(threadId);
       const look = (async () => {
-        await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
-        if (!cancelled) await refreshList(false);
+        try {
+          await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
+          if (!cancelled) await refreshList(false);
+        } finally {
+          setLooking((current) => (current === threadId ? null : current));
+        }
       })();
       trackLook(threadId, look);
       await look;
@@ -2606,8 +2616,9 @@ function Inbox() {
    * already) the row just shows what is true: no toast, nothing to undo.
    */
   const markUnread = async (threadId: string) => {
-    // The row is drawn read from the moment its look goes out (held.ts markHeldRowLooked), so Mark unread can come first: the server
-    // would find the message new still and write nothing, and the look landing after would read the thread again.
+    // The row and the header read as looked at from the moment the look goes out (`looking`), so Mark unread can come
+    // first: the server would find the message new still and write nothing, and the look landing after would read
+    // the thread again.
     await awaitLooks(threadId);
     const before = rowOf(threadId);
     let written: Awaited<ReturnType<typeof inboxApi.markUnread>>;
@@ -2617,6 +2628,8 @@ function Inbox() {
       showError(cause);
       return;
     }
+    // A look that stalled past the wait: the server still has it new, so the row and header show that, not a look.
+    if (!written.wrote) setLooking((current) => (current === threadId ? null : current));
     await afterWrite();
     if (!written.wrote) return;
     if (routeRef.current.thread === threadId) {
@@ -3533,9 +3546,13 @@ function Inbox() {
   const pinRows = latest?.pins;
   const pinnedIds = useMemo(() => new Set((pinRows ?? []).map((pin) => pin.thread_id)), [pinRows]);
   // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
-  const openThreadRow = thread
+  const listedOpenRow = thread
     ? (latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null))
     : null;
+  // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
+  const openThreadRow = listedOpenRow && looking === listedOpenRow.thread_id ? lookedRow(listedOpenRow) : listedOpenRow;
+  /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
+  const listShown = useMemo(() => (shown && looking ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
   // a snooze lives on the thread's home machine and goes there through the forward and the outbox, so a linked
   // machine's row offers it only when that machine keeps snoozes too (`rowSnoozes`).
@@ -4647,7 +4664,7 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={filterList(shown)}
+          sections={filterList(listShown ?? shown)}
           filtered={filterProject !== null}
           projectNames={projectNames}
           machines={machines}

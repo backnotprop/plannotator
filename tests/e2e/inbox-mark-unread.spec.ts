@@ -12,7 +12,8 @@
  *    puts the row back in New, bold, without opening the thread;
  *  - the owner's report (2026-11-02): the open row (while its look is still
  *    on its way) and the row just left offer Mark unread on hover, and
- *    marking it unread sticks through the close and a reload.
+ *    marking it unread sticks through the close and a reload; the open
+ *    thread's header says Mark unread there too.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-mark-unread.spec.ts`.
@@ -228,6 +229,9 @@ test('the owner’s report (2026-11-02): the open row, and the row just left, of
   await expect(action(threads.nightly, 'unread')).toBeVisible();
   await expect(action(threads.nightly, 'read')).toHaveCount(0);
   await expect(row(page, threads.nightly)).not.toHaveClass(/\bib-u\b/);
+  // The header says the same (the owner, 2026-11-02; before: Mark read).
+  await expect(pane.locator('[data-mark-unread]')).toBeVisible();
+  await expect(pane.locator('[data-mark-read]')).toHaveCount(0);
   expect(await serverSection(threads.nightly)).toBe('new');
   releaseLook();
   await expect.poll(() => serverSection(threads.nightly)).toBe('quiet');
@@ -235,6 +239,7 @@ test('the owner’s report (2026-11-02): the open row, and the row just left, of
   // The look landed; the list still holds the row in New, and it still offers Mark unread (v0.28.45: Mark read).
   await row(page, threads.nightly).hover();
   await expect(action(threads.nightly, 'unread')).toBeVisible();
+  await expect(pane.locator('[data-mark-unread]')).toBeVisible();
   expect(await sectionOf(page, threads.nightly)).toBe('new');
 
   // Move to another thread: the row just left keeps Mark unread (v0.28.45: Mark read).

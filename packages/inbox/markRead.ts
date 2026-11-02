@@ -51,9 +51,11 @@ export function offersRowMarkRead(row: Parameters<typeof inboxRowOffersMarkRead>
  * (`drawn`, the group the row sits in on screen): the look put it in Quiet on
  * the server, but while a thread is open the list holds still (held.ts), so
  * the row waits in New until the list settles. Mark read stays offered on it
- * there (the header, the row menu, `E`), and only moves the row to Quiet now:
- * nothing is written, since the thread is already Quiet. The row's hover
- * action is Mark unread on it (the owner, 2026-11-02: the person read it).
+ * there (the row menu, `E`), and only moves the row to Quiet now: nothing is
+ * written, since the thread is already Quiet. The row's hover action and the
+ * header's button are Mark unread on it (the owner, 2026-11-02: "If I open a
+ * thread, and it transitions to [read] ... I need the ability to mark
+ * unread").
  * Not a thread with a question or unsent work (the server keeps those out of
  * Quiet), one marked read, or an archived one.
  */
@@ -67,16 +69,15 @@ export function seenHeldInNew(row: Pick<InboxListRow, 'section' | 'resolved_at'>
  * wrote after the person's last reply (`sent` is null; a reply is a look, so
  * there would be nothing to make new). The store's `markUnread` makes the
  * latest agent message new again: the row goes to New, bold. Never on a row
- * that waits on the person (Mark read's). With `drawn` (the header's button,
- * which shows one or the other), not on a seen update the list still holds
- * in New either: Mark read stays that button, and the menus offer both.
+ * that waits on the person (Mark read's). A seen update the list still holds
+ * in New takes it too, on the row's hover action and the header's button (the
+ * owner, 2026-11-02); its Mark read stays in the row menu and on `E`.
  */
 export function canMarkUnread(
   row: Pick<InboxListRow, 'section' | 'unseen' | 'answered_not_sent' | 'resolved_at' | 'unread' | 'sent'> & { read_at?: string | null },
-  drawn?: InboxListGroupId | null,
 ): boolean {
   if (row.resolved_at !== null || row.unread) return false;
-  if (waitsOnPerson(row) || seenHeldInNew(row, drawn)) return false;
+  if (waitsOnPerson(row)) return false;
   return row.sent === null;
 }
 
