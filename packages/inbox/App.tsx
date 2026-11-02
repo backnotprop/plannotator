@@ -991,6 +991,10 @@ function Inbox() {
       const from = routeRef.current;
       onHash();
       if (lastInput() === 'pointer') return;
+      // A traversal that lands on the screen already shown (the same address) replaced nothing, so it took no focus
+      // away: focus that is on the page stays there, as the person left it (opening a thread puts none in it). Moving
+      // it here put keyboard focus on the thread's row, whose card then opened over a list the thread was covering.
+      if (hashOf(from) === hashOf(readRoute())) return;
       const mark = inputMark();
       // Focus left in what the traversal replaced moves too (focusKept says what stays). Checked again a beat later: a thread drawn again may drop it then.
       // On a slow machine the page may not have drawn its targets by the first check: until one has taken focus,
