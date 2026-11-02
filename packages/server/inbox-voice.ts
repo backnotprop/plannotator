@@ -251,14 +251,18 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     const at = new Date().toISOString();
     saveConfig({ inboxVoiceIntro: options.usedBefore ? { dueAt: at } : { shownAt: at } });
   }
-  /** The one check of this Inbox start: null until it ran. A computer that failed it waits for the next start. */
+  /** The one check of this Inbox start: null until it ran. A computer with no ChatGPT login is settled (`skippedAt`); one whose check failed waits for the next start. */
   let introAudience: boolean | null = null;
   let introCheck: Promise<boolean> | null = null;
   const checkIntroAudience = (): Promise<boolean> => {
     introCheck ??= (async () => {
       // No `codex`, nothing started.
       if (codexCliCandidates(environment, options.extraClis).length === 0) return false;
-      return (await codexStatus(false)).state === "ready";
+      const { state } = await codexStatus(false);
+      // A login that is not ChatGPT (signed out, an API key): settled, so later starts do not run `codex app-server` again.
+      // A missing `codex` or a read that failed (unknown) is not settled: the next start tries again.
+      if (state === "signedout" || state === "apikey" || state === "other") saveConfig({ inboxVoiceIntro: { ...loadConfig().inboxVoiceIntro, skippedAt: new Date().toISOString() } });
+      return state === "ready";
     })().then((ready) => {
       introAudience = ready;
       return ready;
@@ -267,7 +271,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
   };
   const introDue = () => {
     const intro = loadConfig().inboxVoiceIntro;
-    return typeof intro?.dueAt === "string" && intro.dueAt !== "" && !intro.shownAt && !isOn();
+    return typeof intro?.dueAt === "string" && intro.dueAt !== "" && !intro.shownAt && !intro.skippedAt && !isOn();
   };
   /** Only the first claim ever gets true. No await between the last read and the write, so two tabs cannot both win. */
   const claimIntro = async (via: "local" | "tailnet"): Promise<boolean> => {

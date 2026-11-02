@@ -430,8 +430,8 @@ export interface PlannotatorConfig {
    * announcement (`POST /api/inbox/settings` `{ voice }`).
    */
   inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
-  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. */
-  inboxVoiceIntro?: { dueAt?: string; shownAt?: string };
+  /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
+  inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
