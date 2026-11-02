@@ -88,6 +88,10 @@ export function usePhone(): boolean {
  * clientHeight stayed 660), so a keyboard measured against it read as none:
  * the window went back to its full height and the whole page panned under the
  * keyboard.
+ *
+ * A browser that resizes the layout for the keyboard covers nothing, so a phone
+ * window shorter than `FOLD_BELOW` counts too: New message's head, Thread and
+ * foot would leave its words no room (and at 200 px push Send off the screen).
  */
 export function keyboardLayout(
   vv: { height: number; offsetTop: number; scale: number },
@@ -96,9 +100,21 @@ export function keyboardLayout(
   phone: boolean,
 ): { height: number | null; resetScroll: boolean } {
   const unzoomed = Math.abs(vv.scale - 1) < 0.01;
-  const covered = phone && unzoomed && layoutHeight - vv.height > 80;
+  const covered = phone && unzoomed && (layoutHeight - vv.height > 80 || vv.height < FOLD_BELOW);
   if (!covered) return { height: null, resetScroll: false };
   return { height: Math.round(vv.height), resetScroll: scrollY !== 0 || vv.offsetTop !== 0 };
+}
+
+/** New message's unfolded rows (bar 52, To 56, Thread 52, foot 52) and the 72 px its field keeps with the keyboard up. */
+const FOLD_BELOW = 284;
+
+/**
+ * What is left above a strip too small to count as a keyboard (a hardware keyboard's bar, 80 px or less): New
+ * message's height, so Send at its foot stays on screen. Null: nothing covered, or a pinch-zoom.
+ */
+export function stripHeight(vv: { height: number; scale: number }, layoutHeight: number, phone: boolean): number | null {
+  const left = Math.round(vv.height);
+  return phone && Math.abs(vv.scale - 1) < 0.01 && left < layoutHeight ? left : null;
 }
 
 /**
@@ -210,6 +226,9 @@ export function trackKeyboard(): () => void {
     frame = 0;
     // The keyboard covers the bottom of the layout viewport (not a pinch-zoom: keyboardLayout).
     const layout = keyboardLayout(vv, root.clientHeight, window.scrollY, isPhone());
+    const strip = stripHeight(vv, root.clientHeight, isPhone());
+    if (strip !== null) root.style.setProperty('--ib-cp-vvh', `${strip}px`);
+    else root.style.removeProperty('--ib-cp-vvh');
     if (layout.height !== null) {
       root.style.setProperty('--ib-vvh', `${layout.height}px`);
       root.dataset.ibKeyboard = '';
@@ -245,6 +264,7 @@ export function trackKeyboard(): () => void {
     if (frame) cancelAnimationFrame(frame);
     pin(null);
     root.style.removeProperty('--ib-vvh');
+    root.style.removeProperty('--ib-cp-vvh');
     delete root.dataset.ibKeyboard;
   };
 }
