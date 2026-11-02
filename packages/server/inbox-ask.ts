@@ -55,7 +55,8 @@ export function inboxAskSurface(subject: string | null, threadId: string): strin
 
 /** Who answers in a thread: its owner's name as the thread shows it. */
 function agentOf(thread: InboxThread, owner: { host: string | null; session: string } | null): { host: string | null; name: string } {
-  const wrote = owner ? thread.messages.findLast((message) => message.author.kind === "agent" && message.author.session === owner.session) : thread.messages.findLast((message) => message.author.kind === "agent");
+  const agents = thread.messages.filter((message) => message.author.kind === "agent");
+  const wrote = (owner ? agents.filter((message) => message.author.kind === "agent" && message.author.session === owner.session) : agents).at(-1);
   const author = wrote?.author ?? { kind: "agent", host: owner?.host ?? null, name: null };
   return { host: (author as { host?: string | null }).host ?? owner?.host ?? null, name: inboxAgentName(author) };
 }
