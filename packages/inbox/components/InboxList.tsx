@@ -939,6 +939,11 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
+  // The band comes back folded: it shows only while something is snoozed, and each time it is new.
+  const bandShown = visible.some((s) => s.id === 'snoozed');
+  useEffect(() => {
+    if (!bandShown) setSnoozedOpen(false);
+  }, [bandShown]);
   // The wide rows' pin column (the owner, 2026-10-31: the pin beside the counts): only in a list with a pinned row,
   // Quiet's folded rows included, so a list without pins keeps its columns and opening Quiet moves none.
   const pinColumn = !props.phone && !twoLine && !!props.pinned && visible.some((s) => s.threads.some((row) => props.pinned!.has(row.thread_id)));

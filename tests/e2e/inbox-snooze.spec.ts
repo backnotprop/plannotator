@@ -230,6 +230,7 @@ test("the ⋯ menu: Pick a time, two lists by mouse, wheel and keys; the thread 
   const line = page.locator('[data-snooze-line]');
   await expect(line).toContainText(/^Snoozed until \w{3} 4:00 PM|^Snoozed until \w{3} \d+, 4:00 PM/);
   await bandButton(page).click();
+  await expect(bandButton(page)).toHaveAttribute('aria-expanded', 'true');
   await expect(row(page, threads.release).locator('[data-snoozed-until]')).toContainText('4:00 PM');
   await shot(page, 'thread-light.png');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -301,8 +302,11 @@ test('the return at its time: back in its own section (Quiet comes back as New),
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('quiet');
   await snoozeFromPage(page, threads.webhook, new Date(Date.now() + 4000).toISOString());
   await expect(bandButton(page)).toContainText('Snoozed 1');
-  // No reload, no agent: the server's timer tells the window at the time.
-  await expect(row(page, threads.webhook)).toBeVisible({ timeout: 12_000 });
+  // No reload, no agent: the server's timer tells the window at the time. The list never moves under the
+  // reader: the return waits behind "1 new", as an agent's message does, and Show brings it in.
+  const notice = page.locator('[data-inbox-notice]');
+  await expect(notice).toContainText('1 new', { timeout: 12_000 });
+  await notice.click();
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('new');
   await expect(row(page, threads.webhook)).toHaveClass(/\bib-u\b/);
   await expect(row(page, threads.webhook).locator('[data-snooze-back-mark]')).toBeVisible();
@@ -344,7 +348,7 @@ test('a second window follows a snooze made in the first', async () => {
     await expect(row(second, threads.release)).toHaveCount(0);
     await expect(bandButton(second)).toContainText('Snoozed 1');
     // Unsnooze from the first's row menu: the second follows again.
-    await bandButton(page).click();
+    if ((await bandButton(page).getAttribute('aria-expanded')) !== 'true') await bandButton(page).click();
     await row(page, threads.release).click({ button: 'right' });
     await page.locator(`[data-row-menu="${threads.release}"] [data-row-action="unsnooze"]`).click();
     await expect(band(second)).toHaveCount(0);
