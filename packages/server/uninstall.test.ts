@@ -155,7 +155,8 @@ describe("Windows PATH scripts", () => {
           "-NoProfile",
           "-NonInteractive",
           "-Command",
-          "$bad=0; foreach($name in 'remove','restore'){ $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput([Environment]::GetEnvironmentVariable('PLANNOTATOR_TEST_SCRIPT_' + $name),[ref]$null,[ref]$errors); foreach($e in $errors){ Write-Output ($name + ': ' + $e.Message); $bad=1 } }; exit $bad",
+          // A missing variable would parse as an empty script with no errors: that fails too.
+          "$bad=0; foreach($name in 'remove','restore'){ $s=[Environment]::GetEnvironmentVariable('PLANNOTATOR_TEST_SCRIPT_' + $name); if([string]::IsNullOrEmpty($s)){ Write-Output ($name + ': no script'); $bad=1; continue }; $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput($s,[ref]$null,[ref]$errors); foreach($e in $errors){ Write-Output ($name + ': ' + $e.Message); $bad=1 } }; exit $bad",
         ],
         {
           stdin: "ignore",
