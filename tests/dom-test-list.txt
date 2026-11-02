@@ -472,3 +472,4 @@ packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
+packages/inbox/personLineBreaks.test.tsx
