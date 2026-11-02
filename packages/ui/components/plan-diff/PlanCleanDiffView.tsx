@@ -28,6 +28,7 @@ import { AnnotationToolbar } from "../AnnotationToolbar";
 import { CommentPopover } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { getIdentity } from "../../utils/identity";
+import { useHighlightCopy } from "../../utils/highlightCopy";
 
 /**
  * Which version a rendered chunk comes from: 'old' for a removed block and
@@ -143,7 +144,14 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     block: PlanDiffBlock;
     index: number;
     diffContext: Annotation['diffContext'];
+    /** The words dragged over when the composer opened: Ctrl+C copies them. */
+    selectedWords?: string;
   } | null>(null);
+
+  // A click on a block opens its composer, whose textarea then takes the
+  // focus and with it the person's selection, so Ctrl+C would copy nothing.
+  // Keep the words they dragged over inside that block.
+  useHighlightCopy(commentPopover?.selectedWords);
 
   const [quickLabelPicker, setQuickLabelPicker] = useState<{
     anchorEl: HTMLElement;
@@ -307,6 +315,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
       block: hoveredBlock.block,
       index: hoveredBlock.index,
       diffContext: hoveredBlock.diffContext,
+      selectedWords: selectedWordsIn(hoveredBlock.element),
     });
     setHoveredBlock(null);
   };
@@ -352,6 +361,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
         block,
         index,
         diffContext,
+        selectedWords: selectedWordsIn(element),
       });
     }
   }, [createDiffAnnotation, getBlockContent]);
@@ -510,6 +520,16 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
 // --- Line gutter + fold row (optional seams) ---
 
 /** "11–12", or "14" for one line; null when the side has no lines. */
+/** The words the person has selected inside `element`, for Ctrl+C once its
+ *  composer has the focus; undefined when the selection is elsewhere or empty. */
+function selectedWordsIn(element: HTMLElement): string | undefined {
+  const live = window.getSelection();
+  if (!live || live.isCollapsed || live.rangeCount === 0) return undefined;
+  if (!element.contains(live.getRangeAt(0).commonAncestorContainer)) return undefined;
+  const text = live.toString();
+  return text.trim() ? text : undefined;
+}
+
 function rangeLabel(start?: number, end?: number): string | null {
   if (start === undefined) return null;
   return end !== undefined && end !== start ? `${start}–${end}` : `${start}`;

@@ -89,7 +89,8 @@ import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBa
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import { useAnnotationHighlighter, type AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
+import { useHighlightCopy } from '../utils/highlightCopy';
 import { useVimSelection } from '../hooks/useVimSelection';
 import {
   getScrollViewportIntersectionRoot,
@@ -1398,25 +1399,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   // Use the native copy event so clipboard writes are synchronous (Safari
   // rejects the async navigator.clipboard API outside the user-gesture window).
   // web-highlighter clears the DOM selection on mouseup, so the browser has
-  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
-  useEffect(() => {
-    const handleCopy = (e: ClipboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      // A live selection where nothing is annotated (an Inbox action item's text) is
-      // the person's own: the browser copies it, never an older toolbar's text.
-      const live = window.getSelection();
-      if (live && !live.isCollapsed && live.rangeCount > 0 && containerRef.current && rangeInsideExcluded(containerRef.current, live.getRangeAt(0))) return;
-
-      if (toolbarState?.selectionText) {
-        e.preventDefault();
-        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
-      }
-    };
-
-    document.addEventListener('copy', handleCopy);
-    return () => document.removeEventListener('copy', handleCopy);
-  }, [toolbarState]);
+  // nothing to copy by the time Cmd+C fires — we inject the captured text
+  // here, while the toolbar is up and while the selection's composer is open
+  // (its textarea has the focus then). The person's own selection, in a field
+  // or in the page (an Inbox action item's text), always copies natively.
+  useHighlightCopy(
+    toolbarState?.selectionText
+      || (hookCommentPopover && !hostComposes ? hookCommentPopover.selectedText ?? hookCommentPopover.contextText : null),
+  );
 
   // Imperative handle — delegates to hook, extends removeHighlight for code blocks
   useImperativeHandle(ref, () => ({
