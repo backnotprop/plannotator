@@ -10,7 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
-import { perfFirstList, perfOn, perfThreadOpenDrawn, perfThreadOpenDropped, perfThreadOpenStart, perfUntilNextFrame } from './perfMarks';
+import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
@@ -1296,11 +1296,11 @@ function Inbox() {
         setThread(next.thread);
         setThreadRow(next.row ?? null);
         setThreadLoad(null);
-        perfThreadOpenDrawn(threadId, next.thread.messages.length);
+        perfThreadReadLanded(threadId, next.thread.messages.length, true);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
-      }
+      } else perfThreadReadLanded(threadId, null, routeRef.current.thread === threadId);
       return next.thread;
     } catch (cause) {
       perfThreadOpenDropped(threadId);
@@ -1567,7 +1567,7 @@ function Inbox() {
     const readAfterRecord = () => {
       if (timer) clearTimeout(timer);
       // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
-      const heard = perfOn() ? performance.now() : null;
+      const heard = perfStart();
       timer = setTimeout(() => {
         const listRead = refreshList(false).then((next) => {
           if (next) flushNotifications(next);

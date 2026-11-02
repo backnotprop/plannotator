@@ -19,7 +19,7 @@
  *
  * Entries are cleared as they are made, so a window open for weeks keeps none: an observer hears each one first.
  */
-import { debugLogOn, debugNote } from './debugLog';
+import { debugLogOn, debugNote, whenDebugLogStops } from './debugLog';
 
 export type PerfWhat = 'first-list' | 'thread-open' | 'record-refresh' | 'theme' | 'theme-settled' | 'expand-all' | 'keystroke';
 
@@ -39,8 +39,20 @@ export function perfOn(): boolean {
 }
 
 const visible = () => typeof document === 'undefined' || document.visibilityState === 'visible';
-/** Bumped each time the window is hidden: a frame asked for before then measures the hidden time too, so it is dropped. */
+/** Bumped each time the window is hidden: an interaction that started before then holds the hidden time too, so it is dropped. */
 let hiddenTimes = 0;
+
+/** When an interaction started, and how many hides the window had had then. Null: not timed (debug off, or hidden). */
+export interface PerfStart {
+  at: number;
+  hides: number;
+}
+/** An interaction starts now: timed only while debug is on and the window is shown. */
+export function perfStart(at?: number): PerfStart | null {
+  if (!perfOn() || !visible()) return null;
+  return { at: at ?? performance.now(), hides: hiddenTimes };
+}
+
 /** At most one frame waited on per interaction kind (a burst of events or keys is timed from its first). */
 const pending = new Map<PerfWhat, object>();
 /** One channel for every wait (a task after the frame's paint), its callbacks in order. */
@@ -50,13 +62,12 @@ const afterPaint: (() => void)[] = [];
 /**
  * After the next frame is drawn: a rAF, then a task (the frame's paint happens between them). Nothing while the
  * window is hidden (a hidden window draws no frames), nothing when one is already waited on for `what`, and
- * nothing if the window was hidden before the frame came.
+ * nothing if the window was hidden at any moment since the interaction started.
  */
-function afterNextFrame(what: PerfWhat, done: (now: number) => void): void {
-  if (!visible() || pending.has(what)) return;
+function afterNextFrame(what: PerfWhat, start: PerfStart, done: (now: number) => void): void {
+  if (!visible() || start.hides !== hiddenTimes || pending.has(what)) return;
   const token = {};
   pending.set(what, token);
-  const hidden = hiddenTimes;
   requestAnimationFrame(() => {
     if (!channel) {
       channel = new MessageChannel();
@@ -64,7 +75,7 @@ function afterNextFrame(what: PerfWhat, done: (now: number) => void): void {
     }
     afterPaint.push(() => {
       if (pending.get(what) === token) pending.delete(what);
-      if (hidden === hiddenTimes) done(performance.now());
+      if (start.hides === hiddenTimes && listening) done(performance.now());
     });
     channel.port2.postMessage(0);
   });
@@ -82,22 +93,22 @@ function perfMeasure(what: PerfWhat, start: number, detail?: Record<string, numb
   }
 }
 
-/** From `start` to the next frame drawn. */
-export function perfUntilNextFrame(what: PerfWhat, start: number, detail?: Record<string, number>): void {
-  if (!perfOn()) return;
-  afterNextFrame(what, () => perfMeasure(what, start, detail));
+/** From `start` (perfStart) to the next frame drawn. */
+export function perfUntilNextFrame(what: PerfWhat, start: PerfStart | null, detail?: Record<string, number>): void {
+  if (!start || !perfOn()) return;
+  afterNextFrame(what, start, () => perfMeasure(what, start.at, detail));
 }
 
 /** An interaction that starts now: to the next frame, then (theme only) to the first idle moment after it. */
 export function perfInteraction(what: 'theme' | 'expand-all', messages?: number): void {
-  if (!perfOn()) return;
-  const start = performance.now();
+  const start = perfStart();
+  if (!start) return;
   const detail = messages === undefined ? undefined : { messages };
-  afterNextFrame(what, () => {
-    perfMeasure(what, start, detail);
+  afterNextFrame(what, start, () => {
+    perfMeasure(what, start.at, detail);
     if (what === 'theme') {
       const idle = (window as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
-      if (idle) idle(() => perfMeasure('theme-settled', start), { timeout: 5000 });
+      if (idle) idle(() => start.hides === hiddenTimes && perfMeasure('theme-settled', start.at), { timeout: 5000 });
     }
   });
 }
@@ -105,25 +116,35 @@ export function perfInteraction(what: 'theme' | 'expand-all', messages?: number)
 /** A key in the reply box, timed from the key's event. Only a slow one leaves a measure. */
 export function perfKeystroke(): void {
   if (!perfOn()) return;
-  const timeStamp = (window.event as Event | undefined)?.timeStamp || performance.now();
-  afterNextFrame('keystroke', (now) => {
-    if (now - timeStamp >= KEYSTROKE_NOTE_MS) perfMeasure('keystroke', timeStamp);
+  const start = perfStart((window.event as Event | undefined)?.timeStamp || performance.now());
+  if (!start) return;
+  afterNextFrame('keystroke', start, (now) => {
+    if (now - start.at >= KEYSTROKE_NOTE_MS) perfMeasure('keystroke', start.at);
   });
 }
 
 /**
- * The thread being opened and when its read started. One thread opens at a time: a new open replaces it, so an
- * open left before its read came back (another thread, the list) never lends its old start to a later open.
+ * The thread being opened and when its read started. One thread opens at a time: another thread's open replaces
+ * it; a second read of the same thread (a retry, an event's re-read) keeps the first start, so a slow open is
+ * timed whole. A read that lands after the person left that thread ends it, so a later open starts afresh.
  */
-let opening: { threadId: string; at: number } | null = null;
+let opening: { threadId: string; start: PerfStart } | null = null;
 export function perfThreadOpenStart(threadId: string): void {
-  if (perfOn()) opening = { threadId, at: performance.now() };
+  if (opening?.threadId === threadId || !perfOn()) return;
+  const start = perfStart();
+  opening = start ? { threadId, start } : null;
 }
-export function perfThreadOpenDrawn(threadId: string, messages: number): void {
+/**
+ * A thread read came back: `drawnMessages` when it was applied (its messages go on screen), else null; `shown`
+ * whether that thread is still the one on screen. Not applied and not shown: the open was left.
+ */
+export function perfThreadReadLanded(threadId: string, drawnMessages: number | null, shown: boolean): void {
   if (opening?.threadId !== threadId) return;
-  const start = opening.at;
-  opening = null;
-  perfUntilNextFrame('thread-open', start, { messages });
+  if (drawnMessages !== null) {
+    const start = opening.start;
+    opening = null;
+    perfUntilNextFrame('thread-open', start, { messages: drawnMessages });
+  } else if (!shown) opening = null;
 }
 export function perfThreadOpenDropped(threadId: string): void {
   if (opening?.threadId === threadId) opening = null;
@@ -134,8 +155,8 @@ let firstListDone = false;
 export function perfFirstList(sections: readonly { threads: readonly unknown[] }[]): void {
   if (firstListDone) return;
   firstListDone = true;
-  if (!perfOn()) return;
-  perfUntilNextFrame('first-list', 0, { rows: sections.reduce((n, section) => n + section.threads.length, 0) });
+  const start = perfStart(0);
+  if (start) perfUntilNextFrame('first-list', start, { rows: sections.reduce((n, section) => n + section.threads.length, 0) });
 }
 
 // ───────── listeners: the debug log and the overlay ─────────
@@ -174,16 +195,38 @@ function draw(): void {
   overlay.textContent = [`long tasks ${longTasks.count}  ${Math.round(longTasks.ms)} ms  (longest ${Math.round(longTasks.longest)} ms)`, ...rows].join('\n');
 }
 
+/** What the listeners left attached, undone when the window hears that debug went off. */
+const teardown: (() => void)[] = [];
+
+/** Debug went off (debugLog.ts): every listener, observer and the overlay go, and nothing in flight is measured. */
+function stopListening(): void {
+  listening = false;
+  for (const undo of teardown.splice(0)) {
+    try {
+      undo();
+    } catch {
+      // Never in the way.
+    }
+  }
+  overlay = null;
+  opening = null;
+  pending.clear();
+  hiddenTimes++;
+}
+
 function startListening(): void {
   listening = true;
-  document.addEventListener('visibilitychange', () => {
+  teardown.push(whenDebugLogStops(stopListening));
+  const onVisibility = () => {
     if (visible()) return;
     hiddenTimes++;
     pending.clear();
-  });
+  };
+  document.addEventListener('visibilitychange', onVisibility);
+  teardown.push(() => document.removeEventListener('visibilitychange', onVisibility));
   if (typeof PerformanceObserver === 'undefined') return;
   try {
-    new PerformanceObserver((list) => {
+    const measures = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         if (!entry.name.startsWith('pn:')) continue;
         const what = entry.name.slice(3);
@@ -194,18 +237,22 @@ function startListening(): void {
         if (entry.duration >= SLOW_UI_MS) debugNote('slow_ui', { what, ms: Math.round(entry.duration), n: detail?.messages ?? detail?.rows });
       }
       draw();
-    }).observe({ type: 'measure', buffered: false });
+    });
+    measures.observe({ type: 'measure', buffered: false });
+    teardown.push(() => measures.disconnect());
   } catch {
     // An older browser: the marks still go to the timeline.
   }
   if (!overlayOn()) return;
   try {
-    new PerformanceObserver((list) => {
+    const tasks = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         longTasks = { count: longTasks.count + 1, ms: longTasks.ms + entry.duration, longest: Math.max(longTasks.longest, entry.duration) };
       }
       draw();
-    }).observe({ type: 'longtask', buffered: true });
+    });
+    tasks.observe({ type: 'longtask', buffered: true });
+    teardown.push(() => tasks.disconnect());
   } catch {
     // No long-task timing here.
   }
@@ -218,5 +265,9 @@ function startListening(): void {
   const attach = () => document.body.appendChild(box);
   if (document.body) attach();
   else window.addEventListener('DOMContentLoaded', attach, { once: true });
+  teardown.push(() => {
+    window.removeEventListener('DOMContentLoaded', attach);
+    box.remove();
+  });
   draw();
 }

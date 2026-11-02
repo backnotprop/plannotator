@@ -64,7 +64,7 @@ export function serverTimingHeader(list: readonly Phase[], total: number): strin
  * machine's forward, an upload. They still get Server-Timing; a `slow_req` line for them would only repeat the
  * request's own `req_end` and bury the slow reads.
  */
-const WAITING_ROUTE = /^\/api\/inbox\/(?:bridge\/|events$|m\/|uploads(?:\/|$))/;
+const WAITING_ROUTE = /^\/api\/inbox\/(?:bridge\/poll$|events$|m\/|uploads(?:\/|$))/;
 
 export interface SlowRequest {
   route: string;

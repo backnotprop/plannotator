@@ -71,7 +71,7 @@ describe("withServerTiming", () => {
     expect(heard[0]!.phases.thread).toBeGreaterThanOrEqual(INBOX_SLOW_REQUEST_MS);
   });
 
-  test("routes that wait or stream by design (bridge long-poll, events, forwards, uploads) write no slow line", async () => {
+  test("routes that wait or stream by design (the bridge long-poll, events, forwards, uploads) write no slow line", async () => {
     const heard: SlowRequest[] = [];
     const served = withServerTiming(
       async () => {
@@ -86,8 +86,10 @@ describe("withServerTiming", () => {
       expect(response.headers.get("Server-Timing")).toContain("app;dur=");
     }
     expect(heard).toEqual([]);
+    // Only the long-poll waits: another bridge route that is slow is a slow request.
     await served(new Request("http://127.0.0.1/api/inbox/eventsx"), "local");
-    expect(heard.map((slow) => slow.route)).toEqual(["/api/inbox/eventsx"]);
+    await served(new Request("http://127.0.0.1/api/inbox/bridge/event"), "local");
+    expect(heard.map((slow) => slow.route)).toEqual(["/api/inbox/eventsx", "/api/inbox/bridge/event"]);
   });
 
   test("a log that throws never costs the answer", async () => {
