@@ -54,7 +54,7 @@ test('the foot count is a button a finger can press: the list opens as the sheet
   await page.context().close();
 });
 
-test('a tap on a highlight opens the sheet at that comment', async ({ browser }) => {
+test('a tap on a highlight opens the sheet at that comment, with its header still there', async ({ browser }) => {
   const page = await phone(browser);
   const t = await seededThread(world, 8);
   await openThread(page, world, t);
@@ -62,6 +62,7 @@ test('a tap on a highlight opens the sheet at that comment', async ({ browser })
   await isTheSheet(page, t.count);
   await expect(rowOf(page, t.onMessage)).toHaveClass(/ib-at/);
   await expect(rowOf(page, t.onMessage)).toBeInViewport();
+  await expect(theList(page, t.count).getByRole('button', { name: 'Close the list' })).toBeInViewport();
   await page.context().close();
 });
 

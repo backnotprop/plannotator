@@ -762,7 +762,7 @@ describe('the full-screen composer counts as the foot does', () => {
           canSend: false,
           picks: 0,
           annotations: 0,
-        comments: { records: [], attachments: [], onEdit: async () => {}, onRemove: async () => {}, onOpen: () => {}, list: null, onList: () => {} },
+        comments: { records: [], attachments: [], onEdit: async () => {}, onRemove: async () => {}, onOpen: () => {}, editing: null, onEditing: () => {}, list: null, onList: () => {} },
           actions: 0,
           files: [],
           onFiles: () => {},

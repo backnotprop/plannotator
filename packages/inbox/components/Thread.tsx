@@ -34,7 +34,7 @@ import { fileViewFor, openingView, parseFileView, readFileViewChoice, writeFileV
 import { fullScreenExit, type FrameMove } from '../fullScreenOrigin';
 import { takeArrivalFocus } from '../threadStep';
 import type { InboxToastModel } from './Toast';
-import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
+import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
@@ -373,8 +373,8 @@ export function MessageBody({
     onSave: (annotation: Annotation) => Promise<boolean>;
     onUnanchored?: (report: { attempted: readonly string[]; unanchored: readonly string[] }) => void;
     onPainted?: () => void;
-    /** A press on a comment's highlight: the list of comments, at this one. */
-    onOpen?: (id: string) => void;
+    /** A press on a comment's highlight: the list of comments, at this one. Null: the press made a selection, the list makes way. */
+    onOpen?: (id: string | null) => void;
     /** The comment the list is open at: its highlight shows it. */
     openId?: string | null;
     /** Words the comment box opens with for this selection (the tour's suggested comment); absent: an empty box. */
@@ -812,8 +812,10 @@ export function MessageBody({
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
     const id = mark?.getAttribute('data-bind-id') ?? mark?.getAttribute('data-highlight-id');
-    // A link in the highlight stays a link; a drag that ended here is a selection.
-    if (id && !target.closest('a, button') && !pressSelected.current) comments?.onOpen?.(id);
+    // A link in the highlight stays a link.
+    if (!id || target.closest('a, button')) return;
+    // A press that ended in a selection (a drag, a double or triple click) is the comment toolbar's.
+    comments?.onOpen?.(pressSelected.current || event.detail > 1 ? null : id);
   };
   // Read on the way down: the highlighter takes the selection away at this mouseup, so the click finds none.
   const readPress = () => {
@@ -2055,7 +2057,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           : await inboxApi.saveAnnotation(record.attachment_id, record.version, next);
       saveRecord(result.annotation);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not saved.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
     }
   };
   const removeRecord = async (record: InboxAnnotationRecord) => {
@@ -2063,13 +2065,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       await inboxApi.removeAnnotation(record.id);
       dropRecord(record.id);
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : 'The annotation was not removed.');
+      setError(cause instanceof InboxApiError ? cause.message : 'The comment was not removed.');
     }
   };
-  /** The list of comments: open or not, one state for its three ways in (reply box, foot and highlights, full-screen card). */
+  /** The list of comments: open or not, one state for its four ways in (reply box, foot, highlights, full-screen card). */
   const [commentsList, setCommentsList] = useState<CommentsListAt | null>(null);
-  const openListAt = (id: string) => {
-    if (records.some((record) => record.id === id)) setCommentsList({ at: id });
+  const [commentEdit, setCommentEdit] = useState<CommentEdit | null>(null);
+  const openListAt = (id: string | null) => {
+    if (id === null) setCommentsList(null);
+    else if (listHome && records.some((record) => record.id === id)) setCommentsList((open) => ({ at: id, press: (open?.press ?? 0) + 1 }));
   };
   const commentsListProps: AnnotationsListProps = {
     records,
@@ -2079,6 +2083,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     onOpen: openRecord,
     messageName: messageCommentName,
     unanchored: unanchoredComments,
+    editing: commentEdit,
+    onEditing: setCommentEdit,
   };
   /** The annotations as Plannotator's feedback text: each file version's text read now, so line numbers are what the person read. */
   const buildFeedback = async (pending: readonly InboxAnnotationRecord[]): Promise<string> => {
@@ -3923,8 +3929,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const [rowFit, setRowFit] = useState<{ level: number; max: OpenQuestionsLabelForm } | null>(null);
   const rowLevel = rowFit?.level ?? null;
   const footStatusShown = waiting || draftKept;
-  // The list lives where it opened: another thread, another view or the box opening or closing takes it away.
-  useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn]);
+  // What the foot shows in the list's place, in the order the foot draws them. A list opened then would show only later, by itself.
+  const listHome = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && (box.open || !(route.open && asking));
+  // The list lives where it opened: another thread, another view, the box opening or closing, or anything taking the foot's place, takes it away.
+  useEffect(() => setCommentsList(null), [thread.thread_id, shownFull, box.open, route.open, artifactsOn, listHome]);
   /** Closes the foot's list. `back`: to the count that shows at this width (the foot's first button once no comment is left). */
   const closeFootList = (back: boolean) => {
     setCommentsList(null);
@@ -5226,7 +5234,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           {commentsList && !commentsList.card && (
             <div className="ib-annat ib-annfoot">
               <div className="ib-annat-in">
-                <AnnotationsList {...commentsListProps} at={commentsList.at} onClose={closeFootList} />
+                <AnnotationsList {...commentsListProps} at={commentsList.at} press={commentsList.press} onClose={closeFootList} />
               </div>
             </div>
           )}

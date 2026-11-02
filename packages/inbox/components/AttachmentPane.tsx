@@ -1847,6 +1847,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // Kept mounted under a linked page (inert, hidden), so Back finds it as it was left.
             <div className={`ib-htmlframe${linkedTop ? ' ib-covered' : ''}`} inert={linkedTop ? true : undefined}>
             <HtmlViewer
+              ref={viewerRef}
               key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
               rawHtml={view.html}
               title={attachment.name}

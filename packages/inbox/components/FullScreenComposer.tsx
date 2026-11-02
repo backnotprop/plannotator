@@ -335,9 +335,11 @@ export function FullScreenComposer({
           <AnnotationsList
             {...reply.comments}
             at={listAt.at}
+            press={listAt.press}
             onClose={(back) => {
               reply.comments.onList(null);
-              if (back) (commentsRef.current ?? replyRef.current)?.focus({ preventScroll: true });
+              // With no comment left there is no count. The card, on a phone: the reply field would raise the keyboard.
+              if (back) (commentsRef.current ?? (phone ? cardRef.current : replyRef.current))?.focus({ preventScroll: true });
             }}
           />
         </div>
@@ -348,6 +350,7 @@ export function FullScreenComposer({
       className={`ib-fcomp ib-mode-${mode}${phone ? ' ib-phone' : ''}`}
       role="group"
       aria-label={label}
+      tabIndex={-1}
       inert={value.tucked || undefined}
       data-fcomp=""
       data-fcomp-mode-on={mode}

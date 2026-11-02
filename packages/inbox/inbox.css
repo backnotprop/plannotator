@@ -2072,7 +2072,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-rchip.ib-none { opacity: 0.55; }
 /* --ib-annpop-shift: AnnotationsChip moves the list left when it would run past the window (to the reply box's right edge). */
 .ib-annpop { position: absolute; left: var(--ib-annpop-shift, 0px); bottom: calc(100% + 10px); white-space: normal; width: 540px; max-height: 60vh; overflow-y: auto; background: var(--popover); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); z-index: 30; }
-.ib-aph { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; font-size: var(--ib-fs-13-5, 13.5px); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+/* The header stays: opened far down a long list, its count and Close are still there. */
+.ib-aph { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 6px 0 14px; background: var(--popover); font-size: var(--ib-fs-13-5, 13.5px); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
 .ib-aph b { font-weight: 600; }
 .ib-aph .ib-sp, .ib-arow .ib-sp, .ib-abt .ib-sp { flex: 1; }
 .ib-arow { padding: 10px 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 45%, transparent); }
@@ -6485,7 +6486,7 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .pn-inbox button.ib-fcomp-chip { border: 0; font: inherit; font-weight: 600; cursor: pointer; }
 .pn-inbox button.ib-fcomp-chip:hover, .pn-inbox button.ib-fcomp-chip[aria-expanded="true"] { background: color-mix(in oklch, var(--primary) 20%, transparent); }
 .pn-inbox button.ib-fcomp-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.ib-annpop:focus { outline: none; }
+.ib-annpop:focus, .ib-fcomp:focus { outline: none; }
 .ib-arow.ib-at { background: color-mix(in oklch, var(--primary) 7%, transparent); }
 /* The list's place outside the reply box. It never grows what it sits over: the box above the foot's row, inside the
    foot's own side padding; above the full-screen card, centred on it. */
@@ -6494,8 +6495,14 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
 .ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
+/* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
+.ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* The sheet (above) wherever it opens from. */
   .ib-annat, .ib-annat-in { position: static; transform: none; width: auto; }
   .ib-annat .ib-annpop { left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); width: auto; }
+  .ib-anncard .ib-annpop { max-height: calc(var(--ib-vvh, 100%) * 0.72); }
+  /* 44 px to press, drawn on the overlay: the count stays the size it is, and nothing moves. */
+  .pn-inbox button.ib-comments-link::after { inset: auto -6px; top: 50%; height: 44px; transform: translateY(-50%); }
+  .pn-inbox button.ib-draft-pc.ib-comments-link::after { inset: auto; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
 }
