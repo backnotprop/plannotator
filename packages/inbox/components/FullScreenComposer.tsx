@@ -27,7 +27,7 @@
  * the toolbar on a phone, the chip and the notes sit above it. A phone's pill
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
-import { createContext, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { useVoiceSession } from '../voice';
@@ -36,6 +36,7 @@ import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { openItemsLabel } from '../openQuestions';
+import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
 export interface FullScreenReply {
@@ -112,8 +113,35 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The chips of what rides the Send, and the open questions (a way to them, in the thread). */
 function Rides({ reply }: { reply: FullScreenReply }) {
+  const chips = useRef<HTMLSpanElement>(null);
+  const [form, setForm] = useState<OpenQuestionsLabelForm>('full');
+  const n = reply.openQuestions;
+  const a = reply.openActions;
+  const label = openItemsLabel(n, a);
+  // The thread foot's own fit (footFit.ts), on this row: the longest words ("2 open questions"), then "2 open", then
+  // "2", that keep the chips on one line and inside the row. Tried on the page before paint.
+  const fit = useCallback(() => {
+    const row = chips.current;
+    const button = row?.querySelector<HTMLElement>('[data-fcomp-questions]');
+    if (!row || !button) return;
+    const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
+    const fits = () => row.scrollWidth <= row.clientWidth + 1;
+    const next = fitFootRow(row, footFitCandidates('full').filter((c) => !c.tight), apply, fits) ?? { form: 'full' as const, tight: false };
+    apply(next);
+    setForm(next.form);
+  }, []);
+  useLayoutEffect(() => fit());
+  useEffect(() => {
+    const row = chips.current;
+    if (!row || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(row);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fit());
+    return () => observer.disconnect();
+  }, [fit]);
   return (
-    <span className="ib-fcomp-chips">
+    <span className="ib-fcomp-chips" ref={chips}>
       {reply.picks > 0 && (
         <span className="ib-fcomp-chip">
           <Icon name="check" size={12} />
@@ -135,9 +163,20 @@ function Rides({ reply }: { reply: FullScreenReply }) {
       {/* The thread foot's words (openItemsLabel): "2 open questions", "1 open action item", "2 questions, 1 action item".
           Its question count leaves out picked questions, which the foot counts until they are sent. */}
       {reply.openQuestions + reply.openActions > 0 && (
-        <button type="button" className="ib-fcomp-q" onClick={reply.onOpenThread} data-fcomp-questions="">
+        <button
+          type="button"
+          className="ib-fcomp-q"
+          onClick={reply.onOpenThread}
+          data-fcomp-questions=""
+          // What footFit.ts draws each form from; a shorter form keeps the whole count as its name.
+          data-oq-n={n}
+          data-oq-actions={a}
+          data-oq-label={label}
+          data-label-form={form}
+          aria-label={form === 'full' ? undefined : label}
+        >
           <Icon name="question" size={12} />
-          {openItemsLabel(reply.openQuestions, reply.openActions)}
+          <span data-oq-words="">{openQuestionsFormText(n, form, a)}</span>
         </button>
       )}
     </span>

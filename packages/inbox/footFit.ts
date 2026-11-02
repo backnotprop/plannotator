@@ -102,13 +102,15 @@ export function laidOutChildren(row: Element): HTMLElement[] {
  * Tries each way in turn on the page itself (before paint: the caller runs in
  * a layout effect) and leaves the button drawn the first way that keeps the
  * row on one line; none does: the last. `apply` draws one way on the button.
- * Null where there is no layout (a test DOM, a hidden pane).
+ * Null where there is no layout (a test DOM, a hidden pane). `fits` is an
+ * extra test of the page drawn that way (the full-screen composer's chips,
+ * which cannot wrap a lone pill, ask that nothing runs past the row's end).
  */
-export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[], apply: (fit: FootFit) => void): FootFit | null {
+export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[], apply: (fit: FootFit) => void, fits: () => boolean = () => true): FootFit | null {
   if (buttons.getBoundingClientRect().width <= 0 || candidates.length === 0) return null;
   for (const fit of candidates) {
     apply(fit);
-    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top))) return fit;
+    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
   }
   return candidates[candidates.length - 1]!;
 }
