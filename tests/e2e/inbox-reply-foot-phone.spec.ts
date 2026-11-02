@@ -7,6 +7,7 @@
  *    row at 390 and at 320: the paperclip, one line, the mic; nothing runs past the box;
  *  - the line says "4 questions open · 3 comments" at 390 and "4 open · 3 comments" at 320;
  *  - every control in the row and in its sheet is at least 44 px to press;
+ *  - a tap on the sheet's scrim closes it and presses nothing under it (a question's option stays unpicked);
  *  - the sheet: Skip them skips them (the line says so), Review opens the comments list;
  *  - in that list, a comment's place ("<long agent name>'s message, 10:41 AM") is one line from the left;
  *  - dictating, the row stays one row and the status line's Cancel is 44 px to press;
@@ -116,15 +117,42 @@ for (const [width, words] of [
     const page = await phone(browser, width);
     await openBox(page);
     await expect(line(page)).toHaveText(words);
-    await expect(line(page)).toHaveAccessibleName('4 questions stay open, 3 comments');
+    // Its name is the words it shows (what a voice-control user says); the full sentence is its description.
+    await expect(line(page)).toHaveAccessibleName(words);
+    await expect(line(page)).toHaveAccessibleDescription('4 questions stay open, 3 comments');
     const row = await readRow(page);
-    expect(row.controls.map((c) => c.name)).toEqual(['Attach files', '4 questions stay open, 3 comments', 'Dictate: hold to talk, or tap']);
+    expect(row.controls.map((c) => c.name)).toEqual(['Attach files', words, 'Dictate: hold to talk, or tap']);
     oneRow(row);
     // No chip of today's is left in the phone's box.
     await expect(pane(page).locator('.ib-rbox').locator('[data-skip-chip], [data-annotations-chip], [data-picks-chip]')).toHaveCount(0);
     await page.context().close();
   });
 }
+
+test('a tap on the sheet\'s scrim closes it and presses nothing under it (a question\'s option there stays unpicked)', async ({ browser }) => {
+  const page = await phone(browser, 390);
+  await openBox(page);
+  // A question's option in view, where the scrim (not the sheet) will be.
+  const option = pane(page).locator('fieldset[data-question-key]').first().locator('[data-question-option]').filter({ hasText: 'Yes' });
+  await option.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await page.waitForTimeout(300);
+  const spot = (await option.boundingBox())!;
+  const x = spot.x + spot.width / 2;
+  const y = spot.y + spot.height / 2;
+  expect(await option.evaluate((el, [px, py]) => el.contains(document.elementFromPoint(px!, py!)), [x, y]), 'the option is what is under that point').toBe(true);
+  await line(page).tap();
+  const sheet = page.getByRole('dialog', { name: 'Goes with this reply' });
+  await expect(sheet).toBeVisible();
+  expect(y, 'the point is above the sheet, on its scrim').toBeLessThan((await sheet.boundingBox())!.y);
+  await page.touchscreen.tap(x, y);
+  await expect(sheet).toHaveCount(0);
+  // Long enough for a click that went through to have made its pick.
+  await page.waitForTimeout(800);
+  await expect(pane(page).locator('.ib-rbox [data-reply-answers]')).toHaveCount(0);
+  await expect(line(page)).toHaveText('4 questions open · 3 comments');
+  await expect(line(page)).toBeFocused();
+  await page.context().close();
+});
 
 test('the sheet: Skip them skips them, Review opens the list, and a long agent name there stays on one line', async ({ browser }) => {
   const page = await phone(browser, 320);

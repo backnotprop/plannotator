@@ -5425,37 +5425,36 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   voice={voice}
                 />
               ) : (
-              <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
-                <AttachFilesButton
-                  className="ib-rclip"
-                  iconSize={phone ? 19 : 16}
-                  phone={phone}
-                  inputData="data-reply-attach"
-                  onFiles={(list) => {
-                    (phone ? replyFiles.attach : replyFiles.add)(list);
-                    setError(null);
-                  }}
-                />
-                {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
-                {draftAnswers.length > 0 && (
-                  <span className="ib-rchip" data-picks-chip="">
-                    <Icon name="check" size={13} />
-                    {plural(draftAnswers.length, 'pick')}
-                  </span>
-                )}
-                <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                {dropped.length > 0 && (
-                  <Tip content="Replaced; this pick won't be sent">
-                    <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
-                      {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
+                  <AttachFilesButton
+                    className="ib-rclip"
+                    iconSize={16}
+                    inputData="data-reply-attach"
+                    onFiles={(list) => {
+                      replyFiles.add(list);
+                      setError(null);
+                    }}
+                  />
+                  {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
+                  {draftAnswers.length > 0 && (
+                    <span className="ib-rchip" data-picks-chip="">
+                      <Icon name="check" size={13} />
+                      {plural(draftAnswers.length, 'pick')}
                     </span>
-                  </Tip>
-                )}
-                {takesAnnotations && (
-                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
-                )}
-                <VoiceFoot voice={voice} phone={phone} />
-              </div>
+                  )}
+                  <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
+                  {dropped.length > 0 && (
+                    <Tip content="Replaced; this pick won't be sent">
+                      <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
+                        {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+                      </span>
+                    </Tip>
+                  )}
+                  {takesAnnotations && (
+                    <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
+                  )}
+                  <VoiceFoot voice={voice} phone={false} />
+                </div>
               )}
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">

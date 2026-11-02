@@ -15,6 +15,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { plural, formatCount } from '../format';
 import { Icon } from '../icons';
+import { useInboxTextSize } from '../textSize';
 import type { VoiceHandle } from '../voice';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { VoiceFoot } from './VoiceMic';
@@ -74,13 +75,13 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
       <div
         className="ib-fsheet-scrim"
         aria-hidden="true"
-        onPointerDown={(event) => {
-          // The press must not reach the page under the scrim (the reply box would take focus and raise the keyboard).
-          event.preventDefault();
-          closeBack();
-        }}
+        // The press must not reach the page under the scrim (the reply box would take focus and raise the keyboard).
+        onPointerDown={(event) => event.preventDefault()}
+        // Closed on the click, not the press: gone at the press, the tap's click would land on what is under the
+        // finger (a question's option, a link, Back).
+        onClick={closeBack}
       />
-      <div className="ib-fsheet" role="dialog" aria-labelledby={titleId} tabIndex={-1} ref={panel}>
+      <div className="ib-fsheet" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={panel}>
         <div className="ib-fsheet-h">
           <b id={titleId}>{title}</b>
           <button type="button" className="ib-fsheet-x" aria-label="Close" onClick={closeBack}>
@@ -94,36 +95,64 @@ function FootSheet({ title, onClose, back, children }: { title: string; onClose:
 }
 
 export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip: ReactNode; skip: FootSkip; dropped: number; comments: FootComments | null; voice: VoiceHandle }) {
-  const [sheet, setSheet] = useState(false);
+  const [sheetOpen, setSheet] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
   const lineRef = useRef<HTMLButtonElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  const descId = useId();
   const count = comments?.props.records.length ?? 0;
   const commentsOpen = !!comments?.list && !comments.list.card;
   const questions = skip.count > 0 || dropped > 0;
-  // Short of room, "4 open" for "4 questions open": tried long first, on every change of the words or the row's width.
+  // With comments only, the line is the comments' own way in: one press to the list.
+  const direct = !questions;
+  // The sheet is for the questions. When they go while it is open (answered in another window, withdrawn), it closes
+  // for good: a later question must not open it again by itself (it would take focus from the field mid-sentence).
+  const [refocus, setRefocus] = useState(false);
+  if (sheetOpen && direct) {
+    setSheet(false);
+    setRefocus(true);
+  }
+  const sheet = sheetOpen && !direct;
+  // Focus was in the sheet that went: back on the line, or with no line left, the paperclip (not the field, which
+  // would raise a phone's keyboard nobody asked for).
+  useLayoutEffect(() => {
+    if (!refocus) return;
+    setRefocus(false);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    (lineRef.current ?? rowRef.current?.querySelector<HTMLElement>('input[type="file"]'))?.focus({ preventScroll: true });
+  }, [refocus]);
+
+  // Short of room, "4 open" for "4 questions open": tried long first, again on every change of the words, the row's
+  // width, the Inbox text size, or the fonts (a web font that lands after the first measure).
+  const textSize = useInboxTextSize();
+  const [rowWidth, setRowWidth] = useState(0);
+  const [fonts, setFonts] = useState(0);
   const [short, setShort] = useState(false);
-  const words = `${skip.count}|${skip.keepOpen}|${count}|${dropped}`;
-  const [fittedFor, setFittedFor] = useState(words);
-  if (fittedFor !== words) {
-    setFittedFor(words);
+  const fitKey = `${skip.count}|${skip.keepOpen}|${count}|${dropped}|${textSize}|${rowWidth}|${fonts}`;
+  const [fittedFor, setFittedFor] = useState(fitKey);
+  if (fittedFor !== fitKey) {
+    setFittedFor(fitKey);
     setShort(false);
   }
   useLayoutEffect(() => {
     const text = textRef.current;
     if (!short && text && text.scrollWidth > text.clientWidth + 1) setShort(true);
-  });
+  }, [fitKey, short]);
   useEffect(() => {
-    const row = lineRef.current?.closest('.ib-rfoot');
+    const row = rowRef.current;
     if (!row || typeof ResizeObserver === 'undefined') return;
-    let width = row.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (row.clientWidth === width) return;
-      width = row.clientWidth;
-      setShort(false);
-    });
+    const observer = new ResizeObserver(() => setRowWidth(row.clientWidth));
     observer.observe(row);
     return () => observer.disconnect();
-  }, [questions || count > 0]);
+  }, []);
+  useEffect(() => {
+    let live = true;
+    document.fonts?.ready.then(() => live && setFonts((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const parts: ReactNode[] = [];
   if (skip.count > 0)
@@ -137,11 +166,13 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
   if (count > 0) parts.push(<span key="c">{plural(count, 'comment')}</span>);
   if (dropped > 0 && skip.count === 0) parts.push(<span key="d">{dropped} not sent</span>);
   const shown = parts.length > 0 || commentsOpen;
-  // With comments only, the line is the comments' own way in: one press to the list.
-  const direct = !questions;
-  const name = [skip.count > 0 ? skipWords(skip) : null, count > 0 ? plural(count, 'comment') : null, dropped > 0 ? droppedWords(dropped) : null].filter(Boolean).join(', ');
+  // The line's name is its own words ("4 open · 3 comments": what a voice-control user says); the full sentence is its
+  // description.
+  const longWords = [skip.count > 0 ? skipWords(skip) : null, count > 0 ? plural(count, 'comment') : null, dropped > 0 ? droppedWords(dropped) : null]
+    .filter(Boolean)
+    .join(', ');
   return (
-    <div className="ib-rfoot ib-rfoot-phone" data-reply-foot-phone="">
+    <div className="ib-rfoot ib-rfoot-phone" data-reply-foot-phone="" ref={rowRef}>
       {clip}
       {shown && (
         <span className="ib-annchip ib-fsum-w">
@@ -152,7 +183,7 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
             data-foot-summary={direct ? 'comments' : 'sheet'}
             // A press on it while the list is open is the line's own (it closes the list), not a press outside.
             {...(direct ? { 'data-comments-link': '' } : {})}
-            aria-label={name}
+            aria-describedby={descId}
             aria-haspopup="dialog"
             aria-expanded={sheet || commentsOpen}
             onClick={() => (direct ? comments?.onList(commentsOpen ? null : { at: null }) : setSheet((open) => !open))}
@@ -163,6 +194,9 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
             </span>
             <Icon name="chevU" size={14} />
           </button>
+          <span id={descId} hidden>
+            {longWords}
+          </span>
           {comments && commentsOpen && (
             <AnnotationsList
               {...comments.props}
@@ -170,13 +204,18 @@ export function ReplyFootPhone({ clip, skip, dropped, comments, voice }: { clip:
               press={comments.list!.press}
               onClose={(back) => {
                 comments.onList(null);
-                if (back) lineRef.current?.focus({ preventScroll: true });
+                if (!back) return;
+                // The last comment removed (and no question): the line goes with the list, so focus goes to the
+                // box's field, as the desktop chip does.
+                const line = lineRef.current;
+                const target = count === 0 && !questions ? line?.closest('.ib-rbox')?.querySelector('textarea') : line;
+                target?.focus({ preventScroll: true });
               }}
             />
           )}
         </span>
       )}
-      {sheet && !direct && (
+      {sheet && (
         <FootSheet title="Goes with this reply" onClose={() => setSheet(false)} back={() => lineRef.current}>
           {skip.count > 0 && (
             <div className="ib-fsheet-row" data-foot-sheet-row="questions">
