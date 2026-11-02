@@ -108,7 +108,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -428,14 +428,28 @@ const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last
 // `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
 // a long-lived, owner-only publication, never this per-session transport.
 const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
-const tailscaleFlag = tailscaleIdx !== -1;
-if (tailscaleFlag) {
+if (tailscaleIdx !== -1) {
   args.splice(tailscaleIdx, 1);
   if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
     console.error(
       "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
     );
     process.exit(1);
+  }
+}
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" make the flag the default
+// for the same subcommands (every other subcommand ignores them), so a host
+// or agent need not pass it on every call.
+const tailscaleResolved = TAILSCALE_COMMANDS.has(args[0] ?? "")
+  ? resolveSessionTailscale(loadConfig(), process.env, tailscaleIdx !== -1)
+  : { on: false, source: "default" as const };
+const tailscaleFlag = tailscaleResolved.on;
+const tailscaleOptOut = sessionTailscaleOptOut(tailscaleResolved.source);
+if (tailscaleFlag) {
+  if (tailscaleResolved.source !== "flag") {
+    process.stderr.write(
+      `[plannotator] Publishing over your tailnet (${tailscaleResolved.source === "env" ? "PLANNOTATOR_TAILSCALE" : 'config.json "tailscale"'}).\n`,
+    );
   }
   if (isRemoteSession()) {
     process.stderr.write(
@@ -496,7 +510,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.stderr.write("To keep working on this computer, run the same command without --tailscale.\n");
+    process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -1782,7 +1796,7 @@ if (args[0] === "sessions") {
   // terminal treats tailnet publication; the server throw backstops this.
   if (liveAppResolved && tailscaleFlag) {
     exitAnnotateStartupFailure(
-      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+      `Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). To annotate it live, ${tailscaleOptOut}; or use --static to annotate a converted snapshot of the page.`,
     );
   }
 
