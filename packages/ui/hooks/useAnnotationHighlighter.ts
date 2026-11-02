@@ -19,6 +19,7 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
+import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 
 // --- Exported state types ---
 
@@ -1708,7 +1709,7 @@ export function useAnnotationHighlighter({
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
     // touchend would end the system selection and its edit menu first.
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
+    const isTouchPrimary = window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
     if (!(isTouchPrimary && hostComposesRef.current)) {
       highlighter.run();
       listening = true;
@@ -1831,7 +1832,7 @@ export function useAnnotationHighlighter({
       ? () => {
           clearTimeout(selectionTimer);
           if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, 400);
+          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
         }
       : null;
 

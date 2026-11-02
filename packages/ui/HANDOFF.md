@@ -2682,3 +2682,9 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
   - Add the same override: `pnpm.overrides` for pnpm, `overrides` for npm, or `resolutions` for Yarn.
   - Point Mermaid's `katex` import at `utils/mermaid-math-slot` (see "Lazy renderers and eager entries", item 2).
 - **0.19.1** (2026-10-23) fixes a `%` inside a raw argument. `^0.19.0` accepts it. This repo's lockfile records 0.19.0, because `bunfig.toml`'s seven-day `minimumReleaseAge` holds 0.19.1 back until 2026-10-30.
+
+## `HtmlViewer` `touchSelection` and `revealPin({ clearBottom })` (not yet published; additive, no core change)
+
+- **`HtmlViewer` `touchSelection?: boolean`**: a selection made with a finger reaches the host as a mouse selection does. A long press and its handles send no mouseup, so the bridge reads `selectionchange` after the Markdown viewer's 400 ms rest, only where the host asks and `(pointer: coarse)` matches. Absent: the viewer posts nothing and the bridge listens to nothing, so Plannotator's plan, review and annotate frames are unchanged.
+- **`ViewerHandle.revealPin(options?: { clearBottom?: number })`**: for a panel floating over the frame instead of beside it. The pin moves only if it is out of the clear part of the frame, and scrollable ancestors take the move. Absent: the pin scrolls to the centre as before. A page cannot use this: the host posts it, and the bridge bounds it by the frame's height.
+- **`utils/touchSelection`**: `TOUCH_PRIMARY_QUERY` and `TOUCH_SELECTION_SETTLE_MS`, shared by `useAnnotationHighlighter`. The bridge writes them out (it is vendored whole and imports nothing); `bridgeTouchSelection.test.tsx` fails if they drift.

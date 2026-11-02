@@ -6370,6 +6370,18 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
 }
+/* A comment on an HTML page on a phone (HtmlPageComment.tsx): what it is on with Parent and Child, then the field and
+   Comment, under the tabs. The card is the one tool left, solid so the page's words do not read through it, and every
+   target is 44 px. */
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-slot:not([hidden]) .ib-htmlcomment) .ib-fvdock { visibility: hidden; }
+.ib-view.ib-fullview.ib-phone:has(.ib-htmlframe) .ib-fcomp.ib-phone { background: var(--popover); }
+.ib-htmlcomment { flex-direction: column; }
+.ib-htmlcomment-on { display: flex; align-items: center; gap: 2px; min-height: 44px; padding-left: 6px; }
+.ib-htmlcomment-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
+.pn-inbox .ib-htmlcomment-on .ib-fvb { flex: none; width: 44px; height: 44px; padding: 0; }
+.pn-inbox .ib-fcomp.ib-phone .ib-htmlcomment .ib-btn { height: 44px; padding: 0 16px; }
+.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-tabs button { height: 44px; padding: 0 14px; }
+.pn-inbox .ib-fcomp.ib-phone:has(.ib-htmlcomment) .ib-fcomp-min { width: 44px; height: 44px; }
 
 /* The list's look options (approval "inbox-list-options", 2026-10-30; listLook.ts): four checkboxes in the list's
    ⋮ menu, all off by default. Every rule here needs its option's class on the list column (.ib-lk-pill,
