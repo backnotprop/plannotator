@@ -8,6 +8,7 @@ import { Tip } from '../components/Tip';
 import { isPhone } from '../phone';
 import { chosenFiles, clipboardHasText, pastedFiles, pastedImageOwnLink } from './paste';
 import { PASTED_UNDO_MS, boxText, isLongPaste, mapAnchor, pastedPreview, pastedTextName, putTextBack } from './pastedText';
+import { newUuid } from '../uuid';
 
 /**
  * Compose's files, and the reply box's: each one the person picked, dropped
@@ -147,7 +148,7 @@ export function useComposeFiles(
   const patch = (key: string, change: Partial<ComposeFile>) => setFiles((current) => current.map((file) => (file.key === key ? { ...file, ...change } : file)));
 
   const addOne = (file: File, pasted: PastedText | null = null): string => {
-    const key = `local-${crypto.randomUUID()}`;
+    const key = `local-${newUuid()}`;
     const preview = file.type.startsWith('image/') && typeof URL.createObjectURL === 'function' ? URL.createObjectURL(file) : null;
     if (preview) previews.current.set(key, preview);
     setFiles((current) => [...current, { key, name: file.name, size: file.size, state: 'uploading', progress: 0, upload: null, error: null, preview, ...(pasted ? { pasted } : {}) }]);
