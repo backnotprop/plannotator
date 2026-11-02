@@ -288,6 +288,9 @@ export function extractFrontmatter(markdown: string): { frontmatter: Frontmatter
 }
 
 
+/** The most blank lines `keepBlankLines` keeps before a paragraph: a paste of hundreds does not push the text off screen. */
+const MAX_KEPT_BLANK_LINES = 10;
+
 export interface ParseMarkdownOptions {
   /**
    * Strip a leading `--- ... ---` pair as frontmatter (default true).
@@ -670,7 +673,7 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
       bufferStartLine = currentLineNum;
       bufferBlankRun = 0;
       if (options?.keepBlankLines && blocks.length > 0) {
-        for (let j = i - 1; j >= 0 && lines[j].trim() === ''; j--) bufferBlankRun++;
+        for (let j = i - 1; j >= 0 && lines[j].trim() === '' && bufferBlankRun < MAX_KEPT_BLANK_LINES; j--) bufferBlankRun++;
       }
     }
     buffer.push(line);

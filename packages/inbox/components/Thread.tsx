@@ -457,9 +457,9 @@ export function MessageBody({
   const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
   const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
   const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown]);
-  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown]);
-  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown, ownReply]);
+  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown, ownReply]);
+  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown, ownReply]);
   const refRepo = useRefRepo(repo);
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui

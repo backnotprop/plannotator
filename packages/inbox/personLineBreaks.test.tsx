@@ -58,9 +58,9 @@ test.skipIf(!hasDom)("a person's single newlines are line breaks and their run o
   expect(paragraphs).toHaveLength(2);
   expect(paragraphs[0]!.querySelectorAll('br')).toHaveLength(3);
   expect(paragraphs[0]!.getAttribute('data-blank-lines')).toBeNull();
-  // Six blank lines: the second paragraph is pushed down by six lines (less the usual gap).
+  // Six blank lines recorded on the second paragraph; the measured gap is in tests/e2e/inbox-person-line-breaks.spec.ts
+  // (happy-dom has no layout).
   expect(paragraphs[1]!.getAttribute('data-blank-lines')).toBe('6');
-  expect(paragraphs[1]!.style.marginTop).toContain('6lh');
 });
 
 test.skipIf(!hasDom)('one blank line stays the ordinary paragraph gap', async () => {
@@ -84,13 +84,47 @@ test.skipIf(!hasDom)("a person's fenced code, list, table and quote keep their s
   expect(code?.querySelectorAll('br')).toHaveLength(0);
   expect(person.querySelectorAll('table')).toHaveLength(1);
   expect(person.querySelectorAll('td')).toHaveLength(2);
-  expect(person.textContent).toContain('one');
-  expect(person.textContent).toContain('two');
+  // The list is two bullet items, each its own element.
+  const items = (el: HTMLElement) => [...el.querySelectorAll('[data-rich-list-kind="ul"]')].map((li) => li.lastElementChild?.textContent);
+  expect(items(person)).toEqual(['one', 'two']);
+  // One quote with one paragraph: the person's two lines are one break apart.
+  expect(person.querySelectorAll('blockquote')).toHaveLength(1);
+  expect(person.querySelectorAll('blockquote p')).toHaveLength(1);
+  expect(person.querySelectorAll('blockquote p br')).toHaveLength(1);
+  const shape = (el: HTMLElement) => [...el.querySelectorAll('[data-block-id]')].map((b) => b.tagName);
+  const personShape = shape(person);
   act(() => root?.unmount());
   host?.remove();
   const agent = await render(body, AGENT);
-  // Nothing in this body has a soft break outside the quote; the structure is the same element for element.
   expect(agent.querySelector('pre code')?.textContent).toBe('x\ny');
-  expect(agent.querySelectorAll('table')).toHaveLength(1);
-  expect(agent.querySelectorAll('li').length).toBe(person.querySelectorAll('li').length);
+  expect(items(agent)).toEqual(['one', 'two']);
+  expect(agent.querySelectorAll('blockquote p br')).toHaveLength(0);
+  expect(shape(agent)).toEqual(personShape);
+});
+
+test.skipIf(!hasDom)("a sent reply's rest and its feedback keep the person's line breaks too", async () => {
+  const body = [
+    'Answered 1 question.',
+    '',
+    'my words',
+    '',
+    "No questions answered yet; 1 question still open. Don't re-ask it; the person will answer in the Inbox.",
+    '',
+    'rest one',
+    'rest two',
+    '',
+    '# Feedback on the attached files',
+    '',
+    '## plan.md',
+    '',
+    'feedback one',
+    'feedback two',
+  ].join('\n');
+  const el = await render(body, PERSON);
+  const rest = el.querySelector('[data-sent-rest]');
+  expect(rest?.querySelectorAll('br').length).toBe(1);
+  expect(rest?.textContent).toContain('rest one');
+  const feedback = el.querySelector('[data-reply-feedback]');
+  expect(feedback?.textContent).toContain('feedback one');
+  expect(feedback?.querySelectorAll('br').length).toBe(1);
 });

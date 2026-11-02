@@ -18,3 +18,8 @@ test('keepBlankLines marks only paragraphs after 2+ blank lines; fenced blank li
   expect(marked).toEqual([['b', 4], ['c', 2]]);
   expect(blocks.find((b) => b.type === 'code')!.content).toBe('x\n\n\n\ny');
 });
+
+test('a run of blank lines is capped at 10', () => {
+  const blocks = parseMarkdownToBlocks(`a${'\n'.repeat(500)}b`, { keepBlankLines: true });
+  expect(blocks.map((b) => b.blankLinesBefore)).toEqual([undefined, 10]);
+});
