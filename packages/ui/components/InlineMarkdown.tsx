@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { createContext, useContext, useState, useMemo } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
 import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
@@ -422,6 +422,13 @@ const HostResolvedImage: React.FC<{
  */
 let digitHexIssueRefs = false;
 
+/**
+ * Forge comment text (a GitHub issue, PR or comment body) shows every newline
+ * as a line break. Provided by `RenderedMarkdown`'s `softLineBreaks` prop;
+ * absent (false), a bare newline stays a soft break (a space), as in files.
+ */
+export const SoftLineBreaksContext = createContext<boolean>(false);
+
 export function setDigitHexIssueRefs(on: boolean): void {
   digitHexIssueRefs = on;
 }
@@ -472,6 +479,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   // Cross-repo `owner/repo#123` refs: only for a caller that names its
@@ -1215,6 +1223,14 @@ export const InlineMarkdown: React.FC<{
       continue;
     }
 
+    // Forge text: a bare newline is a line break too.
+    if (softLineBreaks && remaining[0] === "\n") {
+      parts.push(<br key={key++} />);
+      remaining = remaining.slice(1);
+      previousChar = "\n";
+      continue;
+    }
+
     // Hard line break: two+ trailing spaces + newline, or backslash + newline
     match = remaining.match(/ {2,}\n|\\\n/);
     if (match && match.index !== undefined) {
@@ -1246,7 +1262,7 @@ export const InlineMarkdown: React.FC<{
     // `h` mid-word (e.g. ":heart:", "hello"), and splitting on it breaks
     // multi-char patterns like emoji shortcodes. Bare URLs are instead
     // detected inline via emitPlainTextWithBareUrls() below.
-    const nextSpecial = remaining.slice(1).search(/[\*_`\[!~\\<#@$]/);
+    const nextSpecial = remaining.slice(1).search(softLineBreaks ? /[\*_`\[!~\\<#@$\n]/ : /[\*_`\[!~\\<#@$]/);
     // A bare URL that starts inside this plain-text chunk and runs past its
     // end would be cut there, and `_`, `~`, `#`, `@`, `$` and `!` all end a
     // chunk (`…/w/ws_01…` rendered a link to `…/w/ws`). Stop the chunk where
