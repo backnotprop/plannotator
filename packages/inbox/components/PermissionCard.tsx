@@ -37,6 +37,7 @@ import type { InboxMessageWire, InboxQuestion, InboxRun } from '@plannotator/cor
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
+import { newUuid } from '../uuid';
 import { useMinuteClock } from './Undelivered';
 
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
@@ -424,7 +425,7 @@ export function PermissionCard({
     try {
       const saved = await inboxApi.pick(message.id, q.key, q.revision, picked, { unsentOnly: true, confirmFull });
       const revision = saved.questions.find((x) => x.key === q.key)?.revision ?? q.revision;
-      await inboxApi.reply(message.id, { idempotency_key: crypto.randomUUID(), words: '', questions: [{ key: q.key, revision }] });
+      await inboxApi.reply(message.id, { idempotency_key: newUuid(), words: '', questions: [{ key: q.key, revision }] });
       await onChanged();
       return true;
     } catch (cause) {

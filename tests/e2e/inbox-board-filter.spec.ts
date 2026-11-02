@@ -7,7 +7,7 @@
  *  - no filter: `#board` is today's Board, every card, the button reading
  *    "All projects";
  *  - picking a project from the keyboard: `#board&project=prj_…`, the lanes,
- *    the lanes and the Done page narrowed, the button reading the name
+ *    the lanes (the Done lane too) and the All done page narrowed, the button reading the name
  *    alone; Back undoes the pick; a reload keeps it;
  *  - opening a card, then its thread, then the way back: the same filtered
  *    Board;
@@ -137,13 +137,18 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   ids.store = await make(pi, paths.machine, 'Session list store', { column: 'in_progress' });
   ids.long = await make(claude, paths[LONG], 'Warehouse cutover', { column: 'in_progress' });
   ids.landing = await make(codex, paths['guides-repo'], 'Landing copy', { column: 'done' });
-  ids.pando = await make(claude, paths.pando, 'Pando sync idea', { column: 'done' });
+  // Pando's one card is cancelled by the person: a project with nothing on the lanes (a card done this week would be on Done's lane).
+  ids.pando = await make(claude, paths.pando, 'Pando sync idea');
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const url = started.stdout.trim();
   await page.goto(url);
+  await page.evaluate(async (id) => {
+    const res = await fetch(`/api/inbox/cards/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: 'drop' }) });
+    if (!res.ok) throw new Error(`drop: ${res.status}`);
+  }, ids.pando);
   const listed = await page.evaluate(async () => ((await (await fetch('/api/inbox/projects')).json()).projects as { id: string; name: string }[]).map((p) => [p.name, p.id]));
   world = { url, agents: [claude, codex, pi], context, page, errors, ids, project: Object.fromEntries(listed), paths };
 });
@@ -159,22 +164,27 @@ test.afterAll(async () => {
 });
 
 const ALL_IN_FLIGHT = 12;
+/** On the lanes: those, and the three cards done this week on Done's lane. */
+const ON_LANES = ALL_IN_FLIGHT + 3;
 
 test('no filter: the Board as before, every card, the button reading All projects', async () => {
   const { page, ids } = world;
   await page.locator('[data-board-nav]').click();
   await expect(page.locator('[data-board-page][data-board-view="lanes"]')).toBeVisible();
   expect(await hashOf(page)).toBe('#board');
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
+  // No counts in the header (owner, 2026-11-02): the lanes keep theirs.
   await expect(page.locator('[data-board-summary]')).toHaveCount(0);
-  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 4');
+  await expect(page.locator('.ib-blanes [data-lane="done"] .ib-lane-n')).toHaveText('3');
+  await expect(page.locator('[data-board-link="done"]')).toHaveText('All done');
+  await expect(page.locator('[data-board-link="cancelled"]')).toHaveText('Cancelled 1');
   expect(await chipWords(page)).toBe('All projects');
   await expect(page.locator('[data-board-project-clear]')).toHaveCount(0);
   for (const id of [ids.auto, ids.design, ids.store, ids.long]) await expect(cardEl(page, id)).toBeVisible();
   await both(page, 'none-1440');
 });
 
-test('picking a project from the keyboard narrows the lanes and Done; Back undoes it; a reload keeps it', async () => {
+test('picking a project from the keyboard narrows the lanes (the Done lane too) and All done; Back undoes it; a reload keeps it', async () => {
   const { page, ids, project } = world;
   // Keyboard only: Tab-reachable, Enter opens, arrows move, Enter picks (Base UI's menu; no shortcut of its own).
   await chip(page).focus();
@@ -195,10 +205,10 @@ test('picking a project from the keyboard narrows the lanes and Done; Back undoe
   await expect(chip(page)).toBeFocused();
 
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
-  for (const id of [ids.design, ids.tokens, ids.onboard]) await expect(cardEl(page, id)).toBeVisible();
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
+  for (const id of [ids.design, ids.tokens, ids.onboard, ids.wsDone]) await expect(cardEl(page, id)).toBeVisible();
   await expect(cardEl(page, ids.auto)).toHaveCount(0);
-  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 1');
+  await expect(page.locator('.ib-blanes [data-lane="done"] .ib-lane-n')).toHaveText('1');
   // The name alone, no "in" (the owner, 2026-10-28), and ×.
   expect(await chipWords(page)).toBe('workspaces');
   await expect(page.locator('[data-board-project-clear]')).toBeVisible();
@@ -216,15 +226,15 @@ test('picking a project from the keyboard narrows the lanes and Done; Back undoe
 
   // A reload keeps it (the address is the state; nothing is stored).
   await page.reload();
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   expect(await chipWords(page)).toBe('workspaces');
 
   // Back undoes the pick: the Board shows every project again.
   await page.goBack();
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
   expect(await hashOf(page)).toBe('#board');
   await page.goForward();
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
 });
 
 test('opening a card, then its thread, then the way back lands on the same filtered Board', async () => {
@@ -233,14 +243,14 @@ test('opening a card, then its thread, then the way back lands on the same filte
   const panel = page.locator(`[data-card-panel="${ids.design}"]`);
   await expect(panel).toBeVisible();
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&card=${ids.design}`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   await panel.locator('[data-card-thread]').first().click();
   await expect(page.locator('[data-thread-card]')).toBeVisible();
   expect(await hashOf(page)).toContain(`board-project=${project.workspaces}`);
   await page.locator('[data-thread-card]').click();
   await expect(panel).toBeVisible();
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&card=${ids.design}`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   expect(await chipWords(page)).toBe('workspaces');
   await panel.locator('[data-card-close]').click();
   await expect(panel).toHaveCount(0);
@@ -264,11 +274,11 @@ test('a project with nothing in flight says so; Show all projects clears the fil
   const empty = page.locator('[data-board-empty="project"]');
   await expect(empty).toBeVisible();
   await expect(empty.locator('b')).toHaveText('pando');
-  await expect(page.locator('[data-board-link="done"]')).toHaveText('Done 1');
+  await expect(page.locator('[data-board-link="cancelled"]')).toHaveText('Cancelled 1');
   await both(page, 'empty-1440');
   await empty.locator('[data-board-show-all]').click();
   await expect(empty).toHaveCount(0);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
   expect(await hashOf(page)).toBe('#board');
   // Focus lands on the Board's heading, never the page (the line and its button are gone).
   await expect(page.locator('.ib-bhead h1')).toBeFocused();
@@ -279,7 +289,7 @@ test('an empty or unknown project in the address is no filter', async () => {
   for (const hash of ['#board&project=', '#board&project=prj_gone']) {
     await page.goto('about:blank');
     await page.goto(`${world.url}${hash}`);
-    await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
+    await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
     await expect(page.locator('[data-board-project-filter]')).not.toHaveAttribute('data-set', '');
     expect(await chipWords(page)).toBe('All projects');
     await expect(page.locator('[data-board-project-clear]')).toHaveCount(0);
@@ -293,18 +303,18 @@ test("a filtered visit leaves the other projects' news unread (the look is recor
   // An unfiltered visit records the look through everything so far.
   await page.goto('about:blank');
   await page.goto(`${world.url}#board`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ALL_IN_FLIGHT);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
   await expect.poll(async () => { const b = await boardSeen(page); return b.seen === b.cursor; }).toBe(true);
   const looked = (await boardSeen(page)).seen;
   // Filtered to workspaces, an agent writes on a plannotator card: not on screen.
   await page.goto('about:blank');
   await page.goto(`${world.url}#board&project=${project.workspaces}`);
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   await claude.card({ op: 'say', card_id: ids.auto, say: 'Rebased on main', project_path: paths.plannotator });
   await expect.poll(async () => (await boardSeen(page)).cursor).toBeGreaterThan(looked ?? 0);
   // A new filtered visit (a reload) records nothing.
   await page.reload();
-  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(3);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
   await page.waitForTimeout(1000);
   expect((await boardSeen(page)).seen).toBe(looked);
   // The next visit showing every project: the plannotator card is still bold.
