@@ -205,11 +205,15 @@ export interface ReplyDraftOptions {
   /**
    * Only another window changed the words (this box still holds the words this window last knew): no conflict. The
    * box takes the draft's words (`was`: the words it should hold now), and this window's file changes are saved with
-   * them. True only when the box took them (open, on that thread, its live words still `was`); otherwise the
-   * conflict shows.
+   * them. Answers `took` (open on that thread, its live words still `was`: it took them), `hidden` (the box is
+   * closed or shows another thread: no words of this window's to keep, so the change is saved with the newer words
+   * all the same) or `differs` (its live words changed since: the conflict shows).
    */
-  onWords?: (threadId: string, draft: InboxReplyDraft, was: string) => boolean;
+  onWords?: (threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook;
 }
+
+/** What the box did with another window's newer words (`onWords`). */
+export type ReplyBoxTook = 'took' | 'hidden' | 'differs';
 
 /** One save on its way (queued or in flight): its words and file changes, which a refused or skipped save hands on. */
 interface QueuedSave {
@@ -392,7 +396,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     /**
      * Only another window changed the words: the box takes them, quietly, when no Send is claiming the thread, every
      * newer save of the box (queued or waiting) still carries `text` (each then carries `latest`'s words, its long
-     * pastes' places moved to them) and the box took them (`onWords`). False, nothing changed: a conflict.
+     * pastes' places moved to them) and the box took them or is not showing the thread (`onWords`). False, nothing
+     * changed: a conflict.
      */
     const takeTheirWords = (text: string, latest: InboxReplyDraft): boolean => {
       if (claimed.current.has(target) || claiming.current.has(target) || !onWordsRef.current) return false;
@@ -406,7 +411,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         one.text = latest.body;
       }
       if (waiting) pending.current = { ...waiting, text: latest.body, ops: rewordReplyDraftFileOps(waiting.ops, text, latest.body) };
-      if (onWordsRef.current(target, latest, text)) return true;
+      if (onWordsRef.current(target, latest, text) !== 'differs') return true;
       for (const { one, text: words, ops } of was) Object.assign(one, { text: words, ops });
       if (waiting && pending.current?.threadId === target) pending.current = waiting;
       return false;

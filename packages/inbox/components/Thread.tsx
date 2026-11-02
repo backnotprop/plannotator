@@ -48,7 +48,7 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { landInReplyDraft, useReplyDraft } from '../replyDraft';
+import { landInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
@@ -1370,8 +1370,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    */
   /** A save of this window's landed: the box takes the draft's files (set below, once the tiles exist). */
   const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
-  /** Only another window changed the words: the box takes them (set below, once the tiles exist); true when it did. */
-  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => boolean>(() => false);
+  /** Only another window changed the words: the box takes them (set below, once the tiles exist); what it did. */
+  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
   const replyDraft = useReplyDraft(thread.thread_id, {
     onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
     onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
@@ -1450,8 +1450,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     for (const upload of uploads) void landInReplyDraft(threadId, upload);
   };
   takeTheirWords.current = (threadId, draft, was) => {
+    // Closed, or showing another thread: no words here to keep (Edit draft and the thread's next visit read the draft).
+    if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return 'hidden';
     // The box's live words (`replyText.get()`, through `liveBox`): changed since, the person's words win (a conflict).
-    if (threadId !== threadRef.current.thread_id || !boxRef.current.open || boxRef.current.text !== was) return false;
+    if (boxRef.current.text !== was) return 'differs';
     // The box still holds the words this window last knew: it takes the other window's, with its files and this
     // window's file changes not saved yet. A tile finished since the box's last save is in no save yet: it stays, and
     // its own save adds it.
@@ -1468,7 +1470,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       replyDraft.boxTook(threadId, saved.map((file) => file.upload_id));
     }
     announce('This reply changed in another window.');
-    return true;
+    return 'took';
   };
   takeMergedFiles.current = (threadId, draft, wanted) => {
     if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;

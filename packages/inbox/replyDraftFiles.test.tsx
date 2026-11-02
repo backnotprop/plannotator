@@ -132,7 +132,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-reply-draft-files-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '34'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '38'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -1077,4 +1077,57 @@ test.skipIf(!hasDom)("a file that finished uploading while the words are too lon
   type(replyText(el)!, 'Hi there, see this');
   await until(async () => (await serverDraft())?.body === 'Hi there, see this' && (await draftNames()).join() === 'late.png', 'the file saved with the words');
   expect(await boxMatchesDraft(el)).toBe(true);
+}, 30_000);
+
+test.skipIf(!hasDom)("attach, then Cancel while its save is on its way, and the phone changes the words: no conflict, the file stays in the draft with the phone's words", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const slow = holdSaveWhere((body) => body.includes('"files_add":[{'));
+  attach(el, [image('mine.png', 251)]);
+  await until(slow.held, 'the file save held');
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  slow.release();
+  await until(async () => (await draftNames()).join() === 'mine.png', 'the file in the draft');
+  expect((await serverDraft())?.body).toBe('Phone words');
+  await until(() => unsentReply() === null, 'the guard at rest');
+  // Edit draft shows the phone's words and the file, with no conflict.
+  act(() => button(el, 'Edit draft').click());
+  await until(() => replyText(el)?.value === 'Phone words', "the phone's words in the box");
+  await settle(500);
+  expect(el.querySelector('[data-draft-conflict]') !== null).toBe(false);
+  expect(tiles(el)).toEqual(['mine.png:done']);
+}, 30_000);
+
+test.skipIf(!hasDom)("attach, then the pane is given another thread while its save is on its way, and the phone changes the words: the file stays in the first thread's draft", async () => {
+  const other = worlds.pop()!;
+  const read = async (id: string) => (JSON.parse((await loopback(`/api/inbox/threads/${id}`)).text) as { thread: InboxThread }).thread;
+  const [first, next] = [await read(world.waiting), await read(other.waiting)];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const el = host;
+  const draw = (t: InboxThread) =>
+    act(() =>
+      root!.render(
+        <ThreadPane thread={t} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />,
+      ),
+    );
+  act(() => {
+    root = createRoot(el);
+  });
+  draw(first);
+  type(await openReply(el), 'Hi');
+  await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
+  const slow = holdSaveWhere((body) => body.includes('"files_add":[{'));
+  attach(el, [image('moved.png', 252)]);
+  await until(slow.held, 'the file save held');
+  draw(next);
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${other.waiting}"]`) !== null, 'the other thread in the pane');
+  await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
+  slow.release();
+  await until(async () => (await draftNames()).join() === 'moved.png', "the file in the first thread's draft");
+  expect((await serverDraft())?.body).toBe('Phone words');
+  await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);
