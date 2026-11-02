@@ -8,15 +8,19 @@
  *  - The walk on a desktop through the Inbox's real viewers: a pick, a comment
  *    on the question's words, a comment on a line of EVALUATION.md, one Send,
  *    the replay, a circle on a screenshot, Artifacts, the film commented at a
- *    moment, compose to a session, and the person's own Inbox at step 10. Every
+ *    moment, compose to a session, "Make it yours" (step 10: theme, colours,
+ *    text size; Done) and the person's own Inbox at step 11. Every
  *    comment box opens with the developer's real comment; nothing is written
  *    but the tour setting; the person's list is exactly as it was. Shots light
  *    and dark, one headless video.
  *  - Keyboard only; an iPhone in WebKit (taps, 44 px targets, the film
  *    comment); reduced motion and a stacked window.
- *  - Exit at steps 1 to 8 gives the Inbox back as it was; a real message
- *    mid-tour is a chip; Back never reopens the tour; step 9 counts as
+ *  - Exit at steps 1 to 10 gives the Inbox back as it was; a real message
+ *    mid-tour is a chip; Back never reopens the tour; steps 10 and 11 count as
  *    finished.
+ *  - "Make it yours": a pick shows at once and is saved, Skip puts back what
+ *    the step opened with, the keyboard reaches every control, and its title
+ *    takes focus without a ring after a click.
  *  - The fixture routes: read only, the film by Range, the notes as text.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -299,8 +303,9 @@ interface WalkOptions {
 }
 
 /**
- * From the tour's first card to step `to` (1 to 9), doing each step's real action and keeping every
- * suggestion the boxes open with. Step 9 is the person's own Inbox.
+ * From the tour's first card to step `to` (1 to 11), doing each step's real action and keeping every
+ * suggestion the boxes open with. Step 10 is "Make it yours" (left with Done, nothing picked); step 11 is the
+ * person's own Inbox.
  */
 async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<void> {
   const phone = options.phone ?? false;
@@ -450,8 +455,12 @@ async function walk(page: Page, to: number, options: WalkOptions = {}): Promise<
   await at('9-also');
   await shot('09-also');
   await press('[data-tour-next]');
+  await at('10-yours');
+  await shot('10-make-it-yours');
+  if (to === 10) return;
+  await press('[data-tour-next]');
   await expect(page.locator('[data-tour-exit="finish"]')).toBeVisible();
-  await shot('10-yours');
+  await shot('11-yours');
 }
 
 /** Routes the tour may ask for: its own read-only routes, the window's reads, the `tour` setting and the window's presence report. */
@@ -488,7 +497,7 @@ test('the walk on a desktop: the real viewers, compose and Artifacts; writes not
   const suggestions: string[] = [];
   const began = Date.now();
   shooting = 0;
-  await walk(page, 10, { suggestions, shot: (name) => shoot(page, `desktop-${name}`) });
+  await walk(page, 11, { suggestions, shot: (name) => shoot(page, `desktop-${name}`) });
   const seconds = (Date.now() - began - shooting) / 1000;
   expect(suggestions).toEqual(SUGGESTIONS);
   // Nothing of the tour reached the server but the tour setting.
@@ -532,6 +541,67 @@ test('keyboard only: Tab and Enter through the coach cards, focus never on the p
   await context.close();
 });
 
+test('"Make it yours": no ring on its title after a click; the keyboard picks and the window changes at once; Skip puts back what the step opened with', async ({ browser }) => {
+  const w = startWorld('yours');
+  const errors: string[] = [];
+  const { context, page } = await open(browser, w, errors);
+  const writes = writesOf(page);
+  const html = page.locator('html');
+  await page.locator('[data-tour-start]').click();
+  await pastIntro(page);
+  await page.evaluate(() => {
+    location.replace('#tour=9');
+  });
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '9');
+  await page.locator('[data-tour-forward]').click();
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '9-loop');
+  await page.locator('[data-tour-next]').click();
+  await page.locator('[data-tour-next]').click();
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 11');
+  await expect(page.locator('[data-tour-bar]')).toContainText('Your settings');
+  // Reached by a click: the title has focus (screen readers read it) and no ring.
+  const title = coach(page).locator('h2');
+  await expect(title).toHaveText('Make it yours');
+  await expect(title).toBeFocused();
+  await expect(title).toHaveCSS('outline-style', 'none');
+  await expect(page.locator('[data-tour-palette]')).toHaveCount(3);
+  await shoot(page, 'make-it-yours-opened');
+  // A fresh machine opens on Match system, Plannotator, 14. The keyboard: one stop per group, the arrows pick.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-mode="system"] input')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('[data-tour-mode="dark"] input')).toBeChecked();
+  await expect(html).not.toHaveClass(/(^|\s)light(\s|$)/);
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-palette="plannotator"] input')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('[data-tour-palette="catppuccin"] input')).toBeChecked();
+  await expect(html).toHaveClass(/theme-catppuccin/);
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('ArrowRight');
+  await expect(html).toHaveCSS('--inbox-text-size', '15');
+  await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('dark catppuccin catppuccin 15');
+  await shoot(page, 'make-it-yours-picked', ['light']);
+  // Then the Settings link, Skip and Done, in that order.
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-settings-link]')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-tour-skip]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 11 of 11');
+  await expect(html).toHaveClass(/theme-plannotator(\s|$)/);
+  await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
+  await expect.poll(() => [config(w).theme?.mode, config(w).theme?.light, config(w).theme?.dark, config(w).inboxTextSize].join(' ')).toBe('system plannotator plannotator 14');
+  await focusKept(page);
+  // What the step wrote: the theme, the text size and the tour setting, through the settings route only.
+  expect(writes.filter((r) => !r.startsWith('POST /api/inbox/settings'))).toEqual([]);
+  for (const r of writes) expect(r).toMatch(/"(tour|theme|text_size)"/);
+  expect(errors).toEqual([]);
+  await context.close();
+});
+
 test('Fast-forward on every step lands on its end state, writing nothing; a click the tour cannot use is answered, never ignored', async ({ browser }) => {
   const w = startWorld('forward');
   const errors: string[] = [];
@@ -552,7 +622,7 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   // The step's end, then the next step's card, for every step to 9; then step 9's end is the loop.
   const ends: Record<number, string> = { 1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: '8-open', 8: '9' };
   for (let n = 1; n <= 8; n++) {
-    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 10`);
+    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 11`);
     await page.locator('[data-tour-forward]').click();
     await expect(coach(page), `after step ${n}`).toHaveAttribute('data-tour-coach', ends[n]!);
     await focusKept(page);
@@ -579,7 +649,10 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   await expect(page.locator('[data-tour-forward]')).toHaveCount(0);
   await page.locator('[data-tour-next]').click();
   await page.locator('[data-tour-next]').click();
-  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 10');
+  await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 11');
+  // "Make it yours" asks for nothing: no Fast-forward, Done goes on.
+  await expect(coach(page)).toHaveAttribute('data-tour-coach', '10-yours');
+  await expect(page.locator('[data-tour-forward]')).toHaveCount(0);
   expect(writes.filter((r) => !r.startsWith('POST /api/inbox/settings'))).toEqual([]);
   expect(await ownList(w)).toBe(before);
   expect(errors).toEqual([]);
@@ -635,7 +708,7 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
     await big('[data-tour-exit]');
     await big('[data-tour-next]');
     const suggestions: string[] = [];
-    await walk(page, 10, {
+    await walk(page, 11, {
       phone: true,
       suggestions,
       shot: async (name) => {
@@ -658,6 +731,12 @@ test('an iPhone in WebKit: taps, 44 px targets, the film comment at a moment; li
         if (name === '02-send') await big('[data-tour-warm-send]');
         if (name === '06-reply') await big('[data-tour-reply]');
         if (name === '08-answer') await big('[data-tour-next]');
+        if (name === '10-make-it-yours') {
+          for (const sel of ['[data-tour-skip]', '[data-tour-next]', '[data-tour-mode="dark"]', '[data-tour-palette="catppuccin"]', '[data-tour-settings] .ib-seg-o']) await big(sel);
+          // The three colour sets stay one row on a phone.
+          const tops = await page.locator('[data-tour-palette]').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+          expect(new Set(tops).size).toBe(1);
+        }
         await shoot(page, `phone-${name}`);
       },
     });
@@ -794,10 +873,10 @@ test('Exit at every step gives the person’s Inbox back exactly as it was; a re
     await expect(page).toHaveURL(/#tour=1$/);
     await pastIntro(page);
   };
-  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
     await enter();
     await walk(page, n);
-    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 10`);
+    await expect(step(page)).toHaveAttribute('aria-label', `Step ${n} of 11`);
     await page.locator('[data-tour-exit="exit"]').click();
     await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
     // Started in Settings: Exit returns to Settings, as the browser's Back (no new entry).
@@ -883,11 +962,11 @@ test('leaving by the chip or the tour sidebar’s Settings: Back never reopens t
   await context.close();
 });
 
-test('step 10 and after a reload: every way out leaves the tour behind; from step 10 it counts as finished, How to allow opens Settings → General', async ({ browser }) => {
+test('step 11 and after a reload: every way out leaves the tour behind; from step 11 it counts as finished, How to allow opens Settings → General', async ({ browser }) => {
   const w = startWorld('step9');
   const first = await agentWrites(w, 'A first real message.', 'First one');
   const errors: string[] = [];
-  // The browser blocked notifications for this address: step 10 offers How to allow.
+  // The browser blocked notifications for this address: step 11 offers How to allow.
   const { context, page } = await open(browser, w, errors, {}, () => {
     if (window.Notification) Object.defineProperty(window.Notification, 'permission', { get: () => 'denied' });
   });
@@ -897,13 +976,13 @@ test('step 10 and after a reload: every way out leaves the tour behind; from ste
     await expect(page).toHaveURL(/#tour=1$/);
     await pastIntro(page);
   };
-  // Reached by its address: step 10 is the person's own Inbox, whatever came before.
+  // Reached by its address: step 11 is the person's own Inbox, whatever came before.
   const toStep9 = async () => {
     // In the tour's own history entry, as a step change is.
     await page.evaluate(() => {
-      location.replace('#tour=10');
+      location.replace('#tour=11');
     });
-    await expect(step(page)).toHaveAttribute('aria-label', 'Step 10 of 10');
+    await expect(step(page)).toHaveAttribute('aria-label', 'Step 11 of 11');
   };
   const neverTheTour = async () => {
     await page.goBack();

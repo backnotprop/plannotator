@@ -381,7 +381,10 @@ async function walkTo(el: HTMLElement, step: number, record: { suggestions?: str
   await click($(el, '[data-tour-next]'));
   await until(() => coachKey(el) === '9-also', 'Also in your Inbox');
   await click($(el, '[data-tour-next]'));
-  await until(() => window.location.hash === '#tour=10', 'step 10');
+  await until(() => window.location.hash === '#tour=10' && coachKey(el) === '10-yours', 'step 10, Make it yours');
+  if (step === 10) return;
+  await click($(el, '[data-tour-next]'));
+  await until(() => window.location.hash === '#tour=11', 'step 11');
 }
 
 test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the real first-run screen and is remembered', async () => {
@@ -412,7 +415,7 @@ test.skipIf(!hasDom)('Two paths: two equal cards; Connect my agents opens the re
  */
 const FORBIDDEN = /\/api\/inbox\/(annotations|markups|uploads|drafts|messages|attachments)|\/picks|\/reply|\/send-now|\/ack/;
 
-test.skipIf(!hasDom)('the walk writes nothing: a plain question, comments, a screenshot, the film, compose, all in the tour; step 10 real, Finish', async () => {
+test.skipIf(!hasDom)('the walk writes nothing: a plain question, comments, a screenshot, the film, compose, all in the tour; step 11 real, Finish', async () => {
   const el = await openOnEntry();
   const before = (await loopback('/api/inbox/threads')).text.replace(/"cursor":\d+,?/, '');
   const record = { suggestions: [] as string[] };
@@ -422,7 +425,7 @@ test.skipIf(!hasDom)('the walk writes nothing: a plain question, comments, a scr
     seen.push(`${init?.method ?? 'GET'} ${String(input)}`);
     return realFetch(input, init);
   }) as typeof fetch;
-  await walkTo(el, 10, record);
+  await walkTo(el, 11, record);
   globalThis.fetch = realFetch;
   // Every comment box opened with the developer's real comment, condensed; the compose words are the real request.
   expect(record.suggestions).toEqual([
@@ -476,7 +479,9 @@ test.skipIf(!hasDom)('Fast-forward through every step writes nothing and ends ea
   expect($(el, '[data-tour-forward]')).toBeNull();
   await click($(el, '[data-tour-next]'));
   await click($(el, '[data-tour-next]'));
-  await until(() => window.location.hash === '#tour=10', 'step 10');
+  await until(() => window.location.hash === '#tour=10' && coachKey(el) === '10-yours', 'step 10, Make it yours');
+  // Nothing to fast-forward on "Make it yours": it asks for nothing, Done or Skip go on.
+  expect($(el, '[data-tour-forward]')).toBeNull();
   globalThis.fetch = realFetch;
   expect(writes()).toEqual([]);
   expect(seen.filter((r) => FORBIDDEN.test(r))).toEqual([]);
@@ -569,7 +574,7 @@ test.skipIf(!hasDom)('Fast-forward mid-replay leaves nothing stale; a second Sen
   watch.disconnect();
   expect(said.slice(from).filter((s) => /Delivered|New message from/.test(s))).toEqual([]);
   // The Fast-forward was said with the card it landed on, in one announcement.
-  expect(said.some((s) => s.startsWith('Fast-forwarded. Step 8 of 10.'))).toBe(true);
+  expect(said.some((s) => s.startsWith('Fast-forwarded. Step 8 of 11.'))).toBe(true);
   expect(coachKey(el)).toBe('8-open');
   // Step 9 after its Send: New message says where the thread is.
   await click($(el, '[data-tour-forward]'));
@@ -582,11 +587,11 @@ test.skipIf(!hasDom)('Fast-forward mid-replay leaves nothing stale; a second Sen
   expect(writes()).toEqual([]);
 }, 120_000);
 
-test.skipIf(!hasDom)('Exit at every step, 1 to 10, gives the Inbox back; a pick other than the real answer is replayed as a fact', async () => {
+test.skipIf(!hasDom)('Exit at every step, 1 to 11, gives the Inbox back; a pick other than the real answer is replayed as a fact', async () => {
   const el = await openOnEntry();
-  for (const step of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]) {
+  for (const step of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) {
     await walkTo(el, step);
-    await click($(el, step === 10 ? '[data-tour-exit="finish"]' : '[data-tour-exit="exit"]'));
+    await click($(el, step === 11 ? '[data-tour-exit="finish"]' : '[data-tour-exit="exit"]'));
     await until(() => $(el, '[data-tour-bar]') === null && $(el, '[data-inbox-empty]') !== null, `the Inbox after Exit at step ${step}`);
     expect(window.location.hash).toBe('');
     expect($(el, '[data-tour-entry]')).toBeNull();
@@ -651,9 +656,9 @@ test.skipIf(!hasDom)('returning users: Settings → General → Take the tour; o
   await pastIntro(el);
   // Steps 1 to 5 play in full over the tailnet; step 6 cannot read the agents there.
   await act(async () => {
-    window.location.hash = '#tour=10';
+    window.location.hash = '#tour=11';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 11');
   await until(() => (el.textContent ?? '').includes('Open the Inbox on the computer to connect agents with one click.'), 'the tailnet line');
 }, 90_000);
 
@@ -675,9 +680,9 @@ test.skipIf(!hasDom)('notifications: quiet over the replay in front (the chip sa
   document.hasFocus = () => true;
   // Step 6 (where the person gets their first question): notifications as always, in front too.
   await act(async () => {
-    window.location.hash = '#tour=10';
+    window.location.hash = '#tour=11';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 11');
   const third = await firstMessage('The question you asked for.', 'Step six one');
   await act(async () => pushRecord!(recordOf(third)));
   await until(() => notices.length === 2, 'the step 6 notification');
@@ -736,9 +741,9 @@ test.skipIf(!hasDom)('⌘K does not open search over the replay (it shows the pe
   expect(document.querySelector('[data-search-palette]')).toBeNull();
   expect(window.location.hash).toBe('#tour=2');
   await act(async () => {
-    window.location.hash = '#tour=10';
+    window.location.hash = '#tour=11';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 11');
   await chord();
   await until(() => document.querySelector('[data-search-palette]') !== null, 'search');
 }, 90_000);
@@ -783,7 +788,7 @@ test.skipIf(!hasDom)('Forward after Exit, and a reload of that entry, never reop
   await until(() => $(again, '[data-inbox-empty]') !== null, 'the Inbox after the reload');
   expect(window.location.hash).toBe('');
   expect($(again, '[data-tour-bar]')).toBeNull();
-  for (const [odd, step] of [['abc', 1], ['0', 1], ['', 1], ['99', 10], ['2.5', 2], ['-3', 1]] as const) {
+  for (const [odd, step] of [['abc', 1], ['0', 1], ['', 1], ['99', 11], ['2.5', 2], ['-3', 1]] as const) {
     await act(async () => {
       window.location.hash = `#tour=${odd}`;
     });
@@ -836,9 +841,9 @@ test.skipIf(!hasDom)('the step-6 chip ends the tour as finished, not skipped', a
   const el = await openOnEntry();
   await walkTo(el, 1);
   await act(async () => {
-    window.location.hash = '#tour=10';
+    window.location.hash = '#tour=11';
   });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 10');
+  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 11');
   await act(async () => pushRecord!(recordOf('msg_01REALMESSAGE000000000000')));
   await until(() => $(el, '[data-tour-arrivals]') !== null, 'the chip');
   await click($(el, '[data-tour-arrivals]'));
@@ -960,3 +965,70 @@ test.skipIf(!hasDom)('pictures that are not here degrade quietly: the card names
   await until(() => $(el, '[data-tour-coach] h2')?.textContent === 'Pick a direction', 'the step-3 card without pictures');
   expect(el.textContent ?? '').not.toMatch(NEVER_IN_THE_TOUR);
 }, 90_000);
+
+/** Picks a radio inside the "Make it yours" card. */
+const yours = (el: ParentNode, s: string) => el.querySelector<HTMLInputElement>(`[data-tour-coach="10-yours"] ${s} input`);
+const htmlClass = () => document.documentElement.className;
+/** Dark is the window without the `light` class (ThemeProvider). */
+const shownLight = () => document.documentElement.classList.contains('light');
+
+test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip puts back what the step opened with, Done keeps it, Exit there is finished', async () => {
+  const { resetInboxThemeForTests } = await import('./theme');
+  const { resetInboxTextSizeForTests } = await import('./textSize');
+  try {
+    const el = await openOnEntry();
+    await walkTo(el, 1);
+    await act(async () => {
+      window.location.hash = '#tour=10';
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours');
+    expect($(el, '[data-tour-bar]')!.textContent).toContain('Your settings');
+    // The three colour sets, in the owner's order.
+    expect([...el.querySelectorAll('[data-tour-palette]')].map((n) => n.getAttribute('data-tour-palette'))).toEqual(['plannotator', 'plannotator-modern', 'catppuccin']);
+    // Opened on a fresh machine: Match system, Plannotator, 14.
+    expect(yours(el, '[data-tour-mode="system"]')!.checked).toBe(true);
+    expect(htmlClass()).toContain('theme-plannotator');
+    await click(yours(el, '[data-tour-mode="dark"]'));
+    await click(yours(el, '[data-tour-palette="catppuccin"]'));
+    await click($(el, '[data-tour-coach="10-yours"] input[name="ib-tset-size"][value="15"]'));
+    // At once on the window, then in config.json (the same keys Settings writes).
+    expect(shownLight()).toBe(false);
+    expect(htmlClass()).toContain('theme-catppuccin');
+    expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('15');
+    await until(() => config().theme?.mode === 'dark' && config().theme?.light === 'catppuccin' && config().theme?.dark === 'catppuccin' && config().inboxTextSize === 15, 'the picks saved');
+    expect(posts.filter((p) => p.path === '/api/inbox/settings').flatMap((p) => Object.keys(p.body)).filter((k) => !['tour', 'theme', 'text_size'].includes(k))).toEqual([]);
+    // Skip: back to what the step opened with, on the window and in config.json, and on to step 11.
+    await click($(el, '[data-tour-skip]'));
+    await until(() => window.location.hash === '#tour=11', 'step 11 after Skip');
+    expect(htmlClass()).toContain('theme-plannotator');
+    expect(htmlClass()).not.toContain('theme-catppuccin');
+    expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('');
+    await until(() => config().theme?.mode === 'system' && config().theme?.light === 'plannotator' && config().theme?.dark === 'plannotator' && config().inboxTextSize === 14, 'Skip saved');
+    // Done keeps the picks.
+    await act(async () => {
+      window.location.hash = '#tour=10';
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours again');
+    await click(yours(el, '[data-tour-mode="light"]'));
+    await click(yours(el, '[data-tour-palette="plannotator-modern"]'));
+    await click($(el, '[data-tour-next]'));
+    await until(() => window.location.hash === '#tour=11', 'step 11 after Done');
+    expect(shownLight()).toBe(true);
+    expect(htmlClass()).toContain('theme-plannotator-modern');
+    await until(() => config().theme?.mode === 'light' && config().theme?.light === 'plannotator-modern' && config().theme?.dark === 'plannotator-modern', 'Done saved');
+    // Exit on "Make it yours" (the replay is over) counts as finished, and keeps what was picked.
+    // In the tour's own history entry (the tour replaces it step by step), so Exit leaves the tour.
+    await act(async () => {
+      window.location.replace('#tour=10');
+    });
+    await until(() => coachKey(el) === '10-yours', 'Make it yours, once more');
+    await click($(el, '[data-tour-exit="exit"]'));
+    await until(() => $(el, '[data-tour-bar]') === null, 'the tour ended');
+    await until(() => !!config().inboxTour?.finished_at, 'finished remembered');
+    expect(config().inboxTour.skipped_at ?? null).toBeNull();
+    expect(config().theme).toMatchObject({ mode: 'light', light: 'plannotator-modern' });
+  } finally {
+    resetInboxThemeForTests();
+    resetInboxTextSizeForTests();
+  }
+}, 120_000);

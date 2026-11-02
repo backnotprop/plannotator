@@ -16,7 +16,9 @@ import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
   TOUR_NEW_THREAD,
+  TOUR_COMPOSE_STEP,
   TOUR_REPLY_ID,
+  TOUR_SETTINGS_STEP,
   TOUR_START,
   TOUR_STEPS,
   TOUR_THREAD,
@@ -152,17 +154,22 @@ describe('the walk', () => {
     s = run([{ type: 'newDelivered' }, { type: 'newArrive' }], s);
     expect(tourCoach(s, names)).toMatchObject({ key: '9-loop', next: true });
     s = tourReducer(s, { type: 'next' });
-    expect(tourCoach(s, names)).toMatchObject({ key: '9-also', nextLabel: 'Connect my agents' });
+    expect(tourCoach(s, names)).toMatchObject({ key: '9-also', next: true });
     expect(tourCoach(s, names)!.items!.map((i) => i.title)).toEqual(['Pin a thread', 'Looks good', 'Re-ask', 'Send now']);
+    // "Make it yours" comes after the replay, over the thread with pictures, with Skip and Done; then the person's own Inbox.
     s = tourReducer(s, { type: 'next' });
-    expect(s.step).toBe(TOUR_STEPS);
+    expect(s).toMatchObject({ step: TOUR_SETTINGS_STEP, route: TOUR_THREAD, file: null });
+    expect(tourCoach(s, names)).toMatchObject({ key: '10-yours', picture: 'settings', next: true, skip: true, target: null });
+    expect(tourCoach(s, names)?.action).toBeUndefined();
+    s = tourReducer(s, { type: 'next' });
+    expect(s).toMatchObject({ step: TOUR_STEPS, route: 'list' });
     expect(tourCoach(s, names)).toBeNull();
   });
 
   test('Back on steps 2 (before its Send), 4, 5 and 8 before its Send; none on 3, 6, 7, 9 or after a Send', () => {
     expect(tourCanBack(TOUR_START)).toBe(false);
     for (const step of [2, 4, 5, 8]) expect(tourCanBack(tourStateAt(step, REAL, fixture)), String(step)).toBe(true);
-    for (const step of [3, 6, 7, 9, 10]) expect(tourCanBack(tourStateAt(step, REAL, fixture)), String(step)).toBe(false);
+    for (const step of [3, 6, 7, 9, 10, 11]) expect(tourCanBack(tourStateAt(step, REAL, fixture)), String(step)).toBe(false);
     expect(tourCanBack({ ...tourStateAt(2, REAL, fixture), warmPicked: WARM, warmSent: true })).toBe(false);
     expect(tourCanBack({ ...tourStateAt(8, REAL, fixture), filmSent: true })).toBe(false);
     expect(tourReducer(tourStateAt(5, REAL, fixture), { type: 'back' }).step).toBe(4);
@@ -204,7 +211,7 @@ describe('the walk', () => {
       for (const key of Object.keys(full) as (keyof typeof full)[]) expect(Math.abs(reduced[key] / full[key] - 0.6)).toBeLessThan(0.02);
   });
 
-  test('tourStateAt(n) is the walk with every suggestion kept, for 1 to 10 (and out of range)', () => {
+  test('tourStateAt(n) is the walk with every suggestion kept, for 1 to 11 (and out of range)', () => {
     expect(tourStateAt(1, REAL, fixture)).toEqual(TOUR_START);
     expect(tourStateAt(2, REAL, fixture)).toMatchObject({ warmPicked: null, warmSent: false });
     expect(tourStateAt(3, REAL, fixture)).toMatchObject({ warmPicked: WARM, warmArrived: true, picked: null });
@@ -214,11 +221,12 @@ describe('the walk', () => {
     expect(tourStateAt(7, REAL, fixture)).toMatchObject({ sent: true, arrived: 2 });
     expect(tourStateAt(8, REAL, fixture)).toMatchObject({ artifactsTour: 2 });
     expect(tourStateAt(9, REAL, fixture)).toMatchObject({ filmArrived: true, step: 9 });
-    expect(tourStateAt(10, REAL, fixture)).toMatchObject({ compose: 'sent', newArrived: true, step: 10 });
+    expect(tourStateAt(10, REAL, fixture)).toMatchObject({ compose: 'sent', newArrived: true, also: true, step: 10, route: TOUR_THREAD });
+    expect(tourStateAt(11, REAL, fixture)).toMatchObject({ compose: 'sent', newArrived: true, step: 11, route: 'list' });
     for (let n = 1; n <= TOUR_STEPS; n++) {
       const s = tourStateAt(n, REAL, fixture);
       expect(s.step).toBe(n);
-      // Every state reached directly draws a coach card (10 none) and its lists.
+      // Every state reached directly draws a coach card (11 none) and its lists.
       if (n < TOUR_STEPS) expect(tourCoach(s, names)).not.toBeNull();
       expect(tourSections(fixture, s).length).toBeGreaterThan(0);
     }
@@ -226,10 +234,18 @@ describe('the walk', () => {
     expect(tourStateAt(-3, REAL, fixture).step).toBe(1);
   });
 
-  test('step 10 is the person’s own Inbox: nothing of the tour moves, Fast-forward included', () => {
-    const s10 = tourStateAt(10, REAL, fixture);
+  test('step 11 is the person’s own Inbox: nothing of the tour moves, Fast-forward included', () => {
+    const s11 = tourStateAt(TOUR_STEPS, REAL, fixture);
     for (const action of [{ type: 'open', thread: TOUR_THREAD }, { type: 'list' }, { type: 'next' }, { type: 'compose', open: true }, { type: 'forward', realAnswer: REAL, fixture }] as TourAction[])
-      expect(tourReducer(s10, action)).toBe(s10);
+      expect(tourReducer(s11, action)).toBe(s11);
+  });
+
+  test('"Make it yours" has nothing to fast-forward and no Back; Next (Done or Skip) is the only way on', () => {
+    const s10 = tourStateAt(TOUR_SETTINGS_STEP, REAL, fixture);
+    expect(tourReducer(s10, { type: 'forward', realAnswer: REAL, fixture })).toBe(s10);
+    expect(tourReducer(s10, { type: 'back' })).toBe(s10);
+    expect(tourCanForward(s10, tourCoach(s10, names))).toBe(false);
+    expect(tourReducer(s10, { type: 'next' }).step).toBe(TOUR_STEPS);
   });
 });
 
@@ -238,7 +254,7 @@ describe('fast-forward', () => {
 
   test('each step forwards to the next step’s start, as the walk would leave it; 9 ends on the loop', () => {
     expect(forward(TOUR_START)).toMatchObject({ step: 1, orient: false });
-    for (let n = 1; n < TOUR_STEPS - 1; n++) {
+    for (let n = 1; n < TOUR_COMPOSE_STEP; n++) {
       const s = { ...tourStateAt(n, REAL, fixture), orient: false };
       const f = forward(s);
       const want = tourStateAt(n + 1, REAL, fixture);
@@ -283,14 +299,14 @@ describe('fast-forward', () => {
     expect(s.picked).toBe(B);
   });
 
-  test('offered on every card that asks or waits; never with Next or on step 10', () => {
+  test('offered on every card that asks or waits; never with Next or on step 11', () => {
     for (let n = 1; n < TOUR_STEPS; n++) {
       const s = tourStateAt(n, REAL, fixture);
       const c = tourCoach(s, names)!;
       expect(tourCanForward(s, c), `${n} ${c.key}`).toBe(!c.next);
     }
     expect(tourCanForward(TOUR_START, tourCoach(TOUR_START, names))).toBe(false);
-    expect(tourCanForward(tourStateAt(10, REAL, fixture), null)).toBe(false);
+    expect(tourCanForward(tourStateAt(TOUR_STEPS, REAL, fixture), null)).toBe(false);
   });
 });
 

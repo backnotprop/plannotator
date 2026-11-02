@@ -37,6 +37,7 @@ import { formatInboxVideoTime, readInboxVideoTime } from '@plannotator/core/inbo
 import { plural } from '../format';
 import { forgetTourMarkups, preloadTourAssets, tourAssetNameOf } from './assets';
 import { tourFileSource } from './fileSource';
+import { TourSettings, type TourSettingsHandle } from './TourSettings';
 import { sentAnswersOf } from '../sentReply';
 import {
   TOUR_FILM_REPLY_ID,
@@ -46,6 +47,7 @@ import {
   TOUR_REPLY_ID,
   TOUR_WARM_REPLY_ID,
   TOUR_SESSION,
+  TOUR_SETTINGS_STEP,
   TOUR_STEPS,
   TOUR_THREAD,
   filmTimings,
@@ -248,7 +250,12 @@ export function TourBar({
         Tour
       </span>
       <span className="ib-tour-what">
-        {real ? (
+        {step === TOUR_SETTINGS_STEP ? (
+          <>
+            <b>Your settings</b>
+            <span className="ib-mut ib-tour-long"> · this step is real: what you pick here stays</span>
+          </>
+        ) : real ? (
           <>
             <b>Your own Inbox</b>
             <span className="ib-mut ib-tour-long"> · this step is real: what you connect here stays connected</span>
@@ -281,6 +288,35 @@ export function TourBar({
 }
 
 // ─────────────────────────── The coach card ───────────────────────────
+
+/**
+ * Whether the person's last input was a key (not a pointer). The coach card's
+ * title takes focus when a card changes, so screen readers read it; it shows a
+ * ring only when the person is on the keyboard, never after a tap, a click or
+ * a page load (where Chrome would otherwise count the focus as visible).
+ */
+let keyboardLast = false;
+let modalityWatched = false;
+function watchModality(): void {
+  if (modalityWatched || typeof document === 'undefined') return;
+  modalityWatched = true;
+  document.addEventListener('keydown', (event) => {
+    if (!event.metaKey && !event.ctrlKey && !event.altKey) keyboardLast = true;
+  }, true);
+  document.addEventListener('pointerdown', () => {
+    keyboardLast = false;
+  }, true);
+}
+
+/** Focus a coach card's title; without a key before it, no ring (`data-quiet-focus`, until it blurs). */
+function focusTitle(title: HTMLElement): void {
+  if (keyboardLast) title.removeAttribute('data-quiet-focus');
+  else {
+    title.setAttribute('data-quiet-focus', '');
+    title.addEventListener('blur', () => title.removeAttribute('data-quiet-focus'), { once: true });
+  }
+  title.focus({ preventScroll: true });
+}
 
 const row = (id: string) => `[data-thread-id="${id}"]:is(button, a, [role="button"])`;
 
@@ -475,7 +511,13 @@ export function TourCoach({
   canForward = false,
   onForward,
   nudge = null,
+  onSkip,
+  onSettings,
 }: {
+  /** "Make it yours": Skip, after the card has put back what the step opened with. */
+  onSkip?: () => void;
+  /** "Make it yours": the Settings link (Settings → General). */
+  onSettings?: () => void;
   coach: TourCoachModel;
   step: number;
   canBack: boolean;
@@ -494,6 +536,7 @@ export function TourCoach({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const settingsRef = useRef<TourSettingsHandle>(null);
   const [place, setPlace] = useState<{ left: number; top: number; at: 'top' | 'bottom' } | null>(null);
   const sheetAt = useRef<{ key: string; at: 'top' | 'bottom' } | null>(null);
 
@@ -590,7 +633,11 @@ export function TourCoach({
   );
 
   useEffect(() => {
-    if (focusTick > 0) titleRef.current?.focus({ preventScroll: true });
+    watchModality();
+  }, []);
+
+  useEffect(() => {
+    if (focusTick > 0 && titleRef.current) focusTitle(titleRef.current);
   }, [focusTick]);
 
   const style = phone ? undefined : place ? { left: place.left, top: place.top } : { visibility: 'hidden' as const };
@@ -609,7 +656,7 @@ export function TourCoach({
   return (
     <div
       ref={ref}
-      className={`ib-tour-coach${coach.picture ? ' ib-tc-wide' : ''}`}
+      className={`ib-tour-coach${coach.picture ? ' ib-tc-wide' : ''}${coach.picture === 'settings' ? ' ib-tc-settings' : ''}`}
       role="region"
       aria-label={`Tour, step ${step} of ${TOUR_STEPS}`}
       data-tour-coach={coach.key}
@@ -644,6 +691,7 @@ export function TourCoach({
         </p>
       )}
       {coach.picture === 'orient' && fixture && <OrientPicture fixture={fixture} onNext={onNext} />}
+      {coach.picture === 'settings' && <TourSettings ref={settingsRef} onSettings={() => onSettings?.()} />}
       {coach.items && (
         <ul className="ib-tour-also" data-tour-also="">
           {coach.items.map((item) => (
@@ -667,6 +715,19 @@ export function TourCoach({
           </button>
         )}
         {coach.wait && <span className="ib-tc-wait">Replaying…</span>}
+        {coach.skip && onSkip && (
+          <button
+            type="button"
+            className="ib-tc-back"
+            onClick={() => {
+              settingsRef.current?.restore();
+              onSkip();
+            }}
+            data-tour-skip=""
+          >
+            Skip
+          </button>
+        )}
         <span className="ib-sp" />
         {coach.next ? (
           <button type="button" className="ib-tc-next" onClick={onNext} data-tour-next="">
