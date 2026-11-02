@@ -915,10 +915,12 @@ test('a second Enter never answers the prompt that arrives right after: the card
   fake.configure({ prompts: [first, second] });
   await launch(page, 'Build the Inbox, then clean its dist folder.');
   await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build', { timeout: 30_000 });
-  // The thread opens with its own control focused (Reply): the card never takes focus from it.
+  // A card already there when the thread opens never takes focus, though opening a thread focuses nothing
+  // (the page body has it): open the thread again with the prompt waiting.
+  await page.reload();
+  await expect(card(page).locator('[data-perm-detail]')).toHaveText('bun run --cwd apps/inbox build', { timeout: 30_000 });
   await page.waitForTimeout(300);
   await expect(card(page).locator('[data-perm="once"]')).not.toBeFocused();
-  await expect(pane(page).locator('[data-reply-button]')).toBeFocused();
   // The person moves to Allow once and answers with Enter.
   await card(page).locator('[data-perm="once"]').focus();
   await armed(page);
