@@ -14,7 +14,8 @@
  *    person's press retries anything else.
  *  - A token, key or clip is never logged, written to disk (the key's own file aside) or returned. Failures are fixed
  *    codes (`InboxVoiceFailure`), never upstream text.
- *  - The key's file is private (0600) and set only on this computer; a page sees the last 4 at most.
+ *  - The key's file is private (0600), set on this computer or by its owner over the tailnet's HTTPS; a page sees the
+ *    last 4 at most.
  *  - Audio is held in memory for the length of the request.
  *  - `account/read` gives the sign-in type and plan, never a token: it is what Settings, the dimmed mic and the
  *    announcement's audience read. Its email field is dropped here.
@@ -110,7 +111,6 @@ export interface InboxVoiceOptions {
   otherDialogDue: () => boolean;
   json: (body: unknown, status?: number) => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
-  localOnly: () => Response;
   /** Tests: fake endpoints and where to look for Codex besides PATH. */
   chatgptUrl?: string;
   openaiUrl?: string;
@@ -416,8 +416,11 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
       }
       if (path === "/api/inbox/voice/key") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        // Set on the computer itself: the window's port takes loopback names only and refuses a forwarded request.
-        if (via !== "local") return options.localOnly();
+        // Over the tailnet a key travels only what `tailscale serve` took in over TLS (it says so in this header,
+        // and sets nothing on a plain-http mapping). The server's gate already kept every login but the owner's out.
+        if (via !== "local" && req.headers.get("x-forwarded-proto") !== "https") {
+          return json({ error: "An API key is accepted only over HTTPS.", code: "https_required" }, 403);
+        }
         const body = await options.readBody(req);
         if (checkServerSession(body, options.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.key === null) rmSync(keyPath, { force: true });

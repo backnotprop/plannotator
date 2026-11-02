@@ -87,7 +87,7 @@ export interface BoardPageProps {
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
   /** Create thread (an opened card with no thread): compose to `session` (the card's agent, else a live session in its project), linked to the card on Send. */
   onCreateThread: (card: InboxCardWire, session: string | null, opener: HTMLElement) => void;
-  /** Read the lane cards' marks (their linked PR's or issue's state). False on a page opened over the tailnet (and in tests that do not serve them). */
+  /** Read the lane cards' marks (their linked PR's or issue's state). False on a tailnet guest's page (and in tests that do not serve them). */
   marks?: boolean;
   /** Tidy (2026-10-28): the header's ⋮ menu (Tidy, Refresh). Absent: no menu. */
   tidy?: TidyController;
