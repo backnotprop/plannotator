@@ -148,10 +148,11 @@ export interface ThreadMoreLaunch {
  * leads with it (only when the Inbox keeps pins: `pin` is absent on an older one, and a phone's way to pin
  * is here, it has no row menu), and Mark unread on a read thread (`markUnread`; markRead.ts `canMarkUnread`,
  * also while the list still holds the row in New, or with a Mark read standing); then Copy thread, Copy link and
- * Copy thread ID (a phone's only way to them).
+ * Copy thread ID (a phone's only way to them); last, in its own group, Archive thread (Unarchive thread on an
+ * archived one), which used to be an icon in the header (the owner, 2026-11-01: move it into the ⋯). It has no key.
  */
-export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; launch?: ThreadMoreLaunch | null }) {
-  const { thread, phone, pin, markUnread, launch } = props;
+export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void }; launch?: ThreadMoreLaunch | null }) {
+  const { thread, phone, pin, markUnread, archive, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   return (
@@ -217,6 +218,20 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
               <Icon name="hash" size={15} />
               Copy thread ID
             </Menu.Item>
+            {archive && (
+              <>
+                <Menu.Separator className="ib-pm-sep" />
+                <Menu.Item
+                  className="ib-pmi"
+                  label={archive.archived ? 'Unarchive thread' : 'Archive thread'}
+                  onClick={archive.onToggle}
+                  data-thread-archive-item=""
+                >
+                  <Icon name="archive" size={15} />
+                  {archive.archived ? 'Unarchive thread' : 'Archive thread'}
+                </Menu.Item>
+              </>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
