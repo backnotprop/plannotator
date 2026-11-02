@@ -118,6 +118,7 @@ packages/inbox/compose.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
+packages/inbox/threadPanel.test.tsx
 packages/inbox/listIntroDialog.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx

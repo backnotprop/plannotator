@@ -82,6 +82,7 @@ import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, tourStepOf, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { ThreadWait } from './components/ThreadWait';
+import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
@@ -116,6 +117,8 @@ import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { threadPanelShows, useThreadPanel } from './threadPanel';
+import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
@@ -2165,6 +2168,10 @@ function Inbox() {
   sidebarHeldNow.current = sidebarHeld;
   // Full screen changes the sidebar's and the list's room without a route change: measured again too.
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
+  // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
+  // no thread open. Off by default, and never on a phone or in a window that stacks.
+  const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
+  const panelView = threadPanelShows(threadPanelOn, { phone, stacked: stack.thread });
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -4339,7 +4346,22 @@ function Inbox() {
       />
     );
   } else if (!latest || !shown) {
-    main = <div className="ib-listcol">{loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>}</div>;
+    const loading = loadError && <div className="ib-error" style={{ padding: 22 }}>{loadError}</div>;
+    // The thread panel view has its two panes from the first paint, so a reload never draws the wide list first. Blank:
+    // whether a thread opens here, or the first-run screen takes the window, is not known yet. The column's edge sets
+    // the width the person dragged, as it does for the list that takes its place.
+    main =
+      panelView && !fileOpen && !fromCard ? (
+        <>
+          <div className="ib-listcol ib-narrow ib-resizable">
+            {loading}
+            <ListColumnEdge />
+          </div>
+          <div className="ib-pane" data-thread-panel-loading="" />
+        </>
+      ) : (
+        <div className="ib-listcol">{loading}</div>
+      );
   } else if (showTourEntry) {
     main = (
       <TourEntry
@@ -4377,7 +4399,8 @@ function Inbox() {
           hideAway={hideAway}
           onHideAway={setHideAway}
           // A stacked thread covers the list, which keeps its own width (and scroll) under it.
-          narrow={route.thread !== null && !stack.thread}
+          narrow={(route.thread !== null || panelView) && !stack.thread}
+          threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
@@ -4436,6 +4459,11 @@ function Inbox() {
             ) : null
           }
         />
+        )}
+        {panelView && !route.thread && (
+          <div className="ib-pane ib-pempty" data-thread-panel-empty="">
+            <EmptyThreadPanel />
+          </div>
         )}
         {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
             and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}

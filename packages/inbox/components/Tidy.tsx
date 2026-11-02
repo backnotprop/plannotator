@@ -8,6 +8,7 @@ import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
 import { LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
 import { shortProjectNames } from '../projectLabels';
+import { THREAD_PANEL_LABEL } from '../threadPanel';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -104,6 +105,7 @@ export function TidyMenu({
   hideAway,
   look,
   onLook,
+  threadPanel,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -113,6 +115,8 @@ export function TidyMenu({
   hideAway?: { on: boolean; onChange: (hide: boolean) => void };
   look?: ListLook;
   onLook?: (key: ListLookKey, on: boolean) => void;
+  /** The thread panel view (threadPanel.ts), checked while it is the default. Absent (a phone, the tour): no item. */
+  threadPanel?: { on: boolean; onChange: (on: boolean) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -175,6 +179,20 @@ export function TidyMenu({
                       {look[option.key] && <Icon name="check" size={15} className="ib-pmi-check" />}
                     </Menu.CheckboxItem>
                   ))}
+                  {threadPanel && (
+                    <Menu.CheckboxItem
+                      className="ib-pmi"
+                      label={THREAD_PANEL_LABEL}
+                      checked={threadPanel.on}
+                      onCheckedChange={threadPanel.onChange}
+                      closeOnClick={false}
+                      data-thread-panel-option=""
+                    >
+                      <Icon name="sideBySide" size={15} />
+                      <span className="ib-pmi-l">{THREAD_PANEL_LABEL}</span>
+                      {threadPanel.on && <Icon name="check" size={15} className="ib-pmi-check" />}
+                    </Menu.CheckboxItem>
+                  )}
                 </>
               )}
               {hideAway && (

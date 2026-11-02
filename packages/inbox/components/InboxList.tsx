@@ -44,9 +44,9 @@ export interface InboxListProps {
    */
   projectNames?: ReadonlyMap<string, string>;
   /**
-   * A thread is open beside the list: a column of its own width (380px, or
-   * wider where the person dragged its edge), three-line rows until it is
-   * wide enough for the wide ones.
+   * A pane is beside the list, a thread's or the empty thread panel's: a
+   * column of its own width (380px, or wider where the person dragged its
+   * edge), three-line rows until it is wide enough for the wide ones.
    */
   narrow: boolean;
   selectedThreadId: string | null;
@@ -121,6 +121,8 @@ export interface InboxListProps {
   machineScope?: string | null;
   hideAway?: boolean;
   onHideAway?: (hide: boolean) => void;
+  /** The ⋮ menu's thread panel item (threadPanel.ts). Absent (a phone, the tour): no item. */
+  threadPanel?: { on: boolean; onChange: (on: boolean) => void };
   /**
    * The person's look options (listLook.ts) from this browser. False (the onboarding tour): today's list, every
    * option off, whatever this browser chose, as the tour's sidebar ignores its closed sections.
@@ -887,7 +889,7 @@ export function InboxList(props: InboxListProps) {
   // The full words on a wide row need a list of at least 1150px (FULL_WORDS_MIN_LIST_WIDTH); a narrower wide row
   // keeps the short forms and the bare triangles (option A).
   const fullWords = !twoLine && !shortWords;
-  // The column beside a thread gets the sidebar's resize edge, except on a phone.
+  // The column beside a pane gets the sidebar's resize edge, except on a phone.
   const { isMobile, open: sidebarDocked } = useSidebar();
   // New message in the header: a phone always has it (its CSS draws it); a wider window only while the
   // main sidebar, which holds its own New message, is closed (the peek does not count as open).
@@ -1024,6 +1026,7 @@ export function InboxList(props: InboxListProps) {
             hideAway={(props.machines?.linked.length ?? 0) > 0 && props.onHideAway ? { on: props.hideAway === true, onChange: props.onHideAway } : undefined}
             look={look}
             onLook={setLook}
+            threadPanel={props.threadPanel}
           />
         )}
       </div>
