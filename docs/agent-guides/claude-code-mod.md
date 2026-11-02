@@ -17,7 +17,9 @@ agent-run `plannotator` commands (below). With the knob off `session.start` stop
 anything (no `$.command.register` or `$.tool.register`, no `$.env.set`, no
 `$.store`, no process) and every other hook passes straight through with
 `next(e)`, so the classic PermissionRequest hook and the `/plannotator-*`
-skills run as they do without mods. See the env table row.
+skills run as they do without mods. (One gap: a `/rename` or `/clear` that beats
+`session.start` to its decision still records the name; see "The session's name".)
+See the env table row.
 
 **Inert without mods.** Checked live: Claude Code 2.1.150 (no hooks modules)
 validates and loads the plugin with the `modules` key, ignores it, and runs the
@@ -679,7 +681,7 @@ answer that says a question waits, so a session with no question has none.
 
 **The session's name in the Inbox's To picker (`noteSessionName`, `sessionNamesAfterCommand`).** A session named with `/rename` shows that name; an unnamed one reads as it always did (owner's decision on #2450, 2026-11-01). The engine gives a plugin no way to read a session's name: no `$` call has it, no module event carries it, and `session_title` is only on the classic inputs, whose hooks cost a "hook was skipped" line every session on a guarded account (#2243), so **never add a classic hook for it**. A second `command.run` hook, matched on `rename` and `clear` (aliases resolved: `/name`, `/reset`, `/new`), writes `$.store`'s `inboxSessionNames` (session id → name, newest 500), and each poll reads it, `""` for none. `$.store` and not `$.state`: `$.state` is held for the session, and a `--resume` is another process that has to find the name. A `--resume` reuses the session id (`--fork-session` is what makes a new one), so the entry is found again; the engine restores the name for itself from the transcript and tells no one.
 
-The hook calls `next(e)` first and returns its answer untouched: a command that threw names nothing, `/clear` has moved the session id by then, and the engine credits a plugin (`plannotator: …`) only on an answer that differs from its own. Read from the 2.1.316 binary, same shape in 2.1.312:
+The hook calls `next(e)` first and returns its answer untouched: a command that threw names nothing, and `/clear` has moved the session id by then. A real session on 2.1.316 showed no credit line (`plannotator: …`) on `/rename` or `/clear` with this hook in place; that is the one version it was watched on. The command never pays for the label: `$` failing before `next` only skips the name, and the write after it is bounded (`SESSION_NAME_WRITE_MS`, 500 ms), so a store that never settles leaves the name unkept and the answer on time. It writes only a change, because the record is read and written back whole and a write of nothing new could only undo another session's. It writes once `session.start` has decided the mod is on, or before it has decided, since a first `/rename` can beat it; a `/rename` in that gap with the mod off leaves an entry nothing reads, and after the decision the knob-off hook passes straight through. Read from the 2.1.316 binary, same shape in 2.1.312:
 
 - `/rename <name>`: `e.args` is the name. `/rename` is `local-jsx`, so on every interactive path `next(e)` resolves with no `text`: `args` is all there is. Its final name can differ: if another live session on the machine holds it, the engine picks another, and the label still shows what was typed.
 - Bare `/rename`: the model makes the name up, and neither `args` nor the answer has it. The session then reads as unnamed, since the name it had is no longer its name.

@@ -154,7 +154,8 @@ describe("Pi's session name", () => {
 
 	test("a stale ctx cannot tell either: the name stands on the next polls", async () => {
 		let stale = false;
-		const { bodies } = await startPi({ getSessionName: () => "Fix login redirect" }, () => stale);
+		// A stale ctx's session manager answers nothing, which must not read as a name taken away.
+		const { bodies } = await startPi({ getSessionName: () => (stale ? undefined : "Fix login redirect") }, () => stale);
 		await until("a poll with the name", () => bodies.at(-1)?.label === "Fix login redirect");
 		stale = true;
 		const seen = bodies.length;

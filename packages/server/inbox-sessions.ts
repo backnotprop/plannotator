@@ -195,6 +195,9 @@ export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
 /** The longest session label kept, in characters (code points, so a pair is never split). */
 export const INBOX_SESSION_LABEL_MAX = 60;
 
+/** How much of what a client sends is looked at, in the same characters: a name's length is the client's to choose, this work is not. */
+export const INBOX_SESSION_LABEL_INPUT_MAX = 200;
+
 /**
  * A poll's `label` as the window may draw it: control characters, line
  * separators and bidi controls stripped (the same characters a thread name
@@ -203,7 +206,9 @@ export const INBOX_SESSION_LABEL_MAX = 60;
  */
 export function cleanInboxSessionLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const text = value.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
+  // Twice as many UTF-16 units always hold that many characters, so the first cut never spends on the rest of a long string.
+  const input = Array.from(value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join("");
+  const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
   const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
   return label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() ? label : null;
 }

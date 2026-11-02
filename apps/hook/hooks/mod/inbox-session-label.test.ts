@@ -10,11 +10,12 @@ import { fakeHost } from './testing/fake-host'
 // the hook through `PlannotatorMod` to the link coming undone, which no fake
 // `label` can see; a `/clear` losing a name the engine kept, or keeping one the
 // engine moved; a `--resume` not finding the name; another session's name; a poll
-// that cannot read the store blanking a labelled row; and the hook changing
-// `/rename`'s or `/clear`'s answer, which the engine would then credit to us.
+// that cannot read the store blanking a labelled row; the hook changing
+// `/rename`'s or `/clear`'s answer, or stopping or holding them when `$` fails; a
+// write with the mod off; and a write of nothing new undoing another session's.
 //
-// That a real `/rename` raises this hook, and what a guard does, needs the
-// engine: apps/hook/tests/register.test.ts and a real session.
+// That a real `/rename` raises this hook needs the engine, so it is checked by
+// hand in a real session; apps/hook/tests/register.test.ts does not run it.
 
 const DATA = '/data'
 const REGISTRY = JSON.stringify({ v: 1, pid: 1, port: 4100, token: 't'.repeat(40), serverSession: 'srv', url: 'http://127.0.0.1:4100' })
@@ -41,9 +42,9 @@ function linkOver(host: ReturnType<typeof fakeHost>, label?: () => string | Prom
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
 
 /** The module's hooks as the engine holds them: `event` to its matcher and function. */
-function hooks() {
+function hooks(registerOn: typeof register = register) {
   const held = new Map<string, { matcher: unknown; run: Hook }[]>()
-  register((event: string, ...args: unknown[]) => {
+  registerOn((event: string, ...args: unknown[]) => {
     held.set(event, [...(held.get(event) ?? []), { matcher: args.length > 1 ? args[0] : undefined, run: args.at(-1) as Hook }])
   })
   return {
@@ -52,6 +53,19 @@ function hooks() {
     command: (command: string) => held.get('command.run')!.find((hook) => (hook.matcher as { command: string[] }).command.includes(command))!.run,
   }
 }
+
+/**
+ * `$.clock.sleep` on real time, the way the bound around the store needs it: a
+ * sleep that answers at once would end that bound before any write.
+ */
+const realSleep = (ms: number, options?: { signal?: AbortSignal }) =>
+  new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    options?.signal?.addEventListener('abort', () => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 
 const NOW = 1_000
 
@@ -96,6 +110,14 @@ describe('what a command does to the names', () => {
     expect(names.s1).toBeDefined()
   })
 
+  test('a command that changes nothing hands back the same record: the hook writes only a change', () => {
+    const record = named('s1')
+    expect(after(record, 'clear', '', 'unnamed', 'new')).toBe(record)
+    expect(after(record, 'clear', 'Ignored', 's1')).toBe(record)
+    expect(after(record, 'rename', '', 'unnamed')).toBe(record)
+    expect(after(record, 'rename', 'Name of s1', 's1')).toBe(record)
+  })
+
   test('what the store holds is read with care: another shape is no name', () => {
     expect(readSessionNames(undefined)).toEqual({})
     expect(readSessionNames([])).toEqual({})
@@ -106,17 +128,25 @@ describe('what a command does to the names', () => {
 describe('the command.run hook', () => {
   function storeOf(session: string) {
     const values = new Map<string, unknown>()
+    let writes = 0
     return {
       values,
+      writes: () => writes,
       $: {
         session: { id: async () => session },
-        clock: { now: async () => NOW },
-        store: { get: async (key: string) => values.get(key), set: async (key: string, value: unknown) => void values.set(key, value) },
+        clock: { now: async () => NOW, sleep: realSleep },
+        store: {
+          get: async (key: string) => values.get(key),
+          set: async (key: string, value: unknown) => {
+            writes += 1
+            values.set(key, value)
+          },
+        },
       },
     }
   }
 
-  test("the engine's own command runs and its answer comes back as it was, so nothing is credited to us", async () => {
+  test("the engine's own command runs and its answer comes back as it was", async () => {
     const { $ } = storeOf('s1')
     const input = { command: 'rename', args: 'Fix login redirect' }
     const answer = { ref: 4 }
@@ -140,19 +170,123 @@ describe('the command.run hook', () => {
     expect(values.has(STORE_INBOX_SESSION_NAMES)).toBe(false)
   })
 
-  test('a store that fails never fails the command', async () => {
-    const answer = { ref: 4 }
-    const broken = {
-      session: { id: async () => 's1' },
-      clock: { now: async () => NOW },
-      store: {
-        get: async () => {
-          throw new Error('the store is gone')
+  const never = () => new Promise<never>(() => undefined)
+  const refuse = async () => {
+    throw new Error('the store is gone')
+  }
+  const engine = {
+    session: { id: async () => 's1' },
+    clock: { now: async () => NOW, sleep: realSleep },
+    store: { get: async () => undefined, set: async () => undefined },
+  }
+
+  test.each<[string, unknown]>([
+    [
+      'the session id throws where it is called',
+      {
+        ...engine,
+        session: {
+          id: () => {
+            throw new Error('no session')
+          },
         },
-        set: async () => undefined,
+      },
+    ],
+    ['the session id rejects', { ...engine, session: { id: refuse } }],
+    [
+      'reading `$.session` throws',
+      {
+        ...engine,
+        get session() {
+          throw new Error('no session')
+        },
+      },
+    ],
+    ['the store rejects a read', { ...engine, store: { ...engine.store, get: refuse } }],
+    ['the store rejects a write', { ...engine, store: { ...engine.store, set: refuse } }],
+    ['a read never settles', { ...engine, store: { ...engine.store, get: never } }],
+    ['a write never settles', { ...engine, store: { ...engine.store, set: never } }],
+  ])('%s: the command still runs once and its answer comes back', async (_how, $) => {
+    const input = { command: 'clear', args: '' }
+    const answer = { ref: 4 }
+    let ran = 0
+    const got = await hooks().command('clear')($, input, (e) => {
+      ran += 1
+      expect(e).toBe(input)
+      return answer
+    })
+    expect(ran).toBe(1)
+    expect(got).toBe(answer)
+  })
+
+  test('a command that changed nothing writes nothing', async () => {
+    const { $, writes } = storeOf('s1')
+    await hooks().command('clear')($, { command: 'clear', args: '' }, () => ({ ref: 2 }))
+    await hooks().command('rename')($, { command: 'rename', args: '' }, () => ({ ref: 1 }))
+    expect(writes()).toBe(0)
+  })
+
+  test("a session whose /clear changed nothing cannot undo a name another session wrote meanwhile", async () => {
+    const shared = storeOf('other')
+    const on = hooks()
+    const clearing = {
+      ...shared.$,
+      session: { id: async () => 'unnamed' },
+      store: {
+        ...shared.$.store,
+        // This read lands first; the other session's whole write lands before this one acts on it.
+        get: async (key: string) => {
+          const seen = shared.values.get(key)
+          await on.command('rename')(shared.$, { command: 'rename', args: 'Named elsewhere' }, () => ({ ref: 1 }))
+          return seen
+        },
       },
     }
-    expect(await hooks().command('rename')(broken, { command: 'rename', args: 'Name' }, () => answer)).toBe(answer)
+    await on.command('clear')(clearing, { command: 'clear', args: '' }, () => ({ ref: 2 }))
+    expect(readSessionNames(shared.values.get(STORE_INBOX_SESSION_NAMES)).other?.name).toBe('Named elsewhere')
+  })
+})
+
+/**
+ * What session.start decided lives in the module, one answer per process, and a
+ * process has only one first session.start. So each test here gets its own copy
+ * of the module; the query only keeps Bun from handing back the cached one.
+ */
+async function freshRegister(name: string): Promise<typeof register> {
+  const path = `./register?${name}`
+  return ((await import(path)) as { register: typeof register }).register
+}
+
+describe('what session.start decided', () => {
+  const engineWith = (env: Record<string, string>) => {
+    const store = new Map<string, unknown>()
+    return {
+      store,
+      $: {
+        env: { get: async (name: string) => env[name], set: async () => undefined },
+        fs: { exists: async () => true, read: async () => { throw new Error('ENOENT') } },
+        session: { id: async () => 's1', cwd: async () => '/w', root: async () => '/w' },
+        clock: { now: async () => NOW, sleep: realSleep },
+        store: { get: async (key: string) => store.get(key), set: async (key: string, value: unknown) => void store.set(key, value) },
+      },
+    }
+  }
+
+  test('with the mod off, /rename runs and nothing is kept', async () => {
+    const on = hooks(await freshRegister('knob-off'))
+    const { $, store } = engineWith({ HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, PLANNOTATOR_CLAUDE_MOD: '0' })
+    await on.only('session.start')($, { isInteractive: true }, async () => ({ cwd: '/w' }))
+
+    const answer = { ref: 1 }
+    expect(await on.command('rename')($, { command: 'rename', args: 'Fix login redirect' }, () => answer)).toBe(answer)
+    expect(store.size).toBe(0)
+  })
+
+  test('a first /rename that beats session.start is kept: the mod may turn out on', async () => {
+    const on = hooks(await freshRegister('before-start'))
+    const { $, store } = engineWith({})
+    await on.command('rename')($, { command: 'rename', args: 'Fix login redirect' }, () => ({ ref: 1 }))
+    expect(readSessionNames(store.get(STORE_INBOX_SESSION_NAMES)).s1?.name).toBe('Fix login redirect')
   })
 })
 
@@ -253,7 +387,7 @@ function engineOver(firstSession: string) {
       },
       clock: {
         now: async () => clock,
-        sleep: async () => undefined,
+        sleep: realSleep,
         every: (_ms: number, fn: () => void) => {
           timers.add(fn)
           return { cancel: () => timers.delete(fn) }
@@ -314,6 +448,12 @@ describe('from /rename to a poll body', () => {
     await rename('Docs pass')
     await world.tick(3)
     expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Docs pass' })
+
+    // A poll speaks for its own session, wherever the process's id has gone.
+    world.sessionId = 'sess-elsewhere'
+    await world.tick(3)
+    expect(world.polls.at(-1)).toEqual({ session: 'sess-wired', label: 'Docs pass' })
+    world.sessionId = 'sess-wired'
 
     // A resume is another process: the name is the store's, set past the hooks here
     // so this can only pass by reading it, and it shows on the first poll.

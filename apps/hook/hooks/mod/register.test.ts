@@ -37,11 +37,10 @@ describe('command.run registration', () => {
 // skipped" line every session on a guarded account. The session name must never
 // bring these two back (owner's decision on #2450).
 describe('no classic hook for the session name', () => {
-  test('the mod has no classic.SessionStart or classic.UserPromptSubmit hook', () => {
+  test('classic.PermissionRequest is the only classic event the mod hooks', () => {
     const events = registrations().map((hook) => hook.event)
 
-    expect(events).not.toContain('classic.SessionStart')
-    expect(events).not.toContain('classic.UserPromptSubmit')
+    expect(new Set(events.filter((event) => event.startsWith('classic.')))).toEqual(new Set(['classic.PermissionRequest']))
   })
 })
 

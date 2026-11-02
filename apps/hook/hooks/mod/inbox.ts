@@ -328,6 +328,7 @@ export function readSessionNames(value: unknown): InboxSessionNames {
 }
 
 function withSessionName(record: InboxSessionNames, sessionId: string, name: string, now: number): InboxSessionNames {
+  if ((record[sessionId]?.name ?? '') === name) return record
   const { [sessionId]: _old, ...rest } = record
   const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)
   return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))

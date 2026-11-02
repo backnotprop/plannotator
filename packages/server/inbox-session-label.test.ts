@@ -21,7 +21,7 @@ import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxToolCall, type In
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { cleanInboxSessionLabel, createInboxLiveSessions, INBOX_SESSION_LABEL_MAX } from "./inbox-sessions";
+import { cleanInboxSessionLabel, createInboxLiveSessions } from "./inbox-sessions";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -96,7 +96,6 @@ describe("cleanInboxSessionLabel", () => {
   });
 
   test("capped at 60 characters, counted as characters and not UTF-16 units", () => {
-    expect(INBOX_SESSION_LABEL_MAX).toBe(60);
     expect(cleanInboxSessionLabel("a".repeat(60))).toBe("a".repeat(60));
     expect(cleanInboxSessionLabel("a".repeat(61))).toBe("a".repeat(60));
     expect(cleanInboxSessionLabel("圆".repeat(200))).toBe("圆".repeat(60));
@@ -104,6 +103,17 @@ describe("cleanInboxSessionLabel", () => {
     const cut = cleanInboxSessionLabel("\u{1F600}".repeat(61))!;
     expect(Array.from(cut)).toHaveLength(60);
     expect(cut.isWellFormed()).toBe(true);
+  });
+
+  test("only the first 200 characters count, however long the name a client sends", () => {
+    const stripped = (count: number) => "‮".repeat(count);
+    expect(cleanInboxSessionLabel(`${stripped(199)}a`)).toBe("a");
+    expect(cleanInboxSessionLabel(`${stripped(200)}a`)).toBeNull();
+    expect(cleanInboxSessionLabel(`${stripped(200)}${"a".repeat(200_000)}`)).toBeNull();
+    // The cut is in characters too: the 200th here is an emoji, which stays whole.
+    expect(cleanInboxSessionLabel(`${stripped(199)}\u{1F600}a`)).toBe("\u{1F600}");
+    const emoji = "\u{1F600}".repeat(201);
+    expect(cleanInboxSessionLabel(emoji)).toBe("\u{1F600}".repeat(60));
   });
 
   test("the cap counts what is left after cleaning, and a cut never ends on a space", () => {
@@ -236,7 +246,7 @@ describe("the model cannot set the label", () => {
     expect(call).toEqual({ error: expect.stringContaining('takes no "label"') });
   });
 
-  test("every tool, a message and every window route, handed a label, change nothing on the session", async () => {
+  test("every tool, a bridge event and a window message, handed a label, change nothing on the session", async () => {
     const { server, client, project } = await setup();
     await poll(server, "ses-a", project, { label: "Set by the host" });
     const carried = { label: "Chosen by the model", session_title: "Chosen by the model", title: "Chosen by the model" };

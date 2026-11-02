@@ -337,6 +337,9 @@ async function reminderGateDecided($: Engine): Promise<boolean | null> {
 /** The longest a resumed conversation's first prompt waits for its thread list. */
 const SESSION_THREADS_RESUME_MS = 1_500
 
+/** How long a `/rename` or `/clear` that already ran waits for its name to be kept: the person is waiting on the prompt. */
+const SESSION_NAME_WRITE_MS = 500
+
 /**
  * PLANNOTATOR_INBOX_REMINDER holds the reminder plus the thread list (ids and
  * subjects), set for one compaction's SessionStart `compact` command hook: the
@@ -438,13 +441,16 @@ async function inboxProjectFolderOf($: Engine, fallback?: string): Promise<strin
  * (`sessionNamesAfterCommand`), after it ran. By session id and in `$.store`, not
  * on the instance: `session.start` does not fire for `/clear` or an in-process
  * resume, and a `--resume` is another process that has to find the name again.
- * Never fails the command over a label.
+ * Never fails the command over a label. Writes only a change: the record is
+ * read and written back whole, so a write that changed nothing could only put
+ * back what another session's command just replaced.
  */
 async function noteSessionName($: Engine, e: { command?: unknown; args?: unknown }, before: string): Promise<void> {
   try {
     const after = String(await $.session.id())
     const stored = readSessionNames(await $.store.get(STORE_INBOX_SESSION_NAMES))
-    await $.store.set(STORE_INBOX_SESSION_NAMES, sessionNamesAfterCommand(stored, { command: e.command, args: e.args, before, after }, await $.clock.now()))
+    const updated = sessionNamesAfterCommand(stored, { command: e.command, args: e.args, before, after }, await $.clock.now())
+    if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_NAMES, updated)
   } catch {
     // The poll says the last word it had.
   }
@@ -700,16 +706,21 @@ export function register(on: On) {
     return { text }
   })
 
-  // The session's name (see the header). Matched by name, as above. The engine's
-  // own command runs and its answer comes back as it is: the engine credits a
-  // plugin only on an answer that differs. After `next`: a command that threw
-  // named nothing, and `/clear` has moved the session id by then. Before
-  // `allowed` too: a first `/rename` can beat session.start, and with the mod off
-  // nothing polls, so nothing reads it.
+  // The session's name (see the header). Matched by name, as above, so at most
+  // these two commands' answers are touched. It hands the engine's answer back as
+  // it is, and a real session on 2.1.316, the one version this was watched on,
+  // showed no credit line on `/rename` or `/clear`. The engine's command runs and
+  // answers whatever `$` does: a read that throws or a store that never settles
+  // costs the label, never `/clear`. After `next`: a command that threw named
+  // nothing, and `/clear` has moved the session id by then. Before session.start
+  // has decided too, since a first `/rename` can beat it; once it said no (the mod
+  // off, `-p`) nothing polls, so nothing is written.
   on('command.run', { command: [...INBOX_SESSION_NAME_COMMANDS] }, async ($: Engine, e: any, next: Next) => {
-    const before = await Promise.resolve($.session.id()).then(String, () => '')
+    const before = await Promise.resolve()
+      .then(() => $.session.id())
+      .then(String, () => '')
     const result = await next(e)
-    if (before) await noteSessionName($, e, before)
+    if (before && (allowed || reminderGateValue === null)) await withinMs($, SESSION_NAME_WRITE_MS, () => noteSessionName($, e, before))
     return result
   })
 
