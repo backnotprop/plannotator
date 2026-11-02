@@ -173,8 +173,9 @@ function bodyFibers(el: HTMLElement): Fiber[] {
 /** The props objects a body's two fibers hold now: a render of the body gives it a new one. */
 const propsOf = (fiber: Fiber) => [fiber.memoizedProps, fiber.alternate?.memoizedProps].filter(Boolean);
 
-const setText = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
 function typeKey(field: HTMLTextAreaElement, char: string) {
+  // Looked up here, not at load: the file loads without a DOM when DOM tests are off.
+  const setText = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setText.call(field, field.value + char);
     field.dispatchEvent(new Event('input', { bubbles: true }));
