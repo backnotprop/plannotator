@@ -24,6 +24,7 @@ import { replyKeysToRenew, type SendTarget, type SentContents } from '../sendTar
 import { agentName, formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { prefersReducedMotion } from '../settle';
+import { registerReloadFlush } from '../stalePage';
 import { Tip } from '../components/Tip';
 import { DecisionCard, type CardPicture, type CardWords } from './DecisionCard';
 import {
@@ -219,6 +220,19 @@ export function DecisionMode(props: DecisionModeProps) {
   const unsavedWordsRef = useRef<(() => boolean) | null>(null);
   /** The `startNonce` already applied (each start moves to its card once). */
   const appliedStart = useRef<number | null>(null);
+  // The stale page notice's Reload (stalePage.ts) waits for the picks on their way; words typed on the card and not
+  // yet given as an answer would be lost, so they stop it.
+  useEffect(
+    () =>
+      registerReloadFlush(async () => {
+        for (let seen = pickChain.current; ; seen = pickChain.current) {
+          await seen;
+          if (seen === pickChain.current) break;
+        }
+        return !(unsavedWordsRef.current?.() ?? false);
+      }),
+    [],
+  );
   const [, setTick] = useState(0);
   const escapedAt = useRef(0);
   const [touch, setTouch] = useState(false);

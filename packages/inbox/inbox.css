@@ -1074,6 +1074,19 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-att { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
 .ib-notice { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 8px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 12px; width: 100%; text-align: left; }
 .ib-notice b { margin-left: auto; color: var(--primary); font-weight: 550; }
+/* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
+   and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
+.ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
+.pn-inbox .ib-stale button { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+.pn-inbox .ib-stale button:disabled { cursor: default; }
+.pn-inbox .ib-stale button:focus-visible { outline-offset: -2px; border-radius: 8px; }
+.ib-stale-go { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; align-self: stretch; padding: 0 10px 0 14px; text-align: left; }
+.ib-stale-say { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-stale-go b { flex: none; }
+.pn-inbox .ib-stale .ib-stale-x { flex: none; align-self: stretch; display: grid; place-items: center; width: 36px; color: var(--muted-foreground); border-left: 1px solid color-mix(in oklch, var(--primary) 18%, transparent); }
+.pn-inbox .ib-stale .ib-stale-x:hover:not(:disabled) { color: var(--foreground); }
+/* In the open thread (no list beside it): under the subject, the thread's width. */
+.ib-pbody > .ib-stale { margin: 2px 0 12px; width: 100%; }
 .ib-askline { container: ib-ask / inline-size; border-radius: var(--ib-gr-r-s, 9px); border: 1px solid var(--ib-gr-line-s, var(--border)); background: var(--ib-gr-bg-s, var(--background)); color: var(--ib-gr-fg-s, currentcolor); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.45; margin-bottom: 12px; }
 /* Narrow (beside an open thread the list is a 380 px column, and a phone): the icon beside the words, the
    actions on their own row under the words, lined up with them. Wide (below): one row, actions at the end. */
@@ -2980,6 +2993,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  /* The stale page notice's ×: a finger's width. */
+  .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }
   /* The phone's buttons are 44 px with 12 px padding (below); pulled back only in the narrow layout, where the
      actions sit under the words (a phone on its side can be wide, actions at the row's end). */

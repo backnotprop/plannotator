@@ -735,6 +735,15 @@ export function setPageSession(value: string): void {
   if (pageSession === null) pageSession = value;
 }
 
+/**
+ * The person pressed Reload on the stale page notice (stalePage.ts) of a page the Inbox restarted under: the saves
+ * that keep what they wrote before the reload go to the Inbox running now, which the notice named. Every other write
+ * keeps the first session, so a page left open on an older Inbox saves nothing without being asked (409).
+ */
+export function adoptPageSession(value: string): void {
+  pageSession = value;
+}
+
 /** The page's serverSession (null before the first list read), for a keepalive request built by hand. */
 export function pageServerSession(): string | null {
   return pageSession;
