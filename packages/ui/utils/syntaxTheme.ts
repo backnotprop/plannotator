@@ -41,6 +41,7 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'nord': { dark: 'nord', light: null },
   'one-dark-pro': { dark: 'one-dark-pro', light: null },
   'one-light': { dark: null, light: 'one-light' },
+  'plannotator-modern': { dark: 'github-dark-default', light: 'github-light-high-contrast' },
   'plastic': { dark: 'plastic', light: null },
   'poimandres': { dark: 'poimandres', light: null },
   'red': { dark: 'red', light: null },

@@ -5,8 +5,9 @@
  * tests/helpers/inbox-dom-server.ts, seeded with plain agent news). What is
  * proved: on a thread read by opening it the header's disabled Mark read is
  * Mark unread (and `E` still does nothing there), and ⋯ More does not repeat
- * it; ⋯ More offers Mark unread while the list holds the row in New and with
- * a Mark read standing (whose pressed Read button stays); the row's hover
+ * it; while the list holds the row in New the header's button is Mark unread
+ * too (the owner, 2026-11-02); ⋯ More offers Mark unread with a Mark read
+ * standing (whose pressed Read button stays); the row's hover
  * action toggles (Mark read on a row that waits, Mark unread on a read row,
  * never opening the thread); Mark unread from the open thread closes it and
  * puts the row back in New, bold, sends nothing to the agent, leaves set
@@ -260,20 +261,29 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
   expect(typeof posted.at(-1)!.body.through_seq).toBe('number');
 });
 
-test.skipIf(!hasDom)('a plain update opened from New keeps Mark read in the header while the list holds it; ⋯ More offers Mark unread', async () => {
+test.skipIf(!hasDom)("a plain update opened from New, its row held in New: the header's button is Mark unread (the owner, 2026-11-02), which closes it and leaves it unread", async () => {
   const id = ids.news[0]!;
   expect(await serverSection(id)).toBe('new');
   await renderApp(`#thread=${id}`);
   await until(async () => (await serverSection(id)) === 'quiet', 'the look');
-  // Held in New (held.ts): the header's button stays Mark read (markRead.ts `seenHeldInNew`).
-  await until(() => sectionOfRow(id) === 'new' && !!head()!.querySelector('[data-mark-read]:not([disabled])'), 'Mark read held');
-  expect(head()!.querySelector('[data-mark-unread]')).toBeNull();
-  const item = await moreUnreadItem();
-  expect(item?.textContent?.trim()).toBe('Mark unread');
+  // Held in New (held.ts), read on the server: the header says Mark unread, not Mark read (v0.28.45 and before:
+  // Mark read, with Mark unread only in ⋯ More). Labels compared as text: an action label, pinned on purpose.
+  await until(() => sectionOfRow(id) === 'new' && head()!.querySelector('[data-mark-unread]')?.getAttribute('aria-label') === 'Mark unread', 'Mark unread in the header');
+  expect(head()!.querySelector('[data-mark-read]') === null).toBe(true);
+  // The header's button is on screen: ⋯ More does not offer it twice.
+  expect((await moreUnreadItem()) === null).toBe(true);
+  await press(head()!.querySelector<HTMLElement>('[data-thread-more]')!);
+  await until(() => !document.querySelector('[data-thread-menu]'), 'the ⋯ menu to close');
   const messages = (await threadOf(id)).thread.messages.length;
-  await act(async () => item!.click());
+  await act(async () => head()!.querySelector<HTMLButtonElement>('[data-mark-unread]')!.click());
   await expectBackInNew(id, messages);
-});
+  // It stays unread: nothing looks at it again.
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 400));
+  });
+  expect(await serverSection(id)).toBe('new');
+  expect(posted.filter((p) => p.path === `/api/inbox/threads/${id}/seen`).length).toBe(1);
+}, 15_000);
 
 test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that waits, Mark unread on a read row, which puts it back in New, bold", async () => {
   const id = ids.news[0]!;

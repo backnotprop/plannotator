@@ -283,13 +283,13 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   const head = () => el.querySelector('[data-mark-read]') as HTMLButtonElement;
   expect(head().getAttribute('aria-pressed')).toBe('false');
   expect(head().disabled).toBe(false);
-  expect(head().textContent).toContain('Mark read');
+  expect(head().getAttribute('aria-label')).toBe('Mark read');
 
   press('e');
   await until(() => head().getAttribute('aria-pressed') === 'true', 'the pressed button');
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.stopped}/read`);
   expect(head().getAttribute('aria-pressed')).toBe('true');
-  expect(head().textContent).toContain('Read');
+  expect(head().getAttribute('aria-label')).toBe('Read');
   expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');

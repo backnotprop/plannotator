@@ -177,10 +177,10 @@ function seed(dataDir: string, project: string, docsProject: string, now: number
   store.savePicks(release.message, [{ key: relQ.key, revision: relQ.revision, answer: { v: 1, key: relQ.key, kind: 'single', prompt: relQ.prompt, selected: ['Yes, as experimental'] } } as never]);
   at(3 * 24 * 60);
   const hover = send(CLAUDE, 'Hover cards on review surfaces', 'Hover cards are in on all three review surfaces. I will send pictures of the light, dark and phone passes once the dark pass is done.');
-  store.createCard({ project_id: projectId, by: CLAUDE, title: 'Hover cards on review surfaces', column: 'designing', say: 'Sending pictures soon', threads: [hover.thread] });
+  store.createCard({ project_id: projectId, by: CLAUDE, title: 'Hover cards on review surfaces', column: 'in_progress', say: 'Sending pictures soon', threads: [hover.thread] });
   // Pi's card in the other project, not moved in 3 days either: the Board's project filter leaves it out.
   const nav = send(PI, 'Docs sidebar order', 'Started on the docs sidebar order.', docsId);
-  store.createCard({ project_id: docsId, by: PI, title: 'Docs sidebar order', column: 'building', say: 'Reordering the sidebar', threads: [nav.thread] });
+  store.createCard({ project_id: docsId, by: PI, title: 'Docs sidebar order', column: 'in_progress', say: 'Reordering the sidebar', threads: [nav.thread] });
   at(45);
   const reply = store.sendReply(hover.message, { words: 'Still waiting on those pictures. Did the phone pass happen?', idempotency_key: 'e2e-tidy-hover' });
   at(44);
