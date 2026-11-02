@@ -1424,7 +1424,7 @@ export class InboxStore {
 
   /**
    * Whether `message` reaches `session` as the person's own reply in a thread
-   * that session already has. Not one: a root or a New message (no `reply_to`);
+   * that session already has. Not one: a root, or a New message to a session new to the thread (a New message to one that has it counts, Board Ask too);
    * the Inbox's own notes and a Re-ask, which are not an answer from the
    * person; and a wake that is the session's first sight of the thread
    * (tagged, added, handed the thread, a reply sent on from an ended session,
@@ -1434,7 +1434,10 @@ export class InboxStore {
    * An action report is a reply: it reaches the agent as one, in the same words.
    */
   private plainReplyFor(message: InboxMessage, session: string | null): boolean {
-    if (message.author.kind !== "person" || !message.reply_to) return false;
+    if (message.author.kind !== "person") return false;
+    // A New message (the window's, or a Board card's Ask) into a thread the session already has is as plain as a reply:
+    // its subject is just as stale. A session new to the thread has not seen the subject, so it keeps it.
+    if (!message.reply_to && !this.newMessageInKnownThread(message)) return false;
     if (isInboxNote(message) || (message.reask?.length ?? 0) > 0) return false;
     const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
     if (tag) {
@@ -1443,6 +1446,15 @@ export class InboxStore {
       return added?.id !== message.id;
     }
     return !handoffActive(message) && !this.redirectedFrom(message) && !this.continuesThread(message);
+  }
+
+  /** A New message (no `reply_to`) to a session that already has the thread: it started or answered in it, or was sent its first message. */
+  private newMessageInKnownThread(message: InboxMessage): boolean {
+    const session = message.to?.session;
+    if (!session || message.thread_id === message.id) return false;
+    const root = this.messages.get(message.thread_id);
+    if (root?.delivery?.session === session || root?.to?.session === session) return true;
+    return this.threadMessages(message.thread_id).some((m) => m.id !== message.id && m.author.kind === "agent" && m.author.session === session);
   }
 
   /**

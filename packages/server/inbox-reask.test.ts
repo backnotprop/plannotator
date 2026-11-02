@@ -29,7 +29,11 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 
+const savedRelay = process.env.PLANNOTATOR_RELAY_URL;
+
 afterEach(async () => {
+  if (savedRelay === undefined) delete process.env.PLANNOTATOR_RELAY_URL;
+  else process.env.PLANNOTATOR_RELAY_URL = savedRelay;
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -40,6 +44,8 @@ async function setup(options: { phones?: boolean } = {}) {
   roots.push(root);
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
+  // Phones on starts the relay connection: it must never reach the real relay from a test (a port nothing answers on; restored after each test).
+  if (options.phones) process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
   const server = await startInboxServer({ dataDir: join(root, "data"), binaryPath: null, ...(options.phones ? { phones: true } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-reask-test", version: "1.0.0" });

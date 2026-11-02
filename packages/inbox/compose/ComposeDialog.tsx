@@ -58,6 +58,7 @@ import {
   type ThreadNameState,
   type ComposeTarget,
 } from './model';
+import { newUuid } from '../uuid';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -232,7 +233,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [footCovered, question, voice.session]);
 
   // The idempotency key of one Send: new whenever what would be sent changes.
-  const sendKey = useRef(crypto.randomUUID());
+  const sendKey = useRef(newUuid());
   const uploadIds = files.uploaded.map((u) => u.upload_id);
   // The chip's suggestion, worked out a moment after typing stops; the same name again changes nothing on screen.
   const fileNames = files.files.map((file) => file.name).join('\n');
@@ -243,7 +244,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, [body, fileNames]);
   const threadName = draftThreadName(nameState);
   useEffect(() => {
-    sendKey.current = crypto.randomUUID();
+    sendKey.current = newUuid();
   }, [body, chosen, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest]);
   const draftId = useRef(request.draft?.id ?? inboxId('drf'));
 
