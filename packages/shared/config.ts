@@ -1383,22 +1383,33 @@ export function resolveAgentTool(
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
  * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
+ * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
- * tools are deferred behind tool search; off on Pi and OpenCode 2, which send
- * every tool's full definition with each request).
+ * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
+ * Harness, which send every tool's full definition with each request; DSH
+ * also keeps its tool list fixed for request caching). DSH has no
+ * `plannotator` agent tool yet, so its entry is its own, off like Pi's.
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
+  dsh: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
+
+/**
+ * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
+ * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
+ * Pi's, and a context message there shows as the person's own words.
+ */
+export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
 
 /** The PLANNOTATOR_INBOX_TOOL override, or undefined when it does not decide. */
 export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -1452,7 +1463,7 @@ export function resolveInboxReminder(
   env: NodeJS.ProcessEnv,
   host: InboxToolHost,
 ): boolean {
-  return resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
 }
 
 /**

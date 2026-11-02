@@ -46,6 +46,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import {
   configuredInboxTool,
+  INBOX_TOOL_HOSTS,
   loadConfig,
   parseInboxToolEnv,
   resolveClaudeCodeMod,
@@ -631,6 +632,39 @@ export function openCodePluginInstalled(e: AgentEnvironment): boolean {
   return false;
 }
 
+/** DeepSeek Harness's home: `$DSH_HOME` when set, else `~/.dsh` (DSH's own rule; a blank value counts as unset). */
+export function dshHome(e: AgentEnvironment): string {
+  return envDir(e, "DSH_HOME") ?? join(e.homeDir, ".dsh");
+}
+
+/**
+ * Whether Plannotator's DeepSeek Harness plugin (`@plannotator/dsh`) is in any
+ * DSH profile: `$DSH_HOME/profiles/<name>/package.json` lists it, as `dsh
+ * plugin --profile <name> add` writes it. Read only: Plannotator never runs dsh.
+ */
+export function dshPluginInstalled(e: AgentEnvironment): boolean {
+  const profiles = join(dshHome(e), "profiles");
+  let names: string[];
+  try {
+    names = readdirSync(profiles);
+  } catch {
+    return false;
+  }
+  return names.some((name) => {
+    const read = readAgentFile(join(profiles, name, "package.json"));
+    if (read.kind !== "file") return false;
+    try {
+      const parsed = JSON.parse(read.text) as Record<string, unknown>;
+      return ["dependencies", "devDependencies", "optionalDependencies"].some((key) => {
+        const deps = parsed[key];
+        return !!deps && typeof deps === "object" && Object.hasOwn(deps, "@plannotator/dsh");
+      });
+    } catch {
+      return false;
+    }
+  });
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -981,6 +1015,15 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    // DeepSeek Harness: only through Plannotator's plugin. Over MCP the Inbox cannot tell its sessions apart
+    // (DSH's MCP client strips every DSH_* variable), so a person adds the plugin; Plannotator never runs dsh.
+    id: "dsh",
+    detect: (e) => dshPluginInstalled(e) || !!e.which("dsh"),
+    way: async (e) => (dshPluginInstalled(e) ? { kind: "tool", host: "dsh" } : { kind: "manual", why: "add Plannotator's DeepSeek Harness plugin (dsh plugin --profile <profile> add @plannotator/dsh)" }),
+    file: () => null,
+    raw: () => null,
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
@@ -1261,7 +1304,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
     const current = loadConfig().inboxTool;
     const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of ["claude-code", "pi", "opencode"] as const) {
+    for (const host of INBOX_TOOL_HOSTS) {
       const value = typeof current === "boolean" ? current : current?.[host];
       if (typeof value === "boolean") next[host] = value;
     }
@@ -1798,7 +1841,7 @@ export function setInboxTool(host: InboxToolHost, on: boolean, e: AgentEnvironme
   if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
   const current = loadConfig().inboxTool;
   const next: Partial<Record<InboxToolHost, boolean>> = {};
-  for (const name of ["claude-code", "pi", "opencode"] as const) {
+  for (const name of INBOX_TOOL_HOSTS) {
     const value = typeof current === "boolean" ? current : current?.[name];
     if (typeof value === "boolean") next[name] = value;
   }

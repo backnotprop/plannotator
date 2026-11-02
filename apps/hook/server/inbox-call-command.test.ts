@@ -243,6 +243,8 @@ describe("who is calling", () => {
     { name: "Pi", host: "pi", session: "ses-pi", agentName: "Pi", env: { PI_SESSION_ID: "ses-pi" } },
     { name: "Codex", host: "codex", session: CODEX_THREAD, agentName: "Codex", env: { CODEX_THREAD_ID: CODEX_THREAD } },
     { name: "Qwen Code", host: "qwen", session: QWEN_SESSION, agentName: "Qwen Code", env: { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" } },
+    // DeepSeek Harness sets DSH_SESSION_ID (and DSH_SHELL) in every model shell.
+    { name: "DeepSeek Harness", host: "dsh", session: "session-0b9c8e4e", agentName: "DeepSeek Harness", env: { DSH_SHELL: "1", DSH_SESSION_ID: "session-0b9c8e4e" } },
     // OpenCode names no session in its shell: only the value its Tidy gives it says who it is.
     { name: "OpenCode", host: "opencode", session: "ses_opencode1", agentName: "OpenCode", env: { OPENCODE: "1" }, flag: "opencode:ses_opencode1" },
   ];
@@ -307,6 +309,9 @@ describe("who is calling", () => {
       { CODEX_THREAD_ID: CODEX_THREAD, OMPCODE: "1" },
       { PI_SESSION_ID: "ses-pi", CLAUDECODE: "1" },
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", QWEN_CODE: "1" },
+      // Claude Code or Pi started from a DeepSeek Harness shell: DSH_* is inherited.
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", CLAUDECODE: "1" },
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", PI_SESSION_ID: "ses-pi" },
     ]) {
       const refused = await cli(box, ["send_message", send], { env });
       expect(refused).toMatchObject({ code: 1, stdout: "" });
@@ -338,6 +343,10 @@ describe("who is calling", () => {
     expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
     expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
     expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
+    // DeepSeek Harness: its marker beside its own session is its own shell; DSH_SHELL alone names no session.
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual({ host: "dsh", session: "session-s", name: "DeepSeek Harness" });
+    expect(caller(null, { DSH_SHELL: "1" })).toBeNull();
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s", GEMINI_CLI: "1" })).toBe("session_ambiguous");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

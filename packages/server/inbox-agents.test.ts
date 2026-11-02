@@ -358,6 +358,44 @@ describe("Pi and OpenCode with Plannotator's extension or plugin: the tool switc
     expect(fake.calls()).toEqual([]);
   });
 
+  test("DeepSeek Harness with Plannotator's plugin in a profile: inboxTool on for it, and dsh is never run", async () => {
+    fake.install("dsh");
+    mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+    writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+    const report = await connect();
+    expect(report.added).toEqual(["dsh"]);
+    expect(loadConfig().inboxTool).toEqual({ dsh: true });
+    // Plannotator never starts dsh: the fake on PATH logs every run.
+    expect(fake.calls()).toEqual([]);
+  });
+
+  test("turning on another agent's tool keeps the person's DeepSeek Harness switch", async () => {
+    mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { dsh: false } }));
+    expect((await connect()).added).toEqual(["pi"]);
+    expect(loadConfig().inboxTool).toEqual({ dsh: false, pi: true });
+  });
+
+  test("DeepSeek Harness: DSH_HOME is where the profiles are", async () => {
+    const dshHome = join(fake.root, "elsewhere-dsh");
+    mkdirSync(join(dshHome, "profiles", "desktop"), { recursive: true });
+    writeFileSync(join(dshHome, "profiles", "desktop", "package.json"), JSON.stringify({ devDependencies: { "@plannotator/dsh": "link:/src/apps/dsh-plugin" } }));
+    expect((await connect()).added).toEqual([]);
+    expect((await connect({ DSH_HOME: dshHome })).added).toEqual(["dsh"]);
+  });
+
+  test("DeepSeek Harness without the plugin is left to a person, never MCP, and dsh is never run", async () => {
+    fake.install("dsh");
+    mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+    writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@deepseek-ai/dsh-bundle-web-app": "1.0.0" } }));
+    const report = await connect();
+    expect(report.manual).toEqual(["dsh"]);
+    expect(report.added).toEqual([]);
+    expect(loadConfig().inboxTool).toBeUndefined();
+    expect(fake.calls()).toEqual([]);
+  });
+
   test("Claude Code: nothing written; said to be on already", async () => {
     mkdirSync(join(fake.home, ".claude"), { recursive: true });
     writeFileSync(join(fake.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));

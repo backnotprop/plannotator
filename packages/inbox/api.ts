@@ -67,7 +67,7 @@ import type {
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {

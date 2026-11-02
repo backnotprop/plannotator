@@ -81,7 +81,9 @@ export interface InboxHostSession {
  * inherited, or null. `PLANNOTATOR_SESSION_TAG` (`<host>:<session id>`, set by
  * the Claude Code mod in every process its session starts) comes first; then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
- * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs. Anything
+ * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs; Qwen's;
+ * last `DSH_SESSION_ID`, DeepSeek Harness's (its MCP client strips every
+ * `DSH_*` variable, so this is a DSH shell's `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
  * session is a thread id, a UUID).
  */
@@ -101,8 +103,21 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   if (isCodexThreadId(codex)) return { host: INBOX_CODEX_HOST, session: codex, name: INBOX_CODEX_NAME };
   const qwen = env[INBOX_QWEN_SESSION_ENV];
   if (isQwenSessionId(qwen)) return { host: INBOX_QWEN_HOST, session: qwen, name: INBOX_QWEN_NAME };
+  // DeepSeek Harness sets DSH_SESSION_ID (with DSH_SHELL) in every model shell. Last, and only when no other
+  // agent's marker is there: every process started from a DSH shell inherits it, another agent included.
+  const dsh = env.DSH_SESSION_ID;
+  if (isInboxSessionId(dsh) && !INBOX_NON_DSH_MARKERS.some((key) => !!env[key])) return { host: INBOX_DSH_HOST, session: dsh, name: INBOX_SESSION_HOST_NAMES[INBOX_DSH_HOST]! };
   return null;
 }
+
+export const INBOX_DSH_HOST = "dsh";
+
+/**
+ * The markers other agents set in the shells and MCP servers they start. Any
+ * of them beside DSH_SESSION_ID means that agent, started from a DSH shell,
+ * is calling, not the DSH session (detect-origin.ts's rule for DSH_SHELL).
+ */
+const INBOX_NON_DSH_MARKERS = ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR_AGENT", "OPENCODE", "GEMINI_CLI", "COPILOT_CLI", "OMPCODE", "QWEN_CODE"] as const;
 
 /**
  * Where the shim looks for the Qwen Code session it runs in: Qwen's home

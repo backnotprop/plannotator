@@ -24,6 +24,7 @@ import { INBOX_MAX_REQUEST_BYTES, INBOX_REMOVED_ACTION_TEXT } from "@plannotator
 import { INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
+import { DSH_INBOX_AGENT_NAME, DSH_INBOX_HOST } from "../../dsh-plugin/inbox";
 import { detachedInboxEnv } from "./inbox-command";
 import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
@@ -434,6 +435,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
   test("the names it fills are the ones each host's own plannotator_inbox tool sends", () => {
     expect(INBOX_SESSION_HOST_NAMES[INBOX_HOST]).toBe(INBOX_AGENT_NAME);
     expect(INBOX_SESSION_HOST_NAMES[OPENCODE_INBOX_HOST]).toBe(OPENCODE_INBOX_AGENT_NAME);
+    expect(INBOX_SESSION_HOST_NAMES[DSH_INBOX_HOST]).toBe(DSH_INBOX_AGENT_NAME);
     // Pi's constants, read from source: apps/pi-extension/inbox.ts imports its generated/ folder, which exists only after vendor.sh.
     const piSource = readFileSync(resolve(import.meta.dir, "../../pi-extension/inbox.ts"), "utf8");
     const piHost = /export const PI_INBOX_HOST = "([^"]+)";/.exec(piSource)?.[1];
@@ -443,7 +445,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     // Codex and Qwen Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
     // cross-session messaging), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "opencode", "pi", "qwen"]);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "codex", "dsh", "opencode", "pi", "qwen"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
@@ -489,6 +491,22 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "" })).toBeNull();
     expect(inboxHostSessionFromEnv({ PI_SESSION_ID: "a;b" })).toBeNull();
     expect(inboxHostSessionFromEnv({})).toBeNull();
+  });
+
+  test("a DeepSeek Harness shell sends as its session (DSH_SESSION_ID), last, and never beside another agent's marker", () => {
+    const dsh = "session-0b9c8e4e-63f1-4f8e-9a51-6a1d7d4c2f10";
+    expect(INBOX_SESSION_HOST_NAMES.dsh).toBe("DeepSeek Harness");
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: dsh })).toEqual({ host: "dsh", session: dsh, name: "DeepSeek Harness" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `dsh:${dsh}` })).toEqual({ host: "dsh", session: dsh, name: "DeepSeek Harness" });
+    // Every other host's own variable wins: it was started from the DSH shell, and it is the caller.
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PI_SESSION_ID: "pi-1" })?.host).toBe("pi");
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, PLANNOTATOR_SESSION_TAG: `claude-code:${CLAUDE_SESSION}` })?.host).toBe("claude-code");
+    expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: dsh, CODEX_THREAD_ID: CODEX_THREAD })?.host).toBe("codex");
+    // An agent that names no session of its own, started from a DSH shell, is never the DSH session.
+    for (const marker of ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CURSOR_AGENT", "OPENCODE", "GEMINI_CLI", "COPILOT_CLI", "OMPCODE", "QWEN_CODE"]) {
+      expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: dsh, [marker]: "1" })).toBeNull();
+    }
+    for (const bad of ["", "a b", "../x", "-x", "a".repeat(129)]) expect(inboxHostSessionFromEnv({ DSH_SESSION_ID: bad })).toBeNull();
   });
 
   test("a call from Codex is its thread's: the thread id from _meta, host codex, whatever the environment says", () => {

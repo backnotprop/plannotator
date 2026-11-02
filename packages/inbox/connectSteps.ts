@@ -80,6 +80,11 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
     return { ...base, state: 'missing' };
   }
   if (!row.detected) return null;
+  // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
+  if (row.reach.kind === 'tool') {
+    if (live || row.reach.on) return { ...base, state: 'ready' };
+    return { ...base, state: 'tool-off', locked: row.reach.locked, chosenOff: row.tool?.chosen_off === true };
+  }
   if (row.reach.on) return { ...base, state: 'mcp' };
   if (row.reach.kind === 'manual') return { ...base, state: 'manual' };
   // Not connected yet; one the person turned off, removed, or holds an entry of their own is theirs to decide.

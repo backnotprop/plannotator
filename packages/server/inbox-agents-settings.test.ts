@@ -250,6 +250,26 @@ test("the reminder switch per host, and the tool switch for Pi's extension", asy
   expect(loadConfig()).toMatchObject({ inboxTool: { pi: true }, inboxReminder: { pi: false } });
 });
 
+// DSH has no slot for a hidden reminder yet (a context message would read as the person's own words).
+test("DeepSeek Harness: the tool switch turns its plugin's tool on, and it has no reminder switch", async () => {
+  mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+  writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+  const s = await start();
+  expect(row(await get(s), "dsh")).toMatchObject({ detected: true, reach: { kind: "tool", on: false }, reminder: null });
+  await post(s, "/api/inbox/agents", { agent: "dsh", reach: true });
+  expect(row(await get(s), "dsh")).toMatchObject({ reach: { kind: "tool", on: true }, reminder: null });
+  const refused = await post(s, "/api/inbox/agents", { agent: "dsh", reminder: true });
+  expect(refused.status).toBe(422);
+  expect(loadConfig()).toMatchObject({ inboxTool: { dsh: true } });
+  expect(loadConfig().inboxReminder).toBeUndefined();
+  // Another agent's switch keeps this one.
+  mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+  writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+  await post(s, "/api/inbox/agents", { agent: "pi", reach: true });
+  expect(loadConfig().inboxTool).toEqual({ dsh: true, pi: true });
+  expect(fake.calls().filter((call) => call.name === "dsh")).toEqual([]);
+});
+
 test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => {
   const s = await start({ PLANNOTATOR_INBOX_TOOL: "0" });
   const model = (await (await post(s, "/api/inbox/agents", { agent: "claude-code", reminder: true })).json()) as Model;

@@ -21,6 +21,7 @@ export type HarnessId =
   | 'cline'
   | 'pi'
   | 'opencode'
+  | 'dsh'
   | 'zed'
   | 'kiro'
   | 'jetbrains'
@@ -46,6 +47,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'cline', label: 'Cline' },
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'jetbrains', label: 'JetBrains' },
@@ -78,6 +80,8 @@ export interface ConnectContext {
 }
 
 const SERVER = 'plannotator-inbox';
+/** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
+const DSH_PLUGIN = '@plannotator/dsh';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -241,6 +245,17 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           },
         ],
         note: "Use the project's opencode.json or ~/.config/opencode/opencode.json.",
+      };
+    case 'dsh':
+      // Plannotator's DSH plugin, not MCP: DSH's MCP client strips every DSH_* variable and sends no session,
+      // so over MCP the Inbox cannot tell which DSH session wrote, and a reply can never wake it.
+      return {
+        artefacts: [{ kind: 'code', text: `dsh plugin --profile <profile> add ${DSH_PLUGIN}` }],
+        note: "Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents, then start a new DSH session. Your replies come back into that session by themselves.",
+        another: {
+          summary: 'for DSH Desktop: open it once, quit it, then run',
+          body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
+        },
       };
     case 'zed':
       return {

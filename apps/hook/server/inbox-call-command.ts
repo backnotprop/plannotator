@@ -15,7 +15,7 @@
  *    It works the same on every host, OpenCode and MCP-only agents included,
  *    which have no session in their shell.
  *  - Else the session the environment names (`inboxHostSessionFromEnv`: Claude
- *    Code's tag, Pi's and Codex's variables, Qwen's).
+ *    Code's tag, Pi's and Codex's variables, Qwen's, DeepSeek Harness's).
  *  - Else none, as a raw MCP client: not a fresh id per process, which would
  *    make every call a stranger with no threads or cards of its own.
  * The JSON cannot name a session. A script must never write as another agent
@@ -50,7 +50,7 @@ const REQUEST_TIMEOUT_MS = 90_000;
 const IDENTITY_FIELDS = ["agent_session", "agent_host", "agent_name"] as const;
 
 /** Each variable that names a host session, read on its own by the shim's own rule. */
-const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV] as const;
+const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV, "DSH_SESSION_ID"] as const;
 
 /**
  * The hosts that mark the shells they start (`detectOrigin`), each here for a
@@ -66,7 +66,7 @@ const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: strin
   { variable: "GEMINI_CLI", name: "Gemini CLI" },
   { variable: "COPILOT_CLI", name: "Copilot CLI" },
   { variable: "CURSOR_AGENT", name: "Cursor" },
-  { variable: "DSH_SHELL", name: "DeepSeek Harness" },
+  { variable: "DSH_SHELL", name: "DeepSeek Harness", host: "dsh" },
 ];
 
 export type InboxCaller = Pick<InboxHostSession, "session"> & Partial<InboxHostSession>;
