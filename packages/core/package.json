@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.14",
+  "version": "0.25.15",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -51,6 +51,7 @@
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
+    "./inbox-snooze": "./inbox-snooze.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
     "./image-region": "./image-region.ts",
     "./open-in-apps": "./open-in-apps.ts",

@@ -148,6 +148,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = 
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
+  "POST threads/:id/snooze": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",

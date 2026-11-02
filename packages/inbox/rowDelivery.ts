@@ -59,6 +59,8 @@ export function rowDeliverySpoken(d: InboxRowDelivery): string {
 
 /** The row's time: when it was delivered, once it was; else the thread's latest activity. */
 export function rowTimeIso(row: InboxListRow): string {
+  // A thread back from a snooze shows its return (a later message, when one came after it).
+  if (row.snooze_back) return row.last_at;
   return row.delivery?.state === 'delivered' && row.delivery.at ? row.delivery.at : row.last_at;
 }
 

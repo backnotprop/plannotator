@@ -111,7 +111,7 @@ export interface InboxMachinesContext {
 }
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> };
 
 export interface MachineView {
   id: string;
@@ -311,6 +311,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       timings: context.timings,
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: machinesChanged,
+      // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
+      onSnoozes: () => emit({ event: "snoozes", data: {} }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);

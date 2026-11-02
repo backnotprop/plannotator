@@ -75,8 +75,15 @@ function projectRows(store: InboxStore, projectId: string): InboxListRow[] {
 export function markProjectRead(store: InboxStore, projectId: string): ProjectReadBatch {
   const read: string[] = [];
   const looked: string[] = [];
+  // A batch never ends a snooze: those threads are out of the list the person is clearing.
+  const snoozed = store.snoozedThreads();
   for (const row of projectRows(store, projectId)) {
-    if (!inboxRowOffersMarkRead(row)) continue;
+    if (snoozed.has(row.thread_id)) continue;
+    // A thread back from a snooze and otherwise Quiet: nothing to mark, only its clock to take away.
+    if (!inboxRowOffersMarkRead(row)) {
+      if (store.snoozes().some((entry) => entry.thread_id === row.thread_id)) store.clearSnooze(row.thread_id);
+      continue;
+    }
     try {
       store.markRead(row.thread_id, true);
     } catch (error) {
@@ -92,8 +99,9 @@ export function markProjectRead(store: InboxStore, projectId: string): ProjectRe
 export function archiveProject(store: InboxStore, projectId: string): ProjectArchiveBatch {
   const resolved: string[] = [];
   const read: string[] = [];
+  const snoozed = store.snoozedThreads();
   for (const row of projectRows(store, projectId)) {
-    if (inboxRowArchived(row)) continue;
+    if (inboxRowArchived(row) || snoozed.has(row.thread_id)) continue;
     try {
       if (row.resolved_at !== null) {
         store.markRead(row.thread_id, true);

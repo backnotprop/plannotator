@@ -66,6 +66,8 @@ export interface PeerLinkOptions {
   onRecord: (record: PeerRecord) => void;
   /** State, list or anything else the window draws changed. */
   onChange: () => void;
+  /** That machine's snoozes changed and its list was read again: the windows read theirs. */
+  onSnoozes?: () => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -190,7 +192,8 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      response = await this.options.transport.events(headers, this.cursor === null ? "" : `?cursor=${this.cursor}`, abort.signal);
+      // `snoozes=1`: a snooze writes no record, so the stream tells this machine when to read the list again.
+      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1" : `?cursor=${this.cursor}&snoozes=1`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -239,6 +242,9 @@ export class PeerLink {
             this.cursor = Math.max(this.cursor ?? 0, seq);
             this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
             this.refreshList();
+          } else if (parsed.event === "snoozes") {
+            // The list's cursor does not move, so the windows are told apart from a list that changes it.
+            void this.refreshList().then(() => this.options.onSnoozes?.());
           }
         }
       }

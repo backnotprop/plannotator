@@ -132,6 +132,8 @@ import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, readInboxReplyDrafts, removeInboxReplyDraft, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
+import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
+import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
@@ -609,6 +611,14 @@ export class InboxStore {
   private pinList: InboxPin[] = [];
   /** Told when the pins change (no store line is written for them). */
   private readonly pinListeners = new Set<() => void>();
+  /**
+   * The snoozed threads (snoozes.ts, approval "inbox-snooze"): a file outside
+   * the event log, read at load. Read by nothing that routes, lists or answers
+   * an agent; `listRow` never carries it (the server's list model does).
+   */
+  private snoozeList: InboxSnooze[] = [];
+  /** Told when the snoozes change (no store line is written for them). */
+  private readonly snoozeListeners = new Set<() => void>();
   private readonly deletionListeners = new Set<() => void>();
   /** The Board's cards, by id (approval "inbox-board"). Read by nothing that routes or lists threads. */
   private readonly cards = new Map<string, InboxCard>();
@@ -651,6 +661,7 @@ export class InboxStore {
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) {
       this.loadPins();
+      this.loadSnoozes();
       return;
     }
     const lines: InboxLine[] = [];
@@ -679,6 +690,7 @@ export class InboxStore {
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
+    this.loadSnoozes();
   }
 
   /**
@@ -991,6 +1003,92 @@ export class InboxStore {
     const next = [...this.pinList];
     next.splice(Math.min(restore.index, next.length), 0, { thread_id: restore.thread_id, pinned_at: restore.pinned_at });
     return this.commitPins(next);
+  }
+
+  /** The snoozes changed (set, ended, or a deleted thread left them): no store line is written. */
+  onSnoozesChange(listener: () => void): () => void {
+    this.snoozeListeners.add(listener);
+    return () => this.snoozeListeners.delete(listener);
+  }
+
+  private snoozesChanged(): void {
+    for (const listener of this.snoozeListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener's failure never fails the write.
+      }
+    }
+  }
+
+  /** Read snoozes.json and keep the snoozes of threads that exist (the same load-time pruning as `loadPins`). */
+  private loadSnoozes(): void {
+    const before = this.snoozeList;
+    const read = readInboxSnoozes(this.dir);
+    const kept = read.filter((snooze) => this.isThreadRoot(snooze.thread_id));
+    this.snoozeList = kept;
+    if (kept.length !== read.length) {
+      try {
+        writeInboxSnoozes(this.dir, kept);
+      } catch {
+        // Best effort: the next load prunes it again.
+      }
+    }
+    if (before.some((snooze) => !kept.some((k) => k.thread_id === snooze.thread_id))) this.snoozesChanged();
+  }
+
+  /** Every snooze on this Inbox, a return not read yet included. */
+  snoozes(): readonly InboxSnooze[] {
+    return this.snoozeList;
+  }
+
+  /** The threads snoozed now, by this store's clock (a return is not one). */
+  snoozedThreads(): Set<string> {
+    const now = this.now();
+    return new Set(this.snoozeList.filter((entry) => inboxSnoozeRunning(entry.until, now)).map((entry) => entry.thread_id));
+  }
+
+  private commitSnoozes(next: InboxSnooze[]): void {
+    writeInboxSnoozes(this.dir, next);
+    this.snoozeList = next;
+    this.snoozesChanged();
+  }
+
+  /**
+   * Snooze a thread until `until`, or move a snooze it has. `at` keeps an
+   * earlier snooze's own time (Undo). An archived thread refuses: it has
+   * nowhere to come back to. Writes no store line.
+   */
+  setSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    const refusal = inboxSnoozeRefusal(until, this.now());
+    if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
+    if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
+    if (at !== undefined && (typeof at !== "string" || Number.isNaN(Date.parse(at)))) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
+    const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: (at as string | undefined) ?? this.now().toISOString() };
+    this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
+    return snooze;
+  }
+
+  /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */
+  clearSnooze(threadId: string): void {
+    if (!this.snoozeList.some((entry) => entry.thread_id === threadId)) return;
+    this.commitSnoozes(this.snoozeList.filter((entry) => entry.thread_id !== threadId));
+  }
+
+  /**
+   * The person acted on the thread, so its snooze is over: their reply, Mark
+   * read, Archive. The act already stands, so a file that cannot be written
+   * never fails it; the snooze then runs out by itself.
+   */
+  private endSnooze(threadId: string): void {
+    try {
+      this.clearSnooze(threadId);
+    } catch {
+      // See above.
+    }
   }
 
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
@@ -2094,6 +2192,7 @@ export class InboxStore {
         }
       }
     }
+    if (read) this.endSnooze(threadId);
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
@@ -2769,6 +2868,9 @@ export class InboxStore {
       const at = this.stamp();
       this.appendMessage({ ...root, person_seen_seq: latestAgent }, at);
     }
+    // A look reads a thread back from its snooze (its small clock goes); before the snooze's time it does nothing to it.
+    const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
+    if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
@@ -3880,6 +3982,7 @@ export class InboxStore {
       for (const record of carried) this.restoreAnnotation(record);
       throw error;
     }
+    this.endSnooze(message.thread_id);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -4007,6 +4110,7 @@ export class InboxStore {
       for (const record of picked) this.restoreQuestion(record);
       throw error;
     }
+    this.endSnooze(message.thread_id);
     return { reply: note, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -4168,6 +4272,7 @@ export class InboxStore {
         at,
       );
     }
+    if (resolved) this.endSnooze(root.id);
     return this.threadSummary(root.id)!;
   }
 
@@ -5198,6 +5303,7 @@ export class InboxStore {
       to: { host: input.to.host, session: input.to.session },
     };
     this.appendMessage(message, at);
+    this.endSnooze(threadId);
     return { message, replayed: false };
   }
   // ──────────── Tidy ────────────

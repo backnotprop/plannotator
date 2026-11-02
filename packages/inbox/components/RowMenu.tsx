@@ -1,7 +1,8 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
+import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
+import { SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon, type IconName } from '../icons';
 import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
@@ -11,9 +12,11 @@ export interface ThreadRowMenuProps {
   /** Finds a listed row by its thread id (the menu is one for the whole list). */
   rowOf: (threadId: string) => InboxListRow | null;
   /** The group a listed row sits in on screen (a held list can draw a row where its state no longer puts it). */
-  sectionOf?: (threadId: string) => InboxSectionId | null;
+  sectionOf?: (threadId: string) => InboxListGroupId | null;
   /** Mark read and Move back are offered (the list has the row's hover action). */
   canMarkRead: boolean;
+  /** Snooze the row until a moment (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
+  onSnooze?: (row: InboxListRow, until: string) => void;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
    * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
@@ -38,6 +41,8 @@ const LABELS: Record<RowMenuAction, { label: string; icon: IconName }> = {
   'copy-thread': { label: 'Copy thread', icon: 'stack' },
   'copy-link': { label: 'Copy link', icon: 'link' },
   'copy-id': { label: 'Copy thread ID', icon: 'hash' },
+  snooze: { label: 'Snooze', icon: 'clock' },
+  unsnooze: { label: 'Unsnooze', icon: 'inbox' },
   read: { label: 'Mark read', icon: 'checkCircle' },
   'mark-unread': { label: 'Mark unread', icon: 'envelope' },
   unread: { label: 'Move back', icon: 'inbox' },
@@ -56,8 +61,8 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
  * The thread rows' right-click menu: one menu for the whole list (its body is
  * the trigger), aimed at the row the right-click (or the platform's
  * context-menu key, or Shift+F10, on a focused row) lands on. Pin thread (or
- * Unpin thread) in its own group, then Copy thread, Copy link, Copy thread ID, then Mark
- * read (or Mark unread, or Move back) and Archive where they apply.
+ * Unpin thread) in its own group, then Copy thread, Copy link, Copy thread ID, then Snooze
+ * (the menu swaps in place for its times), Mark read (or Mark unread, or Move back) and Archive where they apply.
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
  * on the row (wherever focus was before the right-click); a write that takes
@@ -83,34 +88,49 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     // What a write (Mark read, Mark unread, Move back, Archive) changes on a row: once it differs, the write has landed.
     stateOf: (id) => {
       const row = props.rowOf(id);
-      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}` : '';
+      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}` : '';
     },
     disabled: props.disabled,
     held: props.held,
     onTarget: props.onTarget,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined) : [];
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
-  const writes = actions.filter((a) => a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
-  const item = (action: RowMenuAction) => (
-    <Menu.Item
-      key={action}
-      className="ib-pmi"
-      label={LABELS[action].label}
-      data-row-action={action}
-      onClick={() => {
-        if (!target) return;
-        // With a thread open the row stays in place: nothing to follow (`held`). A pin never moves a row.
-        if (action !== 'copy-thread' && action !== 'copy-link' && action !== 'copy-id' && action !== 'pin' && action !== 'unpin') menu.follow(target.thread_id);
-        props.onAction(target, action);
-      }}
-    >
-      <Icon name={LABELS[action].icon} size={15} />
-      {LABELS[action].label}
-    </Menu.Item>
-  );
+  const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
+  // Snooze swaps the menu in place for its times (approval "inbox-snooze"); the next menu opens as the menu again.
+  const [snoozeView, setSnoozeView] = useState<SnoozeView | null>(null);
+  const shownView = target ? snoozeView : null;
+  useLayoutEffect(() => {
+    if (!menu.open) setSnoozeView(null);
+  }, [menu.open]);
+  const item = (action: RowMenuAction) =>
+    action === 'snooze' ? (
+      <Menu.Item key={action} className="ib-pmi" label={LABELS.snooze.label} closeOnClick={false} data-row-action="snooze" onClick={() => setSnoozeView('times')}>
+        <Icon name="clock" size={15} />
+        {LABELS.snooze.label}
+        <span className="ib-zsub">
+          <Icon name="chevR" size={13} />
+        </span>
+      </Menu.Item>
+    ) : (
+      <Menu.Item
+        key={action}
+        className="ib-pmi"
+        label={LABELS[action].label}
+        data-row-action={action}
+        onClick={() => {
+          if (!target) return;
+          // With a thread open the row stays in place: nothing to follow (`held`). A pin never moves a row.
+          if (action !== 'copy-thread' && action !== 'copy-link' && action !== 'copy-id' && action !== 'pin' && action !== 'unpin') menu.follow(target.thread_id);
+          props.onAction(target, action);
+        }}
+      >
+        <Icon name={LABELS[action].icon} size={15} />
+        {LABELS[action].label}
+      </Menu.Item>
+    );
   return (
     <ContextMenu.Root {...menu.root}>
       {/* Buttons and the empty list's link keep the platform's own long-press callout (the hook's `style`). */}
@@ -120,12 +140,27 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
       <ContextMenu.Portal container={portal ?? undefined}>
         <ContextMenu.Positioner className="ib-pm-pos">
           <ContextMenu.Popup className="ib-pm" aria-label={target?.subject ?? 'Thread'} data-row-menu={target?.thread_id} {...menu.popup}>
-            {/* Pin thread first, in its own group (approval "inbox-pinned-threads"). */}
-            {pinning.map(item)}
-            {pinning.length > 0 && <Menu.Separator className="ib-pm-sep" />}
-            {copies.map(item)}
-            {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
-            {writes.map(item)}
+            {shownView && target ? (
+              <SnoozeTimes
+                view={shownView}
+                onView={setSnoozeView}
+                onBack={() => setSnoozeView(null)}
+                onPick={(until) => {
+                  menu.follow(target.thread_id);
+                  props.onSnooze?.(target, until);
+                }}
+                onClose={menu.close}
+              />
+            ) : (
+              <>
+                {/* Pin thread first, in its own group (approval "inbox-pinned-threads"). */}
+                {pinning.map(item)}
+                {pinning.length > 0 && <Menu.Separator className="ib-pm-sep" />}
+                {copies.map(item)}
+                {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
+                {writes.map(item)}
+              </>
+            )}
           </ContextMenu.Popup>
         </ContextMenu.Positioner>
       </ContextMenu.Portal>
