@@ -304,7 +304,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
         // Focus that leaves the revealed toolbar tucks it, without moving focus.
         if (stateRef.current !== 'revealed') return;
         const to = event.relatedTarget as Element | null;
-        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list]')) return;
+        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap]')) return;
         setRef.current('tucked');
       }}
       // Capture: a tooltip open on the focused button would take Escape first, and the count's Escape closes its open drawer.

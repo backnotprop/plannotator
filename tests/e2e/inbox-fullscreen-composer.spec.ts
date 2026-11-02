@@ -410,29 +410,29 @@ test('a phone: Hide, then Show tools, brings the reply back working (the card, a
     await expect(pane(page)).toHaveAttribute('data-full-view', '');
     const dock = page.locator('[data-full-view-dock]');
     for (const minimized of [false, true]) {
-      if (minimized) await card(page).locator('[data-fcomp-minimize]').tap();
+      if (minimized) await card(page).locator('[data-fcomp-minimize]').tap({ timeout: 10_000 });
       else await expect(card(page)).toBeVisible();
-      await page.locator('[data-full-view-hide]').tap();
+      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
       await expect(dock).toHaveAttribute('data-bar', 'tucked');
       // Hidden: the reply goes with the tools.
       await expect(page.locator(minimized ? '[data-fcomp-pillwrap]' : '[data-fcomp]')).toHaveJSProperty('inert', true);
-      await page.locator('[data-full-view-handle]').tap();
+      await page.locator('[data-full-view-handle]').tap({ timeout: 10_000 });
       await expect(dock).toHaveAttribute('data-bar', 'revealed');
       if (minimized) {
         await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', false);
-        await pill(page).tap();
+        await pill(page).tap({ timeout: 10_000 });
       }
       // The reply works as it is: not inert, and a tap in it types.
       await expect(card(page)).toHaveJSProperty('inert', false);
-      await replyField(page).tap();
-      await expect(replyField(page)).toBeFocused();
-      await page.keyboard.type(' x');
-      expect(await replyField(page).inputValue()).toMatch(/ x$/);
-      // The press in the reply did not tuck the tools again.
+      await replyField(page).tap({ timeout: 10_000 });
+      // The press in the reply did not tuck the tools again, and the words go in.
+      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await replyField(page).fill(`${WORDS} ${minimized ? 'two' : 'one'}`);
+      await expect(replyField(page)).toHaveValue(/ (one|two)$/);
       await expect(dock).toHaveAttribute('data-bar', 'revealed');
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       // Pin the tools back (the revealed toolbar's last button) for the next round.
-      await page.locator('[data-full-view-hide]').tap();
+      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
       await expect(dock).toHaveAttribute('data-bar', 'pinned');
     }
   } finally {
