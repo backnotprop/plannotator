@@ -16,6 +16,7 @@ describe("parseInboxCardRef: Jira", () => {
     expect(parseInboxCardRef("https://example.atlassian.net/browse/DEMO-123")).toEqual(jira("DEMO-123", "https://example.atlassian.net/browse/DEMO-123"));
     // Query, fragment and case are how it was pasted, not which issue it is.
     expect(parseInboxCardRef("https://Example.atlassian.net/browse/demo-123?atlOrigin=abc#comment-1")).toEqual(jira("DEMO-123", "https://example.atlassian.net/browse/DEMO-123"));
+    expect(parseInboxCardRef("https://example.atlassian.net:443/browse/DEMO-123")).toEqual(jira("DEMO-123", "https://example.atlassian.net/browse/DEMO-123"));
     expect(parseInboxCardRef("  https://acme-eng.atlassian.net/browse/AB_2-7  ")).toEqual(jira("AB_2-7", "https://acme-eng.atlassian.net/browse/AB_2-7"));
   });
 
@@ -52,6 +53,8 @@ describe("parseInboxCardRef: Jira", () => {
       "https://gitlab.com/browse/DEMO-1",
       "https://user:pass@example.atlassian.net/browse/DEMO-1",
       "http://example.atlassian.net/browse/DEMO-1", // Jira Cloud is https only
+      "https://example.atlassian.net:8443/browse/DEMO-1", // and never on another port
+      "https://jira.acme.corp/browse/ops-42", // a self-hosted key in lowercase
       "ftp://jira.acme.corp/browse/OPS-42",
       "example.atlassian.net/browse/DEMO-1",
       "DEMO-123",

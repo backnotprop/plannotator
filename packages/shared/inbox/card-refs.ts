@@ -100,7 +100,8 @@ const jiraParser: InboxCardRefParser = {
     if (url.username || url.password) return null;
     const host = url.hostname;
     const cloud = JIRA_CLOUD_HOST.test(host);
-    if (cloud && url.protocol !== "https:") return null;
+    // Jira Cloud is https on its default port only; a self-hosted Jira keeps the port it was given.
+    if (cloud && (url.protocol !== "https:" || url.port)) return null;
     let key: string | null = null;
     const browse = /^\/browse\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
     if (browse) {
@@ -132,4 +133,4 @@ export function parseInboxCardRef(value: unknown, hint: InboxCardRefHint = "any"
 
 /** What a refused reference is told. */
 export const INBOX_CARD_REF_HINT =
-  'ref: an issue or PR as "owner/repo#123", or its URL (GitHub, GitLab; a Bitbucket PR), or a Jira issue URL (https://<site>.atlassian.net/browse/KEY-123, or a self-hosted Jira\'s /browse/KEY-123).';
+  'ref: an issue or PR as "owner/repo#123", or its URL (GitHub, GitLab; a Bitbucket PR), or a Jira issue URL (https://<site>.atlassian.net/browse/KEY-123, or a Jira Cloud board link with ?selectedIssue=KEY-123; a self-hosted Jira only as https://<host>/browse/KEY-123, the key in capitals).';

@@ -123,16 +123,21 @@ describe("the Board page's routes", () => {
     // The same issue pasted from a board is the same link, not a second one.
     const again = await mcp({ op: "link", card_id: card.id, ref: "https://example.atlassian.net/jira/software/projects/DEMO/boards/1?selectedIssue=DEMO-123" });
     expect(again.structuredContent?.card?.refs).toEqual([jira]);
+    // The same key on another Jira site is another issue: both are kept.
+    const other = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://jira.acme.corp/browse/DEMO-123" };
+    const twoSites = await mcp({ op: "link", card_id: card.id, ref: other.url });
+    expect(twoSites.structuredContent?.card?.refs).toEqual([jira, other]);
     // An ordinary page is still refused, with the accepted forms in the answer.
     const refused = await mcp({ op: "link", card_id: card.id, ref: "https://example.com/docs/browse/DEMO-123" });
     expect(refused.content[0]!.text).toStartWith("validation_error: ref:");
     expect(refused.content[0]!.text).toContain("atlassian.net/browse/KEY-123");
     // Opened, it has no resolver: unsupported, and no gh or glab ran for it.
     const { refs } = (await (await fetch(`${base}/api/inbox/cards/${card.id}/refs`)).json()) as { refs: { ref: unknown; result: { ok: boolean; error?: string } }[] };
-    expect(refs).toEqual([{ ref: jira, result: expect.objectContaining({ ok: false, error: "unsupported" }) }]);
+    const unsupported = { result: expect.objectContaining({ ok: false, error: "unsupported" }) };
+    expect(refs).toEqual([{ ref: jira, ...unsupported }, { ref: other, ...unsupported }]);
     expect(calls).toEqual([]);
-    // Stored like any ref: the card read back from disk keeps it.
-    expect(InboxStore.open(dataDir).card(card.id)!.refs).toEqual([jira]);
+    // Stored like any ref: the card read back from disk keeps them.
+    expect(InboxStore.open(dataDir).card(card.id)!.refs).toEqual([jira, other]);
   });
 
   test("a card and its history, newest first", async () => {

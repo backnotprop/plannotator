@@ -622,7 +622,7 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
         <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
       )}
       {/* A link-only ref has no hover card: its tooltip says where the key goes. */}
-      {linkOnly ? <Tip content={refItem.url}>{link}</Tip> : link}
+      {linkOnly ? <Tip content={<UrlTip url={refItem.url} />}>{link}</Tip> : link}
       <span className="ib-crdp-rt" dir="auto">
         {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
       </span>
@@ -649,6 +649,21 @@ function JiraMark() {
     <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="jira" width={15} height={15} viewBox="-1.5 -1.5 27 27" aria-hidden="true" focusable="false">
       <path fill="currentColor" d={JIRA_MARK} />
     </svg>
+  );
+}
+
+/** A URL in a tooltip: it may wrap after a `/`, never inside a segment (the key). */
+function UrlTip({ url }: { url: string }) {
+  const parts = url.split('/').map((part, i, all) => (i < all.length - 1 ? `${part}/` : part));
+  return (
+    <span className="ib-tip-url">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </span>
   );
 }
 
