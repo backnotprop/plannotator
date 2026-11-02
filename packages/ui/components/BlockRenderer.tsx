@@ -251,6 +251,9 @@ export const BlockRenderer: React.FC<{
         <p
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
+          // Blank lines the person typed (parse option keepBlankLines): N lines in all, less the usual 1rem gap.
+          style={block.blankLinesBefore ? { marginTop: `calc(${block.blankLinesBefore}lh - 1rem)` } : undefined}
+          data-blank-lines={block.blankLinesBefore}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>

@@ -296,6 +296,12 @@ export interface ParseMarkdownOptions {
    * with them (see shouldStripFrontmatter in @plannotator/core/annotatable).
    */
   frontmatter?: boolean;
+  /**
+   * Person-typed text (Inbox): a paragraph that follows 2+ blank lines records
+   * the run as `blankLinesBefore`, so the renderer can keep the empty lines
+   * the person typed (as Slack does) instead of folding them into one gap.
+   */
+  keepBlankLines?: boolean;
 }
 
 
@@ -360,11 +366,13 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
   let currentLevel = 0;
   let bufferStartLine = contentStartLine;
   let lastLineWasBlank = false;
+  let bufferBlankRun = 0;
 
   const flush = () => {
     if (buffer.length > 0) {
       const content = buffer.join('\n');
       blocks.push({
+        ...(currentType === 'paragraph' && bufferBlankRun > 1 ? { blankLinesBefore: bufferBlankRun } : {}),
         id: `block-${currentId++}`,
         type: currentType,
         content: content,
@@ -660,6 +668,10 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     // Accumulate paragraph text
     if (buffer.length === 0) {
       bufferStartLine = currentLineNum;
+      bufferBlankRun = 0;
+      if (options?.keepBlankLines && blocks.length > 0) {
+        for (let j = i - 1; j >= 0 && lines[j].trim() === ''; j--) bufferBlankRun++;
+      }
     }
     buffer.push(line);
   }

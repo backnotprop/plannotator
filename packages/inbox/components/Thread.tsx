@@ -9,6 +9,7 @@ import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHig
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
@@ -456,9 +457,9 @@ export function MessageBody({
   const shown = useMemo(() => linkFiles(feedback && !replyParts ? feedback.words : wordsText), [linkFiles, feedback, replyParts, wordsText]);
   const restShown = useMemo(() => (replyParts ? linkFiles(feedback ? feedback.words : restText) : ''), [linkFiles, feedback, replyParts, restText]);
   const feedbackShown = useMemo(() => (feedback ? linkFiles(feedback.feedback) : ''), [linkFiles, feedback]);
-  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false }), [shown]);
-  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false }) : []), [restShown]);
-  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false }) : []), [feedbackShown]);
+  const blocks = useMemo(() => parseMarkdownToBlocks(shown, { frontmatter: false, keepBlankLines: ownReply }), [shown]);
+  const restBlocks = useMemo(() => (restShown ? parseMarkdownToBlocks(restShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [restShown]);
+  const feedbackBlocks = useMemo(() => (feedbackShown ? parseMarkdownToBlocks(feedbackShown, { frontmatter: false, keepBlankLines: ownReply }) : []), [feedbackShown]);
   const refRepo = useRefRepo(repo);
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
@@ -827,6 +828,7 @@ export function MessageBody({
 
   return (
     <ImageResolverContext.Provider value={resolveImage}>
+    <SoftLineBreaksContext.Provider value={ownReply}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
@@ -887,6 +889,7 @@ export function MessageBody({
       )}
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
   );
 }
