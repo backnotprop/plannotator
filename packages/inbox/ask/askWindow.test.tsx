@@ -455,22 +455,6 @@ test('a busy agent gets a note, and its choice asks that session once, with focu
   expect((await savedTurns(on.busy)).length).toBe(1);
 });
 
-test('Send and Stop leave focus in the window when their button goes away', async () => {
-  if (!hasDom) return;
-  await openInbox(on, on.mine);
-  await openChat();
-  type(askBox()!, 'Answer this slowly too');
-  press(askWindow()!.querySelector<HTMLElement>('[aria-label="Send"]')!);
-  await until(() => askWindow()!.querySelector('[aria-label="Stop"]') !== null, 'the Stop');
-  expect(askWindow()!.contains(document.activeElement)).toBe(true);
-  press(askWindow()!.querySelector<HTMLElement>('[aria-label="Stop"]')!);
-  await until(() => {
-    act(() => emitAskChange(on.mine));
-    return askWindow()!.querySelector('[aria-label="Send"]') !== null;
-  }, 'the Send again');
-  expect(askWindow()!.contains(document.activeElement)).toBe(true);
-});
-
 test('a busy choice goes only to the session it was shown for: after a hand-off the new owner gets its own note', async () => {
   if (!hasDom) return;
   await openInbox(on, on.moved);

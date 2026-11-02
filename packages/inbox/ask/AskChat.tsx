@@ -105,10 +105,10 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
   }, [focusRequest, canFocus]);
 
   /**
-   * A pressed button goes away when the turn moves on, and focus would fall to
+   * A note's button goes away when the turn moves on, and focus would fall to
    * the page, where the Inbox's keys take it for the thread's: Mod+Enter would
    * send the reply draft. On a touch phone the transcript takes it, so the
-   * keyboard stays down.
+   * keyboard stays down. Send and Stop need none of this: they are one button.
    */
   const keepFocusHere = () => {
     if (document.activeElement === composerRef.current) return;
@@ -133,7 +133,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     postingRef.current = true;
     setPosting(true);
     setProblem(null);
-    keepFocusHere();
     // The kept copy goes now: a switch before the answer lands must not bring back words already sent.
     saveAskWords(threadId, '');
     const turnId = generateId('ask');
@@ -179,7 +178,6 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
   const stop = async () => {
     if (!runningTurn || stopping) return;
     setStopping(true);
-    keepFocusHere();
     try {
       await inboxApi.askStop(threadId, runningTurn);
       onReload();
