@@ -31,11 +31,12 @@ const store = new ChatWindowStore({ onGeometryChange: (geometry) => reports.push
 const root = createRoot(document.getElementById('frame')!);
 let messages: unknown[] = [];
 let status = 'ready';
+let richMarkdown = false;
 function draw() {
   root.render(
     h('div', { id: 'host-tree', style: { position: 'absolute', inset: 0 } },
       h(ChatFrame, { store, label: 'Chat' }, () => [
-        h(ChatTranscript, { key: 't', messages, status, agentName: 'Agent' }),
+        h(ChatTranscript, { key: 't', messages, status, agentName: 'Agent', richMarkdown }),
         h(ChatComposer, { key: 'c', value: 'hello', onChange: () => {}, onSend: () => sent.push('sent') }),
       ]),
     ),
@@ -45,6 +46,7 @@ function draw() {
   store, reports, sent,
   open() { flushSync(() => { store.setMinimized(false); draw(); }); },
   show(next: unknown[], nextStatus = 'ready') { flushSync(() => { messages = next; status = nextStatus; draw(); }); },
+  rich() { flushSync(() => { richMarkdown = true; draw(); }); },
 };
 `);
   const out = join(work, 'bundle.js');
@@ -126,6 +128,72 @@ test('hostile text in either role comes out inert', async ({ page }) => {
   expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align'].includes(name))).toEqual([]);
   expect(found.hrefs.filter((href) => /^\s*(javascript|data):/i.test(href))).toEqual([]);
   expect(seen).toMatchObject({ requests: [], errors: [], dialogs: 0 });
+});
+
+// The DOM lanes walk a list, not a real NodeIterator, so what the sanitizer's hook
+// does to a node mid-walk is only proved here. A hook that broke the walk would
+// fail the rich proof, and then nothing below would draw.
+test('with richMarkdown what Workspaces draws draws, and hostile text is still inert', async ({ page }) => {
+  const seen = await open(page);
+  await page.route('https://evil.test/**', (route) => route.abort());
+  await page.route('https://images.test/**', (route) =>
+    route.fulfill({
+      contentType: 'image/png',
+      body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'),
+    }),
+  );
+  await page.evaluate(() => (window as any).__chat.rich());
+  const drawn = [
+    '![a](https://images.test/a.png "Title")',
+    '<img src="https://images.test/b.png" width="20" height="10" alt="b">',
+    '~~gone~~',
+    '- [ ] open\n- [x] done',
+    '[x](https://images.test/c "Hint")',
+    '7. seven\n8. eight',
+  ].join('\n\n');
+  const attacks = [
+    '<script>window.__pwned = 1</script>',
+    '<img src="https://evil.test/a.png" onerror="window.__pwned = 2" onload="window.__pwned = 3" class="fixed inset-0" style="position:fixed" data-text-part="" aria-hidden="true" id="host-button">',
+    '<img src="javascript:window.__pwned = 4">',
+    '<input type="text" name="q" autofocus onfocus="window.__pwned = 5">',
+    '<input type="checkbox" onclick="window.__pwned = 6" id="host-button">',
+    '<form action="https://evil.test"><input type="submit"><button>go</button></form>',
+    '<iframe src="https://evil.test"></iframe>',
+    '<svg onload="window.__pwned = 7"><script>window.__pwned = 8</script></svg>',
+    '[click](javascript:window.__pwned=9)',
+  ].join('\n\n');
+  await show(page, [say('a', 'assistant', `${drawn}\n\n${attacks}`), say('u', 'user', `![p](https://images.test/p.png)\n\n${attacks}`)]);
+
+  const agent = page.locator('[data-message-role="assistant"][data-text-part]');
+  await expect(agent.locator('img[src="https://images.test/a.png"][alt="a"][title="Title"]')).toHaveCount(1);
+  await expect(agent.locator('img[src="https://images.test/b.png"][width="20"][height="10"]')).toHaveCount(1);
+  await expect(agent.locator('del')).toHaveText('gone');
+  await expect(agent.locator('a[title="Hint"][target="_blank"]')).toHaveCount(1);
+  await expect(agent.locator('ol[start="7"]')).toHaveCount(1);
+  await expect(page.locator('[data-message-role="user"] img[src="https://images.test/p.png"]')).toHaveCount(1);
+  const loaded = await agent.locator('img[src="https://images.test/a.png"]').evaluate((image: HTMLImageElement) => {
+    return image.decode().then(() => image.naturalWidth);
+  });
+  expect(loaded).toBe(1);
+
+  const found = await page.evaluate(() => {
+    const parts = Array.from(document.querySelectorAll('[data-text-part] *'));
+    return {
+      pwned: (window as any).__pwned,
+      tags: [...new Set(parts.map((el) => el.tagName.toLowerCase()))],
+      attributes: [...new Set(parts.flatMap((el) => el.getAttributeNames()))],
+      inputs: Array.from(document.querySelectorAll<HTMLInputElement>('[data-text-part] input')).map((el) => `${el.type}:${el.disabled}`),
+      sources: Array.from(document.querySelectorAll('[data-text-part] img')).map((el) => el.getAttribute('src')),
+    };
+  });
+  expect(found.pwned).toBeUndefined();
+  expect(found.tags.filter((tag) => /script|iframe|form|button|style|svg/.test(tag))).toEqual([]);
+  expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align', 'title', 'start', 'src', 'alt', 'width', 'height', 'type', 'checked', 'disabled'].includes(name))).toEqual([]);
+  expect([...new Set(found.inputs)]).toEqual(['checkbox:true']);
+  expect(found.sources.filter((address) => address?.startsWith('javascript:'))).toEqual([]);
+  expect(seen.errors).toEqual([]);
+  expect(seen.dialogs).toBe(0);
+  expect(await page.evaluate(() => document.getElementById('host-button')?.tagName)).toBe('BUTTON');
 });
 
 test('agent text cannot lay a link over the host', async ({ page }) => {
