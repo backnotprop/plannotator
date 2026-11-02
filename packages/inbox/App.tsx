@@ -41,7 +41,7 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, markHeldRowArchived, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
@@ -3405,7 +3405,8 @@ function Inbox() {
     ? (latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null))
     : null;
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
-  // a snooze lives on the thread's home machine and goes there through the forward and the outbox.
+  // a snooze lives on the thread's home machine and goes there through the forward and the outbox, so a linked
+  // machine's row offers it only when that machine keeps snoozes too (`rowSnoozes`).
   const snoozeOn = latest?.snoozed !== undefined;
   // The list reads again at the nearest return, by this window's clock (api.ts runs the rule on what it reads): a
   // linked machine asleep past a thread's time sends no event, and the row still comes back.
@@ -4535,6 +4536,7 @@ function Inbox() {
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
+          snoozesOf={(row) => rowSnoozes(row, machines)}
           pinned={pinsOn ? pinnedIds : undefined}
           tidy={{
             ...listTidy,
@@ -4605,8 +4607,8 @@ function Inbox() {
             pinned={pinnedIds.has(thread.thread_id)}
             // Pins are this Inbox's own: another machine's thread is pinned on that machine (PLAN Phase 2).
             onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
-            onSnooze={snoozeOn ? (until) => void snooze(thread, until) : undefined}
-            onUnsnooze={snoozeOn ? () => void unsnooze(thread) : undefined}
+            onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
+            onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}

@@ -6598,6 +6598,11 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   .ib-pm-pos[data-phone] .ib-zfoot { display: block; }
   .pn-inbox .ib-pm-pos[data-phone] .ib-zgo { width: 100%; height: 48px; border-radius: 8px; font-size: var(--ib-fs-16-in, 16px); }
 }
+/* Forced colors drop the picked option's tint and the list's inset ring (a box-shadow): an outline shows both. */
+@media (forced-colors: active) {
+  .ib-zli[data-on] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .ib-zcol:focus-visible { outline: 2px solid CanvasText; outline-offset: -2px; }
+}
 
 /* The count opens the list of comments (AnnotationsChip.tsx). In the closed foot, a quiet link; its bigger press area
    is an overlay, so the foot's row keeps its size and nothing moves. */

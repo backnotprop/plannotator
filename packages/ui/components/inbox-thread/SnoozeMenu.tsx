@@ -34,13 +34,23 @@ function BackRow({ label, onBack }: { label: string; onBack: () => void }) {
   );
 }
 
+/**
+ * Focus for a menu whose items a swap just changed: now, and again on the next frame. The menu keeps its highlighted
+ * index across the swap and focuses whatever item lands at it once its list settles (the times' "Next week" where
+ * Snooze stood); a focus after that is one the menu's list registers, so its arrows go on from there. Returns the
+ * cleanup. A host's Back to its menu calls it for its Snooze item.
+ */
+export function focusAfterSwap(find: () => HTMLElement | null | undefined): () => void {
+  find()?.focus({ preventScroll: true });
+  const frame = requestAnimationFrame(() => find()?.focus({ preventScroll: true }));
+  return () => cancelAnimationFrame(frame);
+}
+
 /** The swapped-in list. The menu's own keys move through it; focus starts on its first choice. */
 export function SnoozeTimes({ view, onView, onBack, onPick, onClose }: SnoozeTimesProps) {
   const body = useRef<HTMLDivElement>(null);
   // A menu keeps focus on an item that a swap has taken away: the view's first row takes it.
-  useLayoutEffect(() => {
-    body.current?.querySelector<HTMLElement>(view === 'times' ? '[data-snooze-choice]' : '[role="listbox"]')?.focus({ preventScroll: true });
-  }, [view]);
+  useLayoutEffect(() => focusAfterSwap(() => body.current?.querySelector<HTMLElement>(view === 'times' ? '[data-snooze-choice]' : '[role="listbox"]')), [view]);
   const now = useMemo(() => new Date(), []);
   const choices = useMemo(() => inboxSnoozeChoices(now), [now]);
   return (

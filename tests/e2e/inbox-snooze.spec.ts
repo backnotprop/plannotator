@@ -256,6 +256,9 @@ test("the ⋯ menu: Pick a time, two lists by mouse, wheel and keys; the thread 
 
 test('a Stopped thread snoozed: the folded band shows the triangle; open, the row keeps its badge and says until when', async () => {
   const { page, threads } = world;
+  // The last test's "Unsnoozed" toast goes first: it is not part of these pictures.
+  if ((await toast(page).count()) > 0) await toast(page).locator('[data-toast-dismiss]').click();
+  await expect(toast(page)).toHaveCount(0);
   await snoozeFromPage(page, threads.stopped, inHours(30));
   await expect(row(page, threads.stopped)).toHaveCount(0);
   const blocker = bandButton(page).locator('[data-snooze-blocker]');
@@ -283,8 +286,11 @@ test("an agent's new question does not end a snooze; the person's own reply does
   await expect(row(page, threads.flags)).toHaveCount(0);
   await expect(inboxCount(page)).toHaveText('3');
   await agents.pi.send({ project_path: projects.docs, reply_to: messages.flags, body: ask('Also drop the flag cleanup cron?') });
-  // The window hears the agent; the thread stays in the band, out of the count.
-  await page.waitForTimeout(800);
+  // The window hears the agent (the row in the band shows its second open question); the thread stays in the band,
+  // out of the count, and nothing says "new".
+  await bandButton(page).click();
+  await expect(row(page, threads.flags).locator('[data-open-count]')).toHaveAttribute('data-open-count', '2');
+  expect(await groupOf(page, threads.flags)).toBe('snoozed');
   await expect(page.locator('[data-inbox-notice]')).toHaveCount(0);
   await expect(bandButton(page)).toContainText('Snoozed 1');
   await expect(inboxCount(page)).toHaveText('3');
@@ -310,12 +316,13 @@ test('the return at its time: back in its own section (Quiet comes back as New),
   await page.reload();
   if ((await page.locator('[data-section-id="quiet"] .ib-band').getAttribute('aria-expanded')) !== 'true') await page.locator('[data-section-id="quiet"] .ib-band').click();
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('quiet');
-  await snoozeFromPage(page, threads.webhook, new Date(Date.now() + 4000).toISOString());
+  // 12 s ahead: room for the band to show it first on a slow runner, before it comes back.
+  await snoozeFromPage(page, threads.webhook, new Date(Date.now() + 12_000).toISOString());
   await expect(bandButton(page)).toContainText('Snoozed 1');
   // No reload, no agent: the server's timer tells the window at the time. The list never moves under the
   // reader: the return waits behind "1 new", as an agent's message does, and Show brings it in.
   const notice = page.locator('[data-inbox-notice]');
-  await expect(notice).toContainText('1 new', { timeout: 12_000 });
+  await expect(notice).toContainText('1 new', { timeout: 30_000 });
   await notice.click();
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('new');
   await expect(row(page, threads.webhook)).toHaveClass(/\bib-u\b/);

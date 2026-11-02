@@ -2,7 +2,7 @@ import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState, typ
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
-import { SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
+import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon, type IconName } from '../icons';
 import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
@@ -17,6 +17,8 @@ export interface ThreadRowMenuProps {
   canMarkRead: boolean;
   /** Snooze the row until a moment (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
   onSnooze?: (row: InboxListRow, until: string) => void;
+  /** Whether this row can be snoozed (a linked machine on an older Inbox keeps no snoozes). Absent: every row can. */
+  snoozesOf?: (row: InboxListRow) => boolean;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
    * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
@@ -95,7 +97,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     onTarget: props.onTarget,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && (props.snoozesOf?.(target) ?? true)) : [];
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
   const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
@@ -105,6 +107,13 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   useLayoutEffect(() => {
     if (!menu.open) setSnoozeView(null);
   }, [menu.open]);
+  // Back from the times: focus goes to Snooze again, where it was, not to the item now at its old index.
+  const backed = useRef(false);
+  useLayoutEffect(() => {
+    if (shownView !== null || !backed.current) return;
+    backed.current = false;
+    return focusAfterSwap(() => document.querySelector<HTMLElement>(`[data-row-menu="${target?.thread_id ?? ''}"] [data-row-action="snooze"]`));
+  }, [shownView, target?.thread_id]);
   const item = (action: RowMenuAction) =>
     action === 'snooze' ? (
       <Menu.Item key={action} className="ib-pmi" label={LABELS.snooze.label} closeOnClick={false} data-row-action="snooze" onClick={() => setSnoozeView('times')}>
@@ -144,7 +153,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               <SnoozeTimes
                 view={shownView}
                 onView={setSnoozeView}
-                onBack={() => setSnoozeView(null)}
+                onBack={() => {
+                  backed.current = true;
+                  setSnoozeView(null);
+                }}
                 onPick={(until) => {
                   menu.follow(target.thread_id);
                   props.onSnooze?.(target, until);

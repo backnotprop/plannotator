@@ -3,7 +3,7 @@ import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
+import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -148,6 +148,14 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Back from the times: focus goes to Snooze again, not to the item now at its old index.
+  const backed = useRef(false);
+  const popup = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (view !== null || !backed.current) return;
+    backed.current = false;
+    return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-thread-snooze-item]'));
+  }, [view]);
   return (
     <Menu.Root
       modal={false}
@@ -165,9 +173,16 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
-          <Menu.Popup className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="">
+          <Menu.Popup ref={popup} className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="">
             {view && snooze ? (
-              <SnoozeTimes view={view} onView={setView} onBack={() => setView(null)} onPick={snooze.onPick} onClose={() => setOpen(false)} />
+              <SnoozeTimes
+                view={view}
+                onView={setView}
+                onBack={() => {
+                  backed.current = true;
+                  setView(null);
+                }}
+                onPick={snooze.onPick} onClose={() => setOpen(false)} />
             ) : (
               <>
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">

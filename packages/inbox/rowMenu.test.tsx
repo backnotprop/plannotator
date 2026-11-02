@@ -230,7 +230,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   expect(rowMenuActions(snoozedRow, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'snooze', 'unsnooze', 'read', 'archive']);
   expect(rowMenuActions({ ...snoozedRow, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
   // A seen update the held list still draws in New keeps Mark read; drawn in Quiet, or marked read, or archived, it does not.
-  const seen ={ ...base, section: 'quiet' } as typeof base;
+  const seen = { ...base, section: 'quiet' } as typeof base;
   expect(rowMenuActions(seen, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
   expect(rowMenuActions(seen, true, null, 'quiet')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
   expect(rowMenuActions(seen, false, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'archive']);
@@ -395,6 +395,35 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
   await until(() => document.activeElement === rowButton(ids.mixed), 'focus on the row after Tab');
   // Nothing opened.
   expect(window.location.hash).not.toContain('thread=');
+});
+
+test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  await renderApp();
+  const row = rowButton(ids.waiting)!;
+  act(() => row.focus());
+  await act(async () => {
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  await until(() => menu()?.getAttribute('data-row-menu') === ids.waiting, 'the menu');
+  await choose('snooze');
+  await until(() => !!menu()?.querySelector('[data-snooze-view="times"]'), 'the times');
+  await until(() => document.activeElement === menu()!.querySelector('[data-snooze-choice]'), 'focus on the first time');
+  // The menu's own arrows go on from there: Down is the second time.
+  await act(async () => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  });
+  await until(() => document.activeElement === menu()!.querySelectorAll('[data-snooze-choice]')[1], 'focus on the second time');
+  await act(async () => {
+    menu()!.querySelector<HTMLElement>('[data-snooze-back]')!.click();
+  });
+  await until(() => !!item('snooze'), 'the menu again');
+  await until(() => document.activeElement === item('snooze'), 'focus on Snooze after Back');
+  // Still the menu's: Escape closes it and focus goes back to the row.
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !menu(), 'the menu to close');
+  await until(() => document.activeElement === rowButton(ids.waiting), 'focus on the row');
 });
 
 test.skipIf(!hasDom)('a touch never opens it, and outside the rows the browser keeps its own menu', async () => {
