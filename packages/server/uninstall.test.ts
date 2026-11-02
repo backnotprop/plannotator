@@ -144,30 +144,46 @@ describe("Windows PATH scripts", () => {
       // Parser.ParseInput only parses; nothing is executed, so this touches
       // neither the registry nor the environment. Runs on Windows CI and on
       // any dev box with pwsh.
-      for (const [name, script] of Object.entries(scripts)) {
-        const proc = Bun.spawn(
-          [
-            powershell!,
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "$errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:PLANNOTATOR_TEST_SCRIPT,[ref]$null,[ref]$errors); if($errors.Count -gt 0){$errors | ForEach-Object { Write-Output $_.Message }; exit 1}; exit 0",
-          ],
-          {
-            stdin: "ignore",
-            stdout: "pipe",
-            stderr: "pipe",
-            env: { ...process.env, PLANNOTATOR_TEST_SCRIPT: script },
+      //
+      // One PowerShell parses both scripts: its start is the slow part (on a
+      // loaded Linux runner 0.5 to 2 s each; two starts in a row went past
+      // Bun's 5 s default and failed the lane). Each script's errors are
+      // printed under its name, so a failure still says which one broke.
+      const proc = Bun.spawn(
+        [
+          powershell!,
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "$bad=0; foreach($name in 'remove','restore'){ $errors=$null; [void][System.Management.Automation.Language.Parser]::ParseInput([Environment]::GetEnvironmentVariable('PLANNOTATOR_TEST_SCRIPT_' + $name),[ref]$null,[ref]$errors); foreach($e in $errors){ Write-Output ($name + ': ' + $e.Message); $bad=1 } }; exit $bad",
+        ],
+        {
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...process.env,
+            PLANNOTATOR_TEST_SCRIPT_remove: scripts.remove,
+            PLANNOTATOR_TEST_SCRIPT_restore: scripts.restore,
           },
-        );
-        const [stdout, exitCode] = await Promise.all([
-          new Response(proc.stdout).text(),
-          proc.exited,
-        ]);
-        expect(`${name}: ${stdout.trim()}`).toBe(`${name}: `);
-        expect(exitCode).toBe(0);
-      }
+        },
+      );
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      // stdout names each parse error; stderr says why PowerShell itself failed, if it did.
+      expect({ errors: stdout.trim(), exitCode, stderr: exitCode === 0 ? "" : stderr.trim() }).toEqual({
+        errors: "",
+        exitCode: 0,
+        stderr: "",
+      });
     },
+    // The two starts this replaced took 0.6 to 3.9 s together on green Test
+    // lanes (12 runs, 2 Nov 2026), and past 5 s on the failed ones: PowerShell's
+    // start is slow on a busy runner, so this leaves it room.
+    15_000,
   );
 });
 
