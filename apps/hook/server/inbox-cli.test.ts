@@ -522,9 +522,13 @@ describe("plannotator inbox mcp inside an agent session", () => {
   test("in a DSH subagent's shell, the session Plannotator's plugin names (the parent) is the caller", () => {
     const parent = "session-parent-1";
     const child = "session-child-1";
-    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent })).toEqual({ host: "dsh", session: parent, name: "DeepSeek Harness" });
+    const set = { DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent, DSH_PLANNOTATOR_SESSION_FOR: child };
+    expect(inboxHostSessionFromEnv(set)).toEqual({ host: "dsh", session: parent, name: "DeepSeek Harness" });
     // Malformed: the shell's own session.
-    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: "a b" })?.session).toBe(child);
+    expect(inboxHostSessionFromEnv({ ...set, DSH_PLANNOTATOR_SESSION_ID: "a b" })?.session).toBe(child);
+    // Set for another shell (a DSH started inside a DSH model shell inherits the outer one), or for no shell said: its own session.
+    expect(inboxHostSessionFromEnv({ ...set, DSH_SESSION_ID: "session-inner" })?.session).toBe("session-inner");
+    expect(inboxHostSessionFromEnv({ DSH_SHELL: "1", DSH_SESSION_ID: child, DSH_PLANNOTATOR_SESSION_ID: parent })?.session).toBe(child);
     // Never outside a model shell.
     expect(inboxHostSessionFromEnv({ DSH_PLANNOTATOR_SESSION_ID: parent })).toBeNull();
   });

@@ -46,6 +46,7 @@ import { getPlannotatorDataDir } from "../../packages/shared/data-dir";
 import {
   discoverInboxTools,
   InboxAgentConnection,
+  InboxDeliverLater,
   inboxRegistryFileOf,
   InboxWake,
   type InboxWakeTarget,
@@ -64,7 +65,7 @@ export interface DshInboxAgent {
   readonly id: string;
   readonly status?: "idle" | "running" | string;
   readonly session?: {
-    header?: { cwd?: string; parentSession?: string; origin?: string; delegationDepth?: number };
+    header?: { id?: string; cwd?: string; parentSession?: string; origin?: string; delegationDepth?: number };
   };
   readonly inbox?: { readonly nextTurn?: readonly unknown[]; readonly nextStep?: readonly unknown[] };
   followup?(message: DshUserMessage): void;
@@ -82,6 +83,9 @@ export interface DshShellEnvService {
 
 /** The variable Plannotator's contributor sets: the top-level session a shell works for (the shim reads it). */
 export const DSH_ROOT_SESSION_ENV = "DSH_PLANNOTATOR_SESSION_ID";
+
+/** Set beside it: the shell's own session (DSH_SESSION_ID) the root was worked out for; the shim trusts the root only when they match. */
+export const DSH_ROOT_FOR_ENV = "DSH_PLANNOTATOR_SESSION_FOR";
 
 /** How long a reply put into a session waits to be taken by a turn before it is looked at again (Pi's watchdog). */
 export const DSH_DELIVERY_CHECK_MS = 15_000;
@@ -258,18 +262,21 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   };
 
   /** Replies put into a session and not yet taken by a turn, by DSH message id. */
-  const waiting = new Map<string, { sessionId: string; end: (error?: Error) => void }>();
+  const waiting = new Map<string, { sessionId: string; end: (error?: Error) => void; discarded: () => void; dropped: () => boolean }>();
   const checkMs = deps.deliveryCheckMs ?? DSH_DELIVERY_CHECK_MS;
 
   /**
    * Put the wake text into the session, and settle once a turn takes it, as
-   * Pi waits for its `message_start`: `agent/inbox/claimed` delivers it,
-   * `agent/inbox/discarded` (the person took it out of the queue, or cancelled
-   * the turn and its queue) fails it. Looked at again every `checkMs`: still
-   * in the session's queue (a long tool call holds a steer), it waits on; gone
-   * from it with no word (a DSH without the claimed event) it was taken. The
-   * session closing with it queued keeps it in the session's saved queue, which
-   * DSH takes when the session resumes: delivered.
+   * Pi waits for its `message_start`: `agent/inbox/claimed` delivers it.
+   * `agent/inbox/discarded` is looked at after a microtask, since DSH's queue
+   * edit (replace) and queue steer (remove, then steer) discard the message
+   * and put the same id straight back: back in the queue, it waits on. Really
+   * gone, it is dropped: the session closing next (DSH clears a ready
+   * session's queue, discarding each item, before `agent/disposed`) gives it
+   * back to the Inbox to deliver when the session resumes; otherwise the
+   * person took it out, and at the next look it fails. Looked at again every
+   * `checkMs`: still queued (a long tool call holds a steer), it waits on;
+   * gone with no word (a DSH without the claimed event), it was taken.
    */
   const send = (sessionId: string, text: string, how: "followup" | "steer"): Promise<void> =>
     new Promise<void>((resolve, reject) => {
@@ -281,26 +288,39 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
       }
       const message = createUserMessage(text);
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let dropped = false;
       const end = (error?: Error) => {
         if (!waiting.delete(message.id)) return;
         clearTimeout(timer);
         if (error) reject(error);
         else resolve();
       };
-      const look = () => {
-        if (!waiting.has(message.id)) return;
+      const isQueued = () => {
         const live = agentOf(sessionId);
-        if (live && queued(live, message.id)) {
-          timer = setTimeout(look, checkMs);
-          (timer as { unref?: () => void }).unref?.();
+        return !!live && queued(live, message.id);
+      };
+      const arm = () => {
+        clearTimeout(timer);
+        timer = setTimeout(look, checkMs);
+        (timer as { unref?: () => void }).unref?.();
+      };
+      function look() {
+        if (!waiting.has(message.id)) return;
+        if (isQueued()) {
+          dropped = false;
+          arm();
           return;
         }
-        end();
+        end(dropped ? new Error("it was taken out of the session's queue in DeepSeek Harness before a turn read it") : undefined);
+      }
+      const discarded = () => {
+        if (!waiting.has(message.id) || isQueued()) return;
+        dropped = true;
+        arm();
       };
-      waiting.set(message.id, { sessionId, end });
+      waiting.set(message.id, { sessionId, end, discarded, dropped: () => dropped });
       ours.add(message.id);
-      timer = setTimeout(look, checkMs);
-      (timer as { unref?: () => void }).unref?.();
+      arm();
       try {
         put.call(agent, message);
       } catch (error) {
@@ -349,17 +369,25 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
   });
   ctx.on("agent/disposed", (payload: { agent?: DshInboxAgent }) => {
     forget(payload?.agent);
-    // DSH keeps a closing session's queue (`keepInbox`) and takes it on resume: what waits there is in the session.
-    for (const entry of [...waiting.values()]) if (entry.sessionId === payload?.agent?.id) entry.end();
+    // A ready session closing clears its queue first (DSH's `cancel({ kind: 'disposed' }, { keepInbox: !ready })`,
+    // each item discarded): the person did not remove those, so they go back to the Inbox and wait for the
+    // session's next wake (it resumes). One still queued was kept by DSH (a session not ready yet): it stays in
+    // the session's saved queue, which DSH takes on resume.
+    for (const entry of [...waiting.values()]) {
+      if (entry.sessionId !== payload?.agent?.id) continue;
+      entry.end(entry.dropped() ? new InboxDeliverLater("the session closed before a turn read it") : undefined);
+    }
   });
-  // A turn took the reply: delivered. Taken out of the queue first: not delivered.
+  // A turn took the reply: delivered.
   ctx.on("agent/inbox/claimed", (payload: { message?: { id?: unknown } }) => {
     const id = payload?.message?.id;
     if (typeof id === "string") waiting.get(id)?.end();
   });
+  // Out of the queue: looked at once DSH's own call is done (an edit or a queue steer puts the same id back).
   ctx.on("agent/inbox/discarded", (payload: { message?: { id?: unknown } }) => {
     const id = payload?.message?.id;
-    if (typeof id === "string") waiting.get(id)?.end(new Error("it was taken out of the session's queue in DeepSeek Harness before a turn read it"));
+    const entry = typeof id === "string" ? waiting.get(id) : undefined;
+    if (entry) queueMicrotask(entry.discarded);
   });
   // Someone else's prompt entering a session: its turn goes first, and the person's typing moves the lease here.
   ctx.on("agent/inbox/inserted", (payload: { agent?: DshInboxAgent; message?: { id?: unknown; source?: { kind?: unknown } } }) => {
@@ -414,11 +442,16 @@ export async function setupDshInbox(ctx: DshInboxContext, deps: DshInboxDeps = {
     try {
       const undo = shellEnv.register({
         name: "plannotator-inbox",
-        variables: { [DSH_ROOT_SESSION_ENV]: { description: "The top-level session this shell works for (a subagent's parent); Plannotator's inbox commands send as it." } },
+        variables: {
+          [DSH_ROOT_SESSION_ENV]: { description: "The top-level session this shell works for (a subagent's parent); Plannotator's inbox commands send as it." },
+          [DSH_ROOT_FOR_ENV]: { description: "The session DSH_PLANNOTATOR_SESSION_ID was set for (this shell's DSH_SESSION_ID)." },
+        },
         resolve: (execution): Record<string, string> => {
           const agent = execution?.agent;
           const root = agent ? rootAgentOf(agents, agent) : undefined;
-          return root && typeof root.id === "string" ? { [DSH_ROOT_SESSION_ENV]: root.id } : {};
+          // DSH_SESSION_ID is the agent's session header id (shell-env's collect).
+          const own = agent?.session?.header?.id ?? agent?.id;
+          return root && typeof root.id === "string" && typeof own === "string" ? { [DSH_ROOT_SESSION_ENV]: root.id, [DSH_ROOT_FOR_ENV]: own } : {};
         },
       });
       if (typeof undo === "function") unregisterShellEnv = undo as () => void;

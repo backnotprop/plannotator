@@ -110,7 +110,10 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
   // both, another agent included. Plannotator's DSH plugin adds the top-level session the shell works for
   // (a subagent's parent, as the plugin's tool signs), which wins over the subagent's own.
   if (env.DSH_SHELL === "1" && !INBOX_NON_DSH_MARKERS.some((key) => !!env[key])) {
-    const dsh = isInboxSessionId(env[INBOX_DSH_ROOT_SESSION_ENV]) ? env[INBOX_DSH_ROOT_SESSION_ENV] : env.DSH_SESSION_ID;
+    // The plugin's root counts only for the shell it was set for: a DSH started inside a DSH model shell gives its
+    // own shells a new DSH_SESSION_ID, and an inherited root would name the outer session.
+    const rootHere = isInboxSessionId(env[INBOX_DSH_ROOT_SESSION_ENV]) && env[INBOX_DSH_ROOT_FOR_ENV] === env.DSH_SESSION_ID;
+    const dsh = rootHere ? env[INBOX_DSH_ROOT_SESSION_ENV] : env.DSH_SESSION_ID;
     if (isInboxSessionId(dsh)) return { host: INBOX_DSH_HOST, session: dsh, name: INBOX_SESSION_HOST_NAMES[INBOX_DSH_HOST]! };
   }
   return null;
@@ -120,6 +123,9 @@ export const INBOX_DSH_HOST = "dsh";
 
 /** Set by Plannotator's DSH plugin in each model shell (DSH's `shellEnv`): the top-level session the shell works for. */
 export const INBOX_DSH_ROOT_SESSION_ENV = "DSH_PLANNOTATOR_SESSION_ID";
+
+/** Set beside it: the shell's own session (DSH_SESSION_ID) the root was worked out for. */
+export const INBOX_DSH_ROOT_FOR_ENV = "DSH_PLANNOTATOR_SESSION_FOR";
 
 /**
  * The markers other agents set in the shells and MCP servers they start. Any

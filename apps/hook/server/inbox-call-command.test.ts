@@ -353,7 +353,15 @@ describe("who is calling", () => {
     expect(caller(null, { DSH_SESSION_ID: "session-s", PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
     expect(caller(null, { DSH_SESSION_ID: "session-s", CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
     // A subagent's model shell: the session Plannotator's plugin names (its parent).
-    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent" })).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
+    const sub = { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent", DSH_PLANNOTATOR_SESSION_FOR: "session-child" };
+    expect(caller(null, sub)).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
+    expect(caller(null, { ...sub, DSH_PLANNOTATOR_SESSION_FOR: "session-other" })).toEqual({ host: "dsh", session: "session-child", name: "DeepSeek Harness" });
+    // A mismatch names the variable the session came from, so unsetting it changes something.
+    const mismatch = inboxCallerOf("dsh:session-mine", sub);
+    expect(mismatch.ok ? null : mismatch.message).toContain("from DSH_PLANNOTATOR_SESSION_ID");
+    expect(mismatch.ok ? null : mismatch.message).not.toContain("from DSH_SESSION_ID");
+    const plain = inboxCallerOf("dsh:session-mine", { DSH_SHELL: "1", DSH_SESSION_ID: "session-child" });
+    expect(plain.ok ? null : plain.message).toContain("from DSH_SESSION_ID");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

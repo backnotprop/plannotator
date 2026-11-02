@@ -282,6 +282,20 @@ test("saving a tool switch (Agents, or Settings' inbox_tool) keeps every other h
   expect(loadConfig().inboxTool as Record<string, boolean>).toEqual({ dsh: true, "next-host": false, pi: true, opencode: true });
 });
 
+// The readers count "true" / "1" as on: saving another switch must not turn such a host off.
+test("a switch written as a string (\"true\", \"1\") stays on when another switch is saved", async () => {
+  mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
+  writeFileSync(join(fake.home, ".dsh", "profiles", "web", "package.json"), JSON.stringify({ dependencies: { "@plannotator/dsh": "^0.28.0" } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: "true", opencode: "0" } }));
+  const s = await start();
+  await post(s, "/api/inbox/agents", { agent: "dsh", reach: true });
+  expect(loadConfig().inboxTool).toEqual({ pi: true, opencode: false, dsh: true });
+  // One string for every host: each host this version knows keeps it.
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: "1" }));
+  expect((await post(s, "/api/inbox/settings", { inbox_tool: { dsh: false } })).status).toBe(200);
+  expect(loadConfig().inboxTool).toEqual({ "claude-code": true, pi: true, opencode: true, dsh: false });
+});
+
 test("PLANNOTATOR_INBOX_TOOL locks the tool and reminder switches", async () => {
   const s = await start({ PLANNOTATOR_INBOX_TOOL: "0" });
   const model = (await (await post(s, "/api/inbox/agents", { agent: "claude-code", reminder: true })).json()) as Model;

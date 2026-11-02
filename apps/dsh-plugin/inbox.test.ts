@@ -20,6 +20,7 @@ import type { InboxThread } from "../../packages/core/inbox-types";
 import { inboxLeaseFileOf } from "../../packages/shared/inbox/agent-link";
 import {
   DSH_INBOX_HOST,
+  DSH_ROOT_FOR_ENV,
   DSH_ROOT_SESSION_ENV,
   setupDshInbox,
   type DshInbox,
@@ -49,7 +50,7 @@ class FakeAgent implements DshInboxAgent {
   readonly inbox = { nextTurn: [] as unknown[], nextStep: [] as unknown[] };
   readonly followups: DshUserMessage[] = [];
   readonly steers: DshUserMessage[] = [];
-  readonly session: { header: { cwd: string; parentSession?: string; origin?: string; delegationDepth?: number } };
+  readonly session: { header: { id?: string; cwd: string; parentSession?: string; origin?: string; delegationDepth?: number } };
   /** Leave what goes in queued (a long tool call holds a steer; the turn has not started): the test claims or discards it. */
   hold = false;
   /** A DSH that emits no `agent/inbox/claimed`: the turn takes the message silently. */
@@ -81,6 +82,35 @@ class FakeAgent implements DshInboxAgent {
   discard(id: string): void {
     const message = this.take(id);
     if (message) this.host.emit("agent/inbox/discarded", { agent: this, message });
+  }
+
+  /** The person edits it in the queue (DSH Web's edit, ReactLoopInbox.replace): discarded, then the same id inserted in its place. */
+  edit(id: string, text: string): void {
+    for (const list of [this.inbox.nextTurn, this.inbox.nextStep]) {
+      const at = list.findIndex((item) => (item as { id?: unknown }).id === id);
+      if (at < 0) continue;
+      const old = list.splice(at, 1)[0] as DshUserMessage;
+      this.host.emit("agent/inbox/discarded", { agent: this, message: old });
+      const edited = { ...old, content: [{ type: "text" as const, text }] };
+      list.splice(at, 0, edited);
+      this.host.emit("agent/inbox/inserted", { agent: this, message: edited });
+      return;
+    }
+  }
+
+  /** The person steers a queued follow-up into the running turn (DSH's queue steer): removed (discarded), then `agent.steer` with it. */
+  steerFromQueue(id: string): void {
+    const message = this.take(id) as DshUserMessage | undefined;
+    if (!message) return;
+    this.host.emit("agent/inbox/discarded", { agent: this, message });
+    this.steer!(message);
+  }
+
+  /** DSH's `cancel` without `keepInbox`: every queued item discarded. */
+  clearQueue(): void {
+    for (const list of [this.inbox.nextStep, this.inbox.nextTurn]) {
+      for (const message of list.splice(0)) this.host.emit("agent/inbox/discarded", { agent: this, message });
+    }
   }
 
   private take(id: string): unknown {
@@ -192,7 +222,14 @@ class FakeDsh {
     return agent;
   }
 
-  dispose(agent: FakeAgent): void {
+  /**
+   * The session closes, as DSH's agent teardown (agent-loop index.ts): `cancel({ kind: 'disposed' },
+   * { keepInbox: !ready })` clears a ready session's queue, discarding each item, then awaits before
+   * the agent leaves the registry and `agent/disposed` goes out.
+   */
+  async dispose(agent: FakeAgent, options: { ready?: boolean } = {}): Promise<void> {
+    if (options.ready !== false) agent.clearQueue();
+    await null;
     this.agents.delete(agent.id);
     this.emit("agent/disposed", { agent });
   }
@@ -373,7 +410,7 @@ describe("DeepSeek Harness: the Inbox wake (fake DSH host)", () => {
     expect(inbox.wakes.size).toBe(0);
     const agent = w.dsh.create("session-late", w.project);
     expect([...inbox.wakes.keys()]).toEqual(["session-late"]);
-    w.dsh.dispose(agent);
+    await w.dsh.dispose(agent);
     expect(inbox.wakes.size).toBe(0);
   });
 
@@ -646,16 +683,127 @@ describe("DeepSeek Harness: delivered means a turn took it", () => {
     expect(agent.followups).toHaveLength(1);
   });
 
-  test("the session closes with the reply queued: DSH keeps it for the resume, so it is delivered", async () => {
+  test("the person edits the queued Send now reply in DSH Web: it is not sent again, and the turn taking it delivers it once", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-edit", w.project);
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Ship?" })).text);
+    agent.status = "running";
+    agent.hold = true;
+    const answer = await reply(w.server, sent.message_id, "Ship.");
+    await Bun.sleep(TICK * 6);
+    expect(await sendNow(w.server, answer.id)).toBe(200);
+    expect(await until(() => agent.steers.length === 1)).toBe(true);
+    agent.edit(agent.steers[0]!.id, "Ship it on Monday.");
+    await Bun.sleep(CHECK * 3);
+    // Still queued, as edited: neither delivered nor failed, and not given back for a second go.
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    agent.claim(agent.steers[0]!.id);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-edit" });
+    agent.hold = false;
+    agent.status = "idle";
+    await Bun.sleep(TICK * 8);
+    expect(agent.steers).toHaveLength(1);
+    expect(agent.followups).toEqual([]);
+    expect(w.dsh.warnings).toEqual([]);
+  });
+
+  test("the person steers the queued reply from DSH's queue into the running turn: it is delivered, once", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-queue-steer", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Now?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Now, please.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.status = "running";
+    agent.steerFromQueue(agent.followups[0]!.id);
+    await Bun.sleep(CHECK * 3);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    agent.claim(agent.steers[0]!.id);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-queue-steer" });
+    agent.status = "idle";
+    agent.hold = false;
+    await Bun.sleep(TICK * 8);
+    expect(agent.followups).toHaveLength(1);
+    expect(agent.steers).toHaveLength(1);
+    expect(w.dsh.warnings).toEqual([]);
+  });
+
+  test("the session closes with the reply queued (DSH clears a ready session's queue): it is not reported lost, and goes in once when the session resumes", async () => {
     const w = await world();
     const agent = w.dsh.create("session-closing", w.project);
     agent.hold = true;
-    await start(w, { deliveryCheckMs: 60_000 });
+    await start(w, { deliveryCheckMs: CHECK });
     const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Closing?" })).text);
     const answer = await reply(w.server, sent.message_id, "Fine.");
     expect(await until(() => agent.followups.length === 1)).toBe(true);
-    w.dsh.dispose(agent);
+    await w.dsh.dispose(agent);
+    expect(agent.inbox.nextTurn).toEqual([]);
+    await Bun.sleep(CHECK * 4);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    expect(w.dsh.warnings).toEqual([]);
+    const resumed = w.dsh.create("session-closing", w.project);
+    expect(await until(() => resumed.followups.length === 1)).toBe(true);
+    expect(resumed.texts()[0]).toContain("Fine.");
     expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-closing" });
+    await Bun.sleep(TICK * 8);
+    expect(resumed.followups).toHaveLength(1);
+    expect(agent.followups).toHaveLength(1);
+    expect(w.dsh.warnings).toEqual([]);
+  });
+
+  test("the session closes with Send now's steer queued: the reply goes in once, as a turn, when the session resumes", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-closing-steer", w.project);
+    await start(w, { deliveryCheckMs: CHECK });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Stop?" })).text);
+    agent.status = "running";
+    agent.hold = true;
+    const answer = await reply(w.server, sent.message_id, "Stop.");
+    await Bun.sleep(TICK * 6);
+    expect(await sendNow(w.server, answer.id)).toBe(200);
+    expect(await until(() => agent.steers.length === 1)).toBe(true);
+    await w.dsh.dispose(agent);
+    await Bun.sleep(CHECK * 3);
+    expect(await deliveryNow(w.server, sent.thread_id, answer.id)).toBeNull();
+    const resumed = w.dsh.create("session-closing-steer", w.project);
+    expect(await until(() => resumed.followups.length === 1)).toBe(true);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-closing-steer" });
+    await Bun.sleep(TICK * 8);
+    expect(resumed.followups).toHaveLength(1);
+    expect(agent.followups).toEqual([]);
+    expect(w.dsh.warnings).toEqual([]);
+  });
+
+  test("a session closed before it was ready keeps its queue (keepInbox): the reply waiting there counts as delivered", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-not-ready", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: 60_000 });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Early?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Early.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    await w.dsh.dispose(agent, { ready: false });
+    expect(agent.inbox.nextTurn).toHaveLength(1);
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-not-ready" });
+  });
+
+  test("edited in the queue, then the session closes keeping its queue: the edit is not taken for a removal, and the reply is not given back for a second go", async () => {
+    const w = await world();
+    const agent = w.dsh.create("session-edit-close", w.project);
+    agent.hold = true;
+    await start(w, { deliveryCheckMs: 60_000 });
+    const sent = idsOf((await w.dsh.call(agent, { action: "send_message", body: "Edit?" })).text);
+    const answer = await reply(w.server, sent.message_id, "Edited.");
+    expect(await until(() => agent.followups.length === 1)).toBe(true);
+    agent.edit(agent.followups[0]!.id, "Edited, with more.");
+    await w.dsh.dispose(agent, { ready: false });
+    expect(await deliveryOf(w.server, sent.thread_id, answer.id)).toMatchObject({ host: "dsh", session: "session-edit-close" });
+    const resumed = w.dsh.create("session-edit-close", w.project);
+    await Bun.sleep(TICK * 8);
+    expect(resumed.followups).toEqual([]);
+    expect(w.dsh.warnings).toEqual([]);
   });
 
   test("a DSH that never says claimed: gone from the queue at the next look counts as taken", async () => {
@@ -678,9 +826,13 @@ describe("DeepSeek Harness: a subagent's shell sends as the session it works for
     const child = w.dsh.create("session-sub", w.project, { parentSession: "session-top", origin: "subagent", delegationDepth: 1 });
     await start(w);
     expect(contributors).toHaveLength(1);
-    expect(Object.keys(contributors[0]!.variables)).toEqual([DSH_ROOT_SESSION_ENV]);
-    expect(contributors[0]!.resolve({ agent: child })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top" });
-    expect(contributors[0]!.resolve({ agent: parent })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top" });
+    expect(Object.keys(contributors[0]!.variables)).toEqual([DSH_ROOT_SESSION_ENV, DSH_ROOT_FOR_ENV]);
+    // Each names the session it was set for, so a shell that inherits it into another session (a nested dsh) does not use it.
+    expect(contributors[0]!.resolve({ agent: child })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top", [DSH_ROOT_FOR_ENV]: "session-sub" });
+    expect(contributors[0]!.resolve({ agent: parent })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top", [DSH_ROOT_FOR_ENV]: "session-top" });
+    // The session header's id is what DSH puts in DSH_SESSION_ID.
+    child.session.header.id = "header-sub";
+    expect(contributors[0]!.resolve({ agent: child })).toEqual({ [DSH_ROOT_SESSION_ENV]: "session-top", [DSH_ROOT_FOR_ENV]: "header-sub" });
     expect(contributors[0]!.resolve({})).toEqual({});
   });
 

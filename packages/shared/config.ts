@@ -1429,11 +1429,16 @@ export function inboxToolWith(
   current: PlannotatorConfig["inboxTool"],
   changes: Partial<Record<InboxToolHost, boolean>>,
 ): Partial<Record<InboxToolHost, boolean>> {
+  // The readers' rule (configuredInboxTool): "true", "1", "false", "0" count too, so they are kept as booleans.
   const next: Record<string, boolean> = {};
-  if (typeof current === "boolean") {
-    for (const host of INBOX_TOOL_HOSTS) next[host] = current;
-  } else if (current && typeof current === "object") {
-    for (const [host, value] of Object.entries(current)) if (typeof value === "boolean") next[host] = value;
+  if (current && typeof current === "object" && !Array.isArray(current)) {
+    for (const [host, value] of Object.entries(current)) {
+      const parsed = parseConfigBoolean(value);
+      if (parsed !== undefined) next[host] = parsed;
+    }
+  } else {
+    const shared = parseConfigBoolean(current);
+    if (shared !== undefined) for (const host of INBOX_TOOL_HOSTS) next[host] = shared;
   }
   return { ...next, ...changes } as Partial<Record<InboxToolHost, boolean>>;
 }
