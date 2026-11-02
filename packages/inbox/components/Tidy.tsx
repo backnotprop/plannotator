@@ -163,53 +163,65 @@ export function TidyMenu({
               {look && onLook && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  {/* A tick changes the list at once and leaves the menu open, so the next can be tried. */}
-                  {LIST_LOOK_OPTIONS.map((option) => (
-                    <Menu.CheckboxItem
-                      key={option.key}
-                      className="ib-pmi"
-                      label={option.label}
-                      checked={look[option.key]}
-                      onCheckedChange={(on) => onLook(option.key, on)}
-                      closeOnClick={false}
-                      data-list-look={option.key}
-                    >
-                      <Icon name={option.icon} size={15} />
-                      <span className="ib-pmi-l">{option.label}</span>
-                      {look[option.key] && <Icon name="check" size={15} className="ib-pmi-check" />}
-                    </Menu.CheckboxItem>
-                  ))}
+                  <Menu.Group>
+                    <Menu.GroupLabel className="ib-pm-glabel">Rows</Menu.GroupLabel>
+                    {/* A tick changes the list at once and leaves the menu open, so the next can be tried. */}
+                    {LIST_LOOK_OPTIONS.map((option) => (
+                      <Menu.CheckboxItem
+                        key={option.key}
+                        className="ib-pmi"
+                        label={option.label}
+                        checked={look[option.key]}
+                        onCheckedChange={(on) => onLook(option.key, on)}
+                        closeOnClick={false}
+                        data-list-look={option.key}
+                      >
+                        <Icon name={option.icon} size={15} />
+                        <span className="ib-pmi-l">{option.label}</span>
+                        {look[option.key] && <Icon name="check" size={15} className="ib-pmi-check" />}
+                      </Menu.CheckboxItem>
+                    ))}
+                  </Menu.Group>
                   {threadPanel && (
-                    <Menu.CheckboxItem
-                      className="ib-pmi"
-                      label={THREAD_PANEL_LABEL}
-                      checked={threadPanel.on}
-                      onCheckedChange={threadPanel.onChange}
-                      closeOnClick={false}
-                      data-thread-panel-option=""
-                    >
-                      <Icon name="sideBySide" size={15} />
-                      <span className="ib-pmi-l">{THREAD_PANEL_LABEL}</span>
-                      {threadPanel.on && <Icon name="check" size={15} className="ib-pmi-check" />}
-                    </Menu.CheckboxItem>
+                    <>
+                      <Menu.Separator className="ib-pm-sep" />
+                      <Menu.Group>
+                        <Menu.GroupLabel className="ib-pm-glabel">Thread panel</Menu.GroupLabel>
+                        <Menu.CheckboxItem
+                          className="ib-pmi"
+                          label={THREAD_PANEL_LABEL}
+                          checked={threadPanel.on}
+                          onCheckedChange={threadPanel.onChange}
+                          closeOnClick={false}
+                          data-thread-panel-option=""
+                        >
+                          <Icon name="sideBySide" size={15} />
+                          <span className="ib-pmi-l">{THREAD_PANEL_LABEL}</span>
+                          {threadPanel.on && <Icon name="check" size={15} className="ib-pmi-check" />}
+                        </Menu.CheckboxItem>
+                      </Menu.Group>
+                    </>
                   )}
                 </>
               )}
               {hideAway && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  <Menu.CheckboxItem
-                    className="ib-pmi"
-                    label="Hide offline machines"
-                    checked={hideAway.on}
-                    onCheckedChange={(checked: boolean) => hideAway.onChange(checked)}
-                    closeOnClick
-                    data-hide-offline-machines=""
-                  >
-                    <Icon name="eyeOff" size={15} />
-                    <span className="ib-pmi-l">Hide offline machines</span>
-                    {hideAway.on && <Icon name="check" size={15} className="ib-pmi-check" />}
-                  </Menu.CheckboxItem>
+                  <Menu.Group>
+                    <Menu.GroupLabel className="ib-pm-glabel">Machines</Menu.GroupLabel>
+                    <Menu.CheckboxItem
+                      className="ib-pmi"
+                      label="Hide offline machines"
+                      checked={hideAway.on}
+                      onCheckedChange={(checked: boolean) => hideAway.onChange(checked)}
+                      closeOnClick
+                      data-hide-offline-machines=""
+                    >
+                      <Icon name="eyeOff" size={15} />
+                      <span className="ib-pmi-l">Hide offline machines</span>
+                      {hideAway.on && <Icon name="check" size={15} className="ib-pmi-check" />}
+                    </Menu.CheckboxItem>
+                  </Menu.Group>
                 </>
               )}
             </Menu.Popup>

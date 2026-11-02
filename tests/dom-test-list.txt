@@ -404,6 +404,7 @@ packages/ui/components/Settings.annotateParity.test.tsx
 packages/ui/components/Settings.compactDisplay.test.tsx
 packages/ui/components/Settings.customFont.test.tsx
 packages/ui/components/Settings.documentTextSize.test.tsx
+packages/ui/components/Settings.repoOwner.test.tsx
 packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx
 packages/ui/components/Settings.gridChoice.test.tsx
@@ -461,6 +462,7 @@ packages/review-editor/components/ReviewPanelHeader.test.tsx
 packages/review-editor/hooks/useRepoFiles.test.tsx
 packages/review-editor/components/RepoFileView.test.tsx
 packages/review-editor/components/GoToFile.test.tsx
+packages/ui/components/StartCutPath.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
