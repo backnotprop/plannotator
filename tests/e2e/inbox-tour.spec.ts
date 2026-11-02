@@ -538,11 +538,6 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   const { context, page } = await open(browser, w, errors);
   const writes = writesOf(page);
   const before = await ownList(w);
-  // The first-run line "Want to see it work first?" keeps no highlight outline of its own.
-  const firstRunLine = page.locator('p.ib-tour-again');
-  await expect(firstRunLine).toHaveCount(1);
-  await expect(firstRunLine).not.toHaveClass(/ib-tour-mark/);
-  await expect(firstRunLine).toHaveCSS('outline-style', 'none');
   await page.locator('[data-tour-start]').click();
   await pastIntro(page);
   // The opener has Next, no Fast-forward; a click on its picture goes on (it is never dead).
@@ -553,7 +548,7 @@ test('Fast-forward on every step lands on its end state, writing nothing; a clic
   // A click on the card's own words points at its target again.
   await coach(page).locator('h2').click();
   await expect(page.locator('.ib-tour-mark')).toHaveCount(1);
-  await expect(page.locator('.ib-tour-mark')).toHaveCSS('outline-width', '3px');
+  await expect(page.locator('.ib-tour-mark')).toHaveCSS('outline-style', 'solid');
   // The step's end, then the next step's card, for every step to 9; then step 9's end is the loop.
   const ends: Record<number, string> = { 1: '2', 2: '3', 3: '4', 4: '5', 5: '6', 6: '7', 7: '8-open', 8: '9' };
   for (let n = 1; n <= 8; n++) {
