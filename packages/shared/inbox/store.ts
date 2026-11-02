@@ -153,7 +153,7 @@ import {
   normalizeInboxCardNotes,
   inboxCardHistory,
   inboxCardRefsOf,
-  inboxCardShipPrs,
+  inboxCardDonePrs,
   type InboxCardRef,
   type InboxCardHistoryEntry,
   isInboxCardDropUnseen,
@@ -783,12 +783,11 @@ export class InboxStore {
         {
           let card = readInboxCard(line.record);
           const prev = this.cards.get(card.id);
-          // A line from before `done_prs`: a card in Done then had these PRs (anyone's ship), and a later line
-          // keeps what the card had, so a card shipped and moved back before the upgrade is not moved to Done again.
-          if (card.done_prs === undefined) {
-            const done = card.column === "done" ? inboxCardShipPrs(card) : prev?.done_prs;
-            if (done) card = { ...card, done_prs: done };
-          }
+          // A card in Done holds every PR it links (marked or not: a released Inbox wrote no `via`), with any
+          // list it had; a later line without the field keeps what the card had. So a card shipped and moved back
+          // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
+          if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
+          else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -5741,7 +5740,7 @@ export class InboxStore {
       const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
       const at = out.findIndex((k) => k.url === ref.url || k.ref === ref.ref);
       if (at < 0) out.push(linked);
-      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs).
+      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
       else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
     };
     for (const value of prs) add(value, "pr");
@@ -5863,7 +5862,7 @@ export class InboxStore {
       notes: this.cardNotes(input.notes),
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
-      ...(column === "done" && !target ? { done_prs: inboxCardShipPrs({ refs, prs }) } : {}),
+      ...(column === "done" && !target ? { done_prs: inboxCardDonePrs({ refs, prs }) } : {}),
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -5991,7 +5990,7 @@ export class InboxStore {
       aside_from: asideFrom,
       notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
       // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
-      ...(moves && column === "done" ? { done_prs: inboxCardShipPrs({ refs, prs }) } : {}),
+      ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
     return next;
@@ -6118,7 +6117,7 @@ export class InboxStore {
       dropped: null,
       aside_from: null,
       auto_shipped: { at, prs: urls },
-      done_prs: urls,
+      done_prs: inboxCardDonePrs(card, card.done_prs),
     };
     this.appendCard(next, at);
     return next;

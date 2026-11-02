@@ -5745,7 +5745,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; min-width: 0; }
 .ib-bhead h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
 .ib-bsp { flex: 1; }
-/* A narrow page: tighter gaps, so the counts stay whole beside the Tidy ⋮ (the Project chip has its own row). */
+/* A narrow page: tighter gaps, so the links stay whole beside the Tidy ⋮ (the Project chip has its own row). */
 .ib-bhead[data-narrow] { gap: 8px; }
 .ib-bhead[data-narrow] .ib-blinks { gap: 4px; }
 /* A phone's Done fold ends in All done when older cards are done (its lane holds the last seven days). */

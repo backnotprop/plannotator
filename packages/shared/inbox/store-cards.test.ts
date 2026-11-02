@@ -604,6 +604,51 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(InboxStore.open(dir).autoShipCard(card.id, [PR1])).toBeNull();
   });
 
+  // Review of #2522, D1: a released Inbox wrote links with no `via` and no `done_prs`. Read as context they
+  // gave an empty list, and an agent re-giving the PR as its own `pr` moved the card back to Done.
+  test("a released-format line (links with no via, no done_prs): shipped and moved back, a PR re-given as pr never moves it again", () => {
+    const { store, project, dir } = world();
+    const card = store.createCard({ project_id: project.id, by: AGENT, title: "Released ship", column: "in_progress", prs: [PR1] }).card;
+    store.updateCard(card.id, { by: AGENT, column: "done" });
+    store.updateCard(card.id, { by: PERSON, column: "in_progress" });
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const lines = readFileSync(file, "utf8").trim().split("\n").map((raw) => JSON.parse(raw));
+    for (const line of lines) {
+      delete line.record.done_prs;
+      for (const ref of line.record.refs ?? []) delete ref.via;
+    }
+    writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    expect(readFileSync(file, "utf8")).not.toMatch(/done_prs|"via"/);
+    const reopened = InboxStore.open(dir);
+    expect(reopened.card(card.id)!.done_prs).toEqual([PR1]);
+    // The agent hands it over again, giving the same PR as its own (the tool text's move takes pr).
+    reopened.updateCard(card.id, { by: AGENT, column: "in_review", you: "merge", prs: [PR1] });
+    expect(reopened.autoShipCard(card.id, [PR1])).toBeNull();
+    expect(reopened.card(card.id)!.column).toBe("in_review");
+    // A line in Done keeps a stale list an older Inbox carried along, joined with every PR it links.
+    const stale = reopened.createCard({ project_id: project.id, by: AGENT, title: "Stale list", column: "in_progress", prs: [PR2] }).card;
+    reopened.updateCard(stale.id, { by: AGENT, column: "done" });
+    const all = readFileSync(file, "utf8").trim().split("\n").map((raw) => JSON.parse(raw));
+    all.at(-1)!.record.done_prs = [PR1];
+    writeFileSync(file, `${all.map((line) => JSON.stringify(line)).join("\n")}\n`);
+    expect(InboxStore.open(dir).card(stale.id)!.done_prs).toEqual([PR1, PR2]);
+  });
+
+  // Review of #2522, D2: each writer puts the list in the line it writes (the load only backs up older lines).
+  test("every move into Done writes done_prs into its own line: made in Done, moved there, moved there by the Inbox", () => {
+    const { store, project, dir } = world();
+    const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
+    const lastLine = () => JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1)!).record;
+    store.createCard({ project_id: project.id, by: AGENT, title: "Made done", column: "done", prs: [PR1], refs: [PR2] });
+    expect(lastLine().done_prs).toEqual([PR1, PR2]);
+    const moved = store.createCard({ project_id: project.id, by: AGENT, title: "Moved", column: "in_progress", prs: [PR1] }).card;
+    store.updateCard(moved.id, { by: PERSON, column: "done" });
+    expect(lastLine().done_prs).toEqual([PR1]);
+    const auto = store.createCard({ project_id: project.id, by: AGENT, title: "Auto", column: "in_review", you: "merge", prs: [PR2], refs: [PR1] }).card;
+    store.autoShipCard(auto.id, [PR2]);
+    expect(lastLine()).toMatchObject({ column: "done", auto_shipped: { prs: [PR2] }, done_prs: [PR1, PR2] });
+  });
+
   // Review of #2522, finding 2 (the coordinator's call): only the card's own PRs, linked through `pr`, count.
   test("a PR linked through ref is context: merged, it never moves the card; given as the card's pr, it does", () => {
     const { store, project } = world();

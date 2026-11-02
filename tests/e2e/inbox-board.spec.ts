@@ -659,4 +659,32 @@ test.describe('iPhone 15 (WebKit)', () => {
       }
     });
   }
+
+  test('a week on, the Done fold ends in All done (N); tapping it shows the older cards and focus goes to the first of them', async () => {
+    const context = await browser!.newContext({ ...device, colorScheme: 'light' });
+    try {
+      const page = await context.newPage();
+      // Every card here was done minutes ago: eight days on they are out of the fold's last week.
+      await page.clock.setFixedTime(Date.now() + 8 * 24 * 60 * 60 * 1000);
+      await page.goto(`${world.url}#board`);
+      await expect(page.locator('[data-board-view="phone"]')).toBeVisible();
+      await page.locator('[data-board-fold="done"]').tap();
+      const all = page.locator('[data-board-done-all]');
+      await expect(all).toHaveText(/^All done \(\d+\)$/);
+      const done = page.locator('[data-lane="done"] .ib-bcard');
+      await expect(done).toHaveCount(0);
+      await all.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(shots, 'phone-all-done-light.png') });
+      await all.tap();
+      await expect(all).toHaveCount(0);
+      await expect(done.first()).toBeVisible();
+      // The button left the page: focus is on the first card it showed, never on the body.
+      await expect(done.first().locator('[data-card-open]')).toBeFocused();
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(shots, 'phone-all-done-open-light.png') });
+    } finally {
+      await context.close();
+    }
+  });
 });

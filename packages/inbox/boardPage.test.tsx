@@ -456,7 +456,8 @@ test.if(hasDom)('a phone: one stacked list, Done and Cancelled folded at the end
   act(() => ($('[data-board-done-all]') as HTMLButtonElement).click());
   expect(shown()).toBe('shown');
   expect($('[data-board-done-all]')).toBeNull();
-  expect(document.activeElement).toBe(cardEl('crd_tab')!.querySelector('[data-card-open]'));
+  // Compared with ===: toBe on DOM nodes did not fail here with focus on <body> (review of #2524, D4).
+  expect(document.activeElement === cardEl('crd_tab')!.querySelector('[data-card-open]')).toBe(true);
 });
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
