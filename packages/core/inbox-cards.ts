@@ -404,14 +404,27 @@ function prSourceOf(url: string): string {
 }
 
 /**
+ * Sources a card only links, with no state to read (user feedback #9: a Jira
+ * issue, no sign-in). The opened card draws them with a plain link icon, and
+ * a lane card never marks them, so they never hide a forge link's state.
+ */
+export const INBOX_CARD_LINK_ONLY_SOURCES: readonly string[] = ["jira"];
+
+/** Whether `ref` is a link only (INBOX_CARD_LINK_ONLY_SOURCES). */
+export function inboxCardRefIsLinkOnly(ref: Pick<InboxCardRef, "source">): boolean {
+  return INBOX_CARD_LINK_ONLY_SOURCES.includes(ref.source);
+}
+
+/**
  * The one link a lane card marks (approval "inbox-board", card variant C, and
  * the owner's 2026-10-26 "a symbol ... to indicate merged vs unmerged"): the
  * card's latest pull request, else its latest issue; null when it links
- * neither. The server resolves only this link per card, so the Board asks for
- * one state a card, never all of its links.
+ * neither. A link-only source (Jira) is never marked. The server resolves
+ * only this link per card, so the Board asks for one state a card, never all
+ * of its links.
  */
 export function inboxCardMarkRef(card: { refs?: readonly InboxCardRef[] | null; prs: readonly InboxCardPr[] }): InboxCardRef | null {
-  const refs = inboxCardRefsOf(card);
+  const refs = inboxCardRefsOf(card).filter((ref) => !inboxCardRefIsLinkOnly(ref));
   for (let i = refs.length - 1; i >= 0; i--) if (refs[i]!.kind === "pr") return refs[i]!;
   for (let i = refs.length - 1; i >= 0; i--) if (refs[i]!.kind === "issue") return refs[i]!;
   return null;

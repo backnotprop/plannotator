@@ -152,6 +152,7 @@ import {
   isInboxCardSentWaiting,
   normalizeInboxCardNotes,
   inboxCardHistory,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   inboxCardDonePrs,
   type InboxCardRef,
@@ -5738,7 +5739,10 @@ export class InboxStore {
   /**
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
-   * (card-refs.ts), added to `known` each once (by URL).
+   * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
+   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
+   * Jira sites are two issues.
    */
   private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
     const out = [...known];
@@ -5750,7 +5754,8 @@ export class InboxStore {
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
       const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
-      const at = out.findIndex((k) => k.url === ref.url || k.ref === ref.ref);
+      const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
+      const at = out.findIndex(same);
       if (at < 0) out.push(linked);
       // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
       else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
