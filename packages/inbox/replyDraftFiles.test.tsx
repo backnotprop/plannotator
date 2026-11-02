@@ -912,7 +912,9 @@ test.skipIf(!hasDom)("the stale page's reload saves a file change still waiting 
   offline = true;
   act(() => (replyBox(el)!.querySelector('[data-compose-file] .ib-cp-fx') as HTMLButtonElement).click());
   await settle(1500);
-  // Still no link: the removal cannot land, so the reload waits.
+  // The box closed (Cancel), its removal still waiting: no link, so the reload waits.
+  act(() => button(el, 'Cancel').click());
+  await until(() => replyBox(el) === null, 'the box closed');
   expect(await flushBeforeReload()).toBe(false);
   offline = false;
   // Back: the reload saves the removal first, then goes.
