@@ -599,6 +599,7 @@ button.ib-mut { border-radius: 6px; }
 .ib-pm-title { display: none; }
 /* The thread rows' right-click menu (RowMenu.tsx): the project menu's look, with a line between copying and the writes. */
 .ib-pm-sep { height: 1px; margin: 4px 2px; background: var(--border); }
+.ib-pm-glabel { padding: 6px 8px 2px; font-size: var(--ib-fs-12, 12px); font-weight: 550; color: var(--muted-foreground); cursor: default; user-select: none; }
 .ib-pm-scrim { display: none; }
 /* One project's list when every thread in it is archived. */
 .ib-empty-list { padding: 40px 22px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.6; }
@@ -3301,6 +3302,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   @keyframes ib-pm-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .ib-pm-pos[data-phone] .ib-pm { animation: none; } }
   .ib-pm-pos[data-phone] .ib-pm-title { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); padding: 6px 10px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ib-pm-pos[data-phone] .ib-pm-glabel { padding: 8px 12px 2px; font-size: var(--ib-fs-13, 13px); }
   .ib-pm-pos[data-phone] .ib-pmi { height: 48px; font-size: var(--ib-fs-16-in, 16px); padding: 0 12px; gap: 12px; border-radius: 8px; }
   .ib-pm-pos[data-phone] .ib-pmi .ib-ic { width: 18px; height: 18px; }
   .pn-inbox .ib-upd-btn { height: 44px; }
