@@ -45,6 +45,7 @@ import {
   removeInboxUploads,
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
+import type { InboxLaunch } from "./inbox-launch";
 import type { createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
@@ -63,6 +64,8 @@ export function createInboxCompose(options: {
   resolveProject: (path: string) => Promise<InboxProject>;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
+  launch?: Pick<InboxLaunch, "target" | "prepare" | "begin" | "composeBlock">;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
@@ -129,19 +132,24 @@ export function createInboxCompose(options: {
     // A replayed Send answers the thread it wrote, whatever the session's state now.
     const replay = store.personThreadByKey(key);
     if (replay) {
+      // A replayed launch answers its thread and never starts a second agent.
       const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
-      return json({ thread_id: result.message.thread_id, message: result.message, replayed: true });
+      return json({ thread_id: result.message.thread_id, message: result.message, replayed: true, ...launchAnswer(result.message) });
     }
     if (typeof body.body !== "string" || body.body.trim() === "") throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
     if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
-    const target = live.composeTarget(body.to);
+    // Launch: the folder and the agent are checked first; nothing is written when either fails.
+    const launchTarget = options.launch?.target(body.to) ?? null;
+    if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
+    const prepared = launchTarget ? await options.launch!.prepare(launchTarget) : null;
+    const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
     const root = placeOf(target.root, target.session, store.lastThreadsBySession());
     if (root === null) throw new InboxError("session_not_live", "That session has not said where it works yet; try again in a moment.");
-    const project = target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
+    const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
     const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
@@ -158,6 +166,7 @@ export function createInboxCompose(options: {
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
+        ...(prepared ? { launch: prepared.launch } : {}),
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);
@@ -166,6 +175,8 @@ export function createInboxCompose(options: {
     // Another Send with this key landed while this one waited on the project:
     // its message stands, and the files written for this one are not used.
     if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
+    // The thread is written: only now does the agent start (in the background; the answer comes at once).
+    else if (prepared) options.launch!.begin(result.message);
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
@@ -174,8 +185,13 @@ export function createInboxCompose(options: {
       message: result.message,
       project: { id: project.id, name: project.name, root: project.root },
       replayed: result.replayed,
+      ...launchAnswer(result.message),
     });
   };
+
+  /** A launched thread's Send answer: `launch: { id, state }` (the run line says the rest). */
+  const launchAnswer = (message: { launch?: { id: string; error?: unknown } }) =>
+    message.launch ? { launch: { id: message.launch.id, state: message.launch.error ? "failed" : "starting" } } : {};
 
   /** "Send to another session": a message no session took yet, to a live session of its thread's project. */
   const readdress = (messageId: string, body: Record<string, unknown>): Response => {
@@ -197,6 +213,8 @@ export function createInboxCompose(options: {
         home: homedir(),
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
+        // Launch (only while `inboxLaunch.enabled`): the agents To offers to start and the folder menu's projects.
+        ...(options.launch ? { launch: await options.launch.composeBlock() } : {}),
       });
     }
     if (path === "/api/inbox/messages") {

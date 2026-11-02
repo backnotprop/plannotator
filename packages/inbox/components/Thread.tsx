@@ -10,7 +10,7 @@ import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxListRow, type InboxSectionId, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
@@ -41,7 +41,9 @@ import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
-import { MessageMenu, ThreadMore, type CopyMenuHost } from './CopyMenus';
+import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
+import { RunLine } from './RunLine';
+import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
@@ -1065,6 +1067,13 @@ export interface ThreadPaneProps {
    * The window passes it only while two or more of the thread's decisions wait.
    */
   decide?: OpenQuestionsDecide | null;
+  /**
+   * A launched thread's run line (the thread route's `run`, launch only): null while the agent rests.
+   * Absent: not a launched thread, or launch is off (the delivery line as always).
+   */
+  run?: InboxRun | null;
+  /** Stop, Try again or Delete changed the launch: read the thread again. */
+  onRunChanged?: () => void;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -1251,13 +1260,44 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, replyRequest, onReplyOpened, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, onRunChanged }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
   const asker = startedTo ? hostName(startedTo.host) : agentName(root.author);
+  // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
+  const launched = root.launch ?? null;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const launchAct = async (action: () => Promise<unknown>, done?: string) => {
+    setLaunchError(null);
+    try {
+      await action();
+      if (done) onToast?.({ icon: 'check', lead: done });
+      onRunChanged?.();
+    } catch (cause) {
+      setLaunchError(cause instanceof InboxApiError ? cause.message : 'That did not work; try again.');
+    }
+  };
+  const launchMenu: ThreadMoreLaunch | null =
+    launched && runLine !== undefined && !launched.deleted_at
+      ? {
+          name: hostName(launched.agent),
+          open: phone || remote === true || (!launched.session_ref && !runLine?.untrusted) ? null : () => void launchAct(() => inboxApi.launchOpen(launched.id)),
+          copyAttach: runLine?.attach_command
+            ? () => void copyTextToClipboard(runLine.attach_command!).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
+            : null,
+          // A resting agent (no line) still runs in the background: Stop is offered then too.
+          stop:
+            launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
+              ? () => void launchAct(() => inboxApi.launchStop(launched.id))
+              : null,
+          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
+          remove: phone ? null : () => setConfirmDelete(true),
+        }
+      : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
   // an open thread's: its questions are live, Reply goes to it, its files take
   // comments; the thread stays archived. `resolved` is the thread with nothing
@@ -1741,7 +1781,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
-  const askerEnded = !resolved && askerHasEnded(asking, live);
+  // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
+  const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
+  const askerEnded = !resolved && !launchResumes && askerHasEnded(asking, live);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open.
   const taggable = useTaggable(thread.thread_id, (box.open || !!file) && !resolved);
   const tagOwner = asking?.session ?? taggable?.owner?.session ?? null;
@@ -4321,6 +4363,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
+              launch={launchMenu}
             />
             {phone || stacked || backBesideFile || threadAlone ? null : (
               <>
@@ -4347,7 +4390,50 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         )}
         {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
         {notice}
-        {startedTo && (
+        {launched && (
+          <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
+            <span>
+              You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
+            </span>
+            {launched.full_permissions && (
+              <>
+                <span className="ib-tdot" aria-hidden="true" />
+                <span data-launch-full="">Full permissions</span>
+              </>
+            )}
+          </div>
+        )}
+        {confirmDelete && launched && (
+          <div className="ib-cp-note ib-warn ib-run-confirm" role="alertdialog" aria-label={`Delete the ${hostName(launched.agent)} session`} data-launch-confirm="">
+            <Icon name="warn" size={16} />
+            <div>
+              <b>Delete the {hostName(launched.agent)} session?</b>
+              <p>It stops, and its session files are removed. This thread stays.</p>
+              <span className="ib-acts">
+                <button type="button" className="ib-btn ib-ghost" onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="ib-btn ib-danger"
+                  data-launch-delete=""
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    void launchAct(() => inboxApi.launchDelete(launched.id), 'Session deleted');
+                  }}
+                >
+                  Delete session
+                </button>
+              </span>
+            </div>
+          </div>
+        )}
+        {launchError && (
+          <p className="ib-error" role="alert" data-launch-error="">
+            {launchError}
+          </p>
+        )}
+        {startedTo && !launched && (
           <div className="ib-tmeta" data-started-by="">
             <span>You started this thread</span>
             <span className="ib-tdot" aria-hidden="true" />
@@ -4795,7 +4881,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ))}
                   </ul>
                 )}
-                {message === last && delivered && tagLines.length > 0 && (
+                {message === last && runLine && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
                     <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
@@ -4832,7 +4919,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     {tagSendNow.error}
                   </p>
                 )}
-                {message === last && delivered?.wait && tagLines.length === 0 && (
+                {message === last && !runLine && delivered?.wait && tagLines.length === 0 && (
                   // Waiting on a busy agent (approval "inbox-busy-agent-reply"): the band, with its own minute clock.
                   <UndeliveredBand
                     wait={delivered.wait}
@@ -4843,7 +4930,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     restartName={restartName}
                   />
                 )}
-                {message === last && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !runLine && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">
@@ -4874,7 +4961,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     {sendNowError}
                   </p>
                 )}
-                {message === last && delivered?.state === 'undelivered' && lastTo && (
+                {/* A launched agent that is gone: only a message addressed to it (its own `to`) can move; a reply to its answer cannot. */}
+                {message === last && (runLine ? runLine.state === 'missing' && !!last.to : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}
@@ -4972,7 +5060,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         ) : box.open ? (
           <>
             <DraftHead
-              label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
+              label={
+                launched && launchResumes && runLine?.state === 'stopped'
+                  ? `Reply to ${hostName(launched.agent)} in ${thread.project.name} · starts it again`
+                  : replyName
+                    ? `Reply to ${replyName}`
+                    : `Reply to ${asker} in ${thread.project.name}`
+              }
               savedAt={box.text.trim() ? (replyDraft.draft?.updated_at ?? null) : null}
               conflict={
                 replyDraft.conflict !== null

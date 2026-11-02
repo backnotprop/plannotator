@@ -487,6 +487,16 @@ export interface PlannotatorConfig {
    */
   inboxTailscaleAllow?: string[];
   /**
+   * Launch agents from the Inbox (compose's "New Claude Code session";
+   * packages/server/inbox-launch.ts). `enabled`: config only, default false,
+   * off, compose, the thread and every route are as before.
+   * `fullPermissions`: Settings → Agents' "Start new sessions with full
+   * permissions" (bypass mode). `model`: config only, a model name such as
+   * `haiku` for each launch's settings file (the manual smoke); anything that
+   * is not a plain model name is ignored.
+   */
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string };
+  /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
    * callouts, tables, diagrams, task lists, and the other PFM extensions.
@@ -1133,6 +1143,19 @@ export function resolveDefaultDiffTypeFor(
   if (vcsId !== 'jj') return resolveDefaultDiffType(cfg);
   const v = cfg?.reviewDefaults?.jj?.defaultDiffType;
   return v === 'jj-current' || v === 'jj-last' || v === 'jj-line' || v === 'jj-evolog' || v === 'jj-all' ? v : 'jj-current';
+}
+
+/** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
+const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
+
+/** config.inboxLaunch, coerced: off unless `enabled` is true; `model` only when it is a plain model name. */
+export function resolveInboxLaunch(config: PlannotatorConfig): { enabled: boolean; fullPermissions: boolean; model: string | null } {
+  const value = config.inboxLaunch && typeof config.inboxLaunch === "object" ? config.inboxLaunch : {};
+  return {
+    enabled: coerceConfigBoolean(value.enabled, false),
+    fullPermissions: coerceConfigBoolean(value.fullPermissions, false),
+    model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
+  };
 }
 
 /**

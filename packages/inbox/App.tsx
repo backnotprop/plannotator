@@ -23,7 +23,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
@@ -670,6 +670,8 @@ function Inbox() {
   const [thread, setThread] = useState<InboxThread | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
+  // A launched thread's run line (the thread route's `run`; launch only): null while the agent rests.
+  const [threadRun, setThreadRun] = useState<{ threadId: string; run: InboxRun | null } | null>(null);
   /** The open thread's read when it has not landed: failed (read again soon) or missing (a 404). */
   const [threadLoad, setThreadLoadState] = useState<ThreadLoad | null>(null);
   const threadLoadRef = useRef<ThreadLoad | null>(null);
@@ -1166,6 +1168,7 @@ function Inbox() {
         stopLiveThreadRetry();
         setThread(next.thread);
         setThreadRow(next.row ?? null);
+        setThreadRun(next.run === undefined ? null : { threadId, run: next.run });
         setThreadLoad(null);
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
@@ -1497,6 +1500,9 @@ function Inbox() {
         // The live sessions moved (approval "inbox-row-delivery"): read the list again while a row's
         // delivery can still change (queued, sending, saved, not delivered), so its glyph follows.
         onDeliveries: () => {
+          // A launched thread's run line moves with the same signature: the open one is read again.
+          const open = routeRef.current.thread;
+          if (open && threadLoaded.current?.thread_id === open && threadLoaded.current.messages[0]?.launch) void refreshThread(open);
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
@@ -1602,6 +1608,7 @@ function Inbox() {
     if (!threadId) {
       setThread(null);
       setThreadRow(null);
+      setThreadRun(null);
       setLook(null);
       setThreadLoad(null);
       return;
@@ -2053,10 +2060,13 @@ function Inbox() {
     showToast(
       {
         icon: 'check',
-        lead: `Sent to ${hostLabel(sent.host)}`,
+        // A launch (New <agent> session) starts the agent; its thread's run line says the rest.
+        lead: sent.launched ? `Starting ${hostLabel(sent.host)}` : `Sent to ${hostLabel(sent.host)}`,
         // The thread's own line says Queued / Sending / Delivered. A long project name is cut on screen (Toast.tsx), never in speech.
         detail: `in ${sent.projectName}`,
-        speech: `Sent to ${hostLabel(sent.host)} in ${sent.projectName}. It takes it as its next turn.`,
+        speech: sent.launched
+          ? `Starting ${hostLabel(sent.host)} in ${sent.projectName}. Your message is its first turn.`
+          : `Sent to ${hostLabel(sent.host)} in ${sent.projectName}. It takes it as its next turn.`,
         action: { label: 'Open', onPress: () => {
           dismissToast();
           go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: sent.threadId });
@@ -4474,6 +4484,8 @@ function Inbox() {
             thread={thread}
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
+            run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
+            onRunChanged={() => void refreshThread(thread.thread_id)}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}

@@ -132,6 +132,18 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
 }
 
 /**
+ * A launched thread's items on top of ⋯ (UX screen 07): Open in Terminal, Copy attach command, Stop <agent>,
+ * and Delete session (it asks first, in the thread). Each is absent where it cannot work.
+ */
+export interface ThreadMoreLaunch {
+  name: string;
+  open: (() => void) | null;
+  copyAttach: (() => void) | null;
+  stop: (() => void) | null;
+  remove: (() => void) | null;
+}
+
+/**
  * The thread header's ⋯ More: Pin thread (Unpin thread while pinned) first, in its own group, as the row menu
  * leads with it (only when the Inbox keeps pins: `pin` is absent on an older one, and a phone's way to pin
  * is here, it has no row menu), and Mark unread on a read thread (`markUnread`; markRead.ts `canMarkUnread`,
@@ -139,8 +151,8 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
  * Copy thread ID (a phone's only way to them); last, in its own group, Archive thread (Unarchive thread on an
  * archived one), which used to be an icon in the header (the owner, 2026-11-01: move it into the ⋯). It has no key.
  */
-export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void } }) {
-  const { thread, phone, pin, markUnread, archive } = props;
+export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onToggle: () => void }; markUnread?: () => void; archive?: { archived: boolean; onToggle: () => void }; launch?: ThreadMoreLaunch | null }) {
+  const { thread, phone, pin, markUnread, archive, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   return (
@@ -157,6 +169,35 @@ export function ThreadMore(props: CopyMenuHost & { pin?: { pinned: boolean; onTo
             <div className="ib-pm-title" dir="auto" aria-hidden="true">
               {thread.subject ?? '(no subject)'}
             </div>
+            {launch && (launch.open || launch.copyAttach || launch.stop || launch.remove) && (
+              <>
+                {launch.open && (
+                  <Menu.Item className="ib-pmi" label="Open in Terminal" onClick={launch.open} data-launch-item="open">
+                    <Icon name="terminal" size={15} />
+                    Open in Terminal
+                  </Menu.Item>
+                )}
+                {launch.copyAttach && (
+                  <Menu.Item className="ib-pmi" label="Copy attach command" onClick={launch.copyAttach} data-launch-item="attach">
+                    <Icon name="copy" size={15} />
+                    Copy attach command
+                  </Menu.Item>
+                )}
+                {launch.stop && (
+                  <Menu.Item className="ib-pmi" label={`Stop ${launch.name}`} onClick={launch.stop} data-launch-item="stop">
+                    <Icon name="xCircle" size={15} />
+                    Stop {launch.name}
+                  </Menu.Item>
+                )}
+                {launch.remove && (
+                  <Menu.Item className="ib-pmi" label={`Delete ${launch.name} session…`} onClick={launch.remove} data-launch-item="delete">
+                    <Icon name="x" size={15} />
+                    Delete {launch.name} session…
+                  </Menu.Item>
+                )}
+                <Menu.Separator className="ib-pm-sep" />
+              </>
+            )}
             {pin && (
               <Menu.Item className="ib-pmi" label={pin.pinned ? 'Unpin thread' : 'Pin thread'} onClick={pin.onToggle} data-thread-pin-item="">
                 <Icon name={pin.pinned ? 'pinOff' : 'pin'} size={15} />
