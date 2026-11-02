@@ -94,7 +94,7 @@ describe('opened card refs', () => {
 });
 
 describe('opened card links: a Jira issue (user feedback #9)', () => {
-  test('shows the key as the link to the full URL, with a plain link icon and its site, never a forge state', () => {
+  test('shows the key as the link to the full URL, with the Jira mark and its site, never a forge state', () => {
     const jira = { kind: 'issue', source: 'jira', ref: 'DEMO-123', url: 'https://example.atlassian.net/browse/DEMO-123' };
     const html = render(null, {
       card: { ...card, refs: [jira] } as InboxCardWire,
@@ -104,7 +104,9 @@ describe('opened card links: a Jira issue (user feedback #9)', () => {
     const row = /<li class="ib-crdp-ref"[^>]*data-card-ref="DEMO-123".*?<\/li>/.exec(html)?.[0] ?? '';
     expect(row).toContain('data-ref-source="jira"');
     expect(row).toMatch(/<a href="https:\/\/example\.atlassian\.net\/browse\/DEMO-123"[^>]*aria-label="Jira issue DEMO-123"[^>]*>DEMO-123<\/a>/);
-    expect(row).toContain('data-icon="link"');
+    // Jira's own mark, one colour like the forge marks, hidden from screen readers (the link's name says Jira).
+    expect(row).toMatch(/<svg class="ib-refmark ib-crdp-rjira" data-ref-mark="jira"[^>]*aria-hidden="true"/);
+    expect(row).not.toContain('data-icon="link"');
     // No forge state icon: a Jira issue has no state to show.
     expect(row).not.toContain('data-ref-kind');
     expect(row).toContain('<span class="ib-crdp-rref">example.atlassian.net</span>');

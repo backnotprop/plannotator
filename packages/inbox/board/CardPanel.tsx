@@ -236,7 +236,7 @@ export function CardPanel(props: CardPanelProps) {
               ))}
             </ul>
           )}
-          <LinkField onLink={props.onLink} />
+          <LinkField onLink={props.onLink} phone={props.phone} />
         </section>
         <section className="ib-crdp-sec" aria-label="History">
           <h3 className="ib-crdp-hhead">
@@ -605,20 +605,24 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
 function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
-  // A link-only source (a Jira issue): the key links, beside a plain link icon and its site; no state is read.
+  // A link-only source (a Jira issue): the key links, beside the source's mark and its site; no state is read.
   const linkOnly = inboxCardRefIsLinkOnly(refItem);
   const kind = refItem.source === 'jira' ? 'Jira issue' : refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
   const number = refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
+  const link = (
+    <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
+      {number}
+    </a>
+  );
   return (
     <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-source={refItem.source} data-ref-state={state?.tone ?? (linkOnly ? 'quiet' : loading ? 'loading' : 'quiet')}>
       {linkOnly ? (
-        <Icon name="link" size={15} className="ib-refmark ib-crdp-rlink" />
+        refItem.source === 'jira' ? <JiraMark /> : <Icon name="link" size={15} className="ib-refmark ib-crdp-rlink" />
       ) : (
         <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
       )}
-      <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
-        {number}
-      </a>
+      {/* A link-only ref has no hover card: its tooltip says where the key goes. */}
+      {linkOnly ? <Tip content={refItem.url}>{link}</Tip> : link}
       <span className="ib-crdp-rt" dir="auto">
         {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
       </span>
@@ -629,6 +633,22 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
         </span>
       )}
     </li>
+  );
+}
+
+/**
+ * The Jira mark (Simple Icons `jira`, CC0-1.0), one colour in currentColor as
+ * the forge marks beside it are. Drawn in a 15 px box like them, with a
+ * little room around it: the mark fills its square, an Octicon does not.
+ */
+const JIRA_MARK =
+  'M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z';
+
+function JiraMark() {
+  return (
+    <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="jira" width={15} height={15} viewBox="-1.5 -1.5 27 27" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d={JIRA_MARK} />
+    </svg>
   );
 }
 
@@ -651,7 +671,7 @@ function CardText({ text, repo }: { text: string; repo: InboxProjectRepo | null 
 }
 
 /** Link an issue or PR from the opened card. */
-function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null> }) {
+function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string | null>; phone: boolean }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
@@ -668,7 +688,12 @@ function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null>
       <label className="ib-sr" htmlFor="ib-card-link">
         Link an issue or PR
       </label>
-      <input id="ib-card-link" type="text" placeholder="Link an issue or PR (owner/repo#123 or its URL)" value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
+      <input
+        id="ib-card-link"
+        type="text"
+        // The sources it reads; a phone's narrow field keeps the short form whole.
+        placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
+        value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
       {error && (
         <p className="ib-error" role="alert">
           {error}
