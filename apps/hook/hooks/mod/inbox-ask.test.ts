@@ -60,7 +60,7 @@ async function world(askAi = true) {
     name: 'send_message',
     arguments: { body: 'Ship it?', project_path: project, agent_session: SESSION, agent_host: 'claude-code', agent_name: 'Claude Code' },
   })
-  const threadId = (sent.structuredContent as { thread_id: string }).thread_id
+  const { thread_id: threadId, message_id: messageId } = sent.structuredContent as { thread_id: string; message_id: string }
   const store = new Map<string, unknown>()
   const open = async () => {
     const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: dataDir }, cwd: project, store, sessionId: SESSION, dataDir })
@@ -68,7 +68,13 @@ async function world(askAi = true) {
     sessions.push(session)
     return session
   }
-  return { server, threadId, open }
+  /** Another session replies in the thread, and owns it from then on. */
+  const handOff = (session: string) =>
+    client.callTool({
+      name: 'send_message',
+      arguments: { body: 'Mine now.', reply_to: messageId, project_path: project, agent_session: session, agent_host: 'claude-code', agent_name: 'Claude Code' },
+    })
+  return { server, threadId, open, handOff }
 }
 
 const clientFetches = (session: ClaudeSession) => session.host.fetches.filter((fetch) => fetch.includes(inboxAskBridgeBase(SESSION)))
@@ -241,6 +247,59 @@ describe('the setting on', () => {
     expect(session.host.submits).toHaveLength(1)
     expect(session.turns).toHaveLength(1)
   })
+
+  // The failure this guards: a question queued behind the person's turn, then a /clear they queued in that turn.
+  // The /clear goes first, and a pending `$.prompt.submit` can't be withdrawn, so the question ran as a live turn
+  // of the NEW conversation, which no tracker owned; Ask again after the hand-off then sent it a second time.
+  test('a question still queued at /clear never runs in the new conversation, and Ask again sends it once', async () => {
+    const { server, threadId, open, handOff } = await world()
+    const session = await open()
+    await until(() => inboxPolled(session))
+    // The race: the client's poll said `ready`, then the person's turn started before the question arrived.
+    const realFetch = session.host.fetch
+    let raced = false
+    session.host.fetch = async (url, init) => {
+      const result = await realFetch(url, init)
+      if (!raced && url.includes(inboxAskBridgeBase(SESSION)) && url.endsWith(BRIDGE_POLL_PATH) && result.text.includes('"type":"ask"')) {
+        raced = true
+        await session.type('My own work.')
+      }
+      return result
+    }
+
+    const first = await asked(server, threadId, 'turn-0001')
+    await until(() => session.host.submits.length === 1)
+    expect(session.running?.text).toBe('My own work.')
+
+    // Their turn ends with the /clear they queued in it: it goes before the pending submit.
+    session.endTurn()
+    session.clear('session-b')
+    await until(() => session.turns.length === 2)
+    const queued = session.turns[1]!
+    expect(queued.text).toContain('Why now?')
+    expect(session.host.aborted).toContain(queued.id)
+    session.endTurn('', true)
+    await first.finished
+    expect(first.messages.at(-1)?.code).toBe('session_gone')
+
+    // The thread moves to the new conversation, and the person asks again: one live question turn in all.
+    await handOff('session-b')
+    // Asked again until the new conversation's connection has told the Inbox it can answer (no live path till then).
+    let providerId: string | null = null
+    await until(async () => {
+      providerId = ((await (await postAsk(server, threadId, 'turn-0001', 'Why now?')).json()) as AskAnswer).provider_id
+      return providerId !== null
+    }, 15_000)
+    const again = runQuery(server, await aiSession(server, providerId!, threadId), 'Why now?')
+    await until(() => session.running !== null && session.running.text.includes('Why now?'))
+    expect(session.mod.turns.ownsTurn(session.running!.id)).toBe(true)
+    session.endTurn('Here it is.')
+    await again.finished
+
+    const live = session.turns.filter((turn) => turn.text.includes('Why now?') && !session.host.aborted.includes(turn.id))
+    expect(live).toHaveLength(1)
+    expect(await savedTurns(server, threadId)).toMatchObject([{ id: 'turn-0001', session: 'session-b', answer: 'Here it is.' }])
+  }, 20_000)
 
   test('two processes: the answer finishes where it started after the lease moves, and the next question goes to the new holder', async () => {
     const { server, threadId, open } = await world()

@@ -194,6 +194,7 @@ export class ClaudeSession {
 
   /** `/clear`: `session.end` disposes the instance; the next hook makes one for the new id (register.ts `currentMod`). */
   clear(newSessionId: string): void {
+    const queued = this.mod.turns.queuedAsk()
     this.mod.dispose()
     this.mod = new PlannotatorMod(this.host, {
       sessionId: newSessionId,
@@ -201,6 +202,7 @@ export class ClaudeSession {
       interactive: true,
       ...(this.inboxTools ? { inboxTools: this.inboxTools, inboxToolName: CLAUDE_INBOX_TOOL_NAME, cwd: async () => this.cwd } : {}),
     })
+    if (queued) this.mod.turns.dropQueued(queued)
   }
 
   /** The process quits (or the session ends for good). */
@@ -229,11 +231,12 @@ export class ClaudeSession {
     if (this.running) this.mod.onMainStep(this.running.id)
   }
 
-  endTurn(answer = 'Done.'): void {
+  /** The running turn completes; `aborted` as the engine reports a turn `$.turn.abort` stopped. */
+  endTurn(answer = 'Done.', aborted = false): void {
     const turn = this.running
     if (!turn) return
     this.running = null
-    this.mod.onTurnComplete(turn.id, answer, false)
+    this.mod.onTurnComplete(turn.id, answer, aborted)
     for (const wake of this.idleWaiters.splice(0)) wake()
   }
 

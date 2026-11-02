@@ -437,6 +437,8 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   if (mod && !mod.isDisposed && mod.session.sessionId === sessionId) return mod
   if (switching) return switching
   switching = (async () => {
+    // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
+    const queued = mod?.turns.queuedAsk() ?? null
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
     const instance = new PlannotatorMod(hostOf($, settings.debugPath), {
@@ -456,6 +458,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
           }
         : {}),
     })
+    if (queued) instance.turns.dropQueued(queued)
     mod = instance
     await instance.restore().catch(() => undefined)
     return instance

@@ -252,6 +252,21 @@ export class TurnTracker {
     return true
   }
 
+  /** The question submitted whose turn has not started: its prompt still waits in the engine, which can't withdraw it. */
+  queuedAsk(): string | null {
+    const ask = this.ask
+    return ask && !ask.finished && !ask.cancelled && ask.turnId === null ? ask.text : null
+  }
+
+  /**
+   * Another instance's queued question (`/clear` or a resume moved the process to
+   * another session under it): its turn is aborted when it starts, as a
+   * cancelled queued question's is, so it never runs in the new conversation.
+   */
+  dropQueued(text: string): void {
+    this.dropText = text
+  }
+
   isActiveAsk(askId: string): boolean {
     return this.ask?.askId === askId && !this.ask.finished
   }
