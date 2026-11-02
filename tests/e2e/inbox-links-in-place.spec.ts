@@ -150,7 +150,8 @@ test.beforeAll(async () => {
   writeFileSync(
     join(alpha, 'docs', 'script.html'),
     `<!doctype html><html><head><meta charset="utf-8"><title>script</title></head><body><h1>Script page</h1><script>
-      const send = () => parent.postMessage({ type: 'plannotator-bridge-link-click', href: ${JSON.stringify(`${origin}/#thread=${T2}`)} }, '*');
+      // It tries to take focus first, as a click in the frame would give it.
+      const send = () => { window.focus(); document.body.focus(); parent.postMessage({ type: 'plannotator-bridge-link-click', href: ${JSON.stringify(`${origin}/#thread=${T2}`)} }, '*'); };
       for (const wait of [200, 600, 1200, 2000]) setTimeout(send, wait);
     </script></body></html>`,
   );

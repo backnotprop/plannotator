@@ -1281,9 +1281,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
     // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
     // person's click: the page's own script can post this message too, and must not move the window
-    // (HtmlEmbedBlock's rule). Without one, the page's rules below decide, as before links opened in place.
+    // (HtmlEmbedBlock's rule: the frame holds focus, which a click in it gives, and the window has the click's
+    // activation). Without one, the page's rules below decide, as before links opened in place.
     const activation = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation;
-    const inPlace = /^\s*https?:\/\//i.test(href) && activation?.isActive === true ? props.onInboxLink?.(href) : null;
+    const focused = document.activeElement instanceof HTMLIFrameElement && !!sectionRef.current?.contains(document.activeElement);
+    const clicked = focused && activation?.isActive === true;
+    const inPlace = /^\s*https?:\/\//i.test(href) && clicked ? props.onInboxLink?.(href) : null;
     if (inPlace) {
       leave(null, inPlace);
       return;
