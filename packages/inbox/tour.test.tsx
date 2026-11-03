@@ -1004,7 +1004,11 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     // Opened on a fresh machine: Match system, Plannotator, 14.
     expect(yours(el, '[data-tour-mode="system"]')!.checked).toBe(true);
     expect(htmlClass()).toContain('theme-plannotator');
-    await click(yours(el, '[data-tour-mode="dark"]'));
+    // A synchronous act, as themeToggle.test.tsx does: the hold lasts two frames, and happy-dom's frames are
+    // setImmediate ticks, which an async act's flush can spend before it returns (CI on Linux did, now and then).
+    const darkMode = yours(el, '[data-tour-mode="dark"]');
+    expect(darkMode).toBeTruthy();
+    act(() => darkMode!.click());
     // It lands in one frame, with no colour fade (ThemeProvider's hold; theme.css sets transitions to 0 s under it).
     expect(document.documentElement.classList.contains('pn-theme-switching')).toBe(true);
     // The count follows the half on screen.

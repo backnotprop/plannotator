@@ -190,7 +190,8 @@ async function openReply(el: HTMLElement): Promise<HTMLTextAreaElement> {
 const modeLine = (el: HTMLElement) => el.querySelector('[data-tag-mode]');
 const modeWords = (el: HTMLElement) => el.querySelector('[data-tag-mode-words]')?.textContent ?? null;
 const modeLinks = (el: HTMLElement) => [...el.querySelectorAll('[data-tag-mode-to]')].map((b) => b.textContent);
-const draftLabel = (el: HTMLElement) => el.querySelector('section.ib-pane .ib-pfoot')?.textContent ?? '';
+/** Whom the reply box names (its field's name: nothing sits above the box, approval "inbox-reply-recipient"). */
+const draftLabel = (el: HTMLElement) => replyBox(el)?.getAttribute('aria-label') ?? '';
 
 async function tagPi(el: HTMLElement, words: string): Promise<HTMLTextAreaElement> {
   const box = await openReply(el);
@@ -216,17 +217,19 @@ test.skipIf(!hasDom)('Hand off: the line switches and back, Send carries it, the
   expect(modeLine(el)!.getAttribute('data-tag-mode')).toBe('ask');
   expect(modeWords(el)).toBe('Asks Pi');
   expect(modeLinks(el)).toEqual(['Add instead', 'Hand off instead']);
+  const asked = draftLabel(el);
+  expect(asked).not.toBe('Reply to Pi');
   (el.querySelector('[data-tag-mode-to="handoff"]') as HTMLButtonElement).focus();
   await click(el.querySelector('[data-tag-mode-to="handoff"]'));
   expect(modeWords(el)).toBe('Hands this thread to Pi');
   expect(modeLinks(el)).toEqual(['Ask instead']);
-  expect(draftLabel(el)).toContain('Reply to Pi');
+  expect(draftLabel(el)).toBe('Reply to Pi');
   // The pressed link is gone once the line switches: focus is back in the field, so Mod+Enter still sends.
   expect(document.activeElement).toBe(box);
   // Ask instead goes back to exactly the Ask.
   await click(el.querySelector('[data-tag-mode-to="ask"]'));
   expect(modeWords(el)).toBe('Asks Pi');
-  expect(draftLabel(el)).not.toContain('Reply to Pi');
+  expect(draftLabel(el)).toBe(asked);
   await click(el.querySelector('[data-tag-mode-to="handoff"]'));
   // The reply box keeps its keys: Mod+Enter sends.
   await press(box, 'Enter', { metaKey: true });

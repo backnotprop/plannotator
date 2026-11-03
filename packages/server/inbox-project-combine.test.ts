@@ -282,8 +282,8 @@ describe("the window on a combined project", () => {
 
   test("Settings keeps each folder's size; deleting the head leaves the other folder as its own project", async () => {
     const w = await combined();
-    const store = (await (await fetch(url(w.server, "/api/inbox/settings"))).json()) as { store: { projects: { id: string; combined_into?: string; combined?: string[] }[] } };
-    const usage = new Map(store.store.projects.map((project) => [project.id, project]));
+    const store = (await (await fetch(url(w.server, "/api/inbox/settings/storage"))).json()) as { projects: { id: string; combined_into?: string; combined?: string[] }[] };
+    const usage = new Map(store.projects.map((project) => [project.id, project]));
     expect(usage.get(w.from)?.combined_into).toBe("ledger");
     expect(usage.get(w.into)?.combined).toEqual(["ledger-2"]);
 

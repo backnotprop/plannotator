@@ -358,6 +358,53 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
   });
 });
 
+describe("stopping or deleting an agent is the owner's (a guest never ends the owner's session)", () => {
+  /** A launched thread whose session started: Stop and Delete have a session to act on. */
+  async function launchedWorld() {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    mkdirSync(project.root, { recursive: true });
+    const launched = (key: string) => {
+      const id = inboxId("lch");
+      const started = w.inbox.store.startPersonThread({
+        project_id: project.id,
+        body: "Fix the build.",
+        to: { host: "claude-code", session: `launch:${id}` },
+        idempotency_key: key,
+        launch: { id, agent: "claude-code", session_ref: null, folder: project.root, scratch: false, started_at: new Date().toISOString() },
+      });
+      w.inbox.store.settleLaunch(started.message.id, { to: { host: "claude-code", session: `sess-${key}` }, session_ref: `s${key}` });
+      return { id, messageId: started.message.id, stopLog: join(w.inbox.store.dir, "launch", id, "start.log") };
+    };
+    return { ...w, launched };
+  }
+
+  test("Stop: a guest is refused and nothing is stopped; the owner over the tailnet and this computer stop it", async () => {
+    const w = await launchedWorld();
+    const a = w.launched("a");
+    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/stop`, body: {} }))).toEqual([403, "owner_only"]);
+    // A stop is logged in the launch's folder: a refused one leaves none.
+    expect(existsSync(a.stopLog)).toBe(false);
+    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
+    expect(readFileSync(a.stopLog, "utf8")).toContain(`stop sa:`);
+    const b = w.launched("b");
+    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/stop`, body: {} })).status).toBe(200);
+    expect(readFileSync(b.stopLog, "utf8")).toContain(`stop sb:`);
+  });
+
+  test("Delete: a guest is refused and the launch is kept; the owner over the tailnet and this computer delete it", async () => {
+    const w = await launchedWorld();
+    const a = w.launched("a");
+    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/delete`, body: {} }))).toEqual([403, "owner_only"]);
+    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeUndefined();
+    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/delete`, body: {} })).status).toBe(200);
+    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeString();
+    const b = w.launched("b");
+    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status).toBe(200);
+    expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+  });
+});
+
 describe("what stays refused for everyone over the tailnet", () => {
   for (const row of BLOCKED) {
     test(row.name, async () => {
