@@ -112,7 +112,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { revealArmed, useBoardReveal } from './reveal';
+import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -148,6 +148,7 @@ import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
 import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -4023,6 +4024,21 @@ function Inbox() {
     heldBack: revealHeldBack,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
+  // The Checklist reveal (proposal; its queue entry is off until approved): the Board's moment; the claim turns the
+  // Checklist on, then ChecklistIntro opens.
+  const stepsReveal = useStepsReveal({
+    due: snoozeIntroLatch.current?.next === 'steps',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
+  });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -4061,7 +4077,9 @@ function Inbox() {
     snoozeIntro.stage !== 'open' &&
     snoozeIntro.stage !== 'claimed' &&
     boardReveal.stage !== 'open' &&
-    boardReveal.stage !== 'claimed';
+    boardReveal.stage !== 'claimed' &&
+    stepsReveal.stage !== 'open' &&
+    stepsReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5476,6 +5494,16 @@ function Inbox() {
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
       {boardReveal.stage === 'open' && <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} />}
+      {stepsReveal.stage === 'open' && (
+        <ChecklistIntro
+          phone={phone}
+          onClose={stepsReveal.close}
+          onSettings={() => {
+            stepsReveal.close();
+            go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
+          }}
+        />
+      )}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

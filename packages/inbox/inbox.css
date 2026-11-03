@@ -6303,6 +6303,28 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
 
+/* The Checklist's reveal (proposal; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
+   small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
+   ones (.ib-stp, .ib-st-btn). */
+.ib-ci-art { padding-bottom: 18px; }
+.ib-ci-stage { position: relative; height: 240px; display: flex; flex-direction: column; border-radius: 10px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 60%, transparent); }
+.ib-ci-stage > * { transition: opacity 400ms ease; }
+.ib-ci-stage[data-fading] > * { opacity: 0; }
+.ib-ci-msg { flex: 1; min-height: 0; padding: 16px 18px 0; }
+.ib-ci-who { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.ib-ci-body { gap: 9px; }
+.ib-ci-body b, .ib-ci-body b + b { height: 5px; border-radius: 3px; background: var(--bi-bar2); }
+.ib-ci-foot { padding: 10px 12px; border-top: 1px solid var(--ib-hair); }
+.ib-ci-foot .ib-btn { cursor: default; }
+.ib-ci-anchor { position: relative; display: inline-flex; }
+.ib-ci-pop { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 2; text-align: left; }
+.ib-ci .ib-stg-done { animation: ib-ci-tick 260ms var(--ib-st-calm) both; }
+@keyframes ib-ci-tick { from { opacity: 0.25; transform: scale(0.7); } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-ci .ib-stg-done { animation: none; }
+  .ib-ci-stage > * { transition: none; }
+}
+
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-bmain { padding: 0; }
   .ib-bpage-card { display: flex; flex-direction: column; }
@@ -6344,6 +6366,10 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-bi-phone .ib-bi-lh { justify-content: center; }
   .ib-bi-phone .ib-bi-acts { flex-direction: column-reverse; align-items: stretch; }
   .pn-inbox .ib-bi-phone .ib-bi-acts .ib-btn, dialog .ib-bi-acts .ib-btn { min-height: 44px; justify-content: center; }
+  /* A phone's list shifts to fit, as the popover would: the stage's width, over the message. */
+  .ib-bi-phone .ib-ci-anchor { position: static; }
+  .ib-bi-phone .ib-ci-pop { left: 10px; right: 10px; bottom: 60px; width: auto; }
+  .ib-bi-phone .ib-ci-msg { padding: 14px 14px 0; }
   .ib-babout { width: 44px; height: 44px; }
   .ib-bback { height: 44px; padding: 0 12px 0 6px; }
   .ib-crdp-x { width: 44px; height: 44px; }

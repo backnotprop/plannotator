@@ -36,9 +36,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "snooze", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // The owner: "ok board can be 3 days, snooze 2". The claim turns the Board on (inboxBoard unset -> true).
   { id: "board", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
-  // Thread steps: an offer about a week in, not in the approved record. Its dialog needs its own mock and approval,
-  // so it stays off here: never next, never claimed, and no word of it reaches an agent.
-  { id: "steps", tenureMs: 7 * DAY_MS, minThreads: 0, enabled: false },
+  // The Checklist (thread steps): proposed, not approved (.ops/research/checklist-reveal, `ChecklistIntro`). Five days
+  // and the Board's five threads; the claim would turn the Checklist on (inboxSteps unset -> true). Off until the owner
+  // approves it: never next, never claimed, and no word of it reaches an agent.
+  { id: "steps", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: false },
 ];
 
 /** Never two reveals within this long on one machine. */
