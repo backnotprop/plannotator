@@ -1145,13 +1145,21 @@ for (const width of [320, 390]) {
           await expect(page.locator('html')).toHaveCSS('--inbox-text-size', '15');
           await page.waitForTimeout(300);
         }
-        const m = await page.evaluate(() => {
+        const m = await page.evaluate(async () => {
           const box = (e: Element) => {
             const b = e.getBoundingClientRect();
             return { left: b.left, right: b.right, top: Math.round(b.top), width: b.width, height: b.height };
           };
           const all = (s: string) => [...document.querySelectorAll(s)].map(box);
           const card = document.querySelector('[data-tour-coach]') as HTMLElement;
+          // The card comes in with a 160 ms scale (ib-pm-in): measure it at rest, with no transform on it or above it, read
+          // from fresh style. Without the read, WebKit on Linux CI can hand back boxes from a frame still scaled (43.8 px).
+          const scaled = () => {
+            for (let e: Element | null = card; e; e = e.parentElement) if (getComputedStyle(e).transform !== 'none') return true;
+            return false;
+          };
+          for (let frame = 0; frame < 120 && scaled(); frame++) await new Promise((r) => requestAnimationFrame(r));
+          if (scaled()) return null;
           const wordLines = (el: Element) => {
             const tops = new Set<number>();
             for (const node of el.childNodes) {
@@ -1175,6 +1183,7 @@ for (const width of [320, 390]) {
           };
         });
         const at = `${width} px, ${size} px text`;
+        if (!m) throw new Error(`${at}: the card was still scaled after 120 frames`);
         expect(m.docOverflowX, `${at}: the page`).toBeLessThanOrEqual(0);
         expect(m.cardOverflowX, `${at}: the card`).toBeLessThanOrEqual(0);
         expect(m.card.left, at).toBeGreaterThanOrEqual(0);

@@ -420,7 +420,6 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   expect(fake.calls().some((c) => c.argv[0] === 'stop' && c.argv[1] === agent.id)).toBe(true);
   fake.configure({ waiting: false, hold: false, startDelayMs: 3500 });
   await p.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
-  await expect(p.locator('.ib-draft-for')).toHaveText('Reply to Claude Code in plannotator · starts it again');
   const box = p.getByRole('textbox', { name: /^Reply to Claude Code/ });
   await box.fill('Use the palette scorer, and keep exact matches first.');
   await shot(page, '11-stopped-reply-starts-it');

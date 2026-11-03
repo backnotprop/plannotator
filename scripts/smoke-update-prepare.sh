@@ -78,6 +78,8 @@ smoke_env=(
   TMPDIR="$work/tmp"
   PLANNOTATOR_DATA_DIR="$work/data"
   PLANNOTATOR_UPDATE_CHECK=0
+  # env -i drops CI's variables, and the binary is a marked release: never the live daily ping.
+  NO_ANON_PING=1
   PLANNOTATOR_INSTALL_SCRIPT_URL="$base/install.sh"
   PLANNOTATOR_RELEASE_DOWNLOAD_URL="$base/dl"
   PLANNOTATOR_UPDATE_API_URL="$base/api/latest"

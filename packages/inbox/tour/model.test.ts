@@ -155,7 +155,7 @@ describe('the walk', () => {
     expect(tourCoach(s, names)).toMatchObject({ key: '9-loop', next: true });
     s = tourReducer(s, { type: 'next' });
     expect(tourCoach(s, names)).toMatchObject({ key: '9-also', next: true });
-    expect(tourCoach(s, names)!.items!.map((i) => i.title)).toEqual(['Pin a thread', 'Looks good', 'Re-ask', 'Send now']);
+    expect(tourCoach(s, names)!.items!.map((i) => i.title)).toEqual(['Pin a thread', 'Snooze', 'Looks good', 'Re-ask', 'Send now']);
     // "Make it yours" comes after the replay, over the thread with pictures, with Skip and a Next that names what comes next; then the person's own Inbox.
     s = tourReducer(s, { type: 'next' });
     expect(s).toMatchObject({ step: TOUR_SETTINGS_STEP, route: TOUR_THREAD, file: null });

@@ -168,11 +168,13 @@ describe("tags in a reply", () => {
     expect(wrong.status).toBe(422);
   });
 
-  test("without tags the old rule holds: any agent's read settles a plain reply", async () => {
+  test("without tags, only the owner's read settles a plain reply (handoff \"multi-agent-thread-model\", failure 1)", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "ses-owner", "Ship it?", CLAUDE);
     expect((await reply(server, asked.message_id, { idempotency_key: "k1", words: "Yes." })).status).toBe(200);
     await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-other" } });
+    expect(await poll(server, "ses-owner", "claude-code", project)).toHaveLength(1);
+    await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-owner" } });
     expect(await poll(server, "ses-owner", "claude-code", project)).toEqual([]);
   });
 

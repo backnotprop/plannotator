@@ -146,8 +146,15 @@ describe('a thread with two sessions: the row and the thread line agree on who a
     const asking = inboxAskingMessage(thread.messages, statesOf, inboxDefaultSkip(thread.messages.filter((m) => m.author.kind === 'agent'), statesOf));
     const askingSession = asking?.author.kind === 'agent' ? asking.author.session : null;
     const askerEnded = thread.resolved_at === null && asking?.wakes === true && !!askingSession && !live.askerLive(askingSession);
+    // Named for the session the reply goes to (`recipientName`): the agent it answers when that is another
+    // session than the thread's first agent, else the thread's agent.
+    const first = root.author.kind === 'agent' ? root.author : null;
+    const toAnother =
+      repliedTo.author.kind === 'agent' &&
+      !!first &&
+      ((repliedTo.author.session ?? null) !== (first.session ?? null) || (repliedTo.author.host ?? null) !== (first.host ?? null));
     return deliveryLine({
-      name: inboxAgentName(root.author),
+      name: inboxAgentName(toAnother ? repliedTo.author : root.author),
       deliveredAt: sentCheckedAt,
       time,
       wakes: repliedTo.wakes === true || (replySession !== null && connection != null),
@@ -190,6 +197,8 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       expect(rowDeliveryLine(row.delivery!, time)).toBe(line.text);
       expect(line.state).toBe(picked ? 'saved' : 'queued');
       if (picked) expect(line.text).toStartWith('Saved for Pi. The session that asked has ended');
+      // The words answer Claude Code's message (ses_b), so they go to it, not to Pi, who started the thread.
+      else expect(line.text).toContain('Claude Code is working');
     });
   }
 });

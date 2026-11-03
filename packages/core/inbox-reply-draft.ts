@@ -219,6 +219,11 @@ export interface ReplyDraftSaveInput {
   baseBody: string | null;
   /** The box's file changes since it last held the draft's files: the store applies them (`applyReplyDraftFileOps`). */
   files: ReplyDraftFileOps;
+  /**
+   * Who the reply goes to, as chosen in the recipient pill (session ids, the first answered, the rest tags); an
+   * empty list: none chosen. Absent: the draft keeps the recipients it has (a host or page that does not send them).
+   */
+  recipients?: readonly string[];
 }
 
 /**

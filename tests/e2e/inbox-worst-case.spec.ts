@@ -252,11 +252,14 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await page.locator('.ib-pfoot .ib-btn', { hasText: 'Reply' }).first().click();
       await page.locator('.ib-rtext').fill('Wait for Monday.');
       await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).click();
-      await page.waitForSelector('[data-route-choice]');
-      await page.locator('.ib-route .ib-more').click();
+      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient").
+      await page.waitForSelector('[data-recipient-list]');
       await page.waitForTimeout(300);
-      // Send stays in the window (row 6).
-      const send = (await page.locator('[data-route-send]').boundingBox())!;
+      // The list starts inside the window and scrolls; Send stays in the window (row 6).
+      const list = (await page.locator('[data-recipient-list]').boundingBox())!;
+      expect(list.y).toBeGreaterThanOrEqual(0);
+      expect(await page.locator('[data-recipient-list]').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      const send = (await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).boundingBox())!;
       expect(send.y + send.height).toBeLessThanOrEqual(w.height);
       expect(await shapes(page)).toEqual([]);
       await shot(page, `chooser-${w.name}`);
