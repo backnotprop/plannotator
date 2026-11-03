@@ -330,12 +330,12 @@ export interface PlannotatorConfig {
   /**
    * The `plannotator` agent tool (packages/shared/plannotator-tool.ts) on the
    * hosts that register it: the Claude Code mod, Pi (and the Pi extension in
-   * Oh My Pi) and OpenCode 2. `true` puts it in the agent's tool list, `false`
-   * keeps it out (the slash commands are unchanged either way). Read once when
-   * a session starts, so a change applies to the next session.
-   * PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's default,
-   * AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off on Pi
-   * and OpenCode 2).
+   * Oh My Pi), OpenCode 2 and DeepSeek Harness. `true` puts it in the agent's
+   * tool list, `false` keeps it out (the slash commands are unchanged either
+   * way). Read once when a session starts, so a change applies to the next
+   * session. PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's
+   * default, AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off
+   * on Pi, OpenCode 2 and DeepSeek Harness).
    */
   agentTool?: boolean;
   /**
@@ -442,6 +442,14 @@ export interface PlannotatorConfig {
   inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
   /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
   inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
+  /**
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in packages/server/inbox-snooze-intro.ts). Written
+   * only by a release build. `firstUseAt`: the oldest record of the event log, rebuilt once at the first release start
+   * that knows this key (and filled in later when the log was empty then). `snoozedAt`: the person snoozed something
+   * (the window, the phone, a linked machine's forward), so it never shows. `shownAt`: a page claimed it (`POST
+   * /api/inbox/snooze-intro`, a compare-and-set), once per machine.
+   */
+  inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on, off by default. On: the sidebar's Board row and page,
@@ -1291,6 +1299,31 @@ export function resolveUpdateCheck(
   return coerceConfigBoolean(config.updateCheck, true);
 }
 
+/** What in the environment turns the daily ping off (it can only turn it off). */
+export type TelemetryEnvOff = "DO_NOT_TRACK" | "NO_ANON_PING" | "CI";
+
+/** The CI variables that turn the daily ping off when set (CI itself: unless "0" or "false"). */
+export const TELEMETRY_CI_VARS = ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL", "TF_BUILD", "CODEBUILD_BUILD_ID"] as const;
+
+/**
+ * The environment's hard off for the daily ping, or undefined. In order:
+ * DO_NOT_TRACK set to anything but empty, 0, false, no or off (donottrack.sh);
+ * NO_ANON_PING set to any non-empty value other than "0" (the NO_COLOR
+ * convention); a CI variable. No value turns the ping on.
+ */
+export function parseTelemetryEnvOff(env: NodeJS.ProcessEnv = process.env): TelemetryEnvOff | undefined {
+  // DO_NOT_TRACK is the shared developer convention (donottrack.sh): honoured quietly, never named to users.
+  const dnt = env.DO_NOT_TRACK?.trim().toLowerCase();
+  if (dnt && !["0", "false", "no", "off"].includes(dnt)) return "DO_NOT_TRACK";
+  const noPing = env.NO_ANON_PING;
+  if (noPing !== undefined && noPing !== "" && noPing.trim() !== "0") return "NO_ANON_PING";
+  for (const name of TELEMETRY_CI_VARS) {
+    const v = env[name]?.trim().toLowerCase();
+    if (v && v !== "0" && v !== "false") return "CI";
+  }
+  return undefined;
+}
+
 /** The PLANNOTATOR_UPDATE_CHECK override, or undefined when it does not decide. */
 export function parseUpdateCheckEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
   const v = env.PLANNOTATOR_UPDATE_CHECK?.trim().toLowerCase();
@@ -1326,7 +1359,7 @@ export function resolveClaudeCodeMod(
  * from plain Pi itself (`apps/pi-extension/pi-host.ts`): it is the same
  * extension and the same session bridge (host `pi`), with its own default.
  */
-export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
+export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode" | "dsh";
 
 /**
  * Whether each host registers the `plannotator` agent tool when nothing is
@@ -1334,8 +1367,10 @@ export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
  * mod (the tool is deferred behind tool search there, so it costs only its
  * name until used) and for Oh My Pi (owner's call 2026-10-12: OMP lists an
  * extension tool as one line in its system prompt, about 50 tokens, and loads
- * the schema only when the model reads it); off on Pi and OpenCode 2 (a full
- * tool definition, about 800 tokens, in every request). The mod's mirror
+ * the schema only when the model reads it); off on Pi, OpenCode 2 and
+ * DeepSeek Harness (`dsh`, the `@plannotator/dsh` plugin; owner's call
+ * 2026-11-02): a full tool definition, about 800 tokens, in every request,
+ * and DSH keeps its tool list fixed for request caching. The mod's mirror
  * (`apps/hook/hooks/mod/enabled.ts`) is kept equal to the claude-code entry by
  * `enabled.test.ts`.
  */
@@ -1344,6 +1379,7 @@ export const AGENT_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = {
   pi: false,
   "oh-my-pi": true,
   opencode: false,
+  dsh: false,
 };
 
 /**
@@ -1402,14 +1438,13 @@ export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching). DSH has no
- * `plannotator` agent tool yet, so its entry is its own, off like Pi's.
+ * also keeps its tool list fixed for request caching).
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
-  dsh: false,
+  dsh: AGENT_TOOL_DEFAULTS.dsh,
 };
 
 export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];

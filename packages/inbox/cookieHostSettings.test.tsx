@@ -40,7 +40,7 @@ const baseModel = {
   inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
   notifications: { enabled: true, dismissed: false, allowed_origin: null },
   phones: false,
-  store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+  store_dir: '/home/u/.plannotator/inbox',
 } as unknown as SettingsModel;
 
 function render(cookieHost: InboxCookieHost | undefined, toggles: boolean[]) {

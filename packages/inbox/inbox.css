@@ -1464,6 +1464,14 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-stbl tr.ib-sub td:first-child { padding-left: 26px; color: var(--muted-foreground); }
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .ib-store-note { padding-left: 19px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* Settings → Storage while its sizes are counted (owner's choice "A · The calm wait", 2026-11-02): the card holds its
+   place, the total is a soft bar about a number wide, the words come only after 0.4 s, and the numbers fade in. */
+.ib-store-wait { min-height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-store-wait-t { animation: ib-store-in 200ms ease-out both; }
+.ib-store-bar { display: inline-block; width: 4.2em; height: 0.85em; vertical-align: -0.05em; border-radius: 4px; background: color-mix(in srgb, var(--muted-foreground) 18%, transparent); }
+.ib-store-in { animation: ib-store-in 160ms ease-out both; }
+@keyframes ib-store-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ib-store-wait-t, .ib-store-in { animation: none; } }
 .pn-inbox .ib-del-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
 /* Archived in Settings (owner ruling 2026-10-12): Settings' own rows, one per archived thread. */
@@ -6183,12 +6191,20 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-crdp-phone .ib-crdp-foot .ib-btn { min-height: 44px; }
   .ib-crdp-notesform textarea, .ib-crdp-link input, .ib-crdp-drop input, .ib-ncd-title, .ib-ncd-notes, .ib-ncd-links input { font-size: var(--ib-fs-16-in, 16px); }
-  dialog.ib-dlg.ib-ncd.ib-ncd-phone { width: 100vw; height: var(--ib-vvh, 100dvh); max-height: none; border-radius: 0; margin: 0; }
+  /* The whole screen: a modal <dialog> keeps the browser's `max-width: calc(100% - 6px - 2em)`, so lift it, or the
+     window is capped (286 px at 320) and sits at the left edge. */
+  dialog.ib-dlg.ib-ncd.ib-ncd-phone { inset: 0 auto auto 0; width: 100%; max-width: none; height: var(--ib-vvh, 100dvh); max-height: none; border: 0; border-radius: 0; margin: 0; }
   .ib-ncd-phone .ib-ncd-form { height: var(--ib-vvh, 100dvh); }
   .ib-ncd-phone .ib-ncd-body { flex: 1; }
   .ib-ncd-phone .ib-ncd-modes { flex: 1; justify-content: space-around; }
   .ib-ncd-phone .ib-ncd-mode { min-height: 44px; flex: 1; justify-content: center; }
-  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) 12px 0; min-height: 56px; }
+  /* Every edge clears the safe areas (a phone on its side has ~59 px left and right; the home bar is below). */
+  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left)); min-height: 56px; }
+  .ib-ncd-phone .ib-ncd-body { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-row { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-err { margin-left: calc(22px + env(safe-area-inset-left)); margin-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-foot { padding: 12px calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
+  :root[data-ib-keyboard] .ib-ncd-phone .ib-ncd-foot { padding-bottom: 12px; }
   .ib-ncd-phone .ib-ncd-head h2 { text-align: center; }
   .ib-ncd-pick .ib-cp-picker { left: 8px; right: 8px; width: auto; }
   dialog.ib-dlg.ib-bi.ib-bi-phone { margin: auto auto 12px; }
@@ -6882,6 +6898,39 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .ib-vo-picture .ib-rbox { margin: 0; }
 .ib-vo-text { padding: 10px 12px 6px; min-height: 52px; line-height: 1.55; }
 .ib-lo-text p.ib-vo-route { margin-top: 10px; color: var(--foreground); }
+/* The one-time Snooze announcement (approval "inbox-snooze-announce", B "The real menu"; components/SnoozeIntro.tsx):
+   the list intro's shell, 520 px. Its picture is static and in the person's own mode (no light scope): two real rows
+   in a card, the real "Snooze until" menu (`.ib-pm`) over the target row's right edge with a pointer on Tomorrow, and
+   the real toast (`.ib-toast`) at rest under them. Nothing in it moves: the menu's and the toast's entrances are off.
+   A phone: the ⋯ sheet's times (`.ib-pm-pos[data-phone]`'s own sizes), in the sheet's place at the top. */
+dialog.ib-dlg.ib-lo.ib-zx { width: min(520px, calc(100vw - 32px)); }
+.ib-lo.ib-zx .ib-lo-art { padding: 22px 22px 17px; }
+.ib-zx-scene { position: relative; height: 264px; }
+dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibility: visible; width: 300px; max-width: 100%; height: auto; border: 0; border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; }
+.ib-zx-list .ib-lbody { overflow: hidden; padding-bottom: 10px; }
+.ib-zx-list .ib-lbody > .ib-group > .ib-rw { content-visibility: visible; }
+.ib-zx-list :is(.ib-nrow .ib-l2 > .ib-title, .ib-nrow .ib-l3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-pm.ib-zx-menu { position: absolute; left: 248px; top: 19px; width: 210px; animation: none; text-align: left; }
+.ib-zx-menu .ib-pmi { position: relative; }
+.ib-zx-pointer { position: absolute; left: 76px; top: 7px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
+.ib-toast.ib-zx-toast { position: absolute; left: 0; top: 224px; bottom: auto; transform: none; z-index: auto; animation: none; max-width: 300px; text-align: left; }
+/* "New" above the title: quiet accent text, no fill or border. */
+.ib-zx-new { margin: 0 0 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--primary); }
+.ib-lo-text .ib-zx-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--foreground); }
+.ib-zx-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); }
+.ib-zx-pos[data-phone] { position: static !important; transform: none !important; width: auto !important; }
+.ib-zx-pos .ib-pm.ib-zx-menu { position: static; width: auto; animation: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The bottom sheet's width (the shared phone rule loses to the 520 px width above, which comes later). */
+  dialog.ib-dlg.ib-lo.ib-zx.ib-lo-phone { width: calc(100vw - 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-zx .ib-lo-art { padding: 14px 14px 12px; }
+  /* A picture of the sheet, not the sheet: flat, its rows drawn compact (the real sheet's are 48 px touch rows). */
+  .ib-zx-pos[data-phone] .ib-pm { box-shadow: none; }
+  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; padding: 0 6px; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 22px 0; }
+  .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
+}
 /* Settings → Voice. */
 .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }

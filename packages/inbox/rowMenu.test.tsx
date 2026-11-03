@@ -168,7 +168,7 @@ async function renderApp(hash = '') {
   });
   await until(() => !!rowButton(ids.waiting), 'the list');
   // The settings carry the Inbox's one address.
-  await until(() => fetched.includes('/api/inbox/settings'), 'the settings');
+  await until(() => fetched.some((path) => path.split('?')[0] === '/api/inbox/settings'), 'the settings');
   await act(async () => {
     await new Promise((r) => setTimeout(r, 50));
   });
