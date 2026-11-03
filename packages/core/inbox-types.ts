@@ -30,6 +30,7 @@ export * from "./inbox-open-in";
 export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";
+export * from "./inbox-t3";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
@@ -334,6 +335,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   grok: "Grok Build",
   qwen: "Qwen Code",
   dsh: "DeepSeek Harness",
+  t3: "T3 Code",
 };
 
 /**
@@ -345,13 +347,15 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * and Qwen Code through MCP alone, where the Inbox sends the reply into the
  * running session over Qwen's cross-session messaging (Qwen Code
  * INBOX_QWEN_WAKE_MIN_VERSION or later, macOS and Linux;
- * packages/server/inbox-qwen-wake.ts).
+ * packages/server/inbox-qwen-wake.ts), and a T3 Code thread through MCP
+ * alone, where the Inbox sends the reply into the thread through T3's MCP API
+ * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen", "t3"] as const;
 
-/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex and Qwen Code. */
-export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen"];
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
 
 /** The first version of each agent MCP alone wakes that can be woken. */
 export const INBOX_MCP_WAKE_MIN_VERSIONS: Readonly<Record<string, string>> = { codex: INBOX_CODEX_QUEUE_MIN_VERSION, qwen: INBOX_QWEN_WAKE_MIN_VERSION };
