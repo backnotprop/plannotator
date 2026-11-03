@@ -8,7 +8,7 @@ export function t3Endpoint(value: string): URL {
     throw new Error("T3 requires HTTPS, or HTTP on loopback for a local environment.");
   }
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/mcp") {
-    throw new Error("Use the MCP URL from T3 Settings → Connections, ending in /mcp without credentials or query parameters.");
+    throw new Error("Use the MCP URL from T3 (Settings → Environments, the environment's menu, Copy MCP URL), ending in /mcp without credentials or query parameters.");
   }
   return url;
 }
