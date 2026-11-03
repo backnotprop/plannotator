@@ -70,6 +70,9 @@ import type {
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
+/** A reveal for returning users, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server side). */
+export type InboxRevealId = 'snooze' | 'board' | 'steps';
+
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
@@ -367,6 +370,8 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
+  /** The reveals for returning users: the one this page may arm (POST /api/inbox/reveal), or null. Absent from an older Inbox. */
+  reveal?: { next: InboxRevealId | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -1372,6 +1377,8 @@ export const inboxApi = {
   claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
   /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
   claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
+  /** A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). The Board's turns the Board on. */
+  claimReveal: (id: InboxRevealId) => post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean } }>(inboxUrl('/reveal'), { id }),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),

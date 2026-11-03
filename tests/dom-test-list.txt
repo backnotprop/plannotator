@@ -210,6 +210,7 @@ packages/inbox/settingsSections.test.tsx
 packages/inbox/searchPalette.test.tsx
 packages/inbox/searchShortcut.test.tsx
 packages/inbox/openIn.test.tsx
+packages/inbox/openInCheck.test.tsx
 packages/inbox/htmlLinks.test.tsx
 packages/inbox/markdownLinks.test.tsx
 packages/inbox/videoAttachment.test.tsx
@@ -492,3 +493,4 @@ packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
+packages/inbox/boardReveal.test.tsx
