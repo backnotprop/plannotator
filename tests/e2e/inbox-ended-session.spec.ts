@@ -8,8 +8,9 @@
  * connection drives them (inbox-new-message.spec.ts has the same harness).
  *
  * Two sessions: the one that asked polls once and stops; a second one keeps
- * polling. The person replies, chooses the second session at Send, and the
- * reply reaches it with the line saying the asker ended. Then the second one
+ * polling. The person replies; Send opens the recipient pill's list once
+ * (approval "inbox-reply-recipient"), the person picks the second session,
+ * and the reply reaches it with the line saying the asker ended. Then the second one
  * stops too, and a reply with nothing live is saved for the next agent.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -226,46 +227,38 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const box = pane.getByRole('textbox', { name: 'Reply to Pi' });
   const words = 'Go with backoff, but cap the total wait at 10 minutes so it finishes before the 2 AM export.';
   await box.fill(words);
-  // The note sits in one always-mounted status region, which describes the box.
-  const region = pane.locator('[data-asker-note]');
-  await expect(region).toHaveAttribute('role', 'status');
-  await expect(box).toHaveAttribute('aria-describedby', (await region.getAttribute('id'))!);
+  // The box open: the recipient pill under it names the asker, ended, in the note's place (approval
+  // "inbox-reply-recipient"); the note's always-mounted status region stays.
+  const pill = pane.locator('[data-recipient]');
+  await expect(pill).toHaveAttribute('aria-label', 'To Pi, ended. Change who gets this reply');
+  await expect(pane.locator('[data-asker-note]')).toHaveAttribute('role', 'status');
+  await expect(pane.locator('[data-asker-ended]')).toHaveCount(0);
   await shot('1-ended');
 
-  // Send does not send: the choice, the first live session selected and focused.
+  // Send does not send: the pill's list opens once, the live session first and the asker, ended, last.
+  // "Where should this reply go?" is gone.
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  const choice = pane.locator('[data-route-choice]');
-  await expect(choice.getByRole('group', { name: 'Where should this reply go?' })).toBeVisible();
-  const taking = choice.locator('[data-route-session="pi-session-taker"] input');
-  await expect(taking).toBeChecked();
-  await expect(taking).toBeFocused();
-  const primary = choice.locator('[data-route-send]');
-  await expect(primary).toHaveText('Send to Pi');
+  const list = pane.locator('[data-recipient-list]');
+  await expect(list).toBeVisible();
+  await expect(list.locator('[data-recipient-row]')).toHaveText([/^Pi 2/, /^Pi\s*ended$/]);
+  await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
   await expect(box).toHaveValue(words);
   await shot('2-choose');
   expect((await threadMessages()).filter((m) => m.author.kind === 'person')).toHaveLength(0);
 
-  // Esc with focus on a button of the choice goes back to the reply; the thread stays open.
-  await primary.focus();
+  // Esc closes the list; the thread stays open with the words.
   await page.keyboard.press('Escape');
-  await expect(choice).toHaveCount(0);
+  await expect(list).toHaveCount(0);
   await expect(pane.getByRole('heading', { name: 'Retry policy for the nightly ledger sync' })).toBeVisible();
-  await expect(box).toBeFocused();
-  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
-  await expect(taking).toBeFocused();
-
-  // Arrow keys move the selection and the button follows; Esc goes back with the draft and its choice.
-  await page.keyboard.press('ArrowDown');
-  await expect(primary).toHaveText('Leave it for the next agent');
-  await page.keyboard.press('ArrowUp');
-  await expect(primary).toHaveText('Send to Pi');
-  await page.keyboard.press('Escape');
-  await expect(choice).toHaveCount(0);
-  await expect(box).toBeFocused();
   await expect(box).toHaveValue(words);
+
+  // The live session picked by name: the pill names it, and Mod+Enter sends to it.
+  await pill.click();
+  await list.locator('[data-recipient-row="pi-session-taker"] .ib-rpick-name').click();
+  await expect(list).toHaveCount(0);
+  await expect(pill).toHaveAttribute('aria-label', 'To Pi 2. Change who gets this reply');
+  await box.focus();
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(pane.locator('[data-route-session="pi-session-taker"] input')).toBeFocused();
-  await page.keyboard.press('Enter');
 
   // The reply, addressed to the picked session, and its wake.
   const command = await waitFor('the redirected reply handed to the second session', () => taker.commands[0]);

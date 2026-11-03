@@ -11,8 +11,10 @@
  *
  * The session: inside an agent host session (a Claude Code session's
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`) the card is
- * that session's, as its `plannotator_inbox` tool would make it; otherwise it
- * is nobody's in particular, and `list` lists every card in the project.
+ * that session's, as its `plannotator_inbox` tool would make it, and in that
+ * session's project (`PLANNOTATOR_SESSION_PROJECT`) unless `--project` names
+ * one; otherwise it is nobody's in particular, the project is the shell's
+ * folder, and `list` lists every card in the project.
  *
  * stdout: the tool's text (or its structured result with --json). A refusal
  * goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
@@ -22,7 +24,7 @@ import { resolve } from "node:path";
 import { mcpAnswerOf } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { CARD_COMMAND_USAGE } from "./cli";
-import { inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 export { CARD_COMMAND_USAGE };
 
@@ -58,7 +60,8 @@ const POSITIONAL: Record<Op, { names: readonly string[]; required: number }> = {
 };
 
 export function parseCardCommand(argv: readonly string[]): ParsedCardCommand {
-  const op = argv[0] as Op | undefined;
+  // `card done <crd_id>` is `card ship` (its column is Done).
+  const op = (argv[0] === "done" ? "ship" : argv[0]) as Op | undefined;
   if (!op || !Object.hasOwn(POSITIONAL, op)) return { ok: false, error: op ? `Unknown card command: ${op}` : "A card command: create, move, say, link, ship, drop or list." };
   const args: Record<string, unknown> = { op };
   const positional: string[] = [];
@@ -116,9 +119,11 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
     err(`${parsed.error}\n${CARD_COMMAND_USAGE}\n`);
     return 2;
   }
-  const args: Record<string, unknown> = { ...parsed.args, project_path: resolve(deps.cwd, parsed.project ?? ".") };
-  // Inside an agent host session the card is that session's, as its plannotator_inbox tool would make it.
+  // Inside an agent host session the card is that session's, as its plannotator_inbox tool would make it, in that
+  // session's project when --project names none (PLANNOTATOR_SESSION_PROJECT), wherever the shell stands.
   const host = inboxHostSessionFromEnv(deps.env);
+  const project = parsed.project !== null ? resolve(deps.cwd, parsed.project) : inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host, deps.cwd);
+  const args: Record<string, unknown> = { ...parsed.args, project_path: project };
   if (host) {
     args.agent_session = host.session;
     args.agent_host = host.host;

@@ -71,6 +71,7 @@ Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this st
 |-------|------------|---------------|
 | Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
 | Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
+| DeepSeek Harness | Plannotator's plugin (`@plannotator/dsh`) is in a DSH profile (`~/.dsh/profiles`, or `$DSH_HOME/profiles`) | the inbox tool turned on. Without the plugin, add it yourself: `dsh plugin --profile <profile> add @plannotator/dsh`. Plannotator never runs `dsh`. |
 | Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
 | Codex | `codex` 0.35 or later on your `PATH` (older Codex has no `codex mcp add`, and a `~/.codex` or `$CODEX_HOME` folder without the CLI: connect it by hand) | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
 | Gemini CLI | `gemini` 0.1.19 or later on your `PATH` (older has no `gemini mcp add`: connect it by hand; `$GEMINI_CLI_HOME` honored) | `gemini mcp add -s user plannotator-inbox` |
@@ -82,7 +83,7 @@ Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this st
 Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from its next session. Before it runs an agent's own command, Plannotator checks the program's `--version`, so a different program with the same name is never handed it. Cline is not connected automatically yet: add it in Cline's MCP settings. When an agent started the Inbox in the background, a later `plannotator inbox` connects agents with the Inbox's environment (the `PATH` and home it was started with).
 
 - Every later `plannotator inbox` connects an agent installed since, and says so once ("Connected Amp to the Inbox (new on this computer)").
-- An agent you turned off (its switch in the Inbox's Settings → Agents, or `inboxTool: false` in config.json for Pi and OpenCode), or whose `plannotator-inbox` entry you removed after Plannotator added or found it, is never added back by itself. Turn it back on in Settings → Agents.
+- An agent you turned off (its switch in the Inbox's Settings → Agents, or `inboxTool: false` in config.json for Pi, OpenCode and DeepSeek Harness), or whose `plannotator-inbox` entry you removed after Plannotator added or found it, is never added back by itself. Turn it back on in Settings → Agents.
 - An agent only you can connect (no CLI on your `PATH`, Pi before 0.99, Cline) is named once on the terminal with the reason, and again only if the reason changes.
 - An existing `plannotator-inbox` entry that runs something else is never replaced.
 - In a JSON file only that one entry is added; every other byte of the file stays as it was, and removing it gives the file back exactly as it was (an empty file stays empty; a file Plannotator created is deleted). A file Plannotator cannot edit that way (comments, a duplicate key) is left as it was, and the terminal says why.
@@ -183,17 +184,18 @@ The Board shows work in flight, by stage, as cards: one card per piece of work t
 
 **It is off until you turn it on**, in **Settings → Capabilities → Board** (or with **Turn it on** on the Board's own page). Off, there is no Board in the sidebar, and agents are not offered cards. On, agents get the `card` action from their next session: a session already running keeps the tools it started with (it can still use `plannotator card` in its shell). Turning it off again keeps every card: an agent that still tries gets "the Board is off" and nothing is written, and turning it back on shows the cards as they were. The switch changes nothing else in the Inbox.
 
-- **The lanes.** **Backlog** (work asked for and not started, or a card you wrote), **Designing**, **Your look**, **Building** and **Your review**. In Your look and Your review a card says what you owe ("You: approve the copy"). A card shows the agent, the title, the agent's last word and how long ago it heard. A card with a pull request or issue shows its state as a small icon in GitHub's colours (open, draft, merged or closed; an issue open or closed), read only while the Board is open, only for the cards on screen, and kept for five minutes; the state never moves a card. A page opened over your tailnet by a login in `inboxTailscaleAllow` does not read it. A card an agent wrote to since you last opened the Board is bold until you leave. The header counts what is in flight and what is on you; **Shipped** and **Icebox** are links to their own lists.
-- **A card.** Click one to open it beside the lanes: move it (the Move menu, or drag it to another lane), the agent and whether it is working, **Ask where this is** (a short message to its agent, or to another session in the project when its agent has ended), your notes, its threads (a click opens the thread, with a way back to the card), its links (pull requests and issues, with their live state read when you open the card), and its history. **Start** asks the card's agent to begin; **Send to an agent** gives a card nobody was asked about to a running session. **Ship**, **Icebox** and **Drop…** are at its foot.
-- **The Icebox.** Cards you put aside. Nothing happens to them and no agent moves one out; **Restore** puts it back where it was. Cards that were dropped are listed there too, with who dropped them and why. When an agent drops a card, a note above the lanes says so until you look.
-- **New card.** A title, notes, links and the project; **Add to Backlog**, **Send to an agent** (a new thread to a running session, naming the card), or **Add to Icebox**.
+- **The lanes.** **Backlog** (ideas nobody asked for yet: yours, or one an agent proposes), **Todo** (asked for or sent to an agent, not started), **In progress**, **In review** and **Done** (what was done in the last seven days). A column says where the work stands, not whose move it is. An agent moves a card to In review on purpose when it hands the work over (a ready pull request, screenshots, options to pick from), and the card says what you owe ("You: approve the copy"); a question an agent asks mid-work leaves its card in In progress, and the card says **Waiting on you** with the thread's subject until you answer (a click opens the thread). A card shows the agent, the title, the agent's last word and how long ago it heard. A card with a pull request or issue shows its state as a small icon in GitHub's colours (open, draft, merged or closed; an issue open or closed), read only while the Board is open, only for the cards on screen, and kept for five minutes. While the Board is open, when every pull request an agent linked as the card's own has merged (and none is open), the card moves to Done by itself and its history says so; move it back if it is not finished, and it stays where you put it. Agents also move a card to Done when they see its pull request merge. An unknown state never moves a card. A page opened over your tailnet by a login in `inboxTailscaleAllow` does not read it. A card an agent wrote to since you last opened the Board is bold until you leave. **All done** and **Cancelled** in the header are links to their own lists.
+- **A card.** Click one to open it beside the lanes: move it (the Move menu, or drag it to another lane), the agent and whether it is working, **Ask where this is** (a short message to its agent, or to another session in the project when its agent has ended), your notes, its threads (a click opens the thread, with a way back to the card), its links (pull requests and issues, with their live state read when you open the card), and its history. **Start** asks the card's agent to begin; **Send to an agent** gives a card nobody was asked about to a running session. **Mark done** and **Cancel…** are at its foot.
+- **Backlog is yours.** A card you put in Backlog stays there: no agent moves it out until you send it to one (or press **Start**), which puts it in Todo. Boards from before these columns keep their cards: the Icebox became Backlog, and the other columns map to the new ones.
+- **Cancelled.** Cards that were cancelled, with who cancelled them and why; **Restore** puts one back where it was. When an agent cancels a card, a note above the lanes says so until you look.
+- **New card.** A title, notes, links and the project; **Add to Backlog**, or **Send to an agent** (a new thread to a running session, naming the card; the card goes to Todo).
 - **The first visit.** The first time you open the Board after turning it on, a short dialog offers a prompt to copy into your agent, asking it to make cards for the work it already has. The **?** in the header shows it again.
 
 On a phone the Board is one list, a fold per lane, and a card opens full screen.
 
 ## Connecting your agent
 
-Before any agent has written, the Inbox window shows one next step for this computer: Plannotator's own connections first (Claude Code, Pi and OpenCode 2, where your reply arrives in the session as a new turn on its own), then agents that reach it through MCP, which see your reply the next time they check the Inbox (except Codex 0.149 or later and Qwen Code 0.24 or later, where it arrives as a new turn too). A tool that is off turns on with one click. A plugin that is missing shows its install command to copy; the window never installs anything, and it moves on by itself once you have. Below the step, a short list says which agents are already connected and what is left.
+Before any agent has written, the Inbox window shows one next step for this computer: Plannotator's own connections first (Claude Code, Pi, OpenCode 2 and DeepSeek Harness, where your reply arrives in the session as a new turn on its own), then agents that reach it through MCP, which see your reply the next time they check the Inbox (except Codex 0.149 or later and Qwen Code 0.24 or later, where it arrives as a new turn too). A tool that is off turns on with one click. A plugin that is missing shows its install command to copy; the window never installs anything, and it moves on by itself once you have. Below the step, a short list says which agents are already connected and what is left.
 
 ### Claude Code
 
@@ -221,13 +223,27 @@ export PLANNOTATOR_INBOX_TOOL=1
 
 Restart OpenCode. On OpenCode 2 a reply is queued into the session as its own turn once the session is idle, and the thread shows "Delivered to OpenCode"; **Send now** steers it into the running turn instead. On OpenCode 1 the agent has the tool but is not woken. It reads replies with `read_thread`.
 
+### DeepSeek Harness
+
+Add [Plannotator's DeepSeek Harness plugin](https://www.npmjs.com/package/@plannotator/dsh) to a profile (`dsh plugin --profile <profile> add @plannotator/dsh`), then run `plannotator inbox`: it turns the inbox tool on for DeepSeek Harness when it finds the plugin. The tool is off by default, for the same reason as Pi: DSH sends every tool's definition with each request. To turn it on yourself, use **Settings → Agents**, or add this to `~/.plannotator/config.json` (keep its other keys):
+
+```json
+{ "inboxTool": { "dsh": true } }
+```
+
+It applies when DeepSeek Harness next starts, so restart DSH. When the session is idle, a reply arrives as a new turn. DSH never interrupts a turn for it. **Send now** steers the reply into the running turn instead. The thread shows "Delivered to DeepSeek Harness". When a subagent writes, the reply goes to the session that started it. The `headless`, `sdk`, `sdk-minimal` and `acp` profiles get no tool and no wake. DeepSeek Harness has no reminder at session start yet.
+
+DSH runs its plugins in its own process, so DSH and its other plugins can read what Plannotator's plugin holds. The plugin keeps no copy of the Inbox's key: it reads the key from `~/.plannotator/inbox/inbox.json` for each request, and never writes it to the plugin's config, a log, a tool result or a message. A reply you send becomes part of the DSH session, like anything you type there.
+
+By default, DeepSeek Harness sends its session to DeepSeek, including the Inbox messages and replies the agent reads. The Inbox key is never in the session.
+
 ### The same session in two windows
 
-You can open one Pi session twice (`pi -c` or `--session`), or run two OpenCode 2 servers on one database. Then only one process delivers a reply: the one you used last. On Pi, typing in a window or the agent calling the inbox tool there moves replies to that window. On OpenCode 2, only the agent calling the inbox tool moves them, because the plugin does not see what you type (checked on OpenCode 2.0.19). The process that holds replies checks in every 5 seconds. If it quits, another process takes over at once, and if it crashes, after about 20 seconds. A reply is delivered once either way.
+You can open one Pi session twice (`pi -c` or `--session`), or run two OpenCode 2 servers on one database. Then only one process delivers a reply: the one you used last. On Pi, typing in a window or the agent calling the inbox tool there moves replies to that window. On OpenCode 2, only the agent calling the inbox tool moves them, because the plugin does not see what you type (checked on OpenCode 2.0.19). On DeepSeek Harness (Web and Desktop on one session), typing or the agent calling the inbox tool moves them, as on Pi. The process that holds replies checks in every 5 seconds. If it quits, another process takes over at once, and if it crashes, after about 20 seconds. A reply is delivered once either way.
 
 ## The inbox tool setting
 
-The `plannotator_inbox` tool is one tool. Its actions are the Inbox's MCP tools (listed below). It files messages under the project of the agent's working folder; an agent working in another folder (a notes folder, say) can pass `project_path` to name the repository or folder the message is about. Pi and OpenCode add it only when both of these are true at session start:
+The `plannotator_inbox` tool is one tool. Its actions are the Inbox's MCP tools (listed below). It files messages under the project of the agent's working folder; an agent working in another folder (a notes folder, say) can pass `project_path` to name the repository or folder the message is about. Pi, OpenCode and DeepSeek Harness add it only when both of these are true at session start (DeepSeek Harness: when DSH loads the plugin):
 
 - the Inbox is installed (you ran `plannotator inbox` once), and
 - the inbox tool setting is on for that host.
@@ -239,6 +255,7 @@ Claude Code needs only the setting: before the Inbox was ever installed, the too
 | Claude Code (with the mod) | on |
 | Pi | off |
 | OpenCode | off |
+| DeepSeek Harness | off |
 
 There are three ways to change it. The first that decides wins:
 
@@ -246,7 +263,7 @@ There are three ways to change it. The first that decides wins:
 2. `inboxTool` in `~/.plannotator/config.json`: one boolean for every host, or one per host, for example `{ "inboxTool": { "pi": true, "opencode": false } }`. The switches in the Inbox's **Settings** write this key, and they are disabled while the environment variable decides.
 3. The default in the table above.
 
-The setting is read when a session starts and never during one, because a change to the tool list mid-session would invalidate the model's prompt cache. After a change, restart Claude Code or OpenCode, or start a new Pi session (or `/reload`).
+The setting is read when a session starts and never during one, because a change to the tool list mid-session would invalidate the model's prompt cache. After a change, restart Claude Code, OpenCode or DeepSeek Harness, or start a new Pi session (or `/reload`).
 
 ### The reminder at session start
 
@@ -331,7 +348,7 @@ The stdio command fills in the project (its working folder) and a session id for
 | `resolve_message` | Resolve (archive) or reopen a thread |
 | `get_guide_brief` | Get the brief for writing a guided review, with an example that works as it is |
 | `submit_guide` | Send a guided review: a guide plus its patch, or a snapshot |
-| `card` | Only while the Board is on (see [The Board](#the-board)). Make, move and keep its cards current: `create`, `move`, `say` (its last word, and what you owe in Your look or Your review), `link` (a thread, a pull request or an issue), `ship`, `drop` (with a reason) and `list`. Only you put a card in the Icebox or restore one |
+| `card` | Only while the Board is on (see [The Board](#the-board)). Make, move and keep its cards current: `create`, `move`, `say` (its last word, and what you owe in In review), `link` (a thread, a pull request or an issue), `ship` (to Done), `drop` (cancel, with a reason) and `list`. Columns: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `dropped`; the names agents used before (`shipped` among them) still work. An agent cannot move a card you put in Backlog, and only you restore a card you cancelled |
 
 No tool answers, approves or sends anything for you.
 
@@ -433,6 +450,10 @@ When a newer Plannotator release is out, the sidebar shows an **Update** button 
 Click **Update to X** to see what's new and what will happen, then **Update now**: the install script runs for that version with the choices from your last install, the button reads **Updating…**, and when the new binary is in, the Inbox restarts on it and the page reloads. Open reviews keep running on the old version until you finish them. **Remind me tomorrow** hides the button for that version for a day. Tick **Install new versions automatically** to let Plannotator do this by itself from then on.
 
 If the binary was already updated (by auto-update, `plannotator update`, or the install script), the button restarts the Inbox at once; if you are typing a reply, it asks first. If an update you started fails, the button reads **Update failed** and shows the exit code and the log. After an update, **What's new in X** sits above Settings for that run.
+
+### Privacy
+
+**Settings → About → Privacy** says what the anonymous daily ping sends: once a day, each Plannotator tool you use sends its name, the version, and how many weeks since this computer first used Plannotator, with no ID. To turn it off, set `NO_ANON_PING=1` and restart Plannotator. See the [privacy policy](/privacy/).
 
 A Claude Code window keeps the plugin it started with until you reload it. While any connected Claude Code session runs an older plugin than the one installed, the sidebar shows **Reload Claude Code N** under What's new. It opens **Settings → Agents**, where **Open sessions** lists them: type `/reload-plugins` in each (it keeps the session and interrupts nothing; several sessions in the same folder each need their own, and the list tells them apart by when they started). If one is still listed after that, type `/exit` in it and run the command **Copy restart** gives (it starts the same session again in its folder). The row goes away by itself once they have the new plugin. For Pi the same row says to run `pi update --extensions`, then `/reload`. Only sessions connected to the Inbox (the Inbox tool on) are seen.
 

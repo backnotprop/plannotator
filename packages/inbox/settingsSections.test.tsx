@@ -201,9 +201,10 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
+    '#settings/rows',
     '#settings/agents',
     '#settings/prompts',
     '#settings/devices',
@@ -312,6 +313,71 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(board.contains(switchNamed(el, 'Decision mode'))).toBe(false);
 });
 
+test.skipIf(!hasDom)('Storage asks for its sizes only when shown: the card holds its place, "Counting what is stored…" only after 0.4 s, then the numbers; a second visit shows them at once', async () => {
+  const { STORE_SLOW_MS } = await import('./components/Settings');
+  // The storage read is held until the test lets it go, as a slow count would be.
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let asked = 0;
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/api/inbox/settings/storage')) {
+      asked += 1;
+      await held;
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+  const counting = (el: ParentNode) => el.textContent?.includes('Counting what is stored…') === true;
+
+  const el = await renderApp('#settings/general');
+  await until(() => el.querySelector('[data-settings-notifications]') !== null, 'General');
+  // Settings itself never asks for the walk: no storage read, and its own reads carry the marker that leaves it out.
+  expect(asked).toBe(0);
+  const settingsReads = requests.filter((r) => /^GET \/api\/inbox\/settings(\?|$)/.test(r));
+  expect(settingsReads.length).toBeGreaterThan(0);
+  expect(settingsReads.every((r) => r === 'GET /api/inbox/settings?store=0')).toBe(true);
+
+  // When the words first show, by the page's own clock (an observer, not this test's polling, so a slow machine
+  // cannot make them look early). The clock starts before the click, so it can only make them look later.
+  let wordsAt: number | null = null;
+  const watch = new MutationObserver(() => {
+    if (wordsAt === null && counting(el)) wordsAt = performance.now();
+  });
+  watch.observe(el, { subtree: true, childList: true, characterData: true });
+  const opened = performance.now();
+  act(() => navLink(el, 'storage').click());
+  await until(() => heading(el) === 'Storage' && asked === 1, 'Storage asking for its sizes');
+  // While the count runs: the card in its place, a bar for the total, no numbers.
+  expect(el.querySelector('[data-store-wait]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')!.getAttribute('aria-busy')).toBe('true');
+  expect(el.querySelector('[data-store-bar]')).not.toBeNull();
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+  expect(el.querySelector('.ib-lede')?.textContent).toContain('/data/inbox: messages, attached files');
+
+  await until(() => counting(el), '"Counting what is stored…"');
+  watch.disconnect();
+  // Not before 0.4 s.
+  expect(wordsAt! - opened).toBeGreaterThanOrEqual(STORE_SLOW_MS);
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+
+  release();
+  await until(() => el.querySelector('[data-store-bytes]') !== null, 'the sizes');
+  const onDisk = JSON.parse((await call(current!.port, '/api/inbox/settings/storage')).text) as { bytes: number; projects: { name: string }[] };
+  expect(Number(el.querySelector('[data-store-bytes]')!.getAttribute('data-store-bytes'))).toBe(onDisk.bytes);
+  expect([...el.querySelectorAll('[data-store-project]')].map((row) => row.getAttribute('data-store-project'))).toEqual(onDisk.projects.slice(0, 2).map((p) => p.name));
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  expect(el.querySelector('[data-store-bar]')).toBeNull();
+  expect(counting(el)).toBe(false);
+
+  // Back again: the sizes kept from this visit show at once, and are read again quietly.
+  act(() => navLink(el, 'about').click());
+  await until(() => heading(el) === 'About', 'About');
+  act(() => navLink(el, 'storage').click());
+  expect(el.querySelector('[data-store-bytes]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  await until(() => asked === 2, 'a second read');
+});
+
 test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switch saves inboxBoard to config.json, both ways', async () => {
   const config = () => {
     try {
@@ -384,7 +450,7 @@ test.skipIf(!hasDom)('Capabilities: no row for an Inbox with nothing to switch (
     inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
     notifications: { enabled: true, dismissed: false, allowed_origin: null },
     phones: false,
-    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+    store_dir: '/home/u/.plannotator/inbox',
   };
   const noop = () => {};
   const page = (section: 'general' | 'capabilities' | null, phoneList = false, settings: object = model) => (
@@ -575,11 +641,11 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   expect(el.querySelector('.ib-snav')).toBeNull();
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'about']);
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'about']);
   // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.
   const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
   expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
-  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
+  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
   expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['archived', 'storage', 'about']);
   const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
   expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');

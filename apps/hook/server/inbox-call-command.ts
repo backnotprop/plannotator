@@ -15,7 +15,10 @@
  *    It works the same on every host, OpenCode and MCP-only agents included,
  *    which have no session in their shell.
  *  - Else the session the environment names (`inboxHostSessionFromEnv`: Claude
- *    Code's tag, Pi's and Codex's variables, Qwen's).
+ *    Code's tag, T3 Code's thread, Pi's and Codex's variables, Qwen's,
+ *    DeepSeek Harness's). A T3 thread beside Claude's own CLAUDECODE is that
+ *    thread: T3 runs Claude through the Agent SDK, where the mod and its tag
+ *    are off. Beside anything else it is ambiguous, as below.
  *  - Else none, as a raw MCP client: not a fresh id per process, which would
  *    make every call a stranger with no threads or cards of its own.
  * The JSON cannot name a session. A script must never write as another agent
@@ -37,12 +40,13 @@
  */
 
 import { resolve } from "node:path";
-import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
-import { fillInboxToolArguments, type InboxHostSession, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -51,7 +55,7 @@ const REQUEST_TIMEOUT_MS = 90_000;
 const IDENTITY_FIELDS = ["agent_session", "agent_host", "agent_name"] as const;
 
 /** Each variable that names a host session, read on its own by the shim's own rule. */
-const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV] as const;
+const SESSION_VARIABLES = ["PLANNOTATOR_SESSION_TAG", INBOX_T3_THREAD_ENV, "PI_SESSION_ID", "CODEX_THREAD_ID", INBOX_QWEN_SESSION_ENV, "DSH_SESSION_ID"] as const;
 
 /**
  * The hosts that mark the shells they start (`detectOrigin`), each here for a
@@ -67,7 +71,7 @@ const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: strin
   { variable: "GEMINI_CLI", name: "Gemini CLI" },
   { variable: "COPILOT_CLI", name: "Copilot CLI" },
   { variable: "CURSOR_AGENT", name: "Cursor" },
-  { variable: "DSH_SHELL", name: "DeepSeek Harness" },
+  { variable: "DSH_SHELL", name: "DeepSeek Harness", host: "dsh" },
 ];
 
 export type InboxCaller = Pick<InboxHostSession, "session"> & Partial<InboxHostSession>;
@@ -92,9 +96,12 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
   const named: InboxHostSession[] = [];
   const variables: string[] = [];
   for (const variable of SESSION_VARIABLES) {
-    const found = inboxHostSessionFromEnv({ [variable]: env[variable] });
+    // DSH_SESSION_ID names a session only in a DSH model shell (DSH_SHELL=1), where the plugin may name its parent.
+    const slice = variable === "DSH_SESSION_ID" ? { DSH_SESSION_ID: env.DSH_SESSION_ID, DSH_SHELL: env.DSH_SHELL, [INBOX_DSH_ROOT_SESSION_ENV]: env[INBOX_DSH_ROOT_SESSION_ENV], [INBOX_DSH_ROOT_FOR_ENV]: env[INBOX_DSH_ROOT_FOR_ENV] } : { [variable]: env[variable] };
+    const found = inboxHostSessionFromEnv(slice);
     if (!found) continue;
-    variables.push(variable);
+    // The variable the session came from: the plugin's root when it named it, so the advice to unset it is right.
+    variables.push(variable === "DSH_SESSION_ID" && found.session !== env.DSH_SESSION_ID ? INBOX_DSH_ROOT_SESSION_ENV : variable);
     if (!named.some((other) => other.host === found.host && other.session === found.session)) named.push(found);
   }
   const sessionless = SESSIONLESS_HOSTS.filter(({ variable, host }) => env[variable] && !named.some((other) => other.host === host));
@@ -111,7 +118,10 @@ export function inboxCallerOf(flag: string | null, env: Record<string, string | 
       message: `--session ${flag} is not the session this shell names (${shell}, from ${names}). Nothing was sent. Do not drop --session to get past this: that writes as ${shell}. If the value is from your own Tidy, this shell is older than your session: run the script in a new shell, or unset ${names} for it. If it is not, it is not yours to use.`,
     };
   }
-  if (named.length + sessionless.length > 1 && named.length > 0) {
+  // A T3 thread's Claude: the thread is the only session named and Claude's own CLAUDECODE the only marker. A Codex id,
+  // a tag (from a Claude Code that started T3) or any other marker beside it stays ambiguous.
+  const t3Claude = named.length === 1 && named[0]!.host === INBOX_T3_HOST && sessionless.length === 1 && sessionless[0]!.host === "claude-code";
+  if (!t3Claude && named.length + sessionless.length > 1 && named.length > 0) {
     const seen = [...named.map(refOf), ...sessionless.map(({ name }) => `${name}, which names no session`)].join("; ");
     return { ok: false, code: "session_ambiguous", message: `This shell was started inside another agent: it carries ${seen}. Nothing was sent. Pass --session with your own session, so you never write as the other agent.` };
   }
@@ -198,7 +208,8 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   const input = argumentsOf(text, deps.cwd);
   if ("error" in input) return refused(input.code, input.error, 2);
 
-  const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller);
+  // With no project_path, the session's own project (its host's PLANNOTATOR_SESSION_PROJECT), wherever the shell has cd'd to.
+  const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller, null, inboxSessionProjectFromEnv(deps.env));
   // Where the script runs is where its relative attachments and images are, wherever its project is.
   const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
   // Only on a read of one thread or message: a list has nothing to settle, and the peek would empty it.
@@ -237,7 +248,17 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // A Tidy that waited for this session's next call rides this result: a script keeps only what it prints, so the agent reads it here.
   const tidy = result?.structuredContent?.tidy as (Pick<InboxTidyMark, "id"> & { text: string }) | undefined;
   if (tidy) err(`${inboxTidyMcpLine(tidy.id)}\n\n${tidy.text}\n`);
-  // Pictures sent only as attachments: the result text's advice, on stderr so stdout stays one JSON value.
+  // A question line that opened no block (`:::question {#x}`): the result text's warning, one line each, on stderr so stdout stays one JSON value.
+  const openers = result?.structuredContent?.question_openers_with_text;
+  const moreOpeners = result?.structuredContent?.question_openers_with_text_more;
+  if (Array.isArray(openers) && openers.length > 0) {
+    try {
+      err(`${questionOpenersWithTextText(openers as QuestionOpenerWithText[], typeof moreOpeners === "number" ? moreOpeners : 0).trim()}\n`);
+    } catch {
+      // A malformed list (never from this Inbox) prints no warning; the result below still does.
+    }
+  }
+  // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);

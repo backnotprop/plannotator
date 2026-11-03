@@ -12,7 +12,7 @@
  */
 
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -25,6 +25,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
@@ -516,6 +517,24 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
 }
 
 /**
+ * The project an agent sent from when it is not `project`, the thread's (a
+ * `reply_to` from another folder; approval "inbox-reply-recipient"): its
+ * name as the taggable list names a live session there (the project's, else
+ * its root's folder name). The window names the agent by it once its session
+ * has ended. Null for a send from the thread's project, a folder combined
+ * with it or folded into it, or a root git could not settle. Never makes a
+ * project.
+ */
+async function senderProject(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject): Promise<{ name: string; root: string } | null> {
+  if (!projectPath || !isAbsolute(projectPath) || !context.projectRootOf) return null;
+  const resolved = await context.projectRootOf(projectPath).catch(() => null);
+  if (!resolved || !resolved.settled || resolved.root === project.root) return null;
+  const known = context.store.projectByRoot(resolved.root);
+  if (known && context.store.sameProject(known.id, project.id)) return null;
+  return { name: known?.name ?? (basename(resolved.root) || resolved.root), root: resolved.root };
+}
+
+/**
  * Why an image the body shows will not show in the window, by the code the
  * send-time capture's read refused it with (the message-image route's own
  * rules, message-images.ts). A code not listed (a read that raced a change,
@@ -646,7 +665,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; naming: InboxSendResult["naming"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -660,6 +679,7 @@ export async function sendAgentMessage(
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
   const basePath = await sendBasePath(context, here, project, working);
+  const fromProject = await senderProject(context, input.project_path, project);
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -692,6 +712,7 @@ export async function sendAgentMessage(
       inline_images: captured?.images,
       guide: guide ?? null,
       base_path: basePath,
+      from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
       ...(wakes ? { wakes: true } : {}),
@@ -720,6 +741,14 @@ export async function sendAgentMessage(
   } catch {
     attachedOnly = [];
   }
+  // A `:::question {#x}` line: text after the name, so no block opened and the person cannot answer it.
+  // The result names each line; the send and what the person sees are unchanged, and a failure is left out.
+  let openers: QuestionOpenerWithText[] = [];
+  try {
+    openers = questionOpenersWithText(input.body);
+  } catch {
+    openers = [];
+  }
   // A question the agent is stopped or held up on, with no `Stakes:` line:
   // the result nudges (never refuses), so the person can decide in one look.
   const noStakes = (message.questions ?? [])
@@ -731,6 +760,7 @@ export async function sendAgentMessage(
   return {
     imagesNotShown: notShown,
     attachedImagesNotInBody: attachedOnly,
+    questionOpenersWithText: openers,
     noStakes: noStakes.length,
     recommendedInLabel: recommendedInLabel.length,
     superseded: superseded.length,
@@ -767,6 +797,9 @@ export async function sendAgentMessage(
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
       /** Attached pictures the body does not show with `![alt](path)`, as written (a nudge; the message was sent). */
       ...(attachedOnly.length > 0 ? { attached_images_not_in_body: attachedOnly } : {}),
+      /** Lines that start with a question directive and text after it, so they opened no block (a warning; the message was sent). */
+      ...(openers.length > 0 ? { question_openers_with_text: openers.slice(0, QUESTION_OPENERS_WITH_TEXT_MAX) } : {}),
+      ...(openers.length > QUESTION_OPENERS_WITH_TEXT_MAX ? { question_openers_with_text_more: openers.length - QUESTION_OPENERS_WITH_TEXT_MAX } : {}),
       /** Keys of the Stopped / Holds up questions with no `Stakes:` line (a nudge; the message was sent). */
       ...(noStakes.length > 0 ? { no_stakes: noStakes } : {}),
       /** Keys of the questions that marked their recommendation in a choice label, not a `Recommended:` line (a nudge; the message was sent). */
@@ -869,7 +902,10 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
       if (message.to.session === caller && !message.delivery) unread = true;
       continue;
     }
-    if ((store.messageCursor(message.id) ?? 0) > checked) unread = true;
+    // A plain reply: after the agent-read mark, not delivered (its recipient's read past a reply the mark
+    // waits at, owed to another session, records its delivery), and one this caller's read settles. A reply
+    // owed to another session is not the caller's to read: it would stay "unread" after every read it makes.
+    if ((store.messageCursor(message.id) ?? 0) > checked && !message.delivery && store.readSettles(message, caller)) unread = true;
   }
   return { unread, last };
 }
@@ -960,11 +996,14 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           supersededWords(sent.structured.superseded as string[]) +
           (sent.done > 0 ? `, marking ${sent.done} action item${sent.done === 1 ? "" : "s"} done` : "");
         // The hints after the sent line, in this order, each "" when it has nothing to say.
+        // The ones that start with a space join the sent line; the question-opener warnings
+        // follow them, each a line of its own (so no hint is glued onto a warning).
         const hints = [
           imagesNotShownText(sent.imagesNotShown),
           attachedImagesNotInBodyText(sent.attachedImagesNotInBody.length),
           noStakesText(sent.noStakes),
           recommendedInLabelText(sent.recommendedInLabel),
+          questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         return ok(
@@ -1004,10 +1043,14 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const url = threadUrl(context.baseUrl(), threadId);
           const reader = input.agent_session?.trim() || null;
           // A session the person only tagged here reads as a guest: what the owner still waits for stays queued.
-          // So does a script that names no session (a raw MCP client's read still settles, as it always has).
+          // So does a script that names no session. A raw MCP client's read that names none settles only the
+          // replies to messages sent without a session; any read settles only what is owed to its reader.
           const guest = store.isTaggedGuest(threadId, reader) || (reader === null && callerPeeks(ctx));
           if (input.format === "full") {
-            if (!guest) store.markAgentChecked(threadId);
+            // Only what this reader is owed: a reply to another session waits for that one (markAgentChecked).
+            if (!guest) store.markAgentChecked(threadId, undefined, undefined, reader);
+            // What this read settles that the mark could not reach (an earlier reply still owed to another session).
+            if (!guest) store.settleReadPast(threadId, reader);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.
             if (!guest) store.markAcksSeen(threadId);
             // What this session was owed here and no wake is left to settle.
@@ -1025,7 +1068,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
           const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
           if (!guest) {
-            store.markAgentChecked(threadId, readThrough);
+            store.markAgentChecked(threadId, readThrough, undefined, reader);
+            store.settleReadPast(threadId, reader, shown);
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.

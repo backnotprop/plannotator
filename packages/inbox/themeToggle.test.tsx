@@ -46,7 +46,6 @@ let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
 /** What this computer prefers, as the stubbed `matchMedia` answers it. */
 let osLight = false;
-let reducedMotion = false;
 /** While set, the window's settings read waits for it (a page whose first read has not answered yet). */
 let settingsGate: Promise<void> | null = null;
 
@@ -125,13 +124,13 @@ afterAll(async () => {
 beforeEach(() => {
   if (!hasDom) return;
   osLight = false;
-  reducedMotion = false;
   settingsGate = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
-    if (path === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
+    // The route without its query: the window reads `/api/inbox/settings?store=0`.
+    if (path.split('?')[0] === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -143,7 +142,7 @@ beforeEach(() => {
   savedMatchMedia = window.matchMedia;
   window.matchMedia = ((query: string) => ({
     media: query,
-    matches: query.includes('prefers-color-scheme: light') ? osLight : query.includes('prefers-reduced-motion: reduce') ? reducedMotion : false,
+    matches: query.includes('prefers-color-scheme: light') ? osLight : false,
     onchange: null,
     addEventListener() {},
     removeEventListener() {},
@@ -203,6 +202,8 @@ async function reload(hash = '') {
 }
 
 const shownLight = () => document.documentElement.classList.contains('light');
+/** ThemeProvider's instant-switch hold (theme.css sets every transition to 0 s under it). */
+const landingInstantly = () => document.documentElement.classList.contains('pn-theme-switching');
 const toggle = (el: ParentNode) => el.querySelector('.ib-setrow .ib-theme-tg') as HTMLButtonElement;
 const settingsRow = (el: ParentNode) => el.querySelector('.ib-setrow .ib-nav') as HTMLButtonElement;
 
@@ -217,15 +218,15 @@ test.skipIf(!hasDom)('a theme chosen in plan review (config.json) is the one the
 test.skipIf(!hasDom)('the toggle flips light and dark, keeps the choice across a reload and never opens Settings; the row does', async () => {
   startPage('dark');
   writeThemeOnDisk(undefined);
-  reducedMotion = true;
   const el = await renderApp();
   expect(shownLight()).toBe(false);
   expect(toggle(el).getAttribute('aria-label')).toBe('Switch to light mode');
 
   act(() => toggle(el).click());
   expect(shownLight()).toBe(true);
-  // Under reduced motion the switch lands without the colour crossfade.
-  expect(document.documentElement.classList.contains('ib-theme-instant')).toBe(true);
+  // The switch lands in one frame, with no colour fade, motion preference or not; the hold then goes, so hovers fade again.
+  expect(landingInstantly()).toBe(true);
+  await until(() => !landingInstantly(), 'the instant-switch hold to go');
   expect(toggle(el).getAttribute('aria-label')).toBe('Switch to dark mode');
   expect(window.location.hash).toBe('');
   expect(el.querySelector('[aria-label="Settings"]')).toBeNull();
@@ -257,6 +258,7 @@ test.skipIf(!hasDom)("Settings' Match system goes back to following this compute
   act(() => system.click());
   // This computer prefers light, so light it is, and the choice is "system", not light.
   expect(shownLight()).toBe(true);
+  expect(landingInstantly()).toBe(true);
   expect(el.querySelector('[data-settings-theme]')?.getAttribute('data-settings-theme')).toBe('system');
   expect(readThemePairCookies()?.mode).toBe('system');
   await until(() => themeOnDisk()?.mode === 'system', 'config.json to say system');

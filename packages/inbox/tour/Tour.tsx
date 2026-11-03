@@ -37,7 +37,9 @@ import { formatInboxVideoTime, readInboxVideoTime } from '@plannotator/core/inbo
 import { plural } from '../format';
 import { forgetTourMarkups, preloadTourAssets, tourAssetNameOf } from './assets';
 import { tourFileSource } from './fileSource';
+import { TourSettings, type TourSettingsHandle } from './TourSettings';
 import { sentAnswersOf } from '../sentReply';
+import { threadChipName } from '../threadChip';
 import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
@@ -46,6 +48,7 @@ import {
   TOUR_REPLY_ID,
   TOUR_WARM_REPLY_ID,
   TOUR_SESSION,
+  TOUR_SETTINGS_STEP,
   TOUR_STEPS,
   TOUR_THREAD,
   filmTimings,
@@ -66,6 +69,7 @@ import {
   tourRecord,
   tourSections,
   tourSubject,
+  tourThreadName,
   tourTime,
   tourWaitingCount,
   tourWarmAnswer,
@@ -248,7 +252,12 @@ export function TourBar({
         Tour
       </span>
       <span className="ib-tour-what">
-        {real ? (
+        {step === TOUR_SETTINGS_STEP ? (
+          <>
+            <b>Your settings</b>
+            <span className="ib-mut ib-tour-long"> · this step is real: what you pick here stays</span>
+          </>
+        ) : real ? (
           <>
             <b>Your own Inbox</b>
             <span className="ib-mut ib-tour-long"> · this step is real: what you connect here stays connected</span>
@@ -281,6 +290,38 @@ export function TourBar({
 }
 
 // ─────────────────────────── The coach card ───────────────────────────
+
+/**
+ * Whether the person's last input was a key (not a pointer). The coach card's
+ * title takes focus when a card changes, so screen readers read it; it shows a
+ * ring only when the person is on the keyboard, never after a tap, a click or
+ * a page load (where Chrome would otherwise count the focus as visible).
+ */
+let keyboardLast = false;
+let modalityWatched = false;
+function watchModality(): void {
+  if (modalityWatched || typeof document === 'undefined') return;
+  modalityWatched = true;
+  document.addEventListener('keydown', (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    keyboardLast = true;
+    // A key on a quietly focused title (an arrow to scroll) brings its ring back.
+    (document.activeElement as HTMLElement | null)?.removeAttribute?.('data-quiet-focus');
+  }, true);
+  document.addEventListener('pointerdown', () => {
+    keyboardLast = false;
+  }, true);
+}
+
+/** Focus a coach card's title; without a key before it, no ring (`data-quiet-focus`, until it blurs). */
+function focusTitle(title: HTMLElement): void {
+  if (keyboardLast) title.removeAttribute('data-quiet-focus');
+  else {
+    title.setAttribute('data-quiet-focus', '');
+    title.addEventListener('blur', () => title.removeAttribute('data-quiet-focus'), { once: true });
+  }
+  title.focus({ preventScroll: true });
+}
 
 const row = (id: string) => `[data-thread-id="${id}"]:is(button, a, [role="button"])`;
 
@@ -475,7 +516,16 @@ export function TourCoach({
   canForward = false,
   onForward,
   nudge = null,
+  onSkip,
+  onSettings,
+  settingsReady = true,
 }: {
+  /** "Make it yours": the first settings read has answered (the card's controls wait for it). */
+  settingsReady?: boolean;
+  /** "Make it yours": Skip, after the card has put back what the step opened with. */
+  onSkip?: () => void;
+  /** "Make it yours": the Settings link (Settings → General). */
+  onSettings?: () => void;
   coach: TourCoachModel;
   step: number;
   canBack: boolean;
@@ -494,6 +544,7 @@ export function TourCoach({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const settingsRef = useRef<TourSettingsHandle>(null);
   const [place, setPlace] = useState<{ left: number; top: number; at: 'top' | 'bottom' } | null>(null);
   const sheetAt = useRef<{ key: string; at: 'top' | 'bottom' } | null>(null);
 
@@ -590,7 +641,11 @@ export function TourCoach({
   );
 
   useEffect(() => {
-    if (focusTick > 0) titleRef.current?.focus({ preventScroll: true });
+    watchModality();
+  }, []);
+
+  useEffect(() => {
+    if (focusTick > 0 && titleRef.current) focusTitle(titleRef.current);
   }, [focusTick]);
 
   const style = phone ? undefined : place ? { left: place.left, top: place.top } : { visibility: 'hidden' as const };
@@ -609,7 +664,7 @@ export function TourCoach({
   return (
     <div
       ref={ref}
-      className={`ib-tour-coach${coach.picture ? ' ib-tc-wide' : ''}`}
+      className={`ib-tour-coach${coach.picture ? ' ib-tc-wide' : ''}${coach.picture === 'settings' ? ' ib-tc-settings' : ''}`}
       role="region"
       aria-label={`Tour, step ${step} of ${TOUR_STEPS}`}
       data-tour-coach={coach.key}
@@ -644,6 +699,7 @@ export function TourCoach({
         </p>
       )}
       {coach.picture === 'orient' && fixture && <OrientPicture fixture={fixture} onNext={onNext} />}
+      {coach.picture === 'settings' && <TourSettings ref={settingsRef} ready={settingsReady} onSettings={() => onSettings?.()} />}
       {coach.items && (
         <ul className="ib-tour-also" data-tour-also="">
           {coach.items.map((item) => (
@@ -667,10 +723,25 @@ export function TourCoach({
           </button>
         )}
         {coach.wait && <span className="ib-tc-wait">Replaying…</span>}
+        {coach.skip && onSkip && (
+          <button
+            type="button"
+            className="ib-tc-back"
+            onClick={() => {
+              // Puts back what the card changed (after one settings read), while the tour goes on.
+              void settingsRef.current?.restore();
+              onSkip();
+            }}
+            data-tour-skip=""
+          >
+            Skip
+          </button>
+        )}
         <span className="ib-sp" />
         {coach.next ? (
           <button type="button" className="ib-tc-next" onClick={onNext} data-tour-next="">
             {coach.nextLabel ?? 'Next'}
+            {coach.nextArrow && <Icon name="arrowRight" size={14} />}
           </button>
         ) : canForward && onForward ? (
           <Tip content="Skip to the end of this step">
@@ -1284,13 +1355,25 @@ function TourThreadPane({
       <span className="ib-pback-l">Inbox</span>
     </button>
   );
-  const offInTour = (label: string, icon: 'checkCircle' | 'archive', withLabel: boolean) => (
+  // The real header's icons (approval "inbox-thread-header"): each the person's own Inbox's, a nudge here.
+  const offInTour = (label: string, icon: 'mailOpen' | 'clock' | 'archive') => (
     <Tip content={`${label}: not in the tour`}>
-      <button type="button" className={withLabel ? 'ib-hbtn' : 'ib-iconbtn'} aria-disabled="true" aria-label={withLabel ? undefined : label} onClick={() => nudge(`${label} works in your own Inbox, after the tour.`)}>
-        <Icon name={icon} size={16} />
-        {withLabel && label}
+      <button type="button" className="ib-iconbtn" aria-disabled="true" aria-label={label} onClick={() => nudge(`${label} works in your own Inbox, after the tour.`)}>
+        <Icon name={icon} size={icon === 'archive' ? 16 : 17} />
       </button>
     </Tip>
+  );
+  // The bar's title, as in the real header: the thread's name by the list's rule, its tooltip the whole subject. With no
+  // name the real bar shows the subject only once the body's heading scrolls away; the tour's bar keeps the room empty.
+  const headName = threadChipName(tourThreadName(thread), subject);
+  const headSubject = headName ? (
+    <Tip content={subject}>
+      <span className="ib-phsubj" dir="auto" data-header-subject="" data-on="" aria-hidden="true">
+        {headName}
+      </span>
+    </Tip>
+  ) : (
+    <span className="ib-sp" />
   );
   const artifactsButton = artifacts.length > 0 && (
     <Tip content={state.artifactsOpen ? 'Back to the thread' : 'Artifacts: every file, image and guided review in this thread'}>
@@ -1466,9 +1549,9 @@ function TourThreadPane({
         {phone ? (
           <>
             {back}
-            <span className="ib-sp" />
+            {headSubject}
             {artifactsButton}
-            {offInTour('Archive', 'archive', false)}
+            {offInTour('Archive', 'archive')}
           </>
         ) : (
           <>
@@ -1478,10 +1561,11 @@ function TourThreadPane({
                 <span className="ib-vsep" aria-hidden="true" />
               </>
             )}
-            {offInTour('Mark read', 'checkCircle', true)}
-            <span className="ib-sp" />
+            {offInTour('Mark read', 'mailOpen')}
+            {offInTour('Snooze', 'clock')}
+            {headSubject}
             {artifactsButton}
-            {offInTour('Archive', 'archive', false)}
+            {offInTour('Archive', 'archive')}
             {!stacked && (
               <>
                 <span className="ib-vsep" aria-hidden="true" />

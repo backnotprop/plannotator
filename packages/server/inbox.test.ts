@@ -636,7 +636,7 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
 });
 
 describe("the window's routes: settings, restart, favicon", () => {
-  test("settings answer the stdio entry with this CLI's path, the port, the knob and the store on disk", async () => {
+  test("settings answer the stdio entry with this CLI's path, the port and the knob without walking the store; the store on disk is its own read", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
     const previous = process.env.PLANNOTATOR_DATA_DIR;
@@ -649,21 +649,45 @@ describe("the window's routes: settings, restart, favicon", () => {
       const sent = structured<{ thread_id: string }>(
         await client.callTool({ name: "send_message", arguments: { body: QUESTION_MESSAGE, project_path: gitProject(root) } }),
       );
-      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      // The window's settings read (`?store=0`) never walks the store: the sizes are Settings → Storage's own read.
+      const walk = server.store.diskUsage.bind(server.store);
+      let walks = 0;
+      server.store.diskUsage = () => {
+        walks += 1;
+        return walk();
+      };
+      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings?store=0`)).json();
+      expect(walks).toBe(0);
+      expect(settings.store).toBeUndefined();
+      expect(settings.store_dir).toBe(join(dataDir, "inbox"));
       expect(settings.mcp_command).toEqual(["/opt/tools dir/plannotator", "inbox", "mcp"]);
       expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
       expect(settings.port).toBe(server.port);
-      // Nothing set: the defaults, on for the Claude Code mod, off on Pi and OpenCode.
-      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false }, env: null });
-      const project = settings.store.projects[0];
+      // Nothing set: the defaults, on for the Claude Code mod, off on Pi, OpenCode and DeepSeek Harness.
+      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false }, env: null });
+
+      const storage = await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings/storage`);
+      expect(storage.status).toBe(200);
+      const store = await storage.json();
+      expect(walks).toBe(1);
+      // The same numbers the settings read carried before: the store's own count, unchanged.
+      expect(store).toEqual(JSON.parse(JSON.stringify(walk())));
+      expect(store.dir).toBe(settings.store_dir);
+      // A page older than the storage read asks without the marker and reads `settings.store`: it still gets it whole,
+      // never an empty stand-in (without it that page's Settings throws and the whole window goes blank).
+      const legacy = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      expect(walks).toBe(2);
+      expect(legacy.store).toEqual(store);
+      const project = store.projects[0];
       expect(project.name).toBe("api");
       expect(project.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([sent.thread_id]);
       // Sizes are read from the files themselves.
       const folder = join(dataDir, "inbox", "projects", readdirSync(join(dataDir, "inbox", "projects"))[0]!);
       const onDisk = ["project.json", "messages.jsonl", "questions.jsonl"].reduce((n, f) => n + statSync(join(folder, f)).size, 0);
       expect(project.bytes).toBe(onDisk);
-      expect(settings.store.bytes).toBe(onDisk);
+      expect(store.bytes).toBe(onDisk);
       expect(project.threads[0].bytes).toBe(onDisk - statSync(join(folder, "project.json")).size);
+      expect((await post(server, "/api/inbox/settings/storage", {})).status).toBe(405);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
@@ -689,7 +713,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } });
       expect(saved.status).toBe(200);
-      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false });
+      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false });
       await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { "claude-code": false } });
       // Each host keeps its own choice; an unset host keeps its default.
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTool).toEqual({ pi: true, "claude-code": false });
@@ -799,6 +823,76 @@ describe("the window's routes: settings, restart, favicon", () => {
       const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" } });
       expect((await other.json()).text_size).toBe(13);
       expect(onDisk().inboxTextSize).toBe(13);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-customize-rows" (the owner, 2026-11-02: "Whatever they set goes wherever they're using the app").
+  test("the rows' look saves into config.json `inboxRows`, null until first saved, and every open window hears it", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
+      const server = await start(dataDir);
+      const settings = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { rows: unknown; rows_rev: unknown };
+      const read = async () => (await settings()).rows;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxRows?: unknown; inboxTextSize?: unknown };
+      // Never saved: null, so the first window adopts its browser's old cookies.
+      expect(await settings()).toMatchObject({ rows: null, rows_rev: 0 });
+      for (const bad of ["compact", ["compact", "sparkles"], [1], null, { compact: true }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      const cross = await post(server, "/api/inbox/settings", { rows: ["compact"] }, { Origin: "https://evil.example" });
+      expect(cross.status).toBe(403);
+      expect(onDisk().inboxRows).toBeUndefined();
+
+      // A window listening (another browser, a phone's page): it hears the save, with the look.
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-rows-1&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+      // Saved in the options' order, each once, a rival off (Compact wins over Roomy); the other settings stay. Each save counts.
+      const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
+      expect(saved.status).toBe(200);
+      expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1 });
+      expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
+
+      const deadline = Date.now() + 1500;
+      while (!text.includes("event: rows") && Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.value) text += decoder.decode(chunk.value);
+      }
+      controller.abort();
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1 })}`);
+
+      // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
+      const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });
+      expect(await none.json()).toMatchObject({ rows: [], rows_rev: 2 });
+      expect(await read()).toEqual([]);
+      // Another setting's save keeps the look and its count, and answers both.
+      const other = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, text_size: 15 });
+      expect(await other.json()).toMatchObject({ rows: [], rows_rev: 2 });
+      // A hand-edited name no build knows (a downgrade, a typo) is dropped on read, never "never saved": the synced
+      // look stays, so no window adopts its old cookies over it. Writing that name is still refused (above).
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles", "unreadDot"], inboxRowsRev: 7 }));
+      expect(await settings()).toMatchObject({ rows: ["smallNames", "unreadDot"], rows_rev: 7 });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: ["sparkles"] }));
+      expect(await settings()).toMatchObject({ rows: [], rows_rev: 0 });
+      // The next save counts on from the file's.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
+      const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
+      expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

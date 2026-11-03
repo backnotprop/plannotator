@@ -64,7 +64,7 @@ import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, typ
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 
@@ -629,14 +629,18 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   const connect = !detached && !inboxConnectDisabled(process.env);
 
   if (args[0] === "mcp") {
-    if (args.length > 1) usageError(`Unknown inbox mcp option: ${args[1]}`);
+    // `--t3`: the entry the T3 Code setup adds (`plannotator t3 --help`). It lists its tools only inside a T3 thread.
+    const unknown = args.slice(1).find((arg) => arg !== "--t3");
+    if (unknown !== undefined) usageError(`Unknown inbox mcp option: ${unknown}`);
     await runInboxMcpShim({
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),
+      t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
     });
     process.exit(0);
   }

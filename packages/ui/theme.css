@@ -1265,6 +1265,20 @@ html:not(.transitions-ready) * {
   transition-duration: 150ms;
 }
 
+/* A theme switch lands in one frame. ThemeProvider holds .pn-theme-switching
+   on <html> from the moment it swaps the theme classes until two frames after
+   the redraw commits. Without it, the rule above starts a colour transition on
+   every element at once, which froze the page before it faded. Only timing
+   changes here: a transition already running (a sheet sliding, a menu fading)
+   keeps going, and hover fades come back with the class gone. */
+html.pn-theme-switching,
+html.pn-theme-switching *,
+html.pn-theme-switching *::before,
+html.pn-theme-switching *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
 /* Focus states */
 :focus-visible {
   outline: 2px solid var(--ring);

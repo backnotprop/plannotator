@@ -2,7 +2,8 @@
  * The Board's `card` call and the window's card routes (approval
  * "inbox-board", step 1), through the real doors: a running Inbox, the MCP
  * SDK client, the event stream and the window's routes. The failures these
- * guard: an agent able to pause the person's work (Icebox), a card that lands
+ * guard: an agent starting work the person parked in Backlog, an old agent's
+ * column refused after columns v2, the schema advertising the old ids, a card that lands
  * in another project than the caller's, a call that silently drops a field,
  * card lines missing from the event stream (the one seq counter), and the
  * person's moves not reaching the store.
@@ -68,7 +69,8 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     const props = tool.inputSchema.properties as Record<string, { enum?: string[] }>;
     expect(props.action!.enum).toContain("card");
     expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list"]);
-    expect(props.column!.enum).toContain("icebox");
+    // The schema lists the v2 columns only; the ids before v2 are still taken (the next test).
+    expect(props.column!.enum).toEqual(["backlog", "todo", "in_progress", "in_review", "done", "dropped"]);
     // Claude Code passes a tool description up to 2,048 characters.
     expect(tool.description.length).toBeLessThan(2048);
     // The connection fills the session and project, as for every Inbox tool.
@@ -85,64 +87,66 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     expect(made.isError).toBeUndefined();
     expect(made._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBe(true);
     const id = made.structuredContent.card.id as string;
-    expect(made.structuredContent.card).toMatchObject({ title: "Hero scene timers", column: "backlog", said: "lane started", threads: [threadId] });
+    expect(made.structuredContent.card).toMatchObject({ title: "Hero scene timers", column: "todo", said: "lane started", threads: [threadId] });
     expect(made.structuredContent.card.agent).toEqual({ kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" });
     // The connection hands the model the text alone, and it names the card.
     expect(inboxToolResultText(made).text).toContain(id);
     expect(inboxToolResultText(made).text).not.toContain("{");
     expect((await card({ op: "create", thread_id: threadId, idempotency_key: "hero-1" })).structuredContent).toMatchObject({ replayed: true, card: { id } });
 
-    expect((await card({ op: "move", card_id: id, column: "designing", say: "lane running, sheet in ~1 h" })).structuredContent.card).toMatchObject({
-      column: "designing",
+    expect((await card({ op: "move", card_id: id, column: "in_progress", say: "lane running, sheet in ~1 h" })).structuredContent.card).toMatchObject({
+      column: "in_progress",
       said: "lane running, sheet in ~1 h",
     });
-    const look = await card({ op: "move", card_id: id, column: "your_look", you: "pick one of five hero options" });
+    const look = await card({ op: "move", card_id: id, column: "in_review", you: "pick one of five hero options" });
     expect(look.content[0]!.text).toContain('You: "pick one of five hero options"');
     expect((await card({ op: "say", card_id: id, title: "Hero timers, easy to see" })).structuredContent.card.title).toBe("Hero timers, easy to see");
-    expect((await card({ op: "move", card_id: id, column: "building", say: "PR open" })).structuredContent.card.you).toBeNull();
+    expect((await card({ op: "move", card_id: id, column: "in_progress", say: "PR open" })).structuredContent.card.you).toBeNull();
     expect((await card({ op: "link", card_id: id, pr: "https://github.com/plannotator/workspaces/pull/1125" })).structuredContent.card.prs).toEqual([
       { ref: "plannotator/workspaces#1125", url: "https://github.com/plannotator/workspaces/pull/1125" },
     ]);
     // `ref` links an issue (or a PR) from any supported source; the card's refs carry both, prs only the PR.
     const linked = (await card({ op: "link", card_id: id, ref: "plannotator/workspaces#1130" })).structuredContent.card;
     expect(linked.refs).toEqual([
-      { kind: "pr", source: "github", ref: "plannotator/workspaces#1125", url: "https://github.com/plannotator/workspaces/pull/1125" },
-      { kind: "issue", source: "github", ref: "plannotator/workspaces#1130", url: "https://github.com/plannotator/workspaces/issues/1130" },
+      { kind: "pr", source: "github", ref: "plannotator/workspaces#1125", url: "https://github.com/plannotator/workspaces/pull/1125", via: "pr" },
+      { kind: "issue", source: "github", ref: "plannotator/workspaces#1130", url: "https://github.com/plannotator/workspaces/issues/1130", via: "ref" },
     ]);
     expect(linked.prs).toHaveLength(1);
     expect((await card({ op: "link", card_id: id, ref: "https://gitlab.com/g/p/-/issues/4" })).structuredContent.card.refs.at(-1)).toMatchObject({ kind: "issue", source: "gitlab", ref: "g/p#4" });
-    expect((await card({ op: "link", card_id: id, ref: "https://github.com-evil.example/o/r/issues/1" })).content[0]!.text).toStartWith("validation_error: ref:");
-    expect((await card({ op: "ship", card_id: id, say: "live on staging" })).structuredContent.card.column).toBe("shipped");
+    // A host that only starts like GitHub's is no forge: a plain web link, never a GitHub issue. A non-web ref is refused.
+    expect((await card({ op: "link", card_id: id, ref: "https://github.com-evil.example/o/r/issues/1" })).structuredContent.card.refs.at(-1)).toMatchObject({ kind: "link", source: "web" });
+    expect((await card({ op: "link", card_id: id, ref: "javascript:alert(1)" })).content[0]!.text).toStartWith("validation_error: ref:");
+    expect((await card({ op: "ship", card_id: id, say: "live on staging" })).structuredContent.card.column).toBe("done");
 
     const other = await card({ op: "create", title: "Auto-update for users" });
     const mine = await card({ op: "list" });
-    // Shipped is left out unless asked for.
+    // Done is left out unless asked for.
     expect(mine.structuredContent.cards.map((c: { id: string }) => c.id)).toEqual([other.structuredContent.card.id]);
     const all = await card({ op: "list", include_resolved: true });
     expect(all.structuredContent.cards.map((c: { id: string }) => c.id)).toEqual([other.structuredContent.card.id, id]);
-    expect(inboxToolResultText(all).text).toContain("Shipped");
+    expect(inboxToolResultText(all).text).toContain("Done");
     // Another session's list: its own cards only, unless it asks for anyone's.
     expect((await card({ op: "list", agent_session: "ses_b" })).structuredContent.cards).toEqual([]);
     expect((await card({ op: "list", agent_session: "ses_b", asked_by: "anyone" })).structuredContent.total).toBe(1);
   });
 
-  test("refusals: the Icebox by an agent, a bad column, a field the op does not take, a card or thread in another project", async () => {
-    const { card, call, other } = await world();
-    const id = (await card({ op: "create", title: "Triage #1786", column: "designing" })).structuredContent.card.id as string;
+  test("refusals: a card the person parked in Backlog, a bad column, a field the op does not take, a card or thread in another project", async () => {
+    const { card, call, other, server, project } = await world();
+    const id = (await card({ op: "create", title: "Triage #1786", column: "in_progress" })).structuredContent.card.id as string;
 
-    const iced = await card({ op: "move", card_id: id, column: "icebox" });
-    expect(iced.isError).toBe(true);
-    expect(iced.content[0]!.text).toStartWith("card_icebox_person_only: Only the person puts a card in the Icebox");
-    expect((await card({ op: "create", title: "x", column: "icebox" })).content[0]!.text).toStartWith("card_icebox_person_only:");
+    const parked = server.store.createCard({ project_id: server.store.projectByRoot(project)!.id, by: { kind: "person" }, title: "Idea" }).card;
+    const taken = await card({ op: "move", card_id: parked.id, column: "in_progress" });
+    expect(taken.isError).toBe(true);
+    expect(taken.content[0]!.text).toStartWith("card_backlog_person_only: The person put this card in Backlog");
 
     const bad = await card({ op: "move", card_id: id, column: "later" });
     expect(bad.isError).toBe(true);
     expect(bad.content[0]!.text).toContain("column");
 
-    expect((await card({ op: "say", card_id: id, say: "x", column: "building" })).content[0]!.text).toStartWith("validation_error: column: op say does not take it");
+    expect((await card({ op: "say", card_id: id, say: "x", column: "in_progress" })).content[0]!.text).toStartWith("validation_error: column: op say does not take it");
     expect((await card({ op: "move", card_id: id })).content[0]!.text).toStartWith("validation_error: column:");
     expect((await card({ op: "drop", card_id: id })).content[0]!.text).toStartWith("validation_error: reason:");
-    expect((await card({ op: "move", card_id: id, column: "your_review" })).content[0]!.text).toStartWith("validation_error: you:");
+    expect((await card({ op: "move", card_id: id, column: "in_review" })).content[0]!.text).toStartWith("validation_error: you:");
 
     // A card of another project: refused, naming where it is; that project's path reaches it.
     const elsewhere = await card({ op: "say", card_id: id, say: "x", project_path: other });
@@ -177,16 +181,36 @@ describe.if(INBOX_CARD_ACTION_ON)("a card call writes no project, and tolerates 
     expect(readdirSync(join(root, "data", "inbox", "projects"))).toHaveLength(before);
   });
 
-  test("`asked`, the old name of Backlog, is still taken (the schema lists it) and lands in Backlog", async () => {
+  test("an agent from before v2 keeps working: its column ids are still taken through the MCP door and land in the v2 column", async () => {
     const { card } = await world();
     const made = await card({ op: "create", title: "Old words", column: "building", say: "begun" });
     expect(made.isError).toBeFalsy();
+    expect(made.structuredContent.card.column).toBe("in_progress");
     const id = made.structuredContent.card.id as string;
-    const moved = await card({ op: "move", card_id: id, column: "asked" });
-    expect(moved.isError).toBeFalsy();
-    expect(moved.structuredContent.card.column).toBe("backlog");
-    const created = await card({ op: "create", title: "Asked first", column: "asked" });
-    expect(created.structuredContent.card.column).toBe("backlog");
+    const moves: [Record<string, unknown>, string][] = [
+      [{ column: "asked" }, "todo"],
+      [{ column: "designing" }, "in_progress"],
+      [{ column: "your_look", you: "pick a face" }, "in_review"],
+      [{ column: "To do" }, "todo"],
+      [{ column: "your_review", you: "merge it" }, "in_review"],
+      // Done's id before the owner's rename (2026-11-02).
+      [{ column: "shipped" }, "done"],
+      [{ column: "in_progress" }, "in_progress"],
+    ];
+    for (const [args, column] of moves) {
+      const moved = await card({ op: "move", card_id: id, ...args });
+      expect(moved.isError, JSON.stringify(args)).toBeFalsy();
+      expect(moved.structuredContent.card.column).toBe(column);
+    }
+    // The old Icebox id is Backlog now; an agent's own card there is still its own.
+    expect((await card({ op: "move", card_id: id, column: "icebox" })).structuredContent.card.column).toBe("backlog");
+    expect((await card({ op: "create", title: "Asked first", column: "asked" })).structuredContent.card.column).toBe("todo");
+    // The `done` spelling of ship (its column is Done) is taken too, unlisted in the schema.
+    const other = (await card({ op: "create", title: "Done by word", column: "in_progress" })).structuredContent.card.id as string;
+    expect((await card({ op: "done", card_id: other })).structuredContent.card.column).toBe("done");
+    // An unknown id is refused naming the v2 columns.
+    const bad = await card({ op: "move", card_id: id, column: "later" });
+    expect(bad.content[0]!.text).toContain("in_progress");
   });
 
   // Approved 2026-10-27: titles are 2–5 words, and a sentence-long one gets a hint, never a refusal.
@@ -215,20 +239,20 @@ describe.if(INBOX_CARD_ACTION_ON)("a card call writes no project, and tolerates 
   test("a field an op does not take is refused, but its `false` default is not", async () => {
     const { card } = await world();
     const id = (await card({ op: "create", title: "Defaults" })).structuredContent.card.id as string;
-    expect((await card({ op: "move", card_id: id, column: "designing", include_resolved: false })).isError).toBeUndefined();
-    expect((await card({ op: "move", card_id: id, column: "building", include_resolved: true })).content[0]!.text).toStartWith("validation_error: include_resolved: op move does not take it");
+    expect((await card({ op: "move", card_id: id, column: "in_progress", include_resolved: false })).isError).toBeUndefined();
+    expect((await card({ op: "move", card_id: id, column: "in_review", you: "x", include_resolved: true })).content[0]!.text).toStartWith("validation_error: include_resolved: op move does not take it");
   });
 });
 
 // Served whether or not the agents' card action is on: the person's routes and the stream.
 describe("the window's card routes and the event stream", () => {
-  test("GET filters by project and column; POST is the person's move, icebox, drop and restore; an agent's drop waits until the person sees Dropped; card lines reach the stream", async () => {
+  test("GET filters by project and column; POST is the person's move, drop and restore (an older window's icebox is Backlog); an agent's drop waits until the person sees it; card lines reach the stream", async () => {
     const { base, server, project, other } = await world();
     const { store } = server;
     const here = store.projectByRoot(project)!;
     const there = store.projectByRoot(other)!;
     const agent = { kind: "agent" as const, host: "claude-code", session: "ses_a", name: "Claude Code" };
-    const a = store.createCard({ project_id: here.id, by: agent, title: "Pricing page", column: "building" }).card;
+    const a = store.createCard({ project_id: here.id, by: agent, title: "Pricing page", column: "in_progress" }).card;
     const b = store.createCard({ project_id: here.id, by: agent, title: "Solutions page" }).card;
     const c = store.createCard({ project_id: there.id, by: agent, title: "Web thing" }).card;
 
@@ -238,21 +262,24 @@ describe("the window's card routes and the event stream", () => {
     expect(all.dropped_unseen).toBe(0);
     // No derived stall flag on the wire: the card's age is its heard_at.
     for (const card of all.cards) expect(Object.keys(card)).not.toContain("amber");
-    const building = (await (await fetch(`${base}/api/inbox/cards?project=${here.id}&column=building,your_review`)).json()) as { cards: { id: string }[] };
+    const building = (await (await fetch(`${base}/api/inbox/cards?project=${here.id}&column=in_progress,in_review`)).json()) as { cards: { id: string }[] };
     expect(building.cards.map((card) => card.id)).toEqual([a.id]);
+    // An older window's filter, in the ids before v2, reads the same.
+    expect(((await (await fetch(`${base}/api/inbox/cards?project=${here.id}&column=building,your_review`)).json()) as { cards: { id: string }[] }).cards.map((card) => card.id)).toEqual([a.id]);
     expect((await fetch(`${base}/api/inbox/cards?column=later`)).status).toBe(422);
     expect((await fetch(`${base}/api/inbox/cards?project=prj_00000000000000000000000000`)).status).toBe(404);
 
     const post = (path: string, body: Record<string, unknown>, headers: Record<string, string> = {}) =>
       fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+    // An older window's Icebox: the person parks the card in Backlog, and the agent cannot take it out; the person can.
     const iced = await post(`/api/inbox/cards/${b.id}`, { op: "icebox" });
     expect(iced.status).toBe(200);
-    expect(((await iced.json()) as { card: object }).card).toMatchObject({ column: "icebox", aside_from: "backlog" });
-    // The agent cannot bring it back; the person can.
-    expect(() => store.updateCard(b.id, { by: agent, column: "designing" })).toThrow();
-    expect(((await (await post(`/api/inbox/cards/${b.id}`, { op: "restore" })).json()) as { card: { column: string } }).card.column).toBe("backlog");
+    expect(((await iced.json()) as { card: object }).card).toMatchObject({ column: "backlog", moved_by: { kind: "person" } });
+    expect(() => store.updateCard(b.id, { by: agent, column: "in_progress" })).toThrow("only they move it out");
+    expect(((await (await post(`/api/inbox/cards/${b.id}`, { op: "move", column: "todo" })).json()) as { card: { column: string } }).card.column).toBe("todo");
     expect(((await (await post(`/api/inbox/cards/${a.id}`, { op: "drop", reason: "not now" })).json()) as { card: { dropped: object } }).card.dropped).toMatchObject({ reason: "not now" });
-    expect(((await (await post(`/api/inbox/cards/${a.id}`, { op: "move", column: "your_review" })).json()) as { card: { column: string } }).card.column).toBe("your_review");
+    expect(((await (await post(`/api/inbox/cards/${a.id}`, { op: "restore" })).json()) as { card: { column: string } }).card.column).toBe("in_progress");
+    expect(((await (await post(`/api/inbox/cards/${a.id}`, { op: "move", column: "in_review" })).json()) as { card: { column: string } }).card.column).toBe("in_review");
 
     // An agent's drop waits for the person: counted, by project, until they look at Dropped.
     store.updateCard(b.id, { by: agent, column: "dropped", reason: "folded into the pricing work" });

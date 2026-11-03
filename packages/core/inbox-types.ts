@@ -30,6 +30,7 @@ export * from "./inbox-open-in";
 export * from "./inbox-delivery";
 export * from "./inbox-codex";
 export * from "./inbox-qwen";
+export * from "./inbox-t3";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
@@ -267,6 +268,13 @@ export interface InboxProjectRepo {
   host: string | null;
 }
 
+/**
+ * How long a resolved remote counts as fresh before a read refreshes it in the background
+ * (packages/server/inbox-repos.ts). The window reads an open thread again once its last read is
+ * older than this, so a changed `origin` reaches its links (packages/inbox/openThreadReads.ts).
+ */
+export const INBOX_REPO_TTL_MS = 5 * 60_000;
+
 export type InboxAuthor =
   | { kind: "person" }
   | {
@@ -326,24 +334,28 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   // Threads the Inbox's Grok Build runner wrote (0.28.34 to 0.28.36; removed) keep their author's name.
   grok: "Grok Build",
   qwen: "Qwen Code",
+  dsh: "DeepSeek Harness",
+  t3: "T3 Code",
 };
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
- * Pi and OpenCode 2 through Plannotator's own connection (OpenCode 1 has the
- * tool but no wake), and Codex through MCP alone, where the Inbox puts the
+ * Pi, OpenCode 2 and DeepSeek Harness through Plannotator's own connection
+ * (OpenCode 1 has the tool but no wake), and Codex through MCP alone, where the Inbox puts the
  * reply into the Codex thread with `codex queue` (Codex CLI
  * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
  * and Qwen Code through MCP alone, where the Inbox sends the reply into the
  * running session over Qwen's cross-session messaging (Qwen Code
  * INBOX_QWEN_WAKE_MIN_VERSION or later, macOS and Linux;
- * packages/server/inbox-qwen-wake.ts).
+ * packages/server/inbox-qwen-wake.ts), and a T3 Code thread through MCP
+ * alone, where the Inbox sends the reply into the thread through T3's MCP API
+ * (packages/server/inbox-t3-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "codex", "qwen"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen", "t3"] as const;
 
-/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex and Qwen Code. */
-export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen"];
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
 
 /** The first version of each agent MCP alone wakes that can be woken. */
 export const INBOX_MCP_WAKE_MIN_VERSIONS: Readonly<Record<string, string>> = { codex: INBOX_CODEX_QUEUE_MIN_VERSION, qwen: INBOX_QWEN_WAKE_MIN_VERSION };
@@ -514,6 +526,15 @@ export interface InboxMessage {
    * at the project root. Added after step 8: older records lack it.
    */
   base_path?: string | null;
+  /**
+   * On an agent's message sent into a thread of another project (`reply_to`
+   * from another folder): the project its `project_path` is in, by name
+   * (approval "inbox-reply-recipient"). The window names the agent by it
+   * ("in plannotator", "Claude Code (plannotator)") after its session ends.
+   * Absent for a send from the thread's own project (or a project combined
+   * with it), and on older records.
+   */
+  from_project?: { name: string; root: string } | null;
   /**
    * On an agent's message: it was sent through a connection that wakes its
    * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
@@ -1665,6 +1686,45 @@ export function isInboxTextSize(value: unknown): value is InboxTextSize {
 }
 
 /**
+ * How the Inbox list's rows look (config.json `inboxRows`, through GET and
+ * POST /api/inbox/settings `rows` and the windows' `event: rows`; approval
+ * "inbox-customize-rows"): the names of the options that are on, every other
+ * one off. The list's ⋮ menu has the first four, Settings → Rows has them all.
+ * Kept for the person, not per browser (the owner, 2026-11-02: "Whatever they
+ * set goes wherever they're using the app"). GET answers null until a window
+ * first saves it.
+ */
+export const INBOX_ROWS_OPTIONS = ["highlight", "compact", "hideAgents", "smallNames", "hideProject", "hidePreview", "roomy", "unreadDot", "previewTwo", "relativeTime", "titleFirst"] as const;
+export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
+
+/**
+ * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
+ * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ */
+export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsOption[] {
+  const on = new Set(rows);
+  if (on.has("compact")) on.delete("roomy");
+  if (on.has("hidePreview")) on.delete("previewTwo");
+  if (on.has("unreadDot")) on.add("smallNames");
+  return INBOX_ROWS_OPTIONS.filter((name) => on.has(name));
+}
+
+/** A save's list (POST): every name known, in their order, each once, rivals settled; null otherwise (a `422`). */
+export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
+  if (!Array.isArray(value) || value.some((name) => !(INBOX_ROWS_OPTIONS as readonly unknown[]).includes(name))) return null;
+  return inboxRowsCanonical(value as InboxRowsOption[]);
+}
+
+/**
+ * A kept list (config.json, a read, an event): the names this build knows, the others dropped (a newer build's
+ * option after a downgrade, a typo), so a look is never read as "never saved". Null only for a non-list.
+ */
+export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
+  if (!Array.isArray(value)) return null;
+  return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
+}
+
+/**
  * The agents the Inbox connects itself to on `plannotator inbox` (the
  * approved "inbox-agent-awareness" design; packages/server/inbox-agents.ts).
  * Terminal agents and the Claude desktop app; editors keep their one-click
@@ -1682,6 +1742,7 @@ export type InboxAgentId =
   | "kiro"
   | "pi"
   | "opencode"
+  | "dsh"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -1696,6 +1757,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "kiro",
   "pi",
   "opencode",
+  "dsh",
   "claude-app",
 ];
 
@@ -1711,6 +1773,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   kiro: "Kiro",
   pi: "Pi",
   opencode: "OpenCode",
+  dsh: "DeepSeek Harness",
   "claude-app": "Claude app",
 };
 
@@ -1922,8 +1985,8 @@ export interface InboxAgentsModel {
   sessions?: Partial<Record<InboxToolHostId, InboxHostSessions>>;
 }
 
-/** The three hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode";
+/** The hosts that connect through Plannotator's own plugin or extension. */
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2009,7 +2072,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -2136,13 +2199,24 @@ export type InboxToolCostHost = "pi" | "opencode";
  * measured on Pi with the cost test, 10,096 bytes (+150; tokens scaled from
  * 2,650 and stated high). With the Board on, measured the same way from a
  * real Inbox's Board-on tool list: 11,514 bytes.
+ * Board columns v2 (the card action's `column` lists the v2 ids, the
+ * hand-over rule and the automatic ship; Done in place of Shipped, and the
+ * ship line saying the agent ships on a merge it sees, review of #2522):
+ * the Board-on entry before this change 11,318 → 11,260 bytes, 2,733 →
+ * 2,719 o200k tokens (-58 bytes, -14 tokens); Board off unchanged. On top of
+ * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
+ * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
+ * inbox-board-switch.test.ts).
  */
 const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11514, tokens: 3150 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
+  // DeepSeek Harness sends the same JSON Schema with every request; not measured on a real DSH (tests never run
+  // it), so Pi's measurement stands in until one is.
+  dsh: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */
@@ -2242,7 +2316,19 @@ export interface InboxReplyDraft {
    * yet with where it goes back in `body`. Absent: none (and on a draft an older Inbox wrote).
    */
   files?: InboxDraftFile[];
+  /**
+   * Who the reply goes to, as the person chose it in the reply box's recipient pill (approval
+   * "inbox-reply-recipient"): session ids, the first the one whose message the words answer, the rest
+   * sent as tags. Absent: not chosen (the thread's last writer), and on a draft an older Inbox wrote.
+   */
+  recipients?: string[];
 }
+
+/** The most sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes. */
+export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
+
+/** A session id as a tag (and a reply draft's recipient) names it. */
+export const INBOX_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
 /**
  * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the

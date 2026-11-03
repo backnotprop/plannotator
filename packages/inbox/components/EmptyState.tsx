@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { InboxAgentId, InboxAgentsModel } from '@plannotator/core/inbox-types';
 import { inboxApi, type ComposeSessionsModel } from '../api';
-import { OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
+import { DSH_APPLIES, OTHER_HARNESSES, harnessPanel, hostMcpSnippet, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import {
   CLAUDE_PLUGIN_INSTALL,
@@ -266,6 +266,8 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
       if (isPluginHost(row.id)) {
         setTurnedOn((current) => new Set([...current, row.id]));
         setSaid(`${row.label}'s Inbox tool is on. ${APPLIES[row.id]}`);
+      } else if (row.id === 'dsh') {
+        setSaid(`${row.label}'s Inbox tool is on. ${DSH_APPLIES}`);
       } else {
         setSaid(`${row.label} is connected. Its next session reaches the Inbox.`);
       }

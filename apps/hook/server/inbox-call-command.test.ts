@@ -18,6 +18,7 @@ import type { InboxMessage, InboxThread, InboxTidyPlan, InboxTidyRun } from "@pl
 import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -29,6 +30,7 @@ const entry = resolve(import.meta.dir, "index.ts");
 const HOUR = 60 * 60_000;
 const CODEX_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const QWEN_SESSION = "11111111-2222-4333-8444-555555555555";
+const T3_THREAD = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
 
 let stubs: string[] = [];
 const roots: string[] = [];
@@ -235,6 +237,14 @@ describe("what a script gets", () => {
     expect(shown.stderr).toBe("");
   });
 
+  test("a question opener with text after its name: sent, stdout still one JSON value, the warning on stderr", async () => {
+    const box = await world();
+    const sent = await cli(box, ["send_message", JSON.stringify({ body: "Pick:\n:::question {#bar}\nWhich bar?\n- [ ] Top\n:::", thread: "Bars" })]);
+    expect(sent.code).toBe(0);
+    expect(JSON.parse(sent.stdout).question_openers_with_text).toEqual([{ line: 2, directive: ":::question" }]);
+    expect(sent.stderr).toBe(`${questionOpenersWithTextText([{ line: 2, directive: ":::question" }]).trim()}\n`);
+  });
+
   test("inside an agent Ask AI started the Inbox is off: nothing is started or sent", async () => {
     const box = sandbox();
     const result = await cli(box, ["read_thread", "{}"], { env: { PLANNOTATOR_ASK_AI_CHILD: "1" } });
@@ -256,6 +266,10 @@ describe("who is calling", () => {
     { name: "Pi", host: "pi", session: "ses-pi", agentName: "Pi", env: { PI_SESSION_ID: "ses-pi" } },
     { name: "Codex", host: "codex", session: CODEX_THREAD, agentName: "Codex", env: { CODEX_THREAD_ID: CODEX_THREAD } },
     { name: "Qwen Code", host: "qwen", session: QWEN_SESSION, agentName: "Qwen Code", env: { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" } },
+    // DeepSeek Harness sets DSH_SESSION_ID (and DSH_SHELL) in every model shell.
+    { name: "DeepSeek Harness", host: "dsh", session: "session-0b9c8e4e", agentName: "DeepSeek Harness", env: { DSH_SHELL: "1", DSH_SESSION_ID: "session-0b9c8e4e" } },
+    // T3 Code runs Claude through the Agent SDK (the mod is off there): the thread, beside Claude's own marker.
+    { name: "T3 Code", host: "t3", session: T3_THREAD, agentName: "T3 Code", env: { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } },
     // OpenCode names no session in its shell: only the value its Tidy gives it says who it is.
     { name: "OpenCode", host: "opencode", session: "ses_opencode1", agentName: "OpenCode", env: { OPENCODE: "1" }, flag: "opencode:ses_opencode1" },
   ];
@@ -301,7 +315,7 @@ describe("who is calling", () => {
     await tool(box.client, "send_message", { body: "Lane.", subject: "Lane", thread: "Lane", project_path: box.project, agent_session: "ses-a", agent_host: "claude-code" });
     await tool(box.client, "card", { op: "create", title: "Other lane", project_path: box.project, agent_session: "ses-b", agent_host: "claude-code" });
     const env = { PLANNOTATOR_SESSION_TAG: "claude-code:ses-a" };
-    const made = await cli(box, ["card", '{"op":"create","title":"My lane","column":"building"}'], { env });
+    const made = await cli(box, ["card", '{"op":"create","title":"My lane","column":"in_progress"}'], { env });
     expect(JSON.parse(made.stdout).card.agent).toMatchObject({ host: "claude-code", session: "ses-a", name: "Claude Code" });
     const mine = JSON.parse((await cli(box, ["card", '{"op":"list"}'], { env })).stdout);
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["My lane"]);
@@ -320,6 +334,9 @@ describe("who is calling", () => {
       { CODEX_THREAD_ID: CODEX_THREAD, OMPCODE: "1" },
       { PI_SESSION_ID: "ses-pi", CLAUDECODE: "1" },
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", QWEN_CODE: "1" },
+      // Claude Code or Pi started from a DeepSeek Harness shell: DSH_* is inherited.
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", CLAUDECODE: "1" },
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", PI_SESSION_ID: "ses-pi" },
     ]) {
       const refused = await cli(box, ["send_message", send], { env });
       expect(refused).toMatchObject({ code: 1, stdout: "" });
@@ -351,6 +368,48 @@ describe("who is calling", () => {
     expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
     expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
     expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
+    // DeepSeek Harness: its marker beside its own session is its own shell; DSH_SHELL alone names no session.
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual({ host: "dsh", session: "session-s", name: "DeepSeek Harness" });
+    expect(caller(null, { DSH_SHELL: "1" })).toBeNull();
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s", GEMINI_CLI: "1" })).toBe("session_ambiguous");
+    // The person's own terminal in DSH Web (DSH_SESSION_ID, no DSH_SHELL): no DSH session, so whoever runs there is themselves.
+    expect(caller(null, { DSH_SESSION_ID: "session-s" })).toBeNull();
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PI_SESSION_ID: "ses-pi" })).toEqual({ host: "pi", session: "ses-pi", name: "Pi" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
+    // A subagent's model shell: the session Plannotator's plugin names (its parent).
+    const sub = { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent", DSH_PLANNOTATOR_SESSION_FOR: "session-child" };
+    expect(caller(null, sub)).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
+    expect(caller(null, { ...sub, DSH_PLANNOTATOR_SESSION_FOR: "session-other" })).toEqual({ host: "dsh", session: "session-child", name: "DeepSeek Harness" });
+    // A mismatch names the variable the session came from, so unsetting it changes something.
+    const mismatch = inboxCallerOf("dsh:session-mine", sub);
+    expect(mismatch.ok ? null : mismatch.message).toContain("from DSH_PLANNOTATOR_SESSION_ID");
+    expect(mismatch.ok ? null : mismatch.message).not.toContain("from DSH_SESSION_ID");
+    const plain = inboxCallerOf("dsh:session-mine", { DSH_SHELL: "1", DSH_SESSION_ID: "session-child" });
+    expect(plain.ok ? null : plain.message).toContain("from DSH_SESSION_ID");
+    // T3 Code: its thread beside Claude's own CLAUDECODE is the thread (T3 runs Claude, and the mod is off there).
+    const t3 = { host: "t3", session: T3_THREAD, name: "T3 Code" };
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1" })).toEqual(t3);
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD })).toEqual(t3);
+    // Anything else beside it is ambiguous: a Codex started in a T3 shell is the caller, not the thread; a tag can be
+    // inherited from a Claude Code that started T3; a DSH model shell or another agent is its own.
+    for (const other of [
+      { CODEX_THREAD_ID: CODEX_THREAD },
+      { PLANNOTATOR_SESSION_TAG: "claude-code:s" },
+      { DSH_SHELL: "1" },
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" },
+      { GEMINI_CLI: "1" },
+    ]) {
+      expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", ...other })).toBe("session_ambiguous");
+    }
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toBe("session_ambiguous");
+    // The wake's own value settles it.
+    expect(caller(`t3:${T3_THREAD}`, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual(t3);
+    // A thread T3 made through MCP, a delegated or a forked one is not a UUID: no T3 session, never a guess.
+    for (const id of [`mcp:${T3_THREAD}`, "thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
+      expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toBeNull();
+    }
+    expect(caller("t3:not-a-uuid", {})).toBe("invalid_session");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.
@@ -374,30 +433,41 @@ describe("who is calling", () => {
     expect(parseCallCommand(["--session ses_x", "card"])).toMatchObject({ ok: false, code: "usage", error: expect.stringContaining("separate words") });
   });
 
-  test("a read with no session settles nothing for the thread's owner; one that names a session, or a raw MCP client's, still does", async () => {
+  test("a read with no session settles nothing for the thread's owner; one that names the owner's session does; a raw MCP client's settles only its own", async () => {
     const box = await world();
     const { client, server, project } = box;
     await poll(server, "ses-a", project);
-    const replied = async (subject: string) => {
-      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
-      const words = (await (await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } };
-      return { thread: asked.thread_id as string, reply: words.reply.id };
+    const answer = async (messageId: string, subject: string) =>
+      ((await (await post(server, `/api/inbox/messages/${messageId}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } }).reply.id;
+    const replied = async (subject: string, session: string | null = "ses-a") => {
+      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, ...(session ? { agent_session: session, agent_host: "claude-code" } : {}) });
+      return { thread: asked.thread_id as string, reply: await answer(asked.message_id, subject) };
     };
     const scripted = await replied("Scripted");
     const raw = await replied("Raw");
     const named = await replied("Named");
+    // A raw MCP client that names no session, sending and reading: the reply to it is its own to settle.
+    const own = await replied("Own", null);
+    const checked = async (thread: string) => (await threadOf(server, thread)).messages[0]!.agent_checked_seq ?? null;
 
     for (const json of [{ thread_id: scripted.thread }, { thread_id: scripted.thread, format: "full" }]) {
       const read = await cli(box, ["read_thread", JSON.stringify(json)]);
       expect(read.code).toBe(0);
       expect(read.stdout).toContain("Scripted yes.");
     }
+    // A script's read with no session is a peek, even of a reply to a message sent with none.
+    expect((await cli(box, ["read_thread", JSON.stringify({ thread_id: own.thread, format: "full" })])).code).toBe(0);
+    expect(await checked(own.thread)).toBeNull();
+    // A raw MCP client's read with no session is not a peek: it settles the reply to its own message...
+    await tool(client, "read_thread", { thread_id: own.thread });
+    expect(await checked(own.thread)).not.toBeNull();
+    // ...but not one owed to ses-a, whose connection takes it (only a reply's recipient settles it).
     await tool(client, "read_thread", { thread_id: raw.thread });
     expect((await cli(box, ["--session", "claude-code:ses-a", "read_thread", JSON.stringify({ thread_id: named.thread })])).code).toBe(0);
 
     const handedOut = (await poll(server, "ses-a", project)).map((command) => command.id);
     expect(handedOut).toContain(scripted.reply);
-    expect(handedOut).not.toContain(raw.reply);
+    expect(handedOut).toContain(raw.reply);
     expect(handedOut).not.toContain(named.reply);
   });
 
@@ -421,7 +491,7 @@ set -euo pipefail
 call() { plannotator inbox call --session "$SESSION" "$@"; }
 
 for card in $(call card '{"op":"list"}' | grep -o '"id":"crd_[0-9A-Z]*"' | cut -d'"' -f4); do
-  call card "{\"op\":\"move\",\"card_id\":\"$card\",\"column\":\"your_review\",\"you\":\"Look at the lane\"}" > /dev/null
+  call card "{\"op\":\"move\",\"card_id\":\"$card\",\"column\":\"in_review\",\"you\":\"Look at the lane\"}" > /dev/null
 done
 call send_message "{\"reply_to\":\"$ACTION\",\"done\":[\"$ACTION\"],\"body\":\"Saw the deploy go green.\",\"idempotency_key\":\"tidy-done\"}" > /dev/null
 call send_message "{\"reply_to\":\"$QUESTION\",\"supersedes\":[\"$QUESTION\"],\"body\":\"The ledger moved, so this no longer applies.\",\"idempotency_key\":\"tidy-withdraw\"}" > /dev/null
@@ -454,10 +524,10 @@ describe("a Tidy run from one script", () => {
     const question = await agent("ses-a", { subject: "Ledger", thread: "Ledger", body: block("Backfill the ledger first?") });
     const deploy = await agent("ses-a", { subject: "Deploy", thread: "Deploy", body: action("Approve the deploy") });
     const words = await agent("ses-a", { subject: "Webhooks", thread: "Webhooks", body: "Webhooks are done; screenshots next." });
-    await tool(client, "card", { op: "create", title: "Ledger lane", column: "building", thread_id: question.thread_id, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
-    await tool(client, "card", { op: "create", title: "Docs lane", column: "designing", project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Ledger lane", column: "in_progress", thread_id: question.thread_id, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Docs lane", column: "in_progress", project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
     const others = await agent("ses-b", { subject: "Refunds", thread: "Refunds", body: block("Move refunds now?") });
-    await tool(client, "card", { op: "create", title: "Refunds lane", column: "building", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Refunds lane", column: "in_progress", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
     clock.behind = 2 * HOUR;
     expect((await post(server, `/api/inbox/messages/${words.message_id}/reply`, { words: "Still waiting on those screenshots.", idempotency_key: "r1" })).status).toBe(200);
     for (const command of await poll(server, "ses-a", project)) await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: command.id });
@@ -492,7 +562,7 @@ describe("a Tidy run from one script", () => {
 
     // The Inbox's state: its cards moved and only its cards, the item done, the question withdrawn, the words answered.
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone"}'])).stdout).cards as { title: string; column: string; heard_by: { session: string } }[];
-    expect(Object.fromEntries(cards.map((c) => [c.title, c.column]))).toEqual({ "Ledger lane": "your_review", "Docs lane": "your_review", "Refunds lane": "building" });
+    expect(Object.fromEntries(cards.map((c) => [c.title, c.column]))).toEqual({ "Ledger lane": "in_review", "Docs lane": "in_review", "Refunds lane": "in_progress" });
     const deployThread = await threadOf(server, deploy.thread_id);
     expect(deployThread.messages[0]!.questions![0]!.action_result).toMatchObject({ by: "agent" });
     const ledger = await threadOf(server, question.thread_id);
@@ -557,7 +627,7 @@ describe("a Tidy run from one script", () => {
     const asker = { project_path: project, agent_session: "ses-a", agent_host: "claude-code" };
     const question = await tool(client, "send_message", { ...asker, body: block("Ship the ledger?"), subject: "Ledger", thread: "Ledger" });
     const item = await tool(client, "send_message", { ...asker, body: action("Approve the deploy"), reply_to: question.message_id });
-    const made = await tool(client, "card", { ...asker, op: "create", title: "Ledger lane", column: "building" });
+    const made = await tool(client, "card", { ...asker, op: "create", title: "Ledger lane", column: "in_progress" });
     const real = (json: string) => json.replaceAll("msg_1", question.message_id).replaceAll("msg_2", item.message_id).replaceAll("crd_1", made.card.id);
     const examples = [...INBOX_CALL_USAGE.matchAll(/plannotator inbox call (\w+) '(.+)'$/gm)].map(([, name, json]) => [name!, real(json!)] as const);
     expect(examples.map(([name]) => name)).toEqual(["card", "card", "send_message"]);
@@ -566,7 +636,7 @@ describe("a Tidy run from one script", () => {
     expect(withdrawn!.questions![0]!.state).toBe("superseded");
     expect(done!.questions![0]!.action_result).toMatchObject({ by: "agent" });
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone","include_resolved":true}'])).stdout).cards as { column: string }[];
-    expect(cards.map((c) => c.column)).toEqual(["shipped"]);
+    expect(cards.map((c) => c.column)).toEqual(["done"]);
   });
 
   test("the Board's Tidy: a script that only moves cards counts as tidied, for that session", async () => {
@@ -576,9 +646,9 @@ describe("a Tidy run from one script", () => {
     await poll(server, "ses_oc1", project, "opencode");
     await poll(server, "ses-b", project);
     await tool(client, "send_message", { project_path: project, agent_session: "ses_oc1", agent_host: "opencode", subject: "Lane", thread: "Lane", body: "Starting." });
-    await tool(client, "card", { op: "create", title: "Lane", column: "building", project_path: project, agent_session: "ses_oc1", agent_host: "opencode" });
+    await tool(client, "card", { op: "create", title: "Lane", column: "in_progress", project_path: project, agent_session: "ses_oc1", agent_host: "opencode" });
     await tool(client, "send_message", { project_path: project, agent_session: "ses-b", agent_host: "claude-code", subject: "Other", thread: "Other", body: "Starting." });
-    await tool(client, "card", { op: "create", title: "Other", column: "building", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Other", column: "in_progress", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
     clock.behind = 0;
     await poll(server, "ses_oc1", project, "opencode");
     await poll(server, "ses-b", project);
@@ -595,7 +665,7 @@ describe("a Tidy run from one script", () => {
     expect(session).toBe("opencode:ses_oc1");
     const mine = JSON.parse((await cli(box, ["--session", session, "card", '{"op":"list"}'], { env })).stdout);
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["Lane"]);
-    const moved = await cli(box, ["--session", session, "card", JSON.stringify({ op: "move", card_id: mine.cards[0].id, column: "your_look", you: "Pick a name" })], { env });
+    const moved = await cli(box, ["--session", session, "card", JSON.stringify({ op: "move", card_id: mine.cards[0].id, column: "in_review", you: "Pick a name" })], { env });
     expect(moved.code).toBe(0);
     expect(JSON.parse(moved.stdout).card.heard_by).toMatchObject({ host: "opencode", session: "ses_oc1" });
     expect(Object.fromEntries((await runOf(server)).agents.map((a) => [a.session, a.state]))).toEqual({ ses_oc1: "tidied", "ses-b": "delivered" });

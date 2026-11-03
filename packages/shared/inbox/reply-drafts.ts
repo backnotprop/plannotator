@@ -17,17 +17,25 @@
  * an empty body with no files deletes it. The Send that carries the words clears the draft
  * only while it is still the one they were saved as (its `updated_at`).
  *
- * A draft may keep long pastes beside the words (`files`, approval
- * "inbox-paste-attachment"): each a pending upload with where it goes back
- * (`pasted`). The compare-and-set covers both: any save moves `updated_at`, and
- * `base_body`'s shortcut holds only while the draft also holds `base_files`.
+ * A draft keeps the box's files beside the words (`files`): every file the
+ * person attached (paperclip, drop, paste), each a pending upload, and a long
+ * paste (approval "inbox-paste-attachment") with where it goes back
+ * (`pasted`). The window's save names its file changes (`files_add`,
+ * `files_remove`, `files_place`), applied to the draft's files as they are
+ * (`applyReplyDraftFileOps`, @plannotator/core/inbox-reply-draft); then the
+ * compare-and-set is on the words alone. A save with a list instead: one that
+ * says it carries every file (`all_files: true`) sets the list; an older page's
+ * save (long pastes only) leaves the other files where they are, and its
+ * `base_body` shortcut holds only while the draft also holds its `base_files`
+ * (`replyDraftFilesAfterSave`).
  * The upload sweep keeps the uploads a reply draft names.
  */
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
-import { checkInboxDraftFiles, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
+import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
+import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
 
 export const INBOX_REPLY_DRAFTS_DIR = "reply-drafts";
@@ -45,7 +53,12 @@ function parse(text: string): InboxReplyDraft | null {
     const value = JSON.parse(text) as InboxReplyDraft;
     if (!value || value.v !== 1 || !isInboxId("msg", value.thread_id)) return null;
     if (typeof value.body !== "string" || typeof value.updated_at !== "string" || typeof value.created_at !== "string") return null;
-    const files = Array.isArray(value.files) ? value.files.filter((file) => file && typeof file.upload_id === "string" && file.pasted && typeof file.pasted.at === "number") : [];
+    // Every file the box held; a long paste also names its place (an Inbox of 0.28.46 or earlier kept only those).
+    const files = Array.isArray(value.files)
+      ? value.files.filter((file) => file && typeof file.upload_id === "string" && (file.pasted === undefined || (!!file.pasted && typeof file.pasted.at === "number")))
+      : [];
+    // Who the reply goes to (the recipient pill): kept only when well formed.
+    const recipients = recipientList(value.recipients);
     return {
       v: 1,
       thread_id: value.thread_id,
@@ -53,10 +66,19 @@ function parse(text: string): InboxReplyDraft | null {
       created_at: value.created_at,
       updated_at: value.updated_at,
       ...(files.length > 0 ? { files } : {}),
+      ...(recipients && recipients.length > 0 ? { recipients } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** A list of recipient session ids, or null when it is not one (too many, not session ids as a tag names them, repeats). */
+function recipientList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > INBOX_REPLY_DRAFT_RECIPIENTS_MAX) return null;
+  if (value.some((id) => typeof id !== "string" || !INBOX_SESSION_ID_PATTERN.test(id))) return null;
+  if (new Set(value).size !== value.length) return null;
+  return [...(value as string[])];
 }
 
 /** Every reply draft on disk, by thread id (a file that does not parse is skipped). */
@@ -91,21 +113,27 @@ export function sameInboxUploadIds(a: readonly string[], b: readonly string[]): 
 }
 
 /**
- * The checks on a save's input, before anything is written. `files`: the long
- * pastes kept beside the words (each `{ upload_id, pasted }`, an upload still
- * pending); `base_files`: the upload ids this window saved last, which
- * `base_body`'s shortcut must also match (absent: words only, as an older window
- * sends).
+ * The checks on a save's input, before anything is written. `files`: the files
+ * kept beside the words (each an upload id, or `{ upload_id, pasted }` for a
+ * long paste; an upload still pending); `all_files: true`: they are every file
+ * the box holds (absent: an older page's long pastes only); `base_files`: the
+ * upload ids this window saved last, which `base_body`'s shortcut must also
+ * match (absent: words only, as an older window sends).
  */
 export function checkInboxReplyDraftInput(
   inboxDirPath: string,
-  input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown },
+  input: InboxReplyDraftInput,
 ): {
   body: string;
   base: string | null;
   baseBody: string | null;
   files: InboxDraftFile[];
   baseFiles: string[] | null;
+  allFiles: boolean;
+  /** The file changes this save makes (an Inbox page that sends them), applied to the draft's files as they are. */
+  ops: ReplyDraftFileOps<InboxDraftFile> | null;
+  /** Who the reply goes to (the recipient pill); null: not sent, the draft keeps its own. */
+  recipients: string[] | null;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -121,8 +149,36 @@ export function checkInboxReplyDraftInput(
   if (listedBase !== null && (!Array.isArray(listedBase) || listedBase.some((id) => typeof id !== "string"))) {
     throw new InboxError("validation_error", "base_files: the upload ids this window saved last, or null.", { field: "base_files" });
   }
-  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length, { onlyPasted: true });
-  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null };
+  const files = checkInboxDraftFiles(inboxDirPath, input.files, body.length);
+  const opsGiven = input.files_add !== undefined || input.files_remove !== undefined || input.files_place !== undefined;
+  const ops = opsGiven
+    ? {
+        // A file sent or swept since is not added: the save never fails for it (no retry, no loop).
+        add: checkInboxDraftFiles(inboxDirPath, input.files_add, body.length, { list: "files_add", skipGone: true }),
+        remove: checkInboxDraftIds(input.files_remove, "files_remove"),
+        place: checkInboxDraftPlaces(input.files_place, body.length, "files_place"),
+      }
+    : null;
+  const recipients = input.recipients === undefined || input.recipients === null ? null : recipientList(input.recipients);
+  if (input.recipients !== undefined && input.recipients !== null && recipients === null) {
+    throw new InboxError("validation_error", `recipients: at most ${INBOX_REPLY_DRAFT_RECIPIENTS_MAX} session ids (letters, digits, . _ : -), each once.`, { field: "recipients" });
+  }
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients };
+}
+
+/** What a reply draft save may carry (`POST /api/inbox/threads/:id/draft`). */
+export interface InboxReplyDraftInput {
+  body?: unknown;
+  base?: unknown;
+  base_body?: unknown;
+  files?: unknown;
+  base_files?: unknown;
+  all_files?: unknown;
+  files_add?: unknown;
+  files_remove?: unknown;
+  files_place?: unknown;
+  /** Who the reply goes to: session ids (the recipient pill); absent, the draft keeps its own. */
+  recipients?: unknown;
 }
 
 /** Write one draft whole (owner-only folder and file). */

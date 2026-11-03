@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { FileDiff } from '@pierre/diffs/react';
 import { getSingularPatch } from '@pierre/diffs';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
-import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
 import { useReviewState } from '../dock/ReviewStateContext';
 import { resolveSyntaxTheme, buildLineBgOverrides } from '../hooks/usePierreTheme';
@@ -105,6 +105,8 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   // Re-compute on theme / font / intensity changes
   useEffect(() => {
     const rafId = requestAnimationFrame(() => {
+      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
+      extendThemeSwitch();
       setPierreTheme({
         type: resolvedMode ?? 'dark',
         css: buildPierreCSS(resolvedMode ?? 'dark', state.fontFamily, state.fontSize, lineBgIntensity),

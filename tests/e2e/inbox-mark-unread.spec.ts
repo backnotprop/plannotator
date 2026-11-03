@@ -157,7 +157,8 @@ test('a thread read by opening it: the header’s Mark unread closes it, and the
   await row(page, threads.deploy).click();
   const button = pane.locator('[data-mark-unread]');
   await expect(button).toBeVisible();
-  await expect(button).toContainText('Mark unread');
+  // An icon (approval "inbox-thread-header"): its words are its name.
+  await expect(button).toHaveAccessibleName('Mark unread');
   await expect(pane.locator('[data-mark-read]')).toHaveCount(0);
   await button.click();
 

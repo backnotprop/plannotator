@@ -14,8 +14,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxComposeProject, InboxListSection, InboxProject, InboxTidyPlan } from "@plannotator/core/inbox-types";
-import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
+import { INBOX_BRIDGE_POLL_PATH, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { COMBINE_WHY_STARTED_ABOVE } from "./inbox-combine-suggestions";
 
 const scratch: string[] = [];
 const servers: InboxServer[] = [];
@@ -281,8 +282,8 @@ describe("the window on a combined project", () => {
 
   test("Settings keeps each folder's size; deleting the head leaves the other folder as its own project", async () => {
     const w = await combined();
-    const store = (await (await fetch(url(w.server, "/api/inbox/settings"))).json()) as { store: { projects: { id: string; combined_into?: string; combined?: string[] }[] } };
-    const usage = new Map(store.store.projects.map((project) => [project.id, project]));
+    const store = (await (await fetch(url(w.server, "/api/inbox/settings/storage"))).json()) as { projects: { id: string; combined_into?: string; combined?: string[] }[] };
+    const usage = new Map(store.projects.map((project) => [project.id, project]));
     expect(usage.get(w.from)?.combined_into).toBe("ledger");
     expect(usage.get(w.into)?.combined).toEqual(["ledger-2"]);
 
@@ -350,6 +351,62 @@ describe("Tidy's Combine projects", () => {
     expect(plan.count).toBe(1);
     const board = (await (await fetch(url(w.server, "/api/inbox/tidy?surface=board"))).json()) as InboxTidyPlan;
     expect(board.combine).toBeUndefined();
+  });
+
+  // Audit D2: a session started in a plain folder above a repository files there; the repository's own sessions
+  // file under the repository. The folder is offered only when all its agents' work was that repository's.
+  test("offers a plain folder whose agents all worked in the one repository inside it, and never an unrelated folder", async () => {
+    const w = await world();
+    const work = join(w.root, "work");
+    const app = repository(join(work, "app"), "https://github.com/acme/app.git");
+    mkdirSync(join(app, "src"));
+    const docs = join(w.root, "docs");
+    const site = repository(join(docs, "site"), "https://github.com/acme/site.git");
+    // Started in work/ and cd'd into app/src: the send carries the folder it worked in (as the Claude Code mod sends it).
+    const above = (await w.client.callTool({
+      name: "send_message",
+      arguments: { project_path: work, body: "Fixed the importer.", agent_session: "ses_above" },
+      _meta: { [INBOX_WORKING_FOLDER_META_KEY]: join(app, "src") },
+    })) as ToolResult;
+    expect(above.isError).toBeFalsy();
+    await send(w.client, { project_path: app, body: "The importer's tests.", agent_session: "ses_codex" });
+    // docs/: one session worked in docs itself, another in the site repository: other work.
+    await send(w.client, { project_path: docs, body: "Launch notes.", agent_session: "ses_docs" });
+    await send(w.client, { project_path: site, body: "Site build.", agent_session: "ses_site" });
+    const plan = await until(() => tidyPlan(w.server), (found) => found.combine_loading === undefined);
+    expect(plan.combine?.map((pair) => [pair.from.root, pair.into.root, pair.why])).toEqual([[work, app, COMBINE_WHY_STARTED_ABOVE]]);
+    // Once the session that wrote in docs also writes in site, its work is the site's: then docs is offered too.
+    await send(w.client, { project_path: site, body: "The launch notes, for the site.", agent_session: "ses_docs" });
+    const again = await until(() => tidyPlan(w.server), (found) => (found.combine?.length ?? 0) === 2);
+    expect(again.combine?.map((pair) => [pair.from.root, pair.into.root]).sort()).toEqual([[docs, site], [work, app]].sort());
+  });
+
+  test("never offers a folder of repositories of which only one reached the Inbox yet (review of #2528, F1)", async () => {
+    const w = await world();
+    // ~/repos holds a, b and c; only a has Inbox traffic. b is a repository, c holds checkouts in worktrees/.
+    const code = join(w.root, "repos");
+    const a = repository(join(code, "a"), "https://github.com/acme/a.git");
+    repository(join(code, "b"));
+    mkdirSync(join(code, "c", "worktrees", "main"), { recursive: true });
+    mkdirSync(join(code, "notes"));
+    // The same shape as the offered pair: started in code/, every message the work of a.
+    const above = (await w.client.callTool({
+      name: "send_message",
+      arguments: { project_path: code, body: "Fixed a's importer.", agent_session: "ses_above" },
+      _meta: { [INBOX_WORKING_FOLDER_META_KEY]: a },
+    })) as ToolResult;
+    expect(above.isError).toBeFalsy();
+    await send(w.client, { project_path: a, body: "a's tests.", agent_session: "ses_above" });
+    const plan = await until(() => tidyPlan(w.server), (found) => found.combine_loading === undefined);
+    expect(plan.combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    // b alone beside a is enough; and c's checkouts alone too. With neither, only a plain notes folder: offered.
+    rmSync(join(code, "c"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    rmSync(join(code, "b"), { recursive: true });
+    mkdirSync(join(code, "c", ".worktrees"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.some((pair) => pair.from.root === code) ?? false).toBe(false);
+    rmSync(join(code, "c"), { recursive: true });
+    expect((await tidyPlan(w.server)).combine?.map((pair) => [pair.from.root, pair.into.root])).toContainEqual([code, a]);
   });
 
   test("a combined pair stops being offered; a pair whose combine was undone is not offered again", async () => {

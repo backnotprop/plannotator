@@ -170,10 +170,11 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-    "  plannotator inbox mcp",
+    "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+    "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
@@ -183,6 +184,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "Run 'plannotator <command> --help' for command-specific usage.",
     "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
     "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
+    "Using T3 Code? Run 'plannotator t3 --help'.",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
@@ -200,12 +202,11 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
- * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook), and
- * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
- * hidden until the Board page ships.
+ * `t3` (the T3 Code connection) was the last one to launch. Today:
+ * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
+ * runs.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -218,17 +219,19 @@ export const CARD_COMMAND_USAGE = [
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
   "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
-  "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]",
+  "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]      (moves it to done)",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
-  "Every command takes [--project <folder>] (default: this folder) and [--json].",
-  `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
+  "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
+  `Columns: ${INBOX_CARD_COLUMNS.join(", ")}. A column is where the work stands: todo (asked, not started; the default),`,
+  "in_progress (you are on it), in_review (your part handed over; give --you), done (merged, live or finished), dropped (cancelled), backlog (not asked for yet).",
+  "A card the person put in backlog is theirs to move. Ship a card when you see its PR merge (the Board may also move it to done once every --pr PR merged).",
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
-  "When a card waits on the person, link the Inbox thread where they make the call (--thread), so \"You: …\" opens it.",
-  "--ref: an issue or PR (owner/repo#123, or its GitHub or GitLab URL), or a Jira issue URL (https://<site>.atlassian.net/browse/KEY-123, or a Jira Cloud board link with ?selectedIssue=KEY-123; a self-hosted Jira only as https://<host>/browse/KEY-123, the key in capitals).",
+  "When you move a card to in_review, link the Inbox thread where the person makes the call (--thread), so \"You: …\" opens it.",
+  "--ref: an issue or PR as owner/repo#123, or any http(s) link with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; a Jira or YouTrack issue link shows its key; any other link shows as a plain link.",
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
@@ -327,7 +330,7 @@ export const INBOX_CALL_USAGE = [
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
   "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-  "  plannotator inbox mcp",
+  "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
@@ -354,6 +357,8 @@ export const INBOX_COMMAND_USAGE = [
   "                                  an Inbox already running, asks it to publish.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
+  "                                  --t3: for T3 Code (plannotator t3 --help); lists",
+  "                                  its tools only inside a T3 Code thread.",
   "  plannotator inbox status        Whether the Inbox runs: URL, pid, version, data dir.",
   "                                  Exit 0 running, 1 not running, 2 not answering.",
   "                                  --json prints the same as one JSON object.",

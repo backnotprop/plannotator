@@ -189,13 +189,22 @@ The Plannotator Inbox is one local window per machine where you leave the person
 - Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
 - When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
 
+## plannotator t3
+
+```bash
+plannotator t3 login --url <T3 MCP URL>
+plannotator t3 logout --url <T3 MCP URL>
+```
+
+If the person uses T3 Code, set it up once so their Inbox replies reach Claude threads in T3 as new turns: run `plannotator t3 --help` and follow its two steps. The person approves T3's sign-in page themselves.
+
 ## plannotator card
 
 ```bash
 plannotator card <create|move|say|link|ship|drop|list> ...
 ```
 
-Only while the person has turned the Inbox's Board on (Settings → Capabilities); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of its stage (backlog, designing, your_look, building, your_review, shipped). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. The icebox is the person's only. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in `say`. When a card waits on the person, link the Inbox thread where they make the call (`thread_id`), so "You: …" opens it.
+Only while the person has turned the Inbox's Board on (Settings → Capabilities); it is off by default, and then every call answers `board_off` and writes nothing, so use it only when your inbox tool lists `card` or the person asks. The Board holds one card per piece of work that outlasts a reply, in the column of where the work stands (todo, in_progress, in_review, done; backlog for what nobody asked for yet). Use the `card` action of a `plannotator_inbox` tool when you have one; this CLI is the same call from a shell. `plannotator card --help` gives the arguments, and `plannotator inbox --help` its card section while the Board is on. A card the person put in backlog is theirs to move. A title is 2–5 words naming the work ("Pi update fix"), never a sentence; where it stands goes in `say`. Move a card to in_review yourself when you hand your part over, with `you` and the Inbox thread where the person makes the call (`thread_id`), so "You: …" opens it. Ship a card when you see its PR merge (the Board may also move it to done once every PR linked with `--pr` merged).
 
 ## Other subcommands
 

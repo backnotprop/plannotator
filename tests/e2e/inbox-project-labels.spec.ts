@@ -9,7 +9,7 @@
  *    server's name, what agents read, keeps the parent;
  *  - a checkout in a `worktrees` folder (Workspaces' `<repo>/worktrees/main`)
  *    reads as its repository, in the sidebar, the rows and one project's
- *    list title.
+ *    list title, and in the server's name agents read (one rule, 2026-11-02).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in .local/proof/project-labels/.
@@ -100,7 +100,9 @@ test('a clash on screen adds the parent; archived, it goes, while agents keep th
     return model.projects.map((p) => p.name).sort();
   });
   expect(served).toContain('plannotator · plannotator');
-  expect(served).toContain('main · appnotes/worktrees');
+  // A checkout in a `worktrees` folder reads as its repository for agents too (one rule since 2026-11-02).
+  expect(served).toContain('appnotes');
+  expect(served.filter((name) => /^main\b/.test(name))).toEqual([]);
   expect(world.errors).toEqual([]);
 });
 

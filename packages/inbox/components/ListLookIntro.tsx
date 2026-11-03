@@ -152,8 +152,8 @@ export interface ListLookIntroProps {
   /** Linked machines that are away (machines.ts): their rows are greyed, as in the list. */
   awayMachines?: ReadonlySet<string>;
   phone: boolean;
-  /** Done: the switches as they stand. */
-  onDone: (look: ListLook) => void;
+  /** Done: the switches as they stand, and as they opened (only what the person changed is saved). */
+  onDone: (look: ListLook, opened: ListLook) => void;
   /** Keep as it is, or Escape: nothing changes. */
   onKeep: () => void;
 }
@@ -200,7 +200,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
           Keep as it is
         </button>
         <span className="ib-bsp" />
-        <button type="button" className="ib-btn ib-pri" onClick={() => onDone(look)} data-list-intro-done="">
+        <button type="button" className="ib-btn ib-pri" onClick={() => onDone(look, opened)} data-list-intro-done="">
           Done
         </button>
       </div>
