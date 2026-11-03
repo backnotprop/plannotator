@@ -138,6 +138,34 @@ export function skillListRoom(field: Element): VerticalBox {
   return overlapBox(seen, { top: r.bottom, bottom: seen.bottom });
 }
 
+/**
+ * Whether the person can type in `field` and see it: it has focus, it is not
+ * inert, it has a box on screen (not inside a scroll container's hidden part)
+ * and nothing is drawn over the middle of what shows of it. The list is drawn
+ * at the Inbox's root, above the whole shell, so without this it floated over
+ * whatever covered its field: full view over the reply box (a press on a row
+ * inserted into the hidden reply), a tucked full-screen card, a sheet, and on
+ * a phone an action item's note that hides the reply foot. A hit inside
+ * `surface` counts as the field: its own box (the token mirror sits over the
+ * textarea), or the box it belongs to (the reply foot, whose Send row is held
+ * over the words when the foot scrolls under an iPhone keyboard on its side; a
+ * dialog). So does a hit on `own`, the list's own box, which may lie over it.
+ */
+export function fieldInSight(field: HTMLElement, surface: Element, stopAt: Element | null, own: Element | null): boolean {
+  const doc = field.ownerDocument;
+  if (doc.activeElement !== field) return false;
+  if (field.closest('[inert]')) return false;
+  const r = field.getBoundingClientRect();
+  // No box: hidden (`display: none`), unless nothing has one (a DOM with no layout, as in unit tests).
+  if (!(r.width > 0 && r.height > 0)) return !(doc.documentElement.getBoundingClientRect().width > 0);
+  const shown = overlapBox(visibleBox(field, stopAt), seenBox(doc.defaultView ?? window));
+  if (shown.bottom - shown.top < 1) return false;
+  const hit = typeof doc.elementFromPoint === 'function' ? doc.elementFromPoint(r.left + r.width / 2, (shown.top + shown.bottom) / 2) : null;
+  // No answer (a DOM with no layout): nothing is known to cover it.
+  if (!hit) return true;
+  return surface.contains(hit) || (own !== null && own.contains(hit));
+}
+
 /** A phone's list: at most 4½ rows of 44 px and 40% of what is visible, never under 1½ rows. Pure. */
 export const PHONE_SKILL_LIST_HEIGHT = 198;
 export function phoneSkillListHeight(seenHeight: number): number {

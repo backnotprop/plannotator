@@ -3138,6 +3138,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-skanchor [data-skill-item] { min-height: 44px; flex-wrap: wrap; row-gap: 0; align-content: center; }
   .ib-skanchor [data-skill-item-part="description"] { order: 3; flex-basis: 100%; padding-left: 26px; font-size: var(--ib-fs-12-5, 12.5px); }
   .ib-skanchor [data-skill-item-part="root"] { margin-left: auto; }
+  /* A wrapping row picks each item's line by its basis before anything shrinks: a name wider than the row took a
+     line of its own (icon / name… / source / description, 83 px). From a zero basis it fills the first line and ends
+     in an ellipsis there, the source beside it. */
+  .ib-skanchor [data-skill-item-part="name"] { flex: 1 1 0; min-width: 0; }
   .ib-cfield [data-skill-human-only-notice] > summary { min-height: 44px; }
   .ib-rfoot { flex-wrap: wrap; }
   .pn-inbox .ib-rchip { height: 32px; }

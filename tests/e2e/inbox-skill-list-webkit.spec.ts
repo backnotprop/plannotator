@@ -18,7 +18,12 @@
  * - an iPhone 16 Pro, keyboard 330 px, `/b` then `/big` typed at the end of a
  *   sentence (it opens above, between the header and the box);
  * - an iPhone 15, keyboard 403 px (257 px left), one match (it opens below);
- * - the keyboard opening after the list is open (it moves with it).
+ * - the keyboard opening after the list is open (it moves with it);
+ * - a name wider than a phone's row: the icon, the name (cut with an ellipsis)
+ *   and its source stay on one line, the row two lines tall;
+ * - full view opening over the reply box while the list is open (desktop):
+ *   the list goes with the box it belongs to (at the Inbox's root it is above
+ *   the whole shell, and it stayed over the document, its rows still pressable).
  *
  * What emulation cannot prove: a headless WebKit has no keyboard and no Safari
  * bars, and cannot pan its page; only an iPhone shows Safari's own behaviour.
@@ -29,7 +34,7 @@
 
 import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -47,6 +52,7 @@ const SKILLS = [
   { name: 'break-ui', description: 'Try to break a piece of UI by feeding it worst-case data: long names, unbreakable emails, huge counts.', root: 'universal', humanOnly: false },
   { name: 'build-mcp-server', description: 'Design, scaffold, audit, and upgrade Model Context Protocol servers.', root: 'claude', humanOnly: false },
   { name: 'benachrichtigungseinstellungen-überprüfen', description: 'Überprüft die Benachrichtigungseinstellungen aller Arbeitsbereiche.', root: 'codex', humanOnly: false },
+  { name: 'arbeitsbereichsbenachrichtigungseinstellungenueberpruefung', description: 'Wider than a phone row on its own.', root: 'claude', humanOnly: false },
   ...Array.from({ length: 80 }, (_, i) => ({ name: `bulk-skill-${String(i).padStart(2, '0')}`, description: `Skill ${i}: ${LONG}`, root: 'universal', humanOnly: false })),
 ];
 
@@ -58,6 +64,8 @@ interface World {
   url: string;
   thread: string;
   agent: SimAgent;
+  /** A thread with an HTML page attached, to open in full view. */
+  page: { thread: string; file: string };
 }
 
 let world: World;
@@ -91,7 +99,12 @@ test.beforeAll(async () => {
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const body = ['# Compute research catch-up', '', ...Array.from({ length: 10 }, (_, i) => `${i + 1}. ${PARAGRAPH}`)].join('\n\n');
   const sent = await agent.send({ project_path: project, subject: 'Compute research catch-up: wake time and the long runs', thread: 'compute', body }, { wakes: true });
-  world = { url: started.stdout.trim(), thread: sent.thread_id as string, agent };
+  mkdirSync(join(project, 'pages'));
+  writeFileSync(join(project, 'pages', 'page.html'), '<!doctype html><meta charset="utf-8"><title>Page</title><body style="margin:0;font:16px system-ui;padding:12px 24px"><h1>Checkout</h1>' + '<p>Body text that fills the page.</p>'.repeat(40) + '</body>');
+  const withPage = await agent.send({ project_path: project, subject: 'The checkout page', thread: 'page', body: 'The page as it is now.', attachments: ['pages/page.html'] });
+  const url = started.stdout.trim();
+  const files = (await (await fetch(new URL(`/api/inbox/threads/${withPage.thread_id}/attachments`, url))).json()) as { attachments: { id: string; name: string }[] };
+  world = { url, thread: sent.thread_id as string, agent, page: { thread: withPage.thread_id as string, file: files.attachments[0]!.id } };
   browser = await webkit.launch({ args: [] });
 });
 
@@ -132,8 +145,8 @@ async function iosKeyboardUp(page: Page, keyboard: number): Promise<void> {
   await frames(page);
 }
 
-async function openReply(page: Page) {
-  await page.goto(`${world.url}#thread=${world.thread}`);
+async function openReply(page: Page, thread = world.thread) {
+  await page.goto(`${world.url}#thread=${thread}`);
   const pane = page.locator('section.ib-pane');
   const box = pane.locator('.ib-pfoot textarea').first();
   const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
@@ -258,4 +271,53 @@ test('the keyboard opening after the list is open: the list follows into what is
   await shot(page, 'iphone-keyboard-after');
   await expectWhole(page, 'keyboard up after the list opened');
   await page.context().close();
+});
+
+test('a name wider than a phone row: icon, name and source stay on one line, the row two lines tall', async () => {
+  const page = await phone('iPhone 15');
+  const field = await openReply(page);
+  await field.focus();
+  await iosKeyboardUp(page, 403);
+  await typeAtEnd(page, field, '', '/arbeitsbereichs');
+  await expect(page.locator('[data-skill-item]')).toHaveCount(1);
+  await shot(page, 'iphone-long-name');
+  await expectWhole(page, 'long name');
+  const m = await page.locator('[data-skill-item]').evaluate((row) => {
+    const top = (part: string) => row.querySelector(`[data-skill-item-part="${part}"]`)!.getBoundingClientRect();
+    const icon = row.querySelector('svg')!.getBoundingClientRect();
+    const name = top('name');
+    const root = top('root');
+    const r = row.getBoundingClientRect();
+    return { iconMid: (icon.top + icon.bottom) / 2, nameMid: (name.top + name.bottom) / 2, rootMid: (root.top + root.bottom) / 2, nameRight: name.right, rootLeft: root.left, rowRight: r.right, height: r.height, cut: (row.querySelector('[data-skill-item-part="name"]') as HTMLElement).scrollWidth > name.width + 1 };
+  });
+  // One first line: the name used to drop to a line of its own (icon / name… / source / description, 83 px).
+  expect.soft(Math.abs(m.nameMid - m.iconMid), 'the name sits on the icon\'s line').toBeLessThanOrEqual(3);
+  expect.soft(Math.abs(m.rootMid - m.nameMid), 'the source sits on the name\'s line').toBeLessThanOrEqual(3);
+  expect.soft(m.nameRight, 'the name stops before its source').toBeLessThanOrEqual(m.rootLeft + 0.5);
+  expect.soft(m.cut, 'the name is cut (an ellipsis), not wrapped').toBe(true);
+  expect.soft(m.height, 'two lines: the name\'s, then the description').toBeLessThan(60);
+  await page.context().close();
+});
+
+test('full view opening over the reply box takes the open list away (desktop)', async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
+  await context.route(/\/api\/inbox\/skills(\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ skills: SKILLS }) }));
+  const page = await context.newPage();
+  const field = await openReply(page, world.page.thread);
+  await field.focus();
+  await typeAtEnd(page, field, 'Hi ', '/b');
+  await expect(page.locator('[data-skill-menu]')).toHaveCount(1);
+  const row = await page.locator('[data-skill-item]').first().boundingBox();
+  await page.evaluate(({ thread, file }) => {
+    window.location.hash = `thread=${thread}&file=${file}&view=full`;
+  }, world.page);
+  await expect(page.locator('.ib-view.ib-full')).toBeVisible();
+  await frames(page);
+  await shot(page, 'desktop-full-view-over-list');
+  await expect(page.locator('[data-skill-menu]')).toHaveCount(0);
+  // Where the first row was, the full view is what a press reaches: nothing writes into the hidden reply.
+  const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-skill-item], .ib-view.ib-full') ? (document.elementFromPoint(x, y)!.closest('[data-skill-item]') ? 'row' : 'full view') : 'other', { x: row!.x + 40, y: row!.y + row!.height / 2 });
+  expect(hit).not.toBe('row');
+  await expect(field).toHaveValue('Hi /b');
+  await context.close();
 });

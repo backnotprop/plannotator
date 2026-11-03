@@ -38,7 +38,7 @@ import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomp
 import { useSkillReferenceAutocomplete } from '@plannotator/ui/hooks/useSkillReferenceAutocomplete';
 import type { MentionPerson, MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_UPDATE_WORDS, tagPeople, tagPickedWords, type TagOption } from '../tags';
-import { caretAnchor, caretLineRect, fieldAnchor, phoneSkillListHeight, seenBox, skillListRoom, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
+import { caretAnchor, caretLineRect, fieldAnchor, fieldInSight, phoneSkillListHeight, seenBox, skillListRoom, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
 import { TagNotes, TagPicker } from './TagPicker';
 import { VoiceNote, voiceHidesCaret, voicePaint } from './VoiceMic';
 import type { VoiceHandle } from '../voice';
@@ -181,6 +181,10 @@ export function InboxComposerField({
     if (option?.taggable) setAnnounce(tagPickedWords(option));
   };
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Whether the skill list is drawn (FloatingSkillMenu draws it only while the field is in sight): its keys and
+  // `aria-expanded` follow what the person sees, so arrows never move through a list nobody can see.
+  const [skillShown, setSkillShown] = useState(false);
+  const skillMenuShown = skills.menu !== null && skillShown;
   const textarea = innerRef.current;
   const wrap = wrapRef.current;
   const host = textarea ? skillMenuHost(textarea) : null;
@@ -188,7 +192,7 @@ export function InboxComposerField({
   return (
     <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
       {skills.menu && !tagMenu && textarea && wrap && host ? (
-        <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null}>
+        <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null} onShown={setSkillShown}>
           {(boundary, maxListHeight) => (
             <SkillReferenceMenu
               id={skillListboxId}
@@ -218,7 +222,7 @@ export function InboxComposerField({
             return;
           }
           if (mention.onKeyDown(event)) return;
-          if (skills.onKeyDown(event)) return;
+          if (skillMenuShown && skills.onKeyDown(event)) return;
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
@@ -235,7 +239,7 @@ export function InboxComposerField({
         tokens={skills.referenceTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
-        listboxOpen={skills.menu !== null || tagMenu !== null}
+        listboxOpen={skillMenuShown || tagMenu !== null}
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
@@ -276,10 +280,13 @@ interface MenuFrame {
   box: AnchorBox;
   room: VerticalBox | null;
   cap: number | undefined;
+  /** fieldInSight: the field has focus and nothing covers it. */
+  shown: boolean;
 }
 
 // Object.is: a reading that is NaN (a viewport mid-rotation) still equals itself, so the commit loop converges.
 const sameFrame = (a: MenuFrame, b: MenuFrame) =>
+  a.shown === b.shown &&
   Object.is(a.box.top, b.box.top) &&
   Object.is(a.box.bottom, b.box.bottom) &&
   Object.is(a.box.left, b.box.left) &&
@@ -300,21 +307,31 @@ const sameFrame = (a: MenuFrame, b: MenuFrame) =>
  * them: a scroll anywhere, a resize, the visual viewport (the keyboard opening
  * or closing), a change of the field's size, and the root's keyboard state
  * (phone.ts pins the page a frame after the keyboard opens).
+ *
+ * It is drawn only while the field has focus and is in sight (fieldInSight):
+ * at the root it is above the whole shell, so anything that covers the field
+ * (full view, a tucked card, a sheet, an action note that hides the reply foot
+ * on a phone) would otherwise leave it floating, and pressable, over that.
+ * Focus moves, the shell's own changes and the end of a transition re-check.
+ * `onShown` tells the field, which then leaves the list's keys alone.
  */
 function FloatingSkillMenu({
   textarea,
   wrap,
   host,
   caret,
+  onShown,
   children,
 }: {
   textarea: HTMLTextAreaElement;
   wrap: HTMLElement;
   host: HTMLElement;
   caret: CaretMenuOptions | null;
+  onShown: (shown: boolean) => void;
   children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
   const [frame, setFrame] = useState<MenuFrame | null>(null);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef(caret);
   caretRef.current = caret;
   const room = useCallback((): VerticalBox | null => {
@@ -350,7 +367,8 @@ function FloatingSkillMenu({
     const seen = seenBox(textarea.ownerDocument.defaultView ?? window);
     const phoneCap = phone ? phoneSkillListHeight(seen.bottom - seen.top) : undefined;
     const cap = own ? own.maxListHeight : Number.isFinite(phoneCap) ? phoneCap : undefined;
-    const next: MenuFrame = { box, room: r, cap };
+    const shown = fieldInSight(textarea, textarea.closest('.ib-pfoot, dialog') ?? wrap, host, anchorRef.current);
+    const next: MenuFrame = { box, room: r, cap, shown };
     setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
   }, [host, textarea, wrap, room]);
 
@@ -380,7 +398,21 @@ function FloatingSkillMenu({
     watch?.observe(textarea.ownerDocument.documentElement, { attributes: true, attributeFilter: ['style', 'data-ib-keyboard', 'data-ib-keyboard-pin'] });
     const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(soon) : null;
     sized?.observe(wrap);
+    // What can cover the field or take its focus: focus moving, the shell drawing something new (full view, a sheet,
+    // a card tucked with `inert`), and a slide-in finishing.
+    const doc = textarea.ownerDocument;
+    doc.addEventListener('focusin', soon);
+    doc.addEventListener('focusout', soon);
+    doc.addEventListener('transitionend', soon, true);
+    doc.addEventListener('animationend', soon, true);
+    const shell = typeof MutationObserver === 'function' ? new MutationObserver(soon) : null;
+    shell?.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'class', 'open'] });
     return () => {
+      doc.removeEventListener('focusin', soon);
+      doc.removeEventListener('focusout', soon);
+      doc.removeEventListener('transitionend', soon, true);
+      doc.removeEventListener('animationend', soon, true);
+      shell?.disconnect();
       view.cancelAnimationFrame(raf);
       view.removeEventListener('scroll', soon, true);
       view.removeEventListener('resize', soon);
@@ -391,10 +423,19 @@ function FloatingSkillMenu({
     };
   }, [update, textarea, wrap]);
 
-  if (!frame) return null;
+  const shown = frame?.shown ?? false;
+  useEffect(() => {
+    onShown(shown);
+  }, [onShown, shown]);
+  useEffect(() => () => onShown(false), [onShown]);
+
+  if (!frame || !frame.shown) return null;
   const { box } = frame;
   return createPortal(
     <div
+      ref={anchorRef}
+      // A press on the list's own chrome (its padding, its scrollbar) keeps the caret in the field; rows insert on pointerdown.
+      onMouseDown={(event) => event.preventDefault()}
       className="ib-skanchor"
       data-skill-menu-anchor={caret ? 'caret' : 'field'}
       style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top) }}

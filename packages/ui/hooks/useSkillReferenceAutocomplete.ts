@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import {
   extractSkillReferences,
@@ -134,6 +134,19 @@ export function useSkillReferenceAutocomplete(options: {
     setCaret(el ? el.selectionStart : null);
   }, [textareaRef]);
 
+  // The caret a pick owes the field, placed in the commit that writes the new text (below), before the person can
+  // type again. Placed only from a timer, a key pressed in between landed where the commit had left the caret (the
+  // end), and the timer then pulled the caret back over it: a quick "/b" after a click came out "b/".
+  const pendingCaret = useRef<{ el: HTMLTextAreaElement; text: string; caret: number } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingCaret.current;
+    if (!pending || pending.el.value !== pending.text) return;
+    pendingCaret.current = null;
+    if (!pending.el.isConnected) return;
+    pending.el.focus();
+    pending.el.setSelectionRange(pending.caret, pending.caret);
+  });
+
   const select = useCallback(
     (index: number) => {
       const el = textareaRef.current;
@@ -151,9 +164,16 @@ export function useSkillReferenceAutocomplete(options: {
       // start makes the close ordering-safe; the dismissal clears itself as
       // soon as the trigger changes (including to null when the caret lands).
       setDismissedStart(trigger.start);
-      // Restore focus + caret after React commits the new value.
+      // Restore focus + caret once React commits the new value: in that commit (the layout effect above), else
+      // here, for a host that commits the text later. Never once the person has typed since (the text changed):
+      // their caret is already where they are typing.
+      const pending = { el, text: result.text, caret: result.caret };
+      pendingCaret.current = pending;
       setTimeout(() => {
-        if (!el.isConnected) return;
+        // The commit placed it already (a later pick replaced it): leave the caret where the person has it now.
+        if (pendingCaret.current !== pending) return;
+        pendingCaret.current = null;
+        if (!el.isConnected || el.value !== result.text) return;
         el.focus();
         el.setSelectionRange(result.caret, result.caret);
       }, 0);
