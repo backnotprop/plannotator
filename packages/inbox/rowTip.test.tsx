@@ -2,8 +2,9 @@
  * A list row's tooltips mount on first use (RowTip.tsx; .ops/perf/open-thread-xl.md, fix 2): drawing every row's
  * tooltips with the rows was most of the cost of opening a thread from a long list. What is proved: drawing the rows
  * adds no hover listener; the pointer's first entry still opens the tooltip after the delay, from a trigger drawn
- * the same as before; a Tab from a row onto its hover action keeps focus there and shows the action's tooltip; a
- * touch never draws a trigger again (it would be under the finger mid-tap).
+ * the same as before; rows drawn again under a pointer at rest (the browser's own mouseenter, no pointer event) open
+ * nothing until the pointer moves, then open as before; a Tab from a row onto its hover action keeps focus there and
+ * shows the action's tooltip; a touch never draws a trigger again (it would be under the finger mid-tap).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -130,6 +131,23 @@ for (const narrow of [false, true]) {
     expect({ tag: after.tagName, attributes: attributes(after), html: after.innerHTML }).toEqual(drawn);
   });
 }
+
+test.skipIf(!hasDom)('rows drawn again under a pointer at rest: the browser\'s mouseenter alone opens nothing; the next move opens the tooltip', async () => {
+  const el = render(false);
+  const tiles = () => el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  // What Chrome sends a new element under a pointer that has not moved: the mouse's boundary events, no pointer event.
+  act(() => {
+    tiles().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 }));
+    tiles().dispatchEvent(new MouseEvent('mouseenter', { clientX: 10, clientY: 10 }));
+  });
+  await settle();
+  expect(openTooltips()).toEqual([]);
+  act(() => {
+    tiles().dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 12, clientY: 10 }));
+  });
+  await settle();
+  expect(openTooltips()).toEqual(['Claude Code']);
+});
 
 test.skipIf(!hasDom)("a Tab from a row onto its hover action keeps focus on the action, and the action's tooltip shows", async () => {
   const el = render(false);
