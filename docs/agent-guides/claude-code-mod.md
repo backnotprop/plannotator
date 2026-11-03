@@ -616,6 +616,18 @@ detached servers) inherits it; `registerCliSession` records it as
 as this session (the `plannotator_inbox` tool's author, so the reply wakes it).
 The tag follows `/clear` and an in-process resume: `currentMod` sets it again
 for the new id, at the latest on the next `turn.start`.
+Beside it, `exportSessionProject` (`controller.ts`) sets
+`PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the folder
+the session's `plannotator_inbox` tool files under (`InboxLink.projectFolder()`,
+the session root; with the tool off, `sessionProjectFolder` over the root, else
+the cwd), so `plannotator inbox call` and `plannotator card` run from a
+`cd`'d shell file under the same project. Set in `currentMod` (not awaited:
+every hook, ExitPlanMode included, waits on that switch), at each top-level
+`turn.start` and before each shell tool call (a `/cd` or a worktree move
+between turns; each waited for at most `SESSION_PROJECT_EXPORT_MS`, 250 ms,
+then left to finish behind the hook), written only when the value changes; a
+failed write is retried at the next call. Wiring proof:
+`inbox-session-project.test.ts` drives the real hooks. See "A session's project" in `inbox-foundation.md`.
 
 **Ask this session.** Every launched server gets a 32-byte hex token
 (`PLANNOTATOR_SESSION_BRIDGE_TOKEN`, `_HOST=claude-code`, `_MODES=turn`). Once

@@ -16,7 +16,7 @@ import type { TidyController } from './components/Tidy';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { LIST_LOOK_OFF, writeListLook } = await import('./listLook');
+const { LIST_LOOK_OFF, writeListLookOptions } = await import('./listLook');
 const { THREAD_PANEL_COOKIE, readThreadPanel, threadPanelShows, writeThreadPanel } = await import('./threadPanel');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
@@ -89,7 +89,7 @@ describe('the choice', () => {
 
   test('writing the look options leaves it alone', () => {
     writeThreadPanel(true);
-    writeListLook(LIST_LOOK_OFF);
+    void writeListLookOptions(LIST_LOOK_OFF);
     expect(readThreadPanel()).toBe(true);
   });
 
@@ -101,17 +101,17 @@ describe('the choice', () => {
 });
 
 describe.skipIf(!hasDom)('the ⋮ menu item', () => {
-  test('a checkbox after the look options, unchecked with no ✓ while off', async () => {
+  test('a checkbox after the look options, unchecked, its box empty, while off', async () => {
     const popup = await menu({ on: false, onChange: () => {} });
     expect([...popup.querySelectorAll('[role="menuitemcheckbox"]')].at(-1)).toBe(item(popup)!);
     expect(item(popup)!.getAttribute('aria-checked')).toBe('false');
-    expect(item(popup)!.querySelector('.ib-pmi-check')).toBeNull();
+    expect(item(popup)!.querySelector('.ib-pmi-box[data-on]')).toBeNull();
   });
 
-  test('checked with a ✓ while on, like its neighbours', async () => {
+  test('checked, its box ticked, while on, like its neighbours', async () => {
     const popup = await menu({ on: true, onChange: () => {} });
     expect(item(popup)!.getAttribute('aria-checked')).toBe('true');
-    expect(item(popup)!.querySelector('.ib-pmi-check')).not.toBeNull();
+    expect(item(popup)!.querySelector('.ib-pmi-box[data-on]')).not.toBeNull();
   });
 
   test('a click says the new value and leaves the menu open', async () => {

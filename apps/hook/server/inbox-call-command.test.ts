@@ -301,7 +301,7 @@ describe("who is calling", () => {
     await tool(box.client, "send_message", { body: "Lane.", subject: "Lane", thread: "Lane", project_path: box.project, agent_session: "ses-a", agent_host: "claude-code" });
     await tool(box.client, "card", { op: "create", title: "Other lane", project_path: box.project, agent_session: "ses-b", agent_host: "claude-code" });
     const env = { PLANNOTATOR_SESSION_TAG: "claude-code:ses-a" };
-    const made = await cli(box, ["card", '{"op":"create","title":"My lane","column":"building"}'], { env });
+    const made = await cli(box, ["card", '{"op":"create","title":"My lane","column":"in_progress"}'], { env });
     expect(JSON.parse(made.stdout).card.agent).toMatchObject({ host: "claude-code", session: "ses-a", name: "Claude Code" });
     const mine = JSON.parse((await cli(box, ["card", '{"op":"list"}'], { env })).stdout);
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["My lane"]);
@@ -421,7 +421,7 @@ set -euo pipefail
 call() { plannotator inbox call --session "$SESSION" "$@"; }
 
 for card in $(call card '{"op":"list"}' | grep -o '"id":"crd_[0-9A-Z]*"' | cut -d'"' -f4); do
-  call card "{\"op\":\"move\",\"card_id\":\"$card\",\"column\":\"your_review\",\"you\":\"Look at the lane\"}" > /dev/null
+  call card "{\"op\":\"move\",\"card_id\":\"$card\",\"column\":\"in_review\",\"you\":\"Look at the lane\"}" > /dev/null
 done
 call send_message "{\"reply_to\":\"$ACTION\",\"done\":[\"$ACTION\"],\"body\":\"Saw the deploy go green.\",\"idempotency_key\":\"tidy-done\"}" > /dev/null
 call send_message "{\"reply_to\":\"$QUESTION\",\"supersedes\":[\"$QUESTION\"],\"body\":\"The ledger moved, so this no longer applies.\",\"idempotency_key\":\"tidy-withdraw\"}" > /dev/null
@@ -454,10 +454,10 @@ describe("a Tidy run from one script", () => {
     const question = await agent("ses-a", { subject: "Ledger", thread: "Ledger", body: block("Backfill the ledger first?") });
     const deploy = await agent("ses-a", { subject: "Deploy", thread: "Deploy", body: action("Approve the deploy") });
     const words = await agent("ses-a", { subject: "Webhooks", thread: "Webhooks", body: "Webhooks are done; screenshots next." });
-    await tool(client, "card", { op: "create", title: "Ledger lane", column: "building", thread_id: question.thread_id, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
-    await tool(client, "card", { op: "create", title: "Docs lane", column: "designing", project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Ledger lane", column: "in_progress", thread_id: question.thread_id, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Docs lane", column: "in_progress", project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
     const others = await agent("ses-b", { subject: "Refunds", thread: "Refunds", body: block("Move refunds now?") });
-    await tool(client, "card", { op: "create", title: "Refunds lane", column: "building", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Refunds lane", column: "in_progress", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
     clock.behind = 2 * HOUR;
     expect((await post(server, `/api/inbox/messages/${words.message_id}/reply`, { words: "Still waiting on those screenshots.", idempotency_key: "r1" })).status).toBe(200);
     for (const command of await poll(server, "ses-a", project)) await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: command.id });
@@ -492,7 +492,7 @@ describe("a Tidy run from one script", () => {
 
     // The Inbox's state: its cards moved and only its cards, the item done, the question withdrawn, the words answered.
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone"}'])).stdout).cards as { title: string; column: string; heard_by: { session: string } }[];
-    expect(Object.fromEntries(cards.map((c) => [c.title, c.column]))).toEqual({ "Ledger lane": "your_review", "Docs lane": "your_review", "Refunds lane": "building" });
+    expect(Object.fromEntries(cards.map((c) => [c.title, c.column]))).toEqual({ "Ledger lane": "in_review", "Docs lane": "in_review", "Refunds lane": "in_progress" });
     const deployThread = await threadOf(server, deploy.thread_id);
     expect(deployThread.messages[0]!.questions![0]!.action_result).toMatchObject({ by: "agent" });
     const ledger = await threadOf(server, question.thread_id);
@@ -557,7 +557,7 @@ describe("a Tidy run from one script", () => {
     const asker = { project_path: project, agent_session: "ses-a", agent_host: "claude-code" };
     const question = await tool(client, "send_message", { ...asker, body: block("Ship the ledger?"), subject: "Ledger", thread: "Ledger" });
     const item = await tool(client, "send_message", { ...asker, body: action("Approve the deploy"), reply_to: question.message_id });
-    const made = await tool(client, "card", { ...asker, op: "create", title: "Ledger lane", column: "building" });
+    const made = await tool(client, "card", { ...asker, op: "create", title: "Ledger lane", column: "in_progress" });
     const real = (json: string) => json.replaceAll("msg_1", question.message_id).replaceAll("msg_2", item.message_id).replaceAll("crd_1", made.card.id);
     const examples = [...INBOX_CALL_USAGE.matchAll(/plannotator inbox call (\w+) '(.+)'$/gm)].map(([, name, json]) => [name!, real(json!)] as const);
     expect(examples.map(([name]) => name)).toEqual(["card", "card", "send_message"]);
@@ -566,7 +566,7 @@ describe("a Tidy run from one script", () => {
     expect(withdrawn!.questions![0]!.state).toBe("superseded");
     expect(done!.questions![0]!.action_result).toMatchObject({ by: "agent" });
     const cards = JSON.parse((await cli(box, ["card", '{"op":"list","asked_by":"anyone","include_resolved":true}'])).stdout).cards as { column: string }[];
-    expect(cards.map((c) => c.column)).toEqual(["shipped"]);
+    expect(cards.map((c) => c.column)).toEqual(["done"]);
   });
 
   test("the Board's Tidy: a script that only moves cards counts as tidied, for that session", async () => {
@@ -576,9 +576,9 @@ describe("a Tidy run from one script", () => {
     await poll(server, "ses_oc1", project, "opencode");
     await poll(server, "ses-b", project);
     await tool(client, "send_message", { project_path: project, agent_session: "ses_oc1", agent_host: "opencode", subject: "Lane", thread: "Lane", body: "Starting." });
-    await tool(client, "card", { op: "create", title: "Lane", column: "building", project_path: project, agent_session: "ses_oc1", agent_host: "opencode" });
+    await tool(client, "card", { op: "create", title: "Lane", column: "in_progress", project_path: project, agent_session: "ses_oc1", agent_host: "opencode" });
     await tool(client, "send_message", { project_path: project, agent_session: "ses-b", agent_host: "claude-code", subject: "Other", thread: "Other", body: "Starting." });
-    await tool(client, "card", { op: "create", title: "Other", column: "building", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
+    await tool(client, "card", { op: "create", title: "Other", column: "in_progress", project_path: project, agent_session: "ses-b", agent_host: "claude-code" });
     clock.behind = 0;
     await poll(server, "ses_oc1", project, "opencode");
     await poll(server, "ses-b", project);
@@ -595,7 +595,7 @@ describe("a Tidy run from one script", () => {
     expect(session).toBe("opencode:ses_oc1");
     const mine = JSON.parse((await cli(box, ["--session", session, "card", '{"op":"list"}'], { env })).stdout);
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["Lane"]);
-    const moved = await cli(box, ["--session", session, "card", JSON.stringify({ op: "move", card_id: mine.cards[0].id, column: "your_look", you: "Pick a name" })], { env });
+    const moved = await cli(box, ["--session", session, "card", JSON.stringify({ op: "move", card_id: mine.cards[0].id, column: "in_review", you: "Pick a name" })], { env });
     expect(moved.code).toBe(0);
     expect(JSON.parse(moved.stdout).card.heard_by).toMatchObject({ host: "opencode", session: "ses_oc1" });
     expect(Object.fromEntries((await runOf(server)).agents.map((a) => [a.session, a.state]))).toEqual({ ses_oc1: "tidied", "ses-b": "delivered" });

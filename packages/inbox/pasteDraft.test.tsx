@@ -76,6 +76,10 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
 let heldUploads: { promise: Promise<void>; release: () => void } | null = null;
 /** While set, a paste's text read (`GET uploads/:id/text`) fails as an Inbox that cannot answer would (502). */
 let failTextReads = false;
+/** The statuses of the window's draft saves, in order. */
+const statuses: number[] = [];
+/** A POST that `match`es waits for `wait` before it reaches the Inbox (a slow link). */
+let gate: { match: (path: string, body: string) => boolean; wait: Promise<void> } | null = null;
 function holdUploads() {
   let release = () => {};
   const promise = new Promise<void>((done) => (release = done));
@@ -120,7 +124,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '8'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '11'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -159,7 +163,9 @@ beforeEach(() => {
     if (failTextReads && /\/uploads\/[^/]+\/text$/.test(path)) {
       return new Response(JSON.stringify({ code: 'forward_failed', error: 'The Inbox could not answer.' }), { status: 502 });
     }
+    if (gate && method === 'POST' && gate.match(path, body ?? '')) await gate.wait;
     const answer = await loopback(path, method, body);
+    if (method === 'POST' && path.includes('/draft')) statuses.push(answer.status);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -186,6 +192,8 @@ afterEach(() => {
   unmount();
   globalThis.fetch = savedFetch;
   failTextReads = false;
+  gate = null;
+  statuses.length = 0;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   (globalThis as Record<string, unknown>).XMLHttpRequest = savedXhr;
 });
@@ -422,7 +430,7 @@ test.skipIf(!hasDom)("a paste still uploading stays when another window saves th
   expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
 }, 30_000);
 
-test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others, and the restart guard asks for the one it lost', async () => {
+test.skipIf(!hasDom)('one paste a phone sent: the draft and the box keep the others, and the next save never names it again', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, BEFORE + AFTER, BEFORE.length);
@@ -443,13 +451,18 @@ test.skipIf(!hasDom)('one paste gone from the server: the draft keeps the others
 
   // A phone's Send carries the first paste: its upload is no longer pending, and the server's draft drops it.
   await phoneSend([first!]);
-  // The next save here still names both; refused for the first, it saves the second beside the words, as this window's own.
+  // The next save here changes the words only: the draft keeps the second paste, and the box follows the draft (the
+  // first paste is an attachment of the phone's reply now, not this box's to send again).
   type(replyText(el)!, `${BEFORE}${AFTER} Thanks.`);
   await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks.`, 'the words saved');
   expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
-  // The first tile is still in the box but no longer in any draft: a restart would lose it.
-  expect(pastedTiles(el).length).toBe(2);
-  expect(unsentReply()).not.toBeNull();
+  await until(() => pastedTiles(el).length === 1, 'the sent paste out of the box');
+  await until(() => unsentReply() === null, 'the guard at rest after the phone sent one');
+  const before = posted.length;
+  type(replyText(el)!, `${BEFORE}${AFTER} Thanks!`);
+  await until(async () => (await serverDraft())?.body === `${BEFORE}${AFTER} Thanks!`, 'one more key saved');
+  expect(posted.slice(before).some((p) => JSON.stringify(p.body).includes(first!))).toBe(false);
+  expect((await serverDraft())!.files?.map((file) => file.upload_id)).toEqual([kept!]);
 }, 30_000);
 
 test.skipIf(!hasDom)('a Put back that cannot read the paste says so, and the tile and the words stay', async () => {
@@ -485,4 +498,92 @@ test.skipIf(!hasDom)('a draft brought back with a CRLF paste: Put back gives the
   await until(() => pastedTiles(el).length === 0, 'the words back');
   expect(replyText(el)!.value).toBe(BEFORE + LOG + AFTER);
   expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+test.skipIf(!hasDom)("the phone's long paste, taken into this box after this window changed the words, goes back where the phone put it", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, 'Hello world');
+  await until(async () => (await serverDraft())?.body === 'Hello world', 'the words saved');
+  // The phone pastes its log between "Hello " and "world" (a tile: the words do not change).
+  const log = await uploadAsOther('pasted-text-phone.txt', LOG);
+  const base = (await serverDraft())!.updated_at;
+  const saved = await loopback(
+    `/api/inbox/threads/${world.waiting}/draft`,
+    'POST',
+    JSON.stringify({ serverSession: await serverSession(), body: 'Hello world', base, base_body: 'Hello world', files_add: [{ upload_id: log.upload_id, pasted: { at: 6, preview: 'log' } }], files_remove: [], files_place: [] }),
+  );
+  expect(saved.status).toBe(200);
+  // Before this window hears of it, the person puts "Oh. " in front: the save lands (its own words), and the box takes the tile.
+  type(replyText(el)!, 'Oh. Hello world', 0);
+  await until(async () => (await serverDraft())?.body === 'Oh. Hello world', 'the words saved');
+  await until(() => pastedTiles(el).length === 1, "the phone's tile in the box");
+  act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el).length === 0, 'the words back');
+  expect(replyText(el)!.value).toBe('Oh. Hello ' + LOG + 'world');
+}, 30_000);
+
+/** The save that adds a long paste is held on its way until `release()`. */
+function holdPasteSave() {
+  let release = () => {};
+  const wait = new Promise<void>((done) => (release = done));
+  const state = { held: false };
+  gate = { match: (path, body) => path.includes('/draft') && !state.held && body.includes('"files_add":[{') && (state.held = true), wait };
+  return { held: () => state.held, release: () => ((gate = null), release()) };
+}
+/** Another window saves the words alone (over loopback), a step after this window's last save. */
+async function phoneWords(body: string, baseBody: string) {
+  const base = (await serverDraft())!.updated_at;
+  const phone = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ serverSession: await serverSession(), body, base, base_body: baseBody, files_add: [], files_remove: [], files_place: [] }));
+  expect(phone.status).toBe(200);
+}
+const settle = (ms: number) => act(async () => void (await new Promise((r) => setTimeout(r, ms))));
+
+test.skipIf(!hasDom)("a long paste here while the phone shortens the words: its save goes in at its place in the phone's words, never refused for the old one", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  const LONG = 'Here is a longer sentence before the log: ';
+  type(text, LONG);
+  await until(async () => (await serverDraft())?.body === LONG, 'the words saved');
+  const slow = holdPasteSave();
+  expect(paste(replyText(el)!, LOG)).toBe(true);
+  await until(slow.held, 'the paste save held');
+  await phoneWords('Hi', LONG);
+  statuses.length = 0;
+  slow.release();
+  await until(async () => (await serverDraft())?.files?.length === 1, 'the paste saved');
+  await settle(800);
+  expect(statuses).not.toContain(422);
+  const draft = (await serverDraft())!;
+  expect(draft.body).toBe('Hi');
+  // Its place was the end of the old words: the end of the phone's.
+  expect(draft.files!.map((file) => file.pasted?.at)).toEqual([2]);
+  expect(replyText(el)!.value).toBe('Hi');
+  expect(unsentReply()).toBeNull();
+  // The next key keeps the tile where the box shows it.
+  type(replyText(el)!, 'Hi there');
+  await until(async () => (await serverDraft())?.body === 'Hi there', 'the next words saved');
+  expect((await serverDraft())!.files!.map((file) => file.pasted?.at)).toEqual([2]);
+}, 30_000);
+
+test.skipIf(!hasDom)("a long paste here while the phone puts words in front: it goes in where it was in the words, moved with them", async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  type(text, 'Hello world', 6);
+  await until(async () => (await serverDraft())?.body === 'Hello world', 'the words saved');
+  const slow = holdPasteSave();
+  expect(paste(replyText(el)!, LOG)).toBe(true);
+  await until(slow.held, 'the paste save held');
+  await phoneWords('Oh. Hello world', 'Hello world');
+  slow.release();
+  await until(async () => (await serverDraft())?.files?.length === 1, 'the paste saved');
+  await settle(800);
+  const draft = (await serverDraft())!;
+  expect(draft.body).toBe('Oh. Hello world');
+  // Between "Hello " and "world", in the phone's words too.
+  expect(draft.files!.map((file) => file.pasted?.at)).toEqual([10]);
+  // Put back puts the text there.
+  act(() => (pastedTiles(el)[0]!.querySelector('.ib-pt-act') as HTMLButtonElement).click());
+  await until(() => pastedTiles(el).length === 0, 'the words back');
+  expect(replyText(el)!.value).toBe('Oh. Hello ' + LOG + 'world');
 }, 30_000);

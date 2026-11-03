@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent } from 'react';
 import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxDraftFile, type InboxDraftPasted, type InboxUpload } from '@plannotator/core/inbox-types';
-import { inboxApi, InboxApiError, uploadFile } from '../api';
+import type { DraftFileUploader, ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
+import { InboxApiError } from '../api';
+import { httpDraftFileUploader } from '../replyDraftHttp';
 import { formatBytes } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from '../components/FileName';
@@ -44,8 +46,10 @@ export interface PastedText {
 
 /**
  * The words of the box the files belong to, so a long paste can become a tile
- * and be put back where it was pasted. `value` is the box's text on this
- * render; `set` changes it (the host's own change: the reply box saves its draft).
+ * and be put back where it was pasted. `value` is the box's text (on this
+ * render, or as it is now: the reply box's is a getter, and that host calls
+ * `follow` on each change); `set` changes it (the host's own change: the
+ * reply box saves its draft).
  */
 export interface ComposeFilesText {
   value: string;
@@ -104,10 +108,24 @@ export function attachedAnnouncement(names: readonly string[]): string {
  */
 export function useComposeFiles(
   initial: readonly InboxDraftFile[],
-  options: { onPasted?: (names: string[]) => void; machine?: string | null; text?: ComposeFilesText; onPutBack?: () => void } = {},
+  options: {
+    onPasted?: (names: string[]) => void;
+    machine?: string | null;
+    text?: ComposeFilesText;
+    onPutBack?: () => void;
+    /** Where the bytes go (default: this Inbox's pending uploads, or the linked machine's for its thread). */
+    uploader?: DraftFileUploader;
+    /**
+     * The host unmounts while files still upload: they are handed over (each settles with its upload, or null
+     * when it fails) instead of stopped. Absent: they are stopped.
+     */
+    onUnmountUploads?: (uploads: Promise<InboxUpload | null>[]) => void;
+  } = {},
 ) {
   const [files, setFiles] = useState<ComposeFile[]>(() => initial.map(fromUpload));
   const aborts = useRef(new Map<string, AbortController>());
+  /** Each upload on its way, by its file's key: settles with the upload, or null when it fails or is stopped. */
+  const inFlight = useRef(new Map<string, Promise<InboxUpload | null>>());
   /** Each local preview's object URL by its file's key, freed when the file goes. */
   const previews = useRef(new Map<string, string>());
   const filesRef = useRef<ComposeFile[]>(files);
@@ -119,6 +137,12 @@ export function useComposeFiles(
   // Linked machines: a reply to another machine's thread uploads its files to that machine.
   const machine = useRef(options.machine ?? null);
   machine.current = options.machine ?? null;
+  const ownUploader = useRef<DraftFileUploader | null>(null);
+  if (ownUploader.current === null) ownUploader.current = httpDraftFileUploader(() => machine.current);
+  const uploader = useRef(options.uploader ?? ownUploader.current);
+  uploader.current = options.uploader ?? ownUploader.current;
+  const onUnmountUploads = useRef(options.onUnmountUploads);
+  onUnmountUploads.current = options.onUnmountUploads;
   const text = useRef(options.text);
   text.current = options.text;
   /** Each pasted text tile's place in the box's words, by its file's key (a reopened draft's long pastes too). */
@@ -126,10 +150,19 @@ export function useComposeFiles(
   if (anchors.current === null) anchors.current = anchorsOf(initial);
   /** The words the anchors refer to: every other change of the box's words carries them along (mapAnchor). */
   const anchoredIn = useRef(options.text?.value ?? '');
-  if (options.text && options.text.value !== anchoredIn.current) {
-    for (const anchor of anchors.current.values()) anchor.at = mapAnchor(anchoredIn.current, options.text.value, anchor.at);
-    anchoredIn.current = options.text.value;
-  }
+  const followTo = (value: string) => {
+    if (value === anchoredIn.current) return;
+    for (const anchor of anchors.current.values()) anchor.at = mapAnchor(anchoredIn.current, value, anchor.at);
+    anchoredIn.current = value;
+  };
+  if (options.text) followTo(options.text.value);
+  /**
+   * The box's words changed without a render of this hook's host (the reply box's field draws its words
+   * itself, replyText.ts): the anchors follow them now, edit by edit, as a render would have.
+   */
+  const follow = useCallback(() => {
+    if (text.current) followTo(text.current.value);
+  }, []);
   /** The browser's undo puts this tile back while it is the field's very next edit (the paste's own undo). */
   const undoArm = useRef<{ key: string; field: HTMLTextAreaElement } | null>(null);
   /** Restored tiles whose words are being read for a Put back (a second press waits for the first). */
@@ -154,13 +187,23 @@ export function useComposeFiles(
     setFiles((current) => [...current, { key, name: file.name, size: file.size, state: 'uploading', progress: 0, upload: null, error: null, preview, ...(pasted ? { pasted } : {}) }]);
     const controller = new AbortController();
     aborts.current.set(key, controller);
-    uploadFile(file, { machine: machine.current, signal: controller.signal, onProgress: (loaded, total) => patch(key, { progress: total > 0 ? loaded / total : 0 }) })
-      .then((upload) => patch(key, { state: 'done', progress: 1, upload }))
-      .catch((cause) => {
-        if (cause instanceof DOMException && cause.name === 'AbortError') return;
-        patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : 'Not attached: the upload failed.' });
+    const settled = uploader.current
+      .upload(file, { signal: controller.signal, onProgress: (loaded, total) => patch(key, { progress: total > 0 ? loaded / total : 0 }) })
+      .then((upload) => {
+        patch(key, { state: 'done', progress: 1, upload });
+        return upload;
       })
-      .finally(() => aborts.current.delete(key));
+      .catch((cause) => {
+        if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+          patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : 'Not attached: the upload failed.' });
+        }
+        return null;
+      })
+      .finally(() => {
+        aborts.current.delete(key);
+        inFlight.current.delete(key);
+      });
+    inFlight.current.set(key, settled);
     return key;
   };
 
@@ -179,7 +222,22 @@ export function useComposeFiles(
     setFiles((current) => current.filter((file) => !keys.has(file.key)));
   }, []);
 
-  /** Forget every file (the reply box closed, or the thread changed): uploads in flight are aborted. */
+  /**
+   * The files still uploading, handed over before a `reset` (the reply box closed, or the thread changed): the
+   * reset does not stop them, and each settles with its upload (null: it failed), for the host to keep.
+   */
+  const detach = useCallback((): Promise<InboxUpload | null>[] => {
+    const out: Promise<InboxUpload | null>[] = [];
+    for (const file of filesRef.current) {
+      const settled = inFlight.current.get(file.key);
+      if (file.state !== 'uploading' || !settled || !aborts.current.has(file.key)) continue;
+      aborts.current.delete(file.key);
+      out.push(settled);
+    }
+    return out;
+  }, []);
+
+  /** Forget every file (the reply box closed, or the thread changed): uploads in flight are aborted, unless detached. */
   const reset = useCallback(() => {
     for (const key of [...aborts.current.keys(), ...previews.current.keys(), ...anchors.current.keys()]) release(key);
     undoArm.current = null;
@@ -288,9 +346,9 @@ export function useComposeFiles(
     if (!upload || reading.current.has(key)) return false;
     reading.current.add(key);
     patch(key, { error: null });
-    inboxApi
-      .uploadText(upload.upload_id, machine.current)
-      .then(({ text: words }) => {
+    uploader.current
+      .readText(upload.upload_id)
+      .then((words) => {
         if (!filesRef.current.some((f) => f.key === key)) return;
         if (field?.readOnly) return;
         // The upload holds the pasted bytes; the box takes them with `\n` line ends, as a fresh tile's.
@@ -351,16 +409,30 @@ export function useComposeFiles(
   }, []);
 
   /**
-   * The box takes a draft's words and long pastes (a reload, another window's
-   * save): its pasted tiles become the draft's, anchored in `words`. Files that
-   * are not long pastes stay. Tiles already here keep their state. A paste
-   * pasted here that is not uploaded yet (or whose upload was refused) is in no
-   * draft: it stays, its text still to put back, carried into `words`.
+   * Every finished file as a reply draft keeps it: its upload, and for a long
+   * paste where it goes back in `words` (as `pastedDraft` places it).
    */
-  const restorePasted = useCallback((list: readonly InboxDraftFile[], words: string) => {
-    const wanted = new Set(list.filter((file) => file.pasted).map((file) => file.upload_id));
-    const here = new Set(filesRef.current.filter((file) => file.pasted && file.upload).map((file) => file.upload!.upload_id));
-    const keep = (file: ComposeFile) => !file.pasted || !file.upload || wanted.has(file.upload.upload_id);
+  const draftFiles = useCallback((words?: string): ReplyDraftFileRef[] => {
+    const pasted = new Map(pastedDraft(words).map((file) => [file.upload_id, file]));
+    return filesRef.current.flatMap((file) =>
+      file.state === 'done' && file.upload ? [pasted.get(file.upload.upload_id) ?? { upload_id: file.upload.upload_id }] : [],
+    );
+  }, [pastedDraft]);
+
+  /**
+   * The box takes a draft's words and files (a reload, another window's save,
+   * the box opened again): its tiles become the draft's, a long paste anchored
+   * in `words`. `add`: tiles already here all stay, the draft's join them (the
+   * person attached before the draft was read). Otherwise a finished tile the
+   * draft no longer holds goes (another window removed it), unless `alsoKeep`
+   * names it (attached here since). Tiles already here keep their state. A file
+   * here that is not uploaded yet (or whose upload was refused) is in no draft:
+   * it stays, a paste's text still to put back, carried into `words`.
+   */
+  const restoreDraft = useCallback((list: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
+    const wanted = new Set([...list.map((file) => file.upload_id), ...alsoKeep]);
+    const here = new Set(filesRef.current.filter((file) => file.upload).map((file) => file.upload!.upload_id));
+    const keep = (file: ComposeFile) => mode === 'add' || !file.upload || wanted.has(file.upload.upload_id);
     for (const file of filesRef.current) {
       if (!keep(file)) release(file.key);
       // Only here: its place follows the box's words to the draft's.
@@ -376,9 +448,10 @@ export function useComposeFiles(
     }
     anchoredIn.current = words;
     undoArm.current = null;
-    const added = list.filter((file) => file.pasted && !here.has(file.upload_id)).map(fromUpload);
+    const added = list.filter((file) => !here.has(file.upload_id)).map(fromUpload);
     const next = [...filesRef.current.filter(keep), ...added];
     filesRef.current = next;
+    namesRef.current = next.map((file) => file.name);
     setFiles(next);
   }, []);
 
@@ -437,6 +510,16 @@ export function useComposeFiles(
 
   useEffect(
     () => () => {
+      // The host keeps what still uploads (a reply box's files land in its draft); otherwise they stop.
+      const keep = onUnmountUploads.current;
+      if (keep) {
+        const handed = [...aborts.current.keys()].flatMap((key) => {
+          const settled = inFlight.current.get(key);
+          return settled ? [settled] : [];
+        });
+        aborts.current.clear();
+        if (handed.length > 0) keep(handed);
+      }
       for (const controller of aborts.current.values()) controller.abort();
       for (const url of previews.current.values()) URL.revokeObjectURL(url);
       previews.current.clear();
@@ -446,7 +529,7 @@ export function useComposeFiles(
 
   const uploaded = files.filter((file) => file.state === 'done' && file.upload).map((file) => file.upload!);
   const uploading = files.some((file) => file.state === 'uploading');
-  return { files, add, attach, remove, forget, reset, current, paste, takeText, putBack, pastedDraft, restorePasted, uploaded, uploading };
+  return { files, add, attach, remove, forget, reset, detach, current, paste, takeText, putBack, pastedDraft, draftFiles, restoreDraft, follow, uploaded, uploading };
 }
 
 /** A phone's picker offers the photo library and Files (iOS gives no Paste for a picture in a text field). */

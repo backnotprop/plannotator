@@ -114,7 +114,7 @@ test('layout corners are one scale; buttons keep their own', () => {
   expect(CODE).toMatch(/--ib-sf-r14-s:\s*var\(--ib-soft-surfaces\)\s*var\(--ib-lr-lg\);/);
   expect(CODE).toMatch(/dialog\.ib-dlg \{[^}]*border-radius: var\(--ib-rl-xl-s, 12px\)/);
   // The header's buttons, the foot's pills and the window's buttons keep theirs.
-  expect(CODE).toMatch(/\.pn-inbox \.ib-hbtn \{[^}]*border-radius: var\(--ib-r10-s, 7px\)/);
+  expect(CODE).toMatch(/\.pn-inbox \.ib-iconbtn \{[^}]*border-radius: var\(--ib-r10-s, 7px\)/);
   expect(CODE).toMatch(/--ib-ft-r-s:\s*var\(--ib-soft-foot\)\s*999px;/);
   expect(CODE).toMatch(/--ib-bt-r-s:\s*var\(--ib-soft-buttons\)\s*10px;/);
 });

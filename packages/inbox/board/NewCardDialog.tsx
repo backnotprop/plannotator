@@ -8,34 +8,40 @@ import { Modal } from '../components/Updates';
 import { SessionDetail, ToPicker } from '../compose/ToPicker';
 import { composeGroups, findTarget, hostLabel, type ComposeTarget } from '../compose/model';
 
-/** Where a New card goes (owner's amendment 2026-10-26): Backlog by default, straight to an agent, or the Icebox. */
-export type NewCardMode = 'backlog' | 'send' | 'icebox';
+/** Where a New card goes: Backlog by default, or straight to an agent (Todo). The Icebox folded into Backlog (Board columns v2). */
+export type NewCardMode = 'backlog' | 'send';
 
 export interface NewCardInput {
   title: string;
   notes: string | null;
-  /** Issue or PR links, as typed (each `owner/repo#123` or a URL). */
+  /** Links, as typed (each `owner/repo#123` or a URL). */
   refs: string[];
   mode: NewCardMode;
   project: string | null;
   to: ComposeTarget | null;
 }
 
-/** The first word in a links field that is not one: none means every word is a link the server may read. */
+/**
+ * The links in a links field, split on spaces and commas. A URL keeps the
+ * commas inside it (a map's `@37.7,-122.4`, a filter's `a,b`); only a comma
+ * that ends it, or one right before another `http(s)://` (`url1,url2` from a
+ * spreadsheet cell), is a separator.
+ */
 export function splitRefs(text: string): string[] {
   return text
-    .split(/[\s,]+/)
+    .split(/\s+|,(?=https?:\/\/)/i)
+    .flatMap((word) => (/^https?:\/\//i.test(word) ? [word.replace(/,+$/, '')] : word.split(',')))
     .map((word) => word.trim())
     .filter(Boolean);
 }
 
 /**
  * New card, as mocked (approval "inbox-board", step 2): a title, notes, the
- * project (or the agent, when sent), links to issues or PRs, and three plain
- * buttons for where it goes: Backlog (the default, sent to no agent), Send
- * to an agent (compose's live-session picker; the notes are the message),
- * Icebox. The main button names the action: "Add to Backlog", "Send to
- * Claude Code", "Add to Icebox". On a phone the dialog is a full screen with
+ * project (or the agent, when sent), links (issues, PRs, any web page), and two plain
+ * buttons for where it goes: Backlog (the default, sent to no agent) or Send
+ * to an agent (compose's live-session picker; the notes are the message; the
+ * card lands in Todo). The main button names the action: "Add to Backlog",
+ * "Send to Claude Code". On a phone the dialog is a full screen with
  * Cancel and the action at the top.
  */
 export function NewCardDialog({
@@ -79,7 +85,7 @@ export function NewCardDialog({
   const target = sessions ? findTarget(sessions.projects, chosen) : null;
   const anyLive = (sessions?.projects ?? []).some((g) => g.sessions.length > 0);
 
-  const action = mode === 'send' ? (target ? `Send to ${hostLabel(target.host)}` : 'Send to an agent') : mode === 'icebox' ? 'Add to Icebox' : 'Add to Backlog';
+  const action = mode === 'send' ? (target ? `Send to ${hostLabel(target.host)}` : 'Send to an agent') : 'Add to Backlog';
   const submit = async () => {
     const text = title.replace(/\s+/g, ' ').trim();
     if (!text) {
@@ -103,8 +109,8 @@ export function NewCardDialog({
     if (failed) setError(failed);
   };
 
-  // One choice of three: native radios in one group (arrows move it), drawn as plain buttons.
-  const modeButton = (value: NewCardMode, icon: 'board' | 'send' | 'snowflake', label: string, short: string) => (
+  // One choice of two: native radios in one group (arrows move it), drawn as plain buttons.
+  const modeButton = (value: NewCardMode, icon: 'board' | 'send', label: string, short: string) => (
     <label className="ib-ncd-mode" data-new-card-mode={value} data-on={mode === value ? '' : undefined}>
       <input
         type="radio"
@@ -181,10 +187,11 @@ export function NewCardDialog({
           {fixed === null && (
           <label className="ib-ncd-links">
             <Icon name="link" size={15} />
-            <span className="ib-sr">Link an issue or PR</span>
+            <span className="ib-sr">Links</span>
             <input
               type="text"
-              placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
+              // Any web link, or GitHub's owner/repo#123; a phone's narrow field keeps the short form whole.
+              placeholder={phone ? 'Paste links' : 'Paste links, or owner/repo#123'}
               value={links}
               onChange={(event) => setLinks(event.target.value)}
               data-new-card-links=""
@@ -262,7 +269,6 @@ export function NewCardDialog({
             <div className="ib-ncd-modes" role="radiogroup" aria-label="Where it goes">
               {modeButton('backlog', 'board', 'Backlog', 'Backlog')}
               {modeButton('send', 'send', 'Send to an agent', 'Agent')}
-              {modeButton('icebox', 'snowflake', 'Icebox', 'Icebox')}
             </div>
           )}
           {!phone && (
@@ -283,7 +289,7 @@ export function NewCardDialog({
   );
 }
 
-/** The project a Backlog or Icebox card goes in: a menu of the sidebar's projects. */
+/** The project a Backlog card goes in: a menu of the sidebar's projects. */
 function ProjectPicker({ projects, project, home, onPick }: { projects: readonly ProjectFolder[]; project: ProjectFolder | null; home: string | null; onPick: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   if (!project) return <span className="ib-ncd-none">No project yet</span>;

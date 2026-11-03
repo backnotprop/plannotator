@@ -29,6 +29,8 @@ export interface HeldNotice {
   count: number;
   /** "1 new in docs-site", or "3 new" across projects; null when nothing waits. */
   text: string | null;
+  /** The one project the news is in ("docs-site"), drawn apart so a long name is cut, not wrapped; absent across projects. */
+  project?: string;
 }
 
 function rowsById(sections: readonly InboxListSection[]): Map<string, InboxListRow> {
@@ -131,7 +133,9 @@ export function heldNotice(
     projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
   }
   if (count === 0) return { count, text: null };
-  return { count, text: projects.size === 1 ? `${count} new in ${[...projects.values()][0]}` : `${count} new` };
+  if (projects.size !== 1) return { count, text: `${count} new` };
+  const project = [...projects.values()][0]!;
+  return { count, text: `${count} new in ${project}`, project };
 }
 
 /**
