@@ -1103,6 +1103,12 @@ export interface ThreadPaneProps {
   attachCommand?: string | null;
   /** Stop, Try again or Delete changed the launch: read the thread again. */
   onRunChanged?: () => void;
+  /**
+   * The ids of the messages in the first read of this thread that landed after it was opened (App's `openedWith`).
+   * A permission card among them never takes focus. Null (or absent) while that read has not landed, when `thread`
+   * may be a stale copy from an earlier visit: then no card takes focus.
+   */
+  openedWith?: ReadonlySet<string> | null;
 }
 
 /** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
@@ -1294,7 +1300,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1319,11 +1325,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   };
   // While the agent rests there is no line: the attach command still comes with the thread (a phone has no Open in Terminal).
   const attach = runLine?.attach_command ?? attachCommand;
+  // Terminal is on the Inbox's computer: never from a phone or the tailnet, and only with a session or a refused folder.
+  const openTerminal = launched && !phone && remote !== true && (launched.session_ref || runLine?.untrusted) ? () => void launchAct(() => inboxApi.launchOpen(launched.id)) : null;
   const launchMenu: ThreadMoreLaunch | null =
     launched && runLine !== undefined && !launched.deleted_at
       ? {
           name: hostName(launched.agent),
-          open: phone || remote === true || (!launched.session_ref && !runLine?.untrusted) ? null : () => void launchAct(() => inboxApi.launchOpen(launched.id)),
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
@@ -3817,11 +3824,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const permWaiting = permMessages.some((m) => (m.questions ?? []).some((q) => q.state === 'open' || q.state === 'picked'));
   const runInCard = permWaiting && runLine?.state === 'waiting_answer';
   const newestId = thread.messages.at(-1)?.id ?? null;
-  // The messages this thread opened with: a permission card among them never takes focus (PermissionCard `arrived`).
-  const openedWith = useRef<{ thread: string; ids: ReadonlySet<string> } | null>(null);
-  if (openedWith.current?.thread !== thread.thread_id) openedWith.current = { thread: thread.thread_id, ids: new Set(thread.messages.map((m) => m.id)) };
-  const openedIds = openedWith.current.ids;
-  const permFollowUp =(m: InboxMessageWire): string | null => {
+  // A card arrived after the open only when the open's first fresh read did not have it (PermissionCard `arrived`).
+  // Before that read lands, `thread` may be a copy from an earlier visit, so nothing counts as arrived.
+  const arrivedAfterOpen = (id: string) => !!openedWith && !openedWith.has(id);
+  const permFollowUp = (m: InboxMessageWire): string | null => {
     const by = m.questions?.[0]?.superseded_by?.message_id;
     return by ? (thread.messages.find((x) => x.id === by)?.body.trim() ?? null) : null;
   };
@@ -4966,7 +4972,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={!openedIds.has(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
                   </div>
                 </article>,
               );
@@ -4974,7 +4980,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             if (message === last && runLine && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -5286,7 +5292,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && !runInCard && <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>

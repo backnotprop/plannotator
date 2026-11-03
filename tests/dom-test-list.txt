@@ -75,6 +75,7 @@ packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
+packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
@@ -121,6 +122,8 @@ packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
+packages/inbox/composeTrust.test.tsx
+packages/inbox/openInTerminal.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx

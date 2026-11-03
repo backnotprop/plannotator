@@ -26,6 +26,7 @@ import type {
   InboxComposeProject,
   InboxComposeLaunch,
   InboxLaunchAgent,
+  InboxLaunchTrust,
   InboxRun,
   InboxDraft,
   InboxDraftPasted,
@@ -947,10 +948,16 @@ export interface ComposeSessionsModel {
 /** A draft as the Drafts page lists it, with its chip. */
 export type DraftView = InboxDraft & { status: InboxDraftStatus };
 
+/** The folder To names, whose files a sessions read looks at: a project's id, or `SCRATCH_PICK`. */
+export interface ComposeTrustPick {
+  agent: string;
+  project: string;
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  /** A live session, or (launch on) a new session of `agent` started in the project. */
-  to: { host: string; session: string } | { launch: { agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } };
+  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1297,8 +1304,10 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null) =>
-    get<ComposeSessionsModel>(inboxUrl('/sessions', session ? `session=${encodeURIComponent(session)}` : undefined)),
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+    const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+  },
   startThread: (input: StartThreadInput) =>
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
   // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
@@ -1306,6 +1315,8 @@ export const inboxApi = {
   launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
   launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
   launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
+  launchTrust: (launchId: string, warning: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`), { warning }),
   /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
   /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
   launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),

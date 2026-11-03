@@ -105,6 +105,8 @@ export interface FakeClaudeCall {
   settings?: { env?: Record<string, string>; permissions?: { allow?: string[]; defaultMode?: string }; hooks?: Record<string, unknown>; [key: string]: unknown } | null;
   settingsMode?: number | null;
   threadExisted?: boolean;
+  /** `.mcp.json`'s servers as the start read them: `pending` ones hold the session on Claude's prompt. */
+  mcp?: { running: string[]; rejected: string[]; pending: string[] };
 }
 
 export interface FakeClaudeAgent {

@@ -25,12 +25,18 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * quiet line under the latest message, in place of the delivery line, saying
  * what the agent the person started is doing. It goes away while the agent
  * rests (`run` null: the thread draws nothing). Stop is a text button; the
- * one bordered button is Open in Terminal, where something is blocked on the
- * person (a permission prompt, an untrusted folder). No keyboard shortcuts.
+ * bordered buttons are where something is blocked on the person: Open in
+ * Terminal (a session waiting on Terminal, one that can't start; it is on no
+ * menu, so it shows only then), and for an untrusted folder the owner's Trust
+ * folder, which also works on a phone. No keyboard shortcuts.
  */
-/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). */
-export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; onChanged: () => void }) {
-  const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
+/**
+ * `canOpen`: this window can open Terminal on this launch (the thread's rule: on the Inbox's computer, with
+ * a session or a folder to trust). `canReaddress`: the waiting message can go to another session (Send to
+ * another session is shown under the line).
+ */
+export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; onChanged: () => void }) {
+  const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const ticking = run.state === 'working' || run.state === 'waiting_answer' || run.state === 'waiting_terminal';
@@ -38,16 +44,19 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
   const name = hostLabel(run.agent);
   const minutes = ticking ? minutesSince(run.since, now) : null;
 
-  const act = async (what: 'stop' | 'open' | 'retry') => {
+  const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id);
+      else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null);
       else await inboxApi.launchOpen(run.launch_id);
-      if (what !== 'open') onChanged();
+      onChanged();
     } catch (cause) {
       setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
+      // The folder changed since this line was read: draw the new warning for the next click.
+      if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
     } finally {
       setBusy(null);
     }
@@ -116,12 +125,12 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
         <>
           <b>{name} is waiting on a permission prompt</b>
           {minutes ? ` · ${minutes}` : ''}
-          {phone ? <span className="ib-run-sub">Answer it in Terminal on your Mac:</span> : null}
+          {canOpen ? null : <span className="ib-run-sub">Answer it in Terminal on your Mac:</span>}
         </>
       );
       actions = (
         <>
-          {!phone && openTerminal}
+          {canOpen && openTerminal}
           {attach}
           {stop}
         </>
@@ -142,11 +151,26 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       text = (
         <>
           <b>{name} didn't start.</b> {run.cause ?? ''} Your message is kept.
+          {run.trust?.warning ? (
+            <span className="ib-run-sub" data-run-trust-warning="">
+              {run.trust.warning}
+            </span>
+          ) : null}
+          {run.untrusted && !run.trust ? (
+            <span className="ib-run-sub" data-run-trust-howto="">
+              To trust it, run {name} here in a terminal on the Inbox's computer. Your home folder can't be trusted: start in a folder inside it.
+            </span>
+          ) : null}
         </>
       );
       actions = (
         <>
-          {run.untrusted && !phone && openTerminal}
+          {run.trust && (
+            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('trust')} data-run-trust="">
+              Trust folder
+            </button>
+          )}
+          {canOpen && openTerminal}
           <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
             Try again
           </button>

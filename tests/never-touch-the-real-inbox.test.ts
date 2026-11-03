@@ -121,6 +121,12 @@ describe("the source scan", () => {
     expect(signalFindings(inboxFile("process.kill(pid);"))).toHaveLength(1);
     expect(signalFindings(inboxFile("process.kill(pid, 0);"))).toEqual([]);
     expect(signalFindings(inboxFile("execSync(`kill -9 ${pid}`);"))).not.toEqual([]);
+    // `kill -0` is a probe, like process.kill(pid, 0); a probe followed by a real kill is still a signal.
+    expect(signalFindings(inboxFile("expect(command).toContain(`kill -0 ${pid}`);"))).toEqual([]);
+    expect(signalFindings(inboxFile('spawnSync("kill", ["-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile('Bun.spawnSync(["kill", "-0", String(pid)]);'))).toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -0 ${pid} && kill ${pid}`);"))).not.toEqual([]);
+    expect(signalFindings(inboxFile("execSync(`kill -05 ${pid}`);"))).not.toEqual([]);
     expect(signalFindings(inboxFile('spawnSync("kill", [String(pid)]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile('Bun.spawnSync(["pkill", "-f", "plannotator inbox"]);'))).not.toEqual([]);
     expect(signalFindings(inboxFile("const { kill } = process;\nkill(pid, 9);"))).not.toEqual([]);

@@ -18,7 +18,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 /** Files larger than this are never edited. */
@@ -154,17 +154,29 @@ export function withLineEndings(text: string, crlf: boolean): string {
  * Write `text` to `target` atomically: a temp file beside it, then a rename,
  * keeping `mode`. Creates the folder when missing (`mkdirParents`).
  */
-export function writeAgentFileAtomic(target: string, text: string, mode: number, mkdirParents = true): void {
+export function writeAgentFileAtomic(target: string, text: string, mode: number, mkdirParents = true, fsync = false): void {
   const dir = dirname(target);
   if (mkdirParents) mkdirSync(dir, { recursive: true });
   const temp = join(dir, `.${randomBytes(6).toString("hex")}.plannotator.tmp`);
   try {
-    writeFileSync(temp, text, { mode });
+    if (fsync) writeAndFlush(temp, text, mode);
+    else writeFileSync(temp, text, { mode });
     chmodSync(temp, mode);
     renameSync(temp, target);
   } catch (error) {
     rmSync(temp, { force: true });
     throw error;
+  }
+}
+
+/** `text` in a new file, on the disk before this returns: a power cut after a rename can't leave it empty. */
+function writeAndFlush(path: string, text: string, mode: number): void {
+  const fd = openSync(path, "w", mode);
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -206,6 +218,7 @@ export function describeFsError(error: unknown): string {
   if (code === "ENOSPC") return "the disk is full";
   if (code === "EISDIR") return "it is a folder";
   if (code === "ENOTDIR") return "a folder on its path is a file";
+  if (code === "ELOOP") return "it is a link that leads back to itself";
   return error instanceof Error ? error.message : String(error);
 }
 

@@ -122,6 +122,8 @@ const OWN_FAKES = new Set([
   "inbox-launch-claude.spec.ts",
   "inbox-launch-permission.spec.ts",
   "inbox-launch-scratch.spec.ts",
+  "inbox-launch-trust.spec.ts",
+  "inbox-launch-trust-compose.spec.ts",
   "inbox-launch-pi.spec.ts",
 ]);
 
