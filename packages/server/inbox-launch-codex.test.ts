@@ -655,6 +655,48 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(w.codex.rpc("turn/start")).toHaveLength(1);
   });
 
+  test("a tailnet guest's reply never undoes the owner's Stop, before or after a restart: no turn until the owner's next reply", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    // The owner's reply waited when they pressed Stop.
+    w.store.sendReply(root.id, { words: "Wrong one.", idempotency_key: "reply-1" });
+    await w.post(root.launch!.id, "stop");
+    // A guest replies: held, as the owner's held reply is, and nothing starts.
+    w.store.sendReply(root.id, { words: "Use 8080.", idempotency_key: "reply-guest", by_guest: true });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Use 8080."))).toBe("hold");
+    const again = w.restart();
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "Use 8080."))).toBe("hold");
+    expect(w.codex.rpc("turn/start")).toEqual([]);
+    // The owner's next reply starts it again.
+    again.store.sendReply(root.id, { words: "This one.", idempotency_key: "reply-2" });
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "This one."))).toBe("delivered");
+    expect(w.codex.rpc("turn/start")).toHaveLength(1);
+  });
+
+  test("a tailnet guest's reply after a Stop with nothing waiting, or with the daemon down, starts nothing; the owner's does", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    await w.post(root.launch!.id, "stop");
+    w.store.sendReply(root.id, { words: "Use 8080.", idempotency_key: "reply-guest", by_guest: true });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Use 8080."))).toBe("hold");
+    // The daemon goes too: a guest's reply never starts it.
+    await w.daemonDown();
+    const starts = () => w.codex.calls().filter((c) => c.argv.join(" ") === "app-server daemon start").length;
+    const before = starts();
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Use 8080."))).toBe("hold");
+    expect(starts()).toBe(before);
+    expect(w.codex.rpc("turn/start")).toEqual([]);
+    // The owner's reply does: the daemon starts and a turn goes.
+    w.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-owner" });
+    expect(await w.launch.deliver("codex", threadId, wake(root.id, "Go on."))).toBe("delivered");
+    expect(starts()).toBe(before + 1);
+    expect(w.codex.rpc("turn/start")).toHaveLength(1);
+  });
+
   test("the daemon stopped (its socket gone): a sweep finds none and keeps nothing of it; a look once it runs again finds it, and a reply then starts it", async () => {
     const w = world({ config: { hold: true } });
     const root = await w.send("Fix it.", "send-1");

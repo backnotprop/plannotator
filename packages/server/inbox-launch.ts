@@ -1186,11 +1186,14 @@ export function createInboxLaunch(options: {
       // The replies that waited when the person pressed Stop: they never undo the Stop (after a restart too);
       // their next reply takes them along.
       const memo = memoOf(launch);
+      // A tailnet guest's items (`by_guest`) never undo the owner's Stop, nor start a session that is not running:
+      // they wait, and go along with the owner's next reply. A live session takes them as any.
+      const all = store.pendingReplies(session, { tags: true });
+      const owners = all.filter((reply) => !reply.by_guest);
       if (memo.held) {
-        const pending = store.pendingReplies(session, { tags: true });
-        if (pending.length === 0 || holds(memo, pending)) return "hold";
+        if (owners.length === 0 || holds(memo, owners)) return "hold";
         setHeld(launch.id, memo, null);
-      }
+      } else if (all.length > 0 && owners.length === 0 && !liveOf(host, root, memo)) return "hold";
       const controller = new AbortController();
       const call = host.deliver(launch, text, controller.signal).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) }));
       const one = { controller, done: call };
