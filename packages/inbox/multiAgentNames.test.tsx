@@ -21,6 +21,8 @@ import { DRAFT_NOT_SAVED_FAILED } from './components/DraftLabel';
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
+/** The update control's restart guard: what a restart would lose (null: nothing). */
+const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'superfans-abcdef', name: 'superfans', root: '/work/superfans', created_at: '2026-11-01T10:00:00.000Z' };
 const CLAUDE = { kind: 'agent' as const, host: 'claude-code', session: 'ses_claude', name: null };
@@ -257,4 +259,36 @@ test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the
   await settle(50);
   expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toMatch(/^Saved \d{1,2}:\d{2} [AP]M$/);
   expect(el.querySelector('[data-draft-head]')?.hasAttribute('data-draft-failed')).toBe(false);
+});
+
+test.skipIf(!hasDom)('an emptied box whose save did not land: the restart guard does not ask, since a restart loses nothing', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE)));
+  act(() => button(el, 'Reply').click());
+  await settle();
+  type(el, 'Ship it');
+  await settle(700);
+  expect(serverDraft?.body).toBe('Ship it');
+  expect(unsentReply()).toBeNull();
+
+  // The Inbox stops answering, and the person empties the box: that save (a delete) fails, and the read-back
+  // finds the older words. A restart brings them back, so nothing would be lost.
+  draftSave = () => {
+    throw new TypeError('Failed to fetch');
+  };
+  type(el, '');
+  await settle(700);
+  await settle(50);
+  expect(saves).toBe(2);
+  expect(unsentReply()).toBeNull();
+
+  // Words typed again that do not land: those a restart would lose, so the guard asks.
+  type(el, 'Ship it today');
+  await settle(700);
+  await settle(50);
+  expect(unsentReply()).not.toBeNull();
+  draftSave = null;
+  type(el, 'Ship it today.');
+  await settle(700);
+  await settle(50);
+  expect(unsentReply()).toBeNull();
 });

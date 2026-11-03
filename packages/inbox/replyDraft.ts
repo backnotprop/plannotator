@@ -538,7 +538,9 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
           boxTakes(target, latest!);
         } else if (generation === generationOf(target)) {
           handOn();
-          if (!claimed.current.has(target)) markRefused(target, true);
+          // Only words or a file added are something a restart would lose: an emptied box's save (a delete) that
+          // did not land loses nothing, so it leaves the mark as it was.
+          if (!claimed.current.has(target) && (text.trim() !== '' || save.ops.add.length > 0)) markRefused(target, true);
         } else leave();
       } finally {
         unsaved -= 1;
