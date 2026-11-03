@@ -7116,5 +7116,7 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   /* The list covers the box on a phone: the box's ring would show around it. */
   .pn-inbox:has(.ib-rpick) .ib-rbox { border-color: transparent; box-shadow: none; }
   /* The keyboard leaves about 257 px under the header: the Draft line must not push the box under Send's row. */
+  :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pfoot { padding-top: 6px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-rbox { margin-bottom: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }
 }

@@ -75,8 +75,8 @@ import type { TagMode } from '../api';
 /**
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
- * There it is placed on the screen instead: as wide as the field, from just above it up to the header, never past
- * it. Elsewhere it keeps its place in the page.
+ * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
+ * room above the field, over the box from Send's row up. Elsewhere it keeps its place in the page.
  */
 function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -90,10 +90,14 @@ function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSP
       setStyle((current) => (current === undefined ? current : undefined));
       return;
     }
-    const head = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect();
-    const top = Math.round(field.top - 10);
+    const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
+    // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
+    // covers the box instead, from just above Send's row up to the header (as the recipient list does).
+    const above = Math.round(field.top - 10);
+    const row = foot.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
     const left = Math.round(field.left);
-    const room = Math.max(88, top - (head ? head.bottom : 0) - 8);
+    const room = Math.max(88, top - headBottom - 8);
     setStyle((current) =>
       current && current.top === top && current.left === left && current.maxHeight === room
         ? current
