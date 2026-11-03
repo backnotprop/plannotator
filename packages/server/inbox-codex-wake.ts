@@ -194,6 +194,8 @@ export function createInboxCodexWake(options: {
   environment: AgentEnvironment;
   /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
+  /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
+  skip?: (item: InboxMessage, session: string) => boolean;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
   extraClis?: readonly string[];
   now?: () => number;
@@ -400,7 +402,7 @@ export function createInboxCodexWake(options: {
     const work: { item: InboxMessage; session: string }[] = [];
     for (const [session, items] of pending) {
       for (const item of items) {
-        if (!wakesItem(item, session)) continue;
+        if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
         const key = `${item.id}.${session}`;
         pendingKeys.add(key);
         if (dead.has(session) || claimed.has(key)) continue;

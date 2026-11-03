@@ -350,7 +350,9 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   const stepsOff = !context.stepsOn?.();
   const withdrawn = stepsOff && inboxTidyIsStepsOnly(note.body);
   try {
-    context.store.recordDelivery(note.id, { host: withdrawn ? INBOX_TIDY_WITHDRAWN_HOST : (note.to?.host ?? host ?? "agent"), session });
+    // Withdrawn: settles nothing else in the thread (the person's earlier replies stay owed).
+    if (withdrawn) context.store.recordTidyWithdrawn(note.id, INBOX_TIDY_WITHDRAWN_HOST);
+    else context.store.recordDelivery(note.id, { host: note.to?.host ?? host ?? "agent", session });
   } catch {
     return result;
   }

@@ -299,8 +299,11 @@ describe("Tidy: a checklist step left in progress", () => {
       const w = await quietStep("file", 3 * HOUR);
       expect((await plan(w.server)).agents[0]!.items.map((i) => i.reasons)).toEqual([["step in progress, 3 h"]]);
       expect((await tidy(w.server, { sessions: ["ses-a"], idempotency_key: `t-only-${off}-${via}` })).status).toBe(200);
-      if (off === "settings") expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
-      else writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
+      if (off === "settings") {
+        expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+        // The switch itself withdrew it, before any poll or call.
+        expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      } else writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
       if (via === "poll") {
         expect(await poll(w.server, "ses-a", w.billing)).toEqual([]);
       } else {
@@ -313,7 +316,53 @@ describe("Tidy: a checklist step left in progress", () => {
           setSystemTime();
         }
       }
+      // Withdrawn, the run asked it nothing: the thread shows no Tidy note either.
+      {
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const again = await call(w.client, "read_thread", { thread_id: w.lane.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(again.content.map((c) => c.text).join("\n")).not.toContain("to tidy its threads");
+        } finally {
+          setSystemTime();
+        }
+      }
       expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      // It writes later: still nothing (it was never asked).
+      await send(w.client, w.billing, "ses-a", { reply_to: w.lane.message_id, body: "Still on the replay." });
+      expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      // Nor did it start the cool-down: an old open question of that session is offered again at once.
+      w.clock.behind = 3 * HOUR;
+      await send(w.client, w.billing, "ses-a", { subject: "Refunds", thread: "Refunds", body: block("Move refunds now?") });
+      w.clock.behind = 0;
+      expect((await plan(w.server)).agents.map((a) => a.session)).toEqual(["ses-a"]);
+    }
+  });
+
+  // The review of the withdrawal: it must settle nothing else in the thread. A reply the person sent that session
+  // before the run is still handed over, by the next poll or the next call's read.
+  test("a withdrawn wake keeps the person's earlier reply owed", async () => {
+    for (const via of ["poll", "call"] as const) {
+      const w = await quietStep("file", 3 * HOUR);
+      // Another thread of the session, for a next call that reads something else.
+      const other = await send(w.client, w.billing, "ses-a", { subject: "Docs", thread: "Docs", body: "Docs lane." });
+      expect((await post(w.server, `/api/inbox/messages/${w.lane.message_id}/reply`, { words: "Please also check the refunds.", idempotency_key: `r-${via}` })).status).toBe(200);
+      const reply = (await thread(w.server, w.lane.thread_id)).messages.find((m) => m.author.kind === "person" && !m.tidy)!;
+      expect((await tidy(w.server, { sessions: ["ses-a"], idempotency_key: `t-reply-${via}` })).status).toBe(200);
+      expect(w.server.store.pendingReplies("ses-a").map((m) => m.id)).toContain(reply.id);
+      if (via === "poll") {
+        expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+        expect((await poll(w.server, "ses-a", w.billing)).map((c) => c.id)).toEqual([reply.id]);
+      } else {
+        writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const result = await call(w.client, "read_thread", { thread_id: other.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(result.structuredContent.tidy).toBeUndefined();
+        } finally {
+          setSystemTime();
+        }
+        expect(w.server.store.pendingReplies("ses-a").map((m) => m.id)).toEqual([reply.id]);
+      }
     }
   });
 

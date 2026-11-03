@@ -5289,6 +5289,23 @@ export class InboxStore {
    * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
    * session's delivery marks nothing for the owner. Idempotent per session.
    */
+  /**
+   * A Tidy wake the Inbox withdrew before any hand-off (steps turned off, the
+   * wake listed only steps): recorded delivered under `host` (the Inbox's own
+   * marker) so nothing hands it, and nothing else. Unlike `recordDelivery` it
+   * settles nothing in the thread: the person's earlier replies to that
+   * session stay owed (no `markAgentChecked`), and no 👍 reads seen.
+   */
+  recordTidyWithdrawn(noteId: string, host: string): InboxMessage {
+    const note = this.messages.get(noteId);
+    if (!note || !note.tidy?.wake || !note.to) throw new InboxError("message_not_found", `No Tidy wake ${noteId}.`);
+    if (note.delivery) return note;
+    const at = this.stamp();
+    const withdrawn: InboxMessage = { ...note, delivery: { state: "delivered", host, session: note.to.session, at } };
+    this.appendMessage(withdrawn, at);
+    return withdrawn;
+  }
+
   recordDelivery(replyId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
     const reply = this.messages.get(replyId);
     if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);

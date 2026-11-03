@@ -301,6 +301,8 @@ function cooling(store: InboxStore, session: string, now: number): boolean {
     .pop();
   if (!last) return false;
   if (!last.delivery) return true;
+  // A wake the Inbox withdrew asked nothing: no cool-down.
+  if (last.delivery.host === INBOX_TIDY_WITHDRAWN_HOST) return false;
   if (now - Date.parse(last.created_at) >= INBOX_TIDY_COOLDOWN_MS) return false;
   const after = store.messageCursor(last.id) ?? 0;
   for (const threadId of store.threadIds()) {
@@ -440,9 +442,12 @@ export function inboxTidyRun(
         ? reach === null
           ? "ended"
           : "waiting"
-        : wroteAny || cardWrite
+        : // Withdrawn (steps turned off, only steps listed): it was never asked, whatever it writes later.
+          note.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST
+          ? "nothing"
+          : wroteAny || cardWrite
           ? "tidied"
-          : note.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST || (idle !== null && idle > Date.parse(at))
+          : idle !== null && idle > Date.parse(at)
             ? "nothing"
             : // Delivered, then gone without a write (closed mid-turn, or the Inbox restarted): it never will.
               reach === null

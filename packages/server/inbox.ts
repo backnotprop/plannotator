@@ -1949,7 +1949,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const withdraw = (note: InboxMessage) => {
     try {
-      store.recordDelivery(note.id, { host: INBOX_TIDY_WITHDRAWN_HOST, session: note.to!.session });
+      // Never `recordDelivery`: that would settle the person's earlier replies in the thread as read.
+      store.recordTidyWithdrawn(note.id, INBOX_TIDY_WITHDRAWN_HOST);
     } catch {
       // Gone or no longer this session's: nothing to withdraw.
     }
@@ -2674,6 +2675,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
+    skip: (item) => withdrawnTidy(item),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -2686,6 +2689,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     environment: agentEnvironment,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
+    skip: (item) => withdrawnTidy(item),
     ...options.qwenWake,
   });
 
@@ -2695,6 +2700,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
+    skip: (item) => withdrawnTidy(item),
     ...options.t3Wake,
   });
 
