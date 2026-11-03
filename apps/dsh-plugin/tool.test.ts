@@ -347,6 +347,30 @@ describe("no decision coming", () => {
   }, 15_000);
 });
 
+describe("a CLI gone right after its page came up", () => {
+  // The failure: the call answers "ready" for a child that already exited, while the exit found no
+  // answer yet and sent nothing, so the agent waits for a decision that never comes. The race is
+  // timing-dependent, so it is opened ten times.
+  test("every 'ready' answer is followed by a message; the rest answer a failure", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "crash", env: { FAKE_CLI_DELAY_MS: "0" } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const tool = dsh.tool("plannotator")!;
+    const ready: string[] = [];
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const text = ((await tool.execute({ action: "annotate", target: "notes.md" }, { agent: main })) as { text: string }).text;
+        ready.push(sessionOf(text));
+      } catch (error) {
+        expect(String(error)).toContain("Plannotator could not start");
+      }
+    }
+    await until(() => dsh.folders().length === 0);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    for (const id of ready) expect(main.followups.some((text) => text.startsWith(`Plannotator: notes.md (${id}) — Ended with no decision.`))).toBe(true);
+    expect(main.followups).toHaveLength(ready.length);
+  }, 30_000);
+});
+
 describe("failures", () => {
   // The failure: a command whose CLI fails is reported as opened, so the person
   // and the agent wait for a decision that never comes, or a dead review lingers.
