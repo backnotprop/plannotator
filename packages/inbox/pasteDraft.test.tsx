@@ -34,6 +34,7 @@ const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 /** The update control's restart guard: what a restart would lose (null: nothing). */
 const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
+const { DRAFT_NOT_SAVED_FAILED } = (hasDom ? await import('./components/DraftLabel') : {}) as typeof import('./components/DraftLabel');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 /** A 40 KB log: over the 32 KB line, so it becomes a tile. */
@@ -80,6 +81,10 @@ let failTextReads = false;
 const statuses: number[] = [];
 /** A POST that `match`es waits for `wait` before it reaches the Inbox (a slow link). */
 let gate: { match: (path: string, body: string) => boolean; wait: Promise<void> } | null = null;
+/** This test's fetch calls not answered yet: afterEach waits for none before the real fetch is back. */
+let inflight = 0;
+/** While set, every reply-draft save gets no answer (an Inbox that stopped answering); reads still answer. */
+let dropDraftSaves = false;
 function holdUploads() {
   let release = () => {};
   const promise = new Promise<void>((done) => (release = done));
@@ -124,7 +129,7 @@ beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
   // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '11'], {
+  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '12'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
     stderr: 'inherit',
@@ -155,18 +160,25 @@ beforeEach(() => {
   if (!hasDom) return;
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
+  inflight = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    const method = init?.method ?? 'GET';
-    const body = init?.body ? String(init.body) : undefined;
-    if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
-    if (failTextReads && /\/uploads\/[^/]+\/text$/.test(path)) {
-      return new Response(JSON.stringify({ code: 'forward_failed', error: 'The Inbox could not answer.' }), { status: 502 });
+    inflight += 1;
+    try {
+      const path = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? String(init.body) : undefined;
+      if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+      if (failTextReads && /\/uploads\/[^/]+\/text$/.test(path)) {
+        return new Response(JSON.stringify({ code: 'forward_failed', error: 'The Inbox could not answer.' }), { status: 502 });
+      }
+      if (dropDraftSaves && method === 'POST' && path.endsWith('/draft')) throw new TypeError('Failed to fetch');
+      if (gate && method === 'POST' && gate.match(path, body ?? '')) await gate.wait;
+      const answer = await loopback(path, method, body);
+      if (method === 'POST' && path.includes('/draft')) statuses.push(answer.status);
+      return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+    } finally {
+      inflight -= 1;
     }
-    if (gate && method === 'POST' && gate.match(path, body ?? '')) await gate.wait;
-    const answer = await loopback(path, method, body);
-    if (method === 'POST' && path.includes('/draft')) statuses.push(answer.status);
-    return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   streams = [];
@@ -186,12 +198,17 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   heldUploads?.release();
   unmount();
+  // Leaving the thread saves what waits at once: that save (and its read-back) is answered by this test's Inbox
+  // before the real fetch is back. On the real fetch it fails (a relative URL), and a save that did not land
+  // marks its thread "not saved" in module state, so the next test would start with the restart guard asking.
+  await requestsSettled();
   globalThis.fetch = savedFetch;
   failTextReads = false;
+  dropDraftSaves = false;
   gate = null;
   statuses.length = 0;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
@@ -203,6 +220,22 @@ function unmount() {
   host?.remove();
   root = null;
   host = null;
+}
+
+/**
+ * No request of this test is in flight, on two reads a macrotask apart: the draft's saves chain on microtasks,
+ * so a save queued behind an answer has started its request by the second read.
+ */
+async function requestsSettled() {
+  // About 5 s, so a slow runner still settles.
+  for (let i = 0; i < 250; i++) {
+    if (inflight === 0) {
+      await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+      if (inflight === 0) return;
+    }
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+  }
+  throw new Error(`timed out waiting for the requests of the test to settle (${inflight} in flight)`);
 }
 
 async function until(check: () => boolean | Promise<boolean>, what: string) {
@@ -330,6 +363,24 @@ test.skipIf(!hasDom)("another window's save brings its tile into a box with no e
   await until(() => pastedTiles(el).length === 0, 'the words back');
   expect(replyText(el)!.value).toBe(BEFORE + LOG + AFTER);
   expect(replyText(el)!.selectionStart).toBe((BEFORE + LOG).length);
+}, 30_000);
+
+test.skipIf(!hasDom)('a draft of the paste alone whose save gets no answer says "Not saved", and the restart guard asks; the next save that lands holds the file', async () => {
+  const el = await renderApp(`#thread=${world.waiting}`);
+  const text = await openReply(el);
+  dropDraftSaves = true;
+  expect(paste(text, LOG)).toBe(true);
+  // No words in the box: the file is what the save carried, and it did not land.
+  await until(() => el.querySelector('[data-draft-head][data-draft-failed]') !== null, 'Not saved');
+  expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toBe(DRAFT_NOT_SAVED_FAILED);
+  expect(replyText(el)!.value).toBe('');
+  expect(unsentReply()).not.toBeNull();
+  // The Inbox answers again; the next key saves, with the file.
+  dropDraftSaves = false;
+  type(replyText(el)!, 'x');
+  await until(() => el.querySelector('[data-draft-head][data-draft-failed]') === null, 'Not saved cleared');
+  await until(async () => (await serverDraft())?.files?.length === 1, 'the draft with the file');
+  await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);
 
 test.skipIf(!hasDom)('a draft of the paste alone, its box closed, goes with the Send and the draft is done', async () => {

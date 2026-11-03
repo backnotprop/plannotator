@@ -6177,7 +6177,16 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-bpage-card { display: flex; flex-direction: column; }
   .ib-crdp.ib-crdp-phone { flex: 1; border-radius: 0; box-shadow: none; }
   .ib-crdp-phone .ib-crdp-top { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; border-bottom: 1px solid var(--ib-hair); justify-content: space-between; }
-  .ib-crdp-phone .ib-crdp-col { height: 40px; }
+  /* A phone's bar is one line (cardTopFit.ts): the column's words never break; when even the last way is short they end in "…". */
+  .ib-crdp-phone .ib-crdp-col { height: 44px; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+  .ib-crdp-phone .ib-crdp-col-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ib-crdp-phone .ib-crdp-open { white-space: nowrap; }
+  /* A short bar gives way (cardTopFit.ts): the thread action's icon alone, then the way back's chevron alone. The words
+     stay for a screen reader (the .ib-sr technique), so "Create thread" and "Board" keep their names. */
+  .ib-crdp-top[data-fit~="icon"] .ib-crdp-open-l,
+  .ib-crdp-top[data-fit~="back"] .ib-bback-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+  .pn-inbox .ib-crdp-top[data-fit~="icon"] .ib-crdp-open { width: 44px; flex-shrink: 0; padding: 0; justify-content: center; }
+  .ib-crdp-top[data-fit~="back"] .ib-bback { min-width: 44px; padding: 0; justify-content: center; }
   .ib-crdp-phone .ib-crdp-ask { margin-left: 0; min-height: 44px; }
   .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-crdp-phone .ib-crdp-foot .ib-btn { min-height: 44px; }

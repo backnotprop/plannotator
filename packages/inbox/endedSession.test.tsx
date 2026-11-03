@@ -111,6 +111,11 @@ let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
+/**
+ * A session whose `?asker=` reads wait (a slow /sessions round trip): each read waits on its own, in order, until
+ * `held[i]` is called; null: none waits.
+ */
+let holdAsker: { session: string; held: (() => void)[] } | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -118,6 +123,7 @@ beforeEach(() => {
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   liveness = null;
+  holdAsker = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -131,6 +137,10 @@ beforeEach(() => {
     if (path.includes('/sessions')) {
       // With `liveness`, `?asker=` is answered for whichever session the window asks about.
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
+      if (holdAsker && asked === holdAsker.session) {
+        const held = holdAsker.held;
+        await new Promise<void>((resolve) => held.push(resolve));
+      }
       const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
       return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}) });
     }
@@ -507,6 +517,167 @@ test.skipIf(!hasDom)("picks only on A's older question, the latest message from 
   await settle();
   expect(el.querySelector('[data-route-choice]')).not.toBeNull();
   expect(replies()).toEqual([]);
+});
+
+// Handoff "multi-agent-thread-model", failure 2: a pick on ended A's question while the words go to live B.
+// The words' session is live, so the choice used to stay shut: A's answer went to A, which had ended, and sat
+// there undelivered with no line. Every session a Send reaches is checked now: the choice opens for A's answer.
+test.skipIf(!hasDom)("a pick on ended A's question and words for live B: the choice opens for A's answer; the session picked gets it, B the words", async () => {
+  liveness = { ses_asker: false, ses_b: true };
+  sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  // The pick waits in the draft: the foot opens it with Edit draft.
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  // The note stays once the person types (it named A, then went, before).
+  expect(el.querySelector('[data-asker-ended]')?.textContent).toContain('The Claude Code session that asked has ended.');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+  act(() => radio(el, 'ses_other').click());
+  act(() => (el.querySelector('[data-route-send]') as HTMLButtonElement).click());
+  await settle();
+  await settle();
+  expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.words, r.body.to ?? null])).toEqual([
+    ['A', '', { host: 'pi', session: 'ses_other' }],
+    ['B', 'And keep the logs bucket.', null],
+  ]);
+});
+
+// The same Send pressed before the read of A lands (the words moved the Send's sessions from A alone to B and A):
+// "not read yet" used to read as "not ended", so A's answer went to A with no choice.
+test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send before A's read lands: Send waits for it and opens the choice", async () => {
+  liveness = { ses_asker: false, ses_b: true };
+  sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  holdAsker = { session: 'ses_asker', held: [] };
+  const release = () => holdAsker!.held.splice(0).forEach((go) => go());
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  // A's read has not landed: nothing goes yet.
+  expect(replies()).toEqual([]);
+  await act(async () => {
+    release();
+  });
+  await settle();
+  await settle();
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-route-choice]')).not.toBeNull();
+});
+
+// The same Send pressed twice while the first waits for A's read: the second press must not send too, or the first,
+// when its read lands, posts every reply again with new keys.
+test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send pressed twice before A's read lands: the replies go once", async () => {
+  liveness = { ses_asker: true, ses_b: true };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  holdAsker = { session: 'ses_asker', held: [] };
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  // The effect's read of A waits; the first Send waits on its own read of A.
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(holdAsker.held.length).toBe(2);
+  // The effect's read lands (A is read now), and Send is pressed again while the first still waits.
+  await act(async () => {
+    holdAsker!.held.shift()!();
+  });
+  await settle();
+  act(() => button(el, 'Send').click());
+  await settle();
+  await act(async () => {
+    holdAsker!.held.splice(0).forEach((go) => go());
+  });
+  await settle();
+  await settle();
+  expect(replies().map((r) => (r.path.includes(M1) ? 'A' : 'B'))).toEqual(['A', 'B']);
+});
+
+// A Send that waited for the ended check went on with what the press saw. Both cases below hold A's read, as above.
+async function typeInBox(el: HTMLElement, words: string) {
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, words);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+}
+
+async function waitingSend(words: string) {
+  liveness = { ses_asker: true, ses_b: true };
+  sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
+  const el = await render(threadOf(asking(true), laterUpdate()));
+  holdAsker = { session: 'ses_asker', held: [] };
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  await typeInBox(el, words);
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toEqual([]);
+  return el;
+}
+
+async function releaseHeld() {
+  await act(async () => {
+    holdAsker!.held.splice(0).forEach((go) => go());
+  });
+  await settle();
+  await settle();
+}
+
+test.skipIf(!hasDom)('a Send waiting for the ended check, and the person opens another thread: nothing of the first thread goes to the other', async () => {
+  await waitingSend('Words for thread one.');
+  const T2 = 'msg_01M4HC9Z8Y7X6W5V4T3S2R1Q0P';
+  const other: InboxThread = {
+    thread_id: T2,
+    project: PROJECT,
+    subject: 'Another thread',
+    thread_name: null,
+    resolved_at: null,
+    messages: [{ ...laterUpdate(), id: T2, thread_id: T2, reply_to: null, author: { kind: 'agent', host: 'pi', session: 'ses_other', name: null }, subject: 'Another thread', body: 'Shall I bump the cache?' }],
+  };
+  // The pane stays mounted (no key per thread): the same ThreadPane draws the other thread.
+  act(() =>
+    root!.render(
+      <div className="pn-inbox">
+        <ThreadPane thread={other} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      </div>,
+    ),
+  );
+  await settle();
+  await releaseHeld();
+  expect(replies()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a Send waiting for the ended check, and the person types more: the words in the box when it goes are the ones sent', async () => {
+  const el = await waitingSend('First part.');
+  await typeInBox(el, 'First part. And the rest.');
+  await releaseHeld();
+  expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.words])).toEqual([
+    ['A', ''],
+    ['B', 'First part. And the rest.'],
+  ]);
 });
 
 test.skipIf(!hasDom)('the choice takes the foot: the list of comments goes with it, and a press on a highlight opens nothing, then or after Back', async () => {

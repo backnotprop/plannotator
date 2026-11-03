@@ -90,6 +90,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import {
+  INBOX_REMINDER_HOSTS,
   INBOX_TOOL_HOSTS,
   cookieHostState,
   loadConfig,
@@ -106,6 +107,7 @@ import {
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
+  inboxToolWith,
   configuredInboxReminder,
   resolveInboxReminder,
   type InboxToolHost,
@@ -1319,7 +1321,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             }
           : null;
         // No tool (the inboxTool switch, or Claude Code's mod off): no reminder.
-        const reminder = host
+        const reminder = host && INBOX_REMINDER_HOSTS.includes(host)
           ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }
           : null;
         // With PLANNOTATOR_INBOX_NOTES=0 only a note already written is listed, so it can still be turned off.
@@ -1375,12 +1377,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi and OpenCode have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode and DeepSeek Harness have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
     if (typeof body.reminder === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
+      if (!(INBOX_REMINDER_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
       if (parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv) !== undefined) problems.push("PLANNOTATOR_INBOX_TOOL decides this");
       else {
         const current = loadConfig().inboxReminder;
@@ -1966,25 +1968,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
     }
-    const config = loadConfig();
-    const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of INBOX_TOOL_HOSTS) {
-      const current = configuredInboxTool(config, host);
-      if (current !== undefined) next[host] = current;
-    }
+    const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
       }
-      next[host as InboxToolHost] = value;
+      changes[host as InboxToolHost] = value;
     }
     if (validateOnly) return inboxToolState();
-    saveConfig({ inboxTool: next });
+    // Every other entry is kept, a host this version does not know included.
+    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, changes) });
     const saved = loadConfig();
-    for (const [host, value] of Object.entries(next)) {
+    for (const [host, value] of Object.entries(changes)) {
       if (configuredInboxTool(saved, host as InboxToolHost) !== value) {
         throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       }
