@@ -187,7 +187,9 @@ function useAccountsRead(): Accounts {
         answer = { state: 'failed', reason: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
       }
       if (machine !== SELF) {
-        // That machine alone, read again: its Inbox waits for the switch, so this read shows where it ended.
+        // That machine alone, read again: its Inbox waits for the switch, so this read shows where it ended. It goes
+        // around `readMachine`'s one-at-a-time guard on purpose: an older read of that machine was answered before the
+        // switch began there (the far switch waits for a list run already going), so it can't land after this one.
         const after = await inboxApi.machineAccounts(machine).catch((): InboxMachineAccountsRead => ({ state: 'unreachable' }));
         setMachines((machines) => machines.map((each) => (each.id === machine ? { ...each, read: after } : each)));
         set({ machine, to, label, going: false, line: switchLine(answer, after, to) });

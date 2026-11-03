@@ -195,6 +195,15 @@ const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 export const MACHINE_ACCOUNTS_SWITCH = "accounts/switch";
 /** A switch's answer is a few fields; anything past this is no answer. */
 const SWITCH_ANSWER_MAX_BYTES = 4096;
+
+/** Socket errors that mean no connection was made, so no byte of a request went out (Bun's names, then Node's). */
+const NEVER_CONNECTED = new Set(["ConnectionRefused", "FailedToOpenSocket", "ECONNREFUSED", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);
+
+/** Whether a request failed before it reached the other machine: then a switch did not start there, whatever the line says. */
+export function neverReached(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === "string" && NEVER_CONNECTED.has(code);
+}
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;
@@ -752,9 +761,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
         timeoutMs: waitMs,
         signal: AbortSignal.any([signal, AbortSignal.timeout(waitMs)]),
       });
-    } catch {
+    } catch (error) {
+      // Never reached (refused before the line noticed it went down): nothing started there, so it is not reachable now.
+      if (neverReached(error) || peer.state !== "online") return { state: "offline" };
       // Sent with the line up and no answer in time: it may be switching there.
-      return peer.state === "online" ? { state: "failed", reason: "timed_out" } : { state: "offline" };
+      return { state: "failed", reason: "timed_out" };
     }
     try {
       const raw = await readCapped(response, SWITCH_ANSWER_MAX_BYTES);

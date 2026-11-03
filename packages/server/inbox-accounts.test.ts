@@ -13,6 +13,7 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxAccounts, createInboxAccountsFor, INBOX_ACCOUNTS_TIMEOUT_MS, INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS } from "./inbox-accounts";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
+import { neverReached } from "./inbox-machines";
 import { PEER_LINK_TIMINGS } from "./inbox-peer-link";
 import { fakeCswapCalls, fakeCswapEvents, fakeCswapFinished, fakeCswapSwitched, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer, type FakeCswapSwitch } from "../../tests/helpers/fake-cswap";
 import { waitFor } from "../../tests/helpers/inbox-world";
@@ -56,11 +57,15 @@ interface WorldOptions {
   accountsMs?: number;
   /** A stand-in for another Inbox's door, linked here. */
   linkedTo?: string;
-  /** A tagged Tailscale device: no owner, so its allowlist's login is the person who uses it. */
-  tagged?: boolean;
+  /**
+   * Who Tailscale reports owns this machine: a login (the default), or no owner reported, either for a tagged
+   * device or for a machine whose status names no login. With no owner reported, the allowlist's login is the
+   * person who uses it.
+   */
+  owner?: "login" | "tagged" | "no_login";
 }
 
-async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo, tagged = false }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo, owner = "login" }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -81,6 +86,8 @@ async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLim
   const run: TailscaleRunner = (args) => {
     const done = (stdout = "") => ({ status: 0, stdout, stderr: "" });
     if (args[0] === "status") {
+      if (owner === "no_login") return done(JSON.stringify({ Self: { DNSName: `${MAGIC}.` } }));
+      const tagged = owner === "tagged";
       return done(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
     }
     if (args[1] === "status") {
@@ -1188,16 +1195,18 @@ describe.skipIf(process.platform === "win32")("who may switch", () => {
     for (const dir of [near.dataDir, far.dataDir]) expect(filesUnder(dir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
   });
 
-  test("on a tagged machine (no Tailscale owner), the login its allowlist names is the owner: it switches a linked machine", async () => {
-    const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
-    const near = await world({ tailnet: true, tagged: true, cswap: null });
-    const machine = await link(near, far);
-    await onlineMachine(near);
-    const answer = await near.switchTo(PERSONAL, { path: `/api/inbox/m/${machine}/accounts/switch`, login: GUEST });
-    expect(answer.status).toBe(200);
-    expect(await answer.json()).toEqual({ state: "switched", number: 1 });
-    expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual(["switch 1 --json"]);
-  });
+  for (const owner of ["tagged", "no_login"] as const) {
+    test(`with no owner reported (${owner === "tagged" ? "a tagged device" : "a status that names no login"}), the login its allowlist names is the owner: it switches a linked machine`, async () => {
+      const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+      const near = await world({ tailnet: true, owner, cswap: null });
+      const machine = await link(near, far);
+      await onlineMachine(near);
+      const answer = await near.switchTo(PERSONAL, { path: `/api/inbox/m/${machine}/accounts/switch`, login: GUEST });
+      expect(answer.status).toBe(200);
+      expect(await answer.json()).toEqual({ state: "switched", number: 1 });
+      expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual(["switch 1 --json"]);
+    });
+  }
 
   test("the far side's rules hold: a renumbered list switches nothing there, and a failed switch comes back as its reason", async () => {
     const far = await world({ cswapSwitch: { stdout: SWITCH_ERROR, exit: 1 } });
@@ -1220,6 +1229,45 @@ describe.skipIf(process.platform === "win32")("who may switch", () => {
     expect(await (await send()).json()).toEqual({ state: "switched", number: 1 });
     expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual(["switch 1 --json"]);
     expect(filesUnder(far.dataDir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
+  });
+
+  test("a switch that never reached the far machine says so: refused before a byte went out is not reachable, never still switching", async () => {
+    // What a refused connection throws, against a time limit and an abort, which may have reached it.
+    const refused = await fetch("http://127.0.0.1:9/api/inbox/device/accounts/switch", { method: "POST", body: "{}" }).catch((error: unknown) => error);
+    expect(neverReached(refused)).toBe(true);
+    const hung = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Promise<Response>(() => {}) });
+    doors.push(hung);
+    const late = await fetch(`http://127.0.0.1:${hung.port}/x`, { signal: AbortSignal.timeout(100) }).catch((error: unknown) => error);
+    expect(neverReached(late)).toBe(false);
+    const stop = new AbortController();
+    setTimeout(() => stop.abort(), 100);
+    expect(neverReached(await fetch(`http://127.0.0.1:${hung.port}/x`, { signal: stop.signal }).catch((error: unknown) => error))).toBe(false);
+
+    // The door stops taking connections while its event stream stays open, so the line still reads online: the switch is
+    // refused before a byte goes out, and answers offline at once, not timed_out.
+    // Every answer but the event stream closes its connection, so no kept-alive one is left for the switch to reuse.
+    const door = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        const close = { headers: { Connection: "close" } };
+        if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, version: "0.28.40" }, close);
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [] }, close);
+        return Response.json({ code: "device_route_not_found" }, { status: 404, ...close });
+      },
+    });
+    doors.push(door);
+    const near = await world({ cswap: null, linkedTo: `http://127.0.0.1:${door.port}`, accountsMs: 5_000 });
+    await onlineMachine(near);
+    void door.stop(false);
+    const line = async () => ((await (await fetch(`${near.base}/api/inbox/machines`)).json()) as { machines: { self: boolean; state: string }[] }).machines.find((m) => !m.self)?.state;
+    expect(await line()).toBe("online");
+    const started = Date.now();
+    expect(await (await near.switchTo(PERSONAL, { path: `/api/inbox/m/${FAR}/accounts/switch` })).json()).toEqual({ state: "offline" });
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   test("a machine asleep, an older one, and one that answers more than a switch: each in a few fixed words", async () => {
