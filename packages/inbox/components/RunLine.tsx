@@ -28,8 +28,8 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * one bordered button is Open in Terminal, where something is blocked on the
  * person (a permission prompt, an untrusted folder). No keyboard shortcuts.
  */
-/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). */
-export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; onChanged: () => void }) {
+/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). `guest`: a tailnet guest's page (`tailnetGuest`), which gets no Stop or Try again: the server answers both `owner_only`. */
+export function RunLine({ run, phone, canReaddress = false, guest = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; guest?: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -60,7 +60,7 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
     else setError('Could not copy; select the command and copy it.');
   };
 
-  const stop = (
+  const stop = guest ? null : (
     <Tip content={STOP_TIP}>
       <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-stop="">
         Stop
@@ -141,9 +141,11 @@ export function RunLine({ run, phone, canReaddress = false, onChanged }: { run: 
       actions = (
         <>
           {run.untrusted && !phone && openTerminal}
-          <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
-            Try again
-          </button>
+          {!guest && (
+            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
+              Try again
+            </button>
+          )}
         </>
       );
       break;
