@@ -14,8 +14,9 @@
  * such a door leads to, and a stand-in door covers that answer's first half in
  * packages/server/inbox-accounts.test.ts.
  *
- * What only a browser can show: the rows and the list on a real page, nothing
- * moving when a slow machine answers, an open peek keeping its place and focus
+ * What only a browser can show: one block per machine on a real page, the
+ * "on <machine>" and "most room" notes from real far answers, nothing above a
+ * slow machine moving when it answers, an open peek keeping its place and focus
  * through a far answer, the sheet inside a phone's window, and where focus
  * lands when Tab leaves the peek. The rules are
  * packages/inbox/accountsSection.test.tsx; the refusals, a tailnet guest's
@@ -152,19 +153,23 @@ test.afterAll(async () => {
 });
 
 const rowOf = (page: Page, name: string) => page.locator(`[data-accounts-machine="${name}"]`);
-const useOf = (page: Page, name: string) => rowOf(page, name).locator('.ib-acct-ro');
+/** The name of the account a machine's list shows in use. */
+const inUseOf = (page: Page, name: string) => rowOf(page, name).locator('[data-in-use] .ib-acct-name');
+/** What a machine's block says when it has no list. */
+const quietOf = (page: Page, name: string) => rowOf(page, name).locator('[data-machine-state]');
+const namesOf = (page: Page, name: string) => rowOf(page, name).locator('.ib-acct-name');
+const notesOf = (page: Page, machine: string, account: string) => rowOf(page, machine).locator('.ib-acct-r').filter({ has: page.locator('.ib-acct-name', { hasText: new RegExp(`^${account}$`) }) }).locator('[data-account-notes]');
 const peek = (page: Page) => page.locator('[data-usage-peek]');
 const usageRow = (page: Page) => page.locator('[data-usage-nav]');
 const nearBlocks = (page: Page) => page.locator('[data-usage-machine]');
-const account = (page: Page, name: string) => page.locator('.ib-acct').filter({ has: page.getByText(name, { exact: true }) });
-/** Every machine's rows: this machine's first, the others as they answered, so in either order. */
+/** Every machine's own list, in its own order: in use first, then the most room. */
 async function expectEveryRow(page: Page) {
-  const names = page.locator('.ib-acct .ib-acct-name');
-  await expect.poll(async () => (await names.allTextContents()).sort()).toEqual(['personal', 'side', 'team', 'work', 'work']);
-  expect((await names.allTextContents()).slice(0, 2)).toEqual(['work', 'personal']);
+  await expect(namesOf(page, 'Studio')).toHaveText(['work', 'personal']);
+  await expect(namesOf(page, 'Mini')).toHaveText(['personal', 'team', 'work']);
+  await expect(namesOf(page, 'Laptop')).toHaveCount(2);
 }
-/** Where each row of the list sits now. */
-const rowTops = (page: Page) => page.locator('.ib-acct').evaluateAll((rows) => rows.map((row) => ({ name: row.querySelector('.ib-acct-name')?.textContent, top: row.getBoundingClientRect().top })));
+/** Where each of a machine's rows sits now. */
+const rowTops = (page: Page, name: string) => rowOf(page, name).locator('.ib-acct-r').evaluateAll((rows) => rows.map((row) => ({ name: row.querySelector('.ib-acct-name')?.textContent, top: row.getBoundingClientRect().top })));
 
 async function shot(page: Page, name: string) {
   // Off the left edge's 20 px strip, which slides the sidebar in over the page.
@@ -194,33 +199,30 @@ const phone = async (browser: Browser) => {
   return { context, page };
 };
 
-test('Settings: this machine, then each linked one and the account it is using; every machine in one list', async ({ browser }) => {
+test('Settings: one block per machine, this one first, each with its own list, and the notes that tie them', async ({ browser }) => {
   test.setTimeout(120_000);
   const { context, page, errors } = await desktop(browser);
   await page.goto(`${studio.url}#settings/accounts`);
-  // Two logins read `work`, so the machines say which, as the list does. Laptop's copy has no alias of its own.
-  await expect(useOf(page, 'Studio')).toHaveText('work · Northwind');
-  await expect(useOf(page, 'Mini')).toHaveText('personal');
-  await expect(useOf(page, 'Laptop')).toHaveText('work · Northwind');
-  await expect(useOf(page, 'Build VM')).toHaveText('');
-  // Only this machine switches (step 3); a linked machine's row has no control until step 4.
-  await expect(page.locator('[data-accounts-machines] button')).toHaveCount(1);
-  await expect(rowOf(page, 'Studio').locator('button[data-accounts-switch]')).toHaveCount(1);
-
-  // `personal` is saved on Studio and Mini, Northwind's `work` on Studio and Laptop: one row each. Mini's newer reading wins.
+  await expect(inUseOf(page, 'Studio')).toHaveText('work');
+  await expect(inUseOf(page, 'Mini')).toHaveText('personal');
   await expectEveryRow(page);
-  await expect(page.locator('.ib-acct .ib-acct-org')).toHaveText(['Northwind', 'Acme']);
-  await expect(account(page, 'personal').locator('[data-usage="5h"]')).toContainText('92%');
-  await account(page, 'personal').locator('button.ib-acct-row').click();
-  await expect(account(page, 'personal').locator('.ib-acct-more')).toContainText('Studio, Mini');
+  const blocks = await page.locator('[data-accounts-machine]').evaluateAll((els) => els.map((el) => el.getAttribute('data-accounts-machine')));
+  expect(blocks[0]).toBe('Studio');
+  expect([...blocks].sort()).toEqual(['Build VM', 'Laptop', 'Mini', 'Older', 'Studio']);
+  // Build VM has no claude-swap: its own block says so, with the command.
+  await expect(rowOf(page, 'Build VM').locator('[data-accounts-missing]')).toContainText("claude-swap isn't installed on Build VM.");
+  // A login another machine is using says which; Mini at 92% points at the most room on Mini.
+  await expect(notesOf(page, 'Studio', 'personal')).toContainText('on Mini');
+  await expect(notesOf(page, 'Studio', 'work')).toHaveText('on Laptop');
+  await expect(notesOf(page, 'Mini', 'team')).toContainText('most room');
+  await expect(rowOf(page, 'Mini').locator('[data-in-use] [data-l="hot"]')).toHaveCount(1);
+  // This machine's other rows are the switch; a linked machine's rows are not, in this build.
+  await expect(rowOf(page, 'Studio').locator('button[data-account]')).toHaveCount(1);
+  await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(0);
 
-  // Rows of one height: the Machines column lines up with the first row's.
-  const left = await Promise.all(['Studio', 'Mini', 'Build VM', 'Laptop'].map(async (name) => (await useOf(page, name).boundingBox())!.x));
-  expect(new Set(left).size).toBe(1);
-  // A hairline between rows, as in the list below, and none under the last.
-  const line = (name: string) => rowOf(page, name).evaluate((el) => getComputedStyle(el).borderBottomWidth);
-  expect(await line('Studio')).toBe('1px');
-  expect(await page.locator('[data-accounts-machine]').last().evaluate((el) => getComputedStyle(el).borderBottomWidth)).toBe('0px');
+  // The usage lines up down the page, every machine's rows in one column.
+  const left = await page.locator('[data-account-use="bars"]').evaluateAll((els) => [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().left)))]);
+  expect(left).toHaveLength(1);
   await shot(page, 'desktop-settings');
   expect(errors).toEqual([]);
   await context.close();
@@ -263,7 +265,7 @@ test('the peek shows Mini at 92% in amber under this machine, the row stays plai
   await context.close();
 });
 
-test('a slow machine holds up nothing and moves nothing when it answers', async ({ browser }) => {
+test('a slow machine holds up nothing, and moves nothing above it when it answers', async ({ browser }) => {
   test.setTimeout(120_000);
   const { context, page } = await desktop(browser);
   let letGo = () => {};
@@ -275,21 +277,16 @@ test('a slow machine holds up nothing and moves nothing when it answers', async 
     await route.continue();
   });
   await page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(page, 'Studio')).toHaveText('work');
-  await expect(useOf(page, 'Laptop')).not.toHaveText('Reading accounts…');
+  await expect(inUseOf(page, 'Studio')).toHaveText('work');
+  await expect(namesOf(page, 'Laptop')).toHaveCount(2);
   await expect(page.locator('[data-accounts-refresh]')).toBeEnabled();
-  await expect(useOf(page, 'Mini')).toHaveText('Reading accounts…');
-  const before = (await rowOf(page, 'Laptop').boundingBox())!.y;
-  await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(['work', 'personal', 'side']);
-  const rows = await rowTops(page);
+  await expect(rowOf(page, 'Mini').locator('[data-accounts-wait]')).toHaveText('Reading accounts…');
+  const rows = await rowTops(page, 'Studio');
   await shot(page, 'desktop-slow-machine');
   letGo();
-  await expect(useOf(page, 'Mini')).toHaveText('personal');
-  expect((await rowOf(page, 'Laptop').boundingBox())!.y).toBe(before);
-  // Its namesake gives `work` a second line and its other rows land last: nothing already showing moves.
-  await expect(page.locator('.ib-acct')).toHaveCount(5);
-  await expect(page.locator('.ib-acct .ib-acct-org')).toHaveText(['Northwind', 'Acme']);
-  expect((await rowTops(page)).slice(0, rows.length)).toEqual(rows);
+  await expect(inUseOf(page, 'Mini')).toHaveText('personal');
+  // The blocks above it stay put; its own block grows where it is.
+  expect(await rowTops(page, 'Studio')).toEqual(rows);
   await context.close();
 });
 
@@ -340,9 +337,11 @@ test('phone 390: the same machines on the page, and the near machine in the bott
   test.setTimeout(120_000);
   const { context, page } = await phone(browser);
   await page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(page, 'Mini')).toHaveText('personal');
+  await expect(inUseOf(page, 'Mini')).toHaveText('personal');
   await expectEveryRow(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  // A phone row is a tap target, with no hover word.
+  for (const height of await page.locator('.ib-acct-r').evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))) expect(height).toBeGreaterThanOrEqual(44);
   await shot(page, 'phone-390-settings');
 
   await page.goto('about:blank');
@@ -370,8 +369,8 @@ test('an older Plannotator on the far side stays quiet: its row asks for an upda
   const { context, page, errors } = await desktop(browser);
   await answerAsOlder(page);
   await page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(page, 'Older')).toHaveText('Update Plannotator');
-  await expect(useOf(page, 'Mini')).toHaveText('personal');
+  await expect(quietOf(page, 'Older')).toHaveText('Update Plannotator');
+  await expect(inUseOf(page, 'Mini')).toHaveText('personal');
   await expect(page.locator('[role="alert"]')).toHaveCount(0);
   await shot(page, 'desktop-older-far-side');
   expect(errors).toEqual([]);
@@ -380,7 +379,7 @@ test('an older Plannotator on the far side stays quiet: its row asks for an upda
   const small = await phone(browser);
   await answerAsOlder(small.page);
   await small.page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(small.page, 'Older')).toHaveText('Update Plannotator');
+  await expect(quietOf(small.page, 'Older')).toHaveText('Update Plannotator');
   await shot(small.page, 'phone-390-older-far-side');
   await small.context.close();
 });
@@ -396,9 +395,11 @@ test('a machine that goes to sleep reads as asleep, at once, with no error, and 
 
   const { context, page, errors } = await desktop(browser);
   await page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(page, 'Laptop')).toHaveText('Asleep');
-  await expect(useOf(page, 'Studio')).toHaveText('work · Northwind');
-  await expect(page.locator('.ib-acct .ib-acct-name')).toHaveText(['work', 'personal', 'work', 'team']);
+  await expect(quietOf(page, 'Laptop')).toHaveText('Asleep');
+  await expect(inUseOf(page, 'Studio')).toHaveText('work');
+  await expect(namesOf(page, 'Studio')).toHaveText(['work', 'personal']);
+  // Asleep is not a list: nothing on Studio says "on Laptop" any more.
+  await expect(notesOf(page, 'Studio', 'work')).toHaveCount(0);
   await expect(page.locator('[role="alert"]')).toHaveCount(0);
   await shot(page, 'desktop-machine-offline');
   expect(errors).toEqual([]);
@@ -406,7 +407,7 @@ test('a machine that goes to sleep reads as asleep, at once, with no error, and 
 
   const small = await phone(browser);
   await small.page.goto(`${studio.url}#settings/accounts`);
-  await expect(useOf(small.page, 'Laptop')).toHaveText('Asleep');
+  await expect(quietOf(small.page, 'Laptop')).toHaveText('Asleep');
   await shot(small.page, 'phone-390-machine-offline');
   await small.context.close();
 });

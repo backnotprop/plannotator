@@ -28,8 +28,13 @@ export interface MachineAccounts {
  */
 export type SwitchLine = InboxAccountSwitchFailure | 'not_installed' | 'owner_only' | 'unreachable' | 'still_switching' | 'unconfirmed';
 
-/** This computer's last switch. */
+/** What a switch's machine is called in `switches`: this computer, or a linked machine's id. */
+export const SELF = 'self';
+
+/** A machine's last switch. */
 export interface AccountSwitch {
+  /** `SELF`, or a linked machine's id. */
+  machine: string;
   to: InboxAccountSwitchTarget;
   /** What the window called it when it was picked. */
   label: string;
@@ -50,10 +55,12 @@ export interface Accounts {
   machines: MachineAccounts[];
   /** Reads now, or joins the read already going. `fresh` (Refresh) asks each Inbox to run again, which it does once its last run is 30 s old; sooner it gets the last reading. */
   read: (options?: { fresh?: boolean }) => Promise<void>;
-  /** This computer's last switch, until the next one. Null before any. */
-  lastSwitch: AccountSwitch | null;
-  /** Switch this computer's Claude Code to `to`, then read again: the page shows what that read says, never a guess. */
-  switchTo: (to: InboxAccountSwitchTarget, label: string) => Promise<void>;
+  /** Each machine's last switch, until its next one, by `SELF` or machine id. None before any. */
+  switches: Record<string, AccountSwitch>;
+  /** Whether the page offers a switch on this machine (`SELF` or an id): this build switches this computer only. */
+  canSwitch: (machine: string) => boolean;
+  /** Switch a machine's Claude Code to `to`, then read it again: the page shows what that read says, never a guess. */
+  switchTo: (machine: string, to: InboxAccountSwitchTarget, label: string) => Promise<void>;
 }
 
 type SetMachines = (change: (machines: MachineAccounts[]) => MachineAccounts[]) => void;
@@ -109,12 +116,21 @@ export function switchLine(answer: InboxAccountSwitch | { state: 'failed'; reaso
   return answer.reason;
 }
 
+/** A linked machine's switch is a later step: this build switches this computer only. */
+const canSwitch = (machine: string) => machine === SELF;
+
+/** `switches` with `machine`'s line answered by a read that shows a list. */
+function clearLine(switches: Record<string, AccountSwitch>, machine: string): Record<string, AccountSwitch> {
+  const held = switches[machine];
+  return held && !held.going && held.line ? { ...switches, [machine]: { ...held, line: null } } : switches;
+}
+
 function useAccountsRead(): Accounts {
   const [view, setView] = useState<AccountsView | null>(null);
   const [refreshFailed, setRefreshFailed] = useState<AccountsFailure | null>(null);
   const [reading, setReading] = useState(true);
   const [machines, setMachines] = useState<MachineAccounts[]>([]);
-  const [lastSwitch, setLastSwitch] = useState<AccountSwitch | null>(null);
+  const [switches, setSwitches] = useState<Record<string, AccountSwitch>>({});
   const latest = useRef<AccountsView | null>(null);
   /** The last read's own answer, a failure too, which `latest` keeps out while a list is up. */
   const answered = useRef<AccountsView | null>(null);
@@ -140,8 +156,8 @@ function useAccountsRead(): Accounts {
         setView(next);
       }
       setReading(false);
-      // A later good read answers the last switch's line, whatever it said: the pill and the list now show where it is.
-      if (next.state === 'accounts') setLastSwitch((held) => (held && !held.going && held.line ? { ...held, line: null } : held));
+      // A later good read answers the last switch's line, whatever it said: the list now shows where it is.
+      if (next.state === 'accounts') setSwitches((held) => clearLine(held, SELF));
     };
     running.current ??= run().finally(() => {
       running.current = null;
@@ -152,8 +168,11 @@ function useAccountsRead(): Accounts {
   const read = useCallback(({ fresh = false }: { fresh?: boolean } = {}) => readThis({ fresh }), [readThis]);
 
   const switchTo = useCallback(
-    async (to: InboxAccountSwitchTarget, label: string) => {
-      setLastSwitch({ to, label, going: true, line: null });
+    async (machine: string, to: InboxAccountSwitchTarget, label: string) => {
+      // A linked machine's switch is a later step: this build switches this computer only.
+      if (machine !== SELF) return;
+      const set = (change: AccountSwitch) => setSwitches((held) => ({ ...held, [machine]: change }));
+      set({ machine, to, label, going: true, line: null });
       let answer: InboxAccountSwitch | { state: 'failed'; reason: 'owner_only' | 'unreachable' };
       try {
         answer = await inboxApi.switchAccount(to);
@@ -164,7 +183,7 @@ function useAccountsRead(): Accounts {
       await running.current;
       // This computer only: a switch here changes nothing on a linked machine.
       await readThis({ machines: false });
-      setLastSwitch({ to, label, going: false, line: switchLine(answer, answered.current ?? { state: 'unreachable' }, to) });
+      set({ machine, to, label, going: false, line: switchLine(answer, answered.current ?? { state: 'unreachable' }, to) });
     },
     [readThis],
   );
@@ -174,7 +193,7 @@ function useAccountsRead(): Accounts {
     void read();
   }, [read]);
 
-  return useMemo(() => ({ view, refreshFailed, reading, machines, read, lastSwitch, switchTo }), [view, refreshFailed, reading, machines, read, lastSwitch, switchTo]);
+  return useMemo(() => ({ view, refreshFailed, reading, machines, read, switches, canSwitch, switchTo }), [view, refreshFailed, reading, machines, read, switches, switchTo]);
 }
 
 const AccountsContext = createContext<Accounts | null>(null);

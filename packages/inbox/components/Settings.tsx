@@ -8,7 +8,7 @@ import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
-import { AccountsSection } from './Accounts';
+import { AccountsRefresh, AccountsSection } from './Accounts';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -1069,9 +1069,19 @@ export function SettingsPage(props: SettingsPageProps) {
             </a>
           </div>
         )}
-        <h1 ref={heading} tabIndex={-1}>
-          {section ? SETTINGS_SECTION_LABEL[section] : 'General'}
-        </h1>
+        {section === 'accounts' && settings ? (
+          // Accounts' Refresh reads every machine, so it sits by the page's title (approval "accounts-page").
+          <div className="ib-spg-h">
+            <h1 ref={heading} tabIndex={-1}>
+              {SETTINGS_SECTION_LABEL[section]}
+            </h1>
+            <AccountsRefresh />
+          </div>
+        ) : (
+          <h1 ref={heading} tabIndex={-1}>
+            {section ? SETTINGS_SECTION_LABEL[section] : 'General'}
+          </h1>
+        )}
         {loadFailed ? (
           <>
             <LoadError error={error} onRetry={onRetry} />
