@@ -113,7 +113,9 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     ]);
     expect(linked.prs).toHaveLength(1);
     expect((await card({ op: "link", card_id: id, ref: "https://gitlab.com/g/p/-/issues/4" })).structuredContent.card.refs.at(-1)).toMatchObject({ kind: "issue", source: "gitlab", ref: "g/p#4" });
-    expect((await card({ op: "link", card_id: id, ref: "https://github.com-evil.example/o/r/issues/1" })).content[0]!.text).toStartWith("validation_error: ref:");
+    // A host that only starts like GitHub's is no forge: a plain web link, never a GitHub issue. A non-web ref is refused.
+    expect((await card({ op: "link", card_id: id, ref: "https://github.com-evil.example/o/r/issues/1" })).structuredContent.card.refs.at(-1)).toMatchObject({ kind: "link", source: "web" });
+    expect((await card({ op: "link", card_id: id, ref: "javascript:alert(1)" })).content[0]!.text).toStartWith("validation_error: ref:");
     expect((await card({ op: "ship", card_id: id, say: "live on staging" })).structuredContent.card.column).toBe("done");
 
     const other = await card({ op: "create", title: "Auto-update for users" });
