@@ -33,9 +33,10 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
 /**
  * `canOpen`: this window can open Terminal on this launch (the thread's rule: on the Inbox's computer, with
  * a session or a folder to trust). `canReaddress`: the waiting message can go to another session (Send to
- * another session is shown under the line).
+ * another session is shown under the line). `guest`: a tailnet guest's page
+ * (`tailnetGuest`), which gets no Stop or Try again: the server answers both `owner_only`.
  */
-export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; onChanged: () => void }) {
+export function RunLine({ run, canOpen, canReaddress = false, guest = false, onChanged }: { run: InboxRun; canOpen: boolean; canReaddress?: boolean; guest?: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -69,7 +70,7 @@ export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run
     else setError('Could not copy; select the command and copy it.');
   };
 
-  const stop = (
+  const stop = guest ? null : (
     <Tip content={STOP_TIP}>
       <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-stop="">
         Stop
@@ -171,9 +172,11 @@ export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run
             </button>
           )}
           {canOpen && openTerminal}
-          <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
-            Try again
-          </button>
+          {!guest && (
+            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
+              Try again
+            </button>
+          )}
         </>
       );
       break;
