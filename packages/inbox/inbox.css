@@ -5220,6 +5220,15 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 }
 .pn-inbox .ib-st-btn { gap: 6px; }
 .ib-st-num { font-variant-numeric: tabular-nums; }
+/* Another session's list too: "+1", quieter than the count. */
+.ib-st-more { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; margin-left: -2px; }
+.ib-st-btn[aria-expanded="true"] .ib-st-more, .ib-st-btn[data-popup-open] .ib-st-more { color: inherit; opacity: 0.8; }
+/* The row's fit (footFit.ts): read only, the checklist gives way first, its chevron gone before the open questions'
+   words shorten (the row's `steps` step; `data-steps-fit` from the buttons' own fit); at a phone's `icon` step,
+   the pie and the count alone, closer together. */
+.pn-inbox .ib-footrow[data-fit~="steps"] .ib-st-btn .ib-oq-chev,
+.pn-inbox .ib-footbtns[data-steps-fit] .ib-st-btn .ib-oq-chev { display: none; }
+.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns .ib-st-btn { padding-left: 8px; padding-right: 8px; gap: 4px; }
 .pn-inbox .ib-st-btn[aria-expanded="true"], .pn-inbox .ib-st-btn[data-popup-open] { background: color-mix(in srgb, var(--primary) 11%, var(--card)); color: var(--primary); }
 .ib-st-btn[aria-expanded="true"] .ib-oq-chev, .ib-st-btn[data-popup-open] .ib-oq-chev { transform: none; }
 .ib-stpie { flex: none; }
@@ -5296,6 +5305,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-row { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-st-m { font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-oq-pos[data-phone] .ib-st-jump { min-height: 44px; }
+/* A phone: a step's words wrap to two lines (then the ellipsis), as the open questions' rows do; the mark and what
+   sits at the right stay by the first line. "Waiting on you ›" keeps its 44 px target over the row's padding. */
+.ib-oq-pos[data-phone] .ib-st-row { align-items: flex-start; padding-top: 11px; padding-bottom: 11px; line-height: 22px; }
+.ib-oq-pos[data-phone] .ib-st-gl { margin-top: 4px; }
+.ib-oq-pos[data-phone] .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.ib-oq-pos[data-phone] .ib-st-m { line-height: 22px; }
+.ib-oq-pos[data-phone] .ib-st-jump { margin: -11px 0; }
 
 /* the Board (part 4): the lane card wears the pie alone (the opened card has the number); the opened card lists the
    steps under a section head like Threads and Links; the panel's head has a Board icon that opens the card */
@@ -5307,6 +5323,12 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-crdp-steps .ib-stg-done .k, .ib-crdp-steps .ib-stg-drop path { stroke: var(--card); }
 .ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
 .ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
+/* The opened card on a phone: two lines too, as the foot's sheet. */
+.ib-crdp-phone .ib-crdp-steps .ib-st-row { align-items: flex-start; padding-top: 9px; padding-bottom: 9px; line-height: 22px; }
+.ib-crdp-phone .ib-crdp-steps .ib-st-gl { margin-top: 4px; }
+.ib-crdp-phone .ib-crdp-steps .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.ib-crdp-phone .ib-crdp-steps .ib-st-m { line-height: 22px; }
+.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -11px 0; }
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }

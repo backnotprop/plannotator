@@ -360,7 +360,9 @@ test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the butto
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [list('working'), { ...list('idle', B), steps: list('idle', B).steps.slice(0, 2) }] });
   await render();
   await until(() => !!button(), 'the steps button');
-  expect(button()!.textContent).toBe('3/6');
+  // "+1": another session's list is there too, and the button's name says so.
+  expect(button()!.textContent).toBe('3/6+1');
+  expect(button()!.getAttribute('aria-label')).toEndWith(', and 1 more checklist');
   await openPanel();
   expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
   // A name can be cut with an ellipsis: its title says it whole.

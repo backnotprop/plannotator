@@ -13,6 +13,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 import { agentName } from '../format';
+import { drawStepsFit, fitFootRow, laidOutChildren } from '../footFit';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { presenceClass, stepsCount, stepsName } from './model';
@@ -40,10 +41,32 @@ export function StepsButton({ lists, phone, onWaiting, boardCard = null }: Steps
   // Drawn inside the window's root, so its styles and theme reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  // The row's fit: read only, this button gives way first (its chevron goes). Beside the open questions button,
+  // that button's fit does it (before its own words shorten); alone, this one fits itself, on each render and resize.
+  const fittedFor = useRef('');
+  const fitRef = useRef<() => void>(() => {});
+  fitRef.current = () => {
+    const buttons = trigger.current?.parentElement;
+    if (!buttons || buttons.querySelector('[data-open-questions]')) return;
+    const key = `${buttons.getBoundingClientRect().width}|${laidOutChildren(buttons).map((el) => el.textContent ?? '').join('|')}`;
+    if (key === fittedFor.current) return;
+    fittedFor.current = key;
+    drawStepsFit(buttons, fitFootRow(buttons, [false, true], (narrow) => drawStepsFit(buttons, narrow)) ?? false);
+  };
+  useLayoutEffect(() => fitRef.current());
+  useLayoutEffect(() => {
+    const buttons = trigger.current?.parentElement;
+    if (!buttons || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fitRef.current());
+    observer.observe(buttons);
+    return () => observer.disconnect();
+  }, [lists.length > 0]);
   const first = lists[0];
   if (!first) return null;
   const { done, total, text } = stepsCount(first);
-  const name = stepsName(agentName(first.agent), first);
+  // Another session's list too: "+1" says it is there (the panel shows them all).
+  const more = lists.length - 1;
+  const name = `${stepsName(agentName(first.agent), first)}${more > 0 ? `, and ${more} more checklist${more === 1 ? '' : 's'}` : ''}`;
   const waitingFor = (list: InboxStepsWire) => {
     const go = onWaiting(list);
     return go
@@ -68,6 +91,11 @@ export function StepsButton({ lists, phone, onWaiting, boardCard = null }: Steps
         <span className="ib-st-num" aria-hidden="true">
           {text}
         </span>
+        {more > 0 && (
+          <span className="ib-st-more" data-steps-more="" aria-hidden="true">
+            +{more}
+          </span>
+        )}
         <span className="ib-oq-chev" aria-hidden="true">
           <Icon name="chevU" size={13} />
         </span>

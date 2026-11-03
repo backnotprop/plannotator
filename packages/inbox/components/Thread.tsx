@@ -6074,19 +6074,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
                   keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
                 />
               )}
-              {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
-              {stepLists.length > 0 && (
-                <StepsButton
-                  lists={stepLists}
-                  phone={phone}
-                  onWaiting={(list) => {
-                    const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
-                    return target ? () => jumpTo(target) : null;
-                  }}
-                  boardCard={threadSteps?.boardCard ?? null}
-                />
-              )}
-              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}
+              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
+                  Before the checklist: the actions first, the status after. */}
               {ackOffered && !waiting && !draftKept && (
                 <Tip
                   content={
@@ -6102,6 +6091,18 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
                     Looks good
                   </button>
                 </Tip>
+              )}
+              {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
+              {stepLists.length > 0 && (
+                <StepsButton
+                  lists={stepLists}
+                  phone={phone}
+                  onWaiting={(list) => {
+                    const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
+                    return target ? () => jumpTo(target) : null;
+                  }}
+                  boardCard={threadSteps?.boardCard ?? null}
+                />
               )}
               {/* The in-thread New message button is off (approval "inbox-acknowledge", 2026-10-15): Reply and compose cover it.
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}
