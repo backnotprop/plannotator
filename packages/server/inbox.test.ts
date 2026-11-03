@@ -636,7 +636,7 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
 });
 
 describe("the window's routes: settings, restart, favicon", () => {
-  test("settings answer the stdio entry with this CLI's path, the port, the knob and the store on disk", async () => {
+  test("settings answer the stdio entry with this CLI's path, the port and the knob without walking the store; the store on disk is its own read", async () => {
     const root = tempRoot();
     const dataDir = join(root, "data");
     const previous = process.env.PLANNOTATOR_DATA_DIR;
@@ -649,21 +649,45 @@ describe("the window's routes: settings, restart, favicon", () => {
       const sent = structured<{ thread_id: string }>(
         await client.callTool({ name: "send_message", arguments: { body: QUESTION_MESSAGE, project_path: gitProject(root) } }),
       );
-      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      // The window's settings read (`?store=0`) never walks the store: the sizes are Settings → Storage's own read.
+      const walk = server.store.diskUsage.bind(server.store);
+      let walks = 0;
+      server.store.diskUsage = () => {
+        walks += 1;
+        return walk();
+      };
+      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings?store=0`)).json();
+      expect(walks).toBe(0);
+      expect(settings.store).toBeUndefined();
+      expect(settings.store_dir).toBe(join(dataDir, "inbox"));
       expect(settings.mcp_command).toEqual(["/opt/tools dir/plannotator", "inbox", "mcp"]);
       expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
       expect(settings.port).toBe(server.port);
       // Nothing set: the defaults, on for the Claude Code mod, off on Pi, OpenCode and DeepSeek Harness.
       expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false }, env: null });
-      const project = settings.store.projects[0];
+
+      const storage = await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings/storage`);
+      expect(storage.status).toBe(200);
+      const store = await storage.json();
+      expect(walks).toBe(1);
+      // The same numbers the settings read carried before: the store's own count, unchanged.
+      expect(store).toEqual(JSON.parse(JSON.stringify(walk())));
+      expect(store.dir).toBe(settings.store_dir);
+      // A page older than the storage read asks without the marker and reads `settings.store`: it still gets it whole,
+      // never an empty stand-in (without it that page's Settings throws and the whole window goes blank).
+      const legacy = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      expect(walks).toBe(2);
+      expect(legacy.store).toEqual(store);
+      const project = store.projects[0];
       expect(project.name).toBe("api");
       expect(project.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([sent.thread_id]);
       // Sizes are read from the files themselves.
       const folder = join(dataDir, "inbox", "projects", readdirSync(join(dataDir, "inbox", "projects"))[0]!);
       const onDisk = ["project.json", "messages.jsonl", "questions.jsonl"].reduce((n, f) => n + statSync(join(folder, f)).size, 0);
       expect(project.bytes).toBe(onDisk);
-      expect(settings.store.bytes).toBe(onDisk);
+      expect(store.bytes).toBe(onDisk);
       expect(project.threads[0].bytes).toBe(onDisk - statSync(join(folder, "project.json")).size);
+      expect((await post(server, "/api/inbox/settings/storage", {})).status).toBe(405);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
