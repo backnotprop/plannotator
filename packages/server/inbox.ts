@@ -451,7 +451,8 @@ export interface InboxServerOptions {
   accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
-  t3Wake?: { connect?: T3Connect; now?: () => number };
+  /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
+  t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void };
 }
 
 /**

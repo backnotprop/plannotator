@@ -17,6 +17,11 @@
  *  - a thread T3 no longer has is ended, and alive again when it next calls
  *    the Inbox; a send T3Delivery refuses (an uncertain send from before a new
  *    login) is never retried: the agent sees it when it reads the thread;
+ *  - a send T3 denies for the grant's mode (`capability_denied`: a Read only
+ *    grant; `runtime_mode_escalation_denied` or
+ *    `interaction_mode_escalation_denied`: the thread runs in a mode above the
+ *    grant's) is never retried either, and that thread is not offered as
+ *    woken under that grant until a new `plannotator t3 login`;
  *  - any other failure is tried again later (30 s, doubling to 10 min). With
  *    no grant that reaches the thread, nothing is retried on a timer: the
  *    reply waits for the next look.
@@ -43,6 +48,22 @@ const MISS_TTL_MS = 60_000;
 const THREAD_GONE = /thread was not found|calling thread was not found|archived/i;
 /** A lookup T3 answered (a tool error, a refused grant); anything else did not reach it and is tried again. */
 const T3_ANSWERED = /^T3 t3_thread_read:|\b401\b|unauthorized/i;
+/** What T3 answers when the grant's mode does not cover the thread (its OrchestratorMcpFailure codes). */
+const MODE_DENIED = /\b(capability_denied|runtime_mode_escalation_denied|interaction_mode_escalation_denied)\b/;
+
+/**
+ * The grant's mode as T3's denial words it: "approved for read-only access",
+ * "… is broader than parent mode auto." (the parent is the grant here).
+ */
+export function t3GrantModeOf(said: string): string | null {
+  if (/read-only access/i.test(said)) return "read-only";
+  return /parent mode ([a-z-]+)/i.exec(said)?.[1] ?? null;
+}
+
+/** The log line for a send T3 denied for the grant's mode. */
+export function t3ModeDeniedLine(itemId: string, thread: string, code: string, mode: string | null, endpoint: string): string {
+  return `T3 refused ${itemId} for thread ${thread} (${code}): the saved grant (${mode ?? "its mode"}) cannot send into that thread. It waits in the Inbox for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
+}
 
 export interface InboxT3Wake {
   /** Whether a message from this host and session wakes it: a T3 thread a saved grant reaches. */
@@ -145,6 +166,21 @@ export function createInboxT3Wake(options: {
   const knownSessions = (): Set<string> => (known ??= store.wakingSessionsOfHost(INBOX_T3_HOST));
   const dead = new Set<string>();
   const refused = new Set<string>();
+  /** Threads T3 denied a send into for the grant's mode, with that grant's epoch: a new login clears it. */
+  const denied = new Map<string, string>();
+  const deniedNow = (session: string, link: Link): boolean => {
+    const epoch = denied.get(session);
+    if (epoch === undefined) return false;
+    let current: string | undefined;
+    try {
+      current = link.credentials.read()?.epoch;
+    } catch {
+      current = undefined;
+    }
+    if (current === epoch) return true;
+    denied.delete(session);
+    return false;
+  };
 
   const wakesItem = (item: InboxMessage, session: string): boolean => {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_T3_HOST && tag.wakes) ?? false;
@@ -196,6 +232,19 @@ export function createInboxT3Wake(options: {
       }
     } catch (error) {
       const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
+      const code = MODE_DENIED.exec(said)?.[1];
+      if (code) {
+        retryAt.delete(key);
+        refused.add(key);
+        try {
+          const epoch = link.credentials.read()?.epoch;
+          if (epoch) denied.set(session, epoch);
+        } catch {
+          // An unreadable grant: the next lookup finds out.
+        }
+        sayOnce(t3ModeDeniedLine(item.id, session, code, t3GrantModeOf(said), link.credentials.endpoint.href));
+        return;
+      }
       if (error instanceof T3DeliveryRefused) {
         retryAt.delete(key);
         refused.add(key);
@@ -253,6 +302,11 @@ export function createInboxT3Wake(options: {
       }
       for (const item of todo) {
         if (stopped) return;
+        // Denied for the grant's mode: kept for the agent's next read, never sent again under this grant.
+        if (deniedNow(session, link)) {
+          refused.add(`${item.id}.${session}`);
+          continue;
+        }
         sendable.add(`${item.id}.${session}`);
         await deliverOne(link, item, session);
       }
@@ -306,10 +360,10 @@ export function createInboxT3Wake(options: {
     wakes: async (host, session) => {
       if (host !== INBOX_T3_HOST || !isT3ThreadId(session)) return false;
       const home = await homeOf(session);
-      return home !== null && home !== "unreachable";
+      return home !== null && home !== "unreachable" && !deniedNow(session, home);
     },
     // No grant reaches the thread (logged out, a lapsed grant): nothing wakes it, so the MCP presence rules apply.
-    status: (session) => (!knownSessions().has(session) || misses.has(session) ? null : dead.has(session) ? "dead" : "alive"),
+    status: (session) => (!knownSessions().has(session) || misses.has(session) || denied.has(session) ? null : dead.has(session) ? "dead" : "alive"),
     noteToolCall: (session) => {
       if (!isT3ThreadId(session) || !dead.delete(session)) return;
       // Back: what waited on a retry goes now too.
