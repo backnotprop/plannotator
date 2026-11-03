@@ -10,9 +10,11 @@
  * comes from a thread that keeps running (its turn metadata's `turn_trigger`
  * is not `exec`: a `codex exec` run exits after its turn, so its agent reads
  * the thread) and this Inbox can run a Codex CLI that queues
- * (packages/server/inbox-mcp.ts). A command the thread's shell runs carries no
- * turn metadata, so it wakes only for a thread that already woke from a call
- * of its own and that Codex has not disowned since. Then each item waiting for that session
+ * (packages/server/inbox-mcp.ts). A command the thread's shell runs
+ * (`plannotator inbox call`, CODEX_THREAD_ID) carries no turn metadata, so it
+ * wakes for a thread that already woke from a call of its own, or one whose
+ * rollout says it is an interactive thread (`codexRolloutKeepsRunning`: the
+ * TUI or the apps, never `codex exec`), and that Codex has not disowned since. Then each item waiting for that session
  * (`InboxStore.pendingRepliesFor`) is handed to
  * `codex queue --thread=<id> --message=<the wake text>` exactly once:
  *
@@ -53,13 +55,13 @@
  * mid-turn.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import type { AgentEnvironment } from "./inbox-agents";
+import { codexHome, type AgentEnvironment } from "./inbox-agents";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -102,7 +104,8 @@ export interface InboxCodexWake {
    * this `_meta`, wakes it: a Codex thread id, a Codex CLI that queues, and
    * the call from that thread and not from `codex exec`. A command its shell
    * runs says neither: it wakes only for a thread with a waking message of its
-   * own (which a `codex exec` run never has, a Tidy or a tag only naming it),
+   * own (which a `codex exec` run never has, a Tidy or a tag only naming it)
+   * or whose rollout names a source that keeps running (`codexRolloutKeepsRunning`),
    * and not one Codex disowned that no queue or turn has proved since.
    */
   wakes(host: unknown, session: unknown, meta: unknown): Promise<boolean>;
@@ -149,6 +152,94 @@ export function codexCliCandidates(environment: AgentEnvironment, extraClis?: re
   const onPath = environment.which("codex");
   const first = onPath && isAbsolute(onPath) ? [onPath] : [];
   return [...new Set((first.length > 0 ? first : apps).filter((path) => isAbsolute(path) && existsSync(path)))];
+}
+
+/**
+ * The `session_meta.source` of a thread that keeps running after its turn, so
+ * a queued message becomes a turn: the TUI (`cli`) and the apps and the IDE
+ * extension (`vscode`). Never `exec` (it exits after its turn), `mcp`, a
+ * subagent's, an internal or a custom one.
+ */
+const KEEPS_RUNNING_SOURCES = new Set(["cli", "vscode"]);
+/** `codex exec`'s own originator: a rollout that says it is never woken, whatever its source. */
+const EXEC_ORIGINATOR = "codex_exec";
+/** The longest first line read from a rollout (its `session_meta` carries the thread's base instructions). */
+const SESSION_META_MAX_BYTES = 4 * 1024 * 1024;
+
+/** A file's first line, read up to `max` bytes; null when it cannot be read or the line is longer. */
+function firstLineOf(path: string, max: number): string | null {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const chunk = Buffer.alloc(64 * 1024);
+    const parts: Buffer[] = [];
+    let total = 0;
+    while (total < max) {
+      const read = readSync(fd, chunk, 0, chunk.length, total);
+      if (read === 0) break;
+      const end = chunk.subarray(0, read).indexOf(0x0a);
+      parts.push(Buffer.from(chunk.subarray(0, end >= 0 ? end : read)));
+      if (end >= 0) return Buffer.concat(parts).toString("utf8");
+      total += read;
+    }
+    return total > 0 && total < max ? Buffer.concat(parts).toString("utf8") : null;
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** What one rollout's first line says of `thread`: true (keeps running), false (exec, a subagent…), null (not its session_meta). */
+function sessionMetaKeepsRunning(line: string | null, thread: string): boolean | null {
+  if (!line) return null;
+  let record: unknown;
+  try {
+    record = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  const { type, payload } = (record ?? {}) as { type?: unknown; payload?: { id?: unknown; source?: unknown; originator?: unknown } };
+  if (type !== "session_meta" || !payload || typeof payload.id !== "string" || payload.id.toLowerCase() !== thread.toLowerCase()) return null;
+  return typeof payload.source === "string" && KEEPS_RUNNING_SOURCES.has(payload.source) && payload.originator !== EXEC_ORIGINATOR;
+}
+
+/**
+ * Whether a Codex thread keeps running after its turn, as its own rollout
+ * says (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl`, its
+ * first line `session_meta` with `source` and `originator`): true for the TUI
+ * and the apps, false for `codex exec` and the rest, null when no rollout of
+ * that thread is found. Read only. For a command the thread's shell runs,
+ * which carries no turn metadata to tell a typed turn from `codex exec`.
+ */
+export function codexRolloutKeepsRunning(codexHomeDir: string, thread: string): boolean | null {
+  if (!isCodexThreadId(thread)) return null;
+  const sessions = join(codexHomeDir, "sessions");
+  const newestFirst = (dir: string): string[] => {
+    try {
+      return readdirSync(dir).sort().reverse();
+    } catch {
+      return [];
+    }
+  };
+  const suffix = `-${thread.toLowerCase()}.jsonl`;
+  for (const year of newestFirst(sessions)) {
+    for (const month of newestFirst(join(sessions, year))) {
+      for (const day of newestFirst(join(sessions, year, month))) {
+        const folder = join(sessions, year, month, day);
+        for (const file of newestFirst(folder)) {
+          if (!file.startsWith("rollout-") || !file.toLowerCase().endsWith(suffix)) continue;
+          const answer = sessionMetaKeepsRunning(firstLineOf(join(folder, file), SESSION_META_MAX_BYTES), thread);
+          if (answer !== null) return answer;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /** The text a body is put in for, so the tool names are named only outside the person's words. */
@@ -238,6 +329,15 @@ export function createInboxCodexWake(options: {
   const knownSessions = (): Set<string> => (known ??= store.wakingSessionsOfHost(INBOX_CODEX_HOST));
   let woke: Set<string> | null = null;
   const wokeSessions = (): Set<string> => (woke ??= store.sessionsThatWoke(INBOX_CODEX_HOST));
+  /** What each thread's rollout said (`codexRolloutKeepsRunning`), once it said it: a thread's source never changes. */
+  const rolloutSaid = new Map<string, boolean>();
+  const rolloutKeepsRunning = (session: string): boolean => {
+    const said = rolloutSaid.get(session);
+    if (said !== undefined) return said;
+    const answer = codexRolloutKeepsRunning(codexHome(environment), session);
+    if (answer !== null) rolloutSaid.set(session, answer);
+    return answer === true;
+  };
   /** Threads only a shell call took off `dead`: that call says nothing of Codex knowing them again, until a queue or a turn does. */
   const unproven = new Set<string>();
   const dead = new Set<string>();
@@ -495,7 +595,9 @@ export function createInboxCodexWake(options: {
     wakes: async (host, session, meta) =>
       host === INBOX_CODEX_HOST &&
       isCodexThreadId(session) &&
-      (codexCallWakes(meta, session) || (codexThreadOfCall(meta) === null && wokeSessions().has(session) && !dead.has(session) && !unproven.has(session))) &&
+      (codexCallWakes(meta, session) ||
+        // A command its shell runs (`plannotator inbox call`): a thread that woke before, or one its rollout says keeps running.
+        (codexThreadOfCall(meta) === null && !dead.has(session) && !unproven.has(session) && (wokeSessions().has(session) || rolloutKeepsRunning(session)))) &&
       (await cli()) !== null,
     status: (session) => (!knownSessions().has(session) ? null : dead.has(session) ? "dead" : "alive"),
     uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`),

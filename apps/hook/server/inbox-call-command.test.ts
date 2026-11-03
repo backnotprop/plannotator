@@ -20,6 +20,8 @@ import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeComman
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
+import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
+import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -36,6 +38,7 @@ let stubs: string[] = [];
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
+const fakes: FakeAgents[] = [];
 const detached: { entry: InboxEntry; root: string }[] = [];
 
 beforeAll(() => {
@@ -48,6 +51,8 @@ afterAll(() => {
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
+  // Throws when a fake CLI outlived the test.
+  for (const fake of fakes.splice(0)) fake.remove();
   await stopProvenInboxes(detached.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -692,4 +697,75 @@ describe("a Tidy run from one script", () => {
     expect(reply.stderr).toBe("");
     expect((await runOf(server)).agents).toEqual([expect.objectContaining({ session: "ses_mcp", state: "tidied", updated: 1 })]);
   });
+});
+
+describe("a Codex thread's script and the reply wake (#2573)", () => {
+  /**
+   * The Inbox runs with a fake `codex` (tests/helpers/fake-agents.ts) and its
+   * own scratch CODEX_HOME, where the thread's rollout says what started it.
+   * The thread never called the Inbox tool: only `plannotator inbox call` from
+   * its shell (CODEX_THREAD_ID), as an agent that did not find the MCP tools.
+   */
+  async function codexWorld(rollout: { source: unknown; originator: string } | null) {
+    const box = sandbox();
+    const fake = createFakeAgents("plannotator-inbox-call-codex-");
+    fakes.push(fake);
+    fake.install("codex");
+    if (rollout) {
+      const day = join(fake.env.CODEX_HOME!, "sessions", "2026", "11", "03");
+      mkdirSync(day, { recursive: true });
+      const meta = { timestamp: "2026-11-03T10:00:00.000Z", type: "session_meta", payload: { id: CODEX_THREAD, timestamp: "2026-11-03T10:00:00.000Z", cwd: box.project, cli_version: "0.166.0", ...rollout } };
+      writeFileSync(join(day, `rollout-2026-11-03T10-00-00-${CODEX_THREAD}.jsonl`), `${JSON.stringify(meta)}\n`);
+    }
+    const server = await startInboxServer({
+      dataDir: box.dataDir,
+      binaryPath: null,
+      agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: fake.env }),
+      codexWake: { extraClis: [] },
+    });
+    servers.push(server);
+    return { ...box, fake, server };
+  }
+  const queues = (fake: FakeAgents) => fake.calls().filter((call) => call.name === "codex" && call.args[0] === "queue");
+
+  const interactive: [string, { source: unknown; originator: string }][] = [
+    ["the TUI", { source: "cli", originator: "codex-tui" }],
+    ["the Codex app", { source: "vscode", originator: "Codex Desktop" }],
+  ];
+  for (const [name, rollout] of interactive) {
+    test(`a thread of ${name}: its script's message wakes, and the person's reply goes in through codex queue`, async () => {
+      const w = await codexWorld(rollout);
+      const sent = await cli(w, ["send_message", JSON.stringify({ body: "Ship the worker today?" })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
+      expect(sent.code).toBe(0);
+      const { message_id, thread_id } = JSON.parse(sent.stdout) as { message_id: string; thread_id: string };
+      const asked = (await threadOf(w.server, thread_id)).messages[0]!;
+      expect(asked.author).toMatchObject({ kind: "agent", host: "codex", session: CODEX_THREAD });
+      expect(asked.wakes).toBe(true);
+
+      expect((await post(w.server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Yes, ship it." })).status).toBe(200);
+      await w.server.codexWake.sweep();
+      const calls = queues(w.fake);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.args[1]).toBe(`--thread=${CODEX_THREAD}`);
+      expect(calls[0]!.args[2]).toContain("Yes, ship it.");
+    });
+  }
+
+  const never: [string, { source: unknown; originator: string } | null][] = [
+    ["a codex exec run", { source: "exec", originator: "codex_exec" }],
+    ["a subagent", { source: { subagent: "review" }, originator: "codex-tui" }],
+    ["a thread with no rollout", null],
+  ];
+  for (const [name, rollout] of never) {
+    test(`${name} is never woken from its script: nothing is queued for the reply`, async () => {
+      const w = await codexWorld(rollout);
+      const sent = await cli(w, ["send_message", JSON.stringify({ body: "One turn only." })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
+      expect(sent.code).toBe(0);
+      const { message_id, thread_id } = JSON.parse(sent.stdout) as { message_id: string; thread_id: string };
+      expect((await threadOf(w.server, thread_id)).messages[0]!.wakes).toBeUndefined();
+      expect((await post(w.server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Yes." })).status).toBe(200);
+      await w.server.codexWake.sweep();
+      expect(queues(w.fake)).toEqual([]);
+    });
+  }
 });
