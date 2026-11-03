@@ -1,30 +1,21 @@
 /**
  * The daily ping's client (daily-ping.ts) against a loopback receiver, never
  * the real host, in a temp PLANNOTATOR_DATA_DIR. Guards: what turns it off
- * (DO_NOT_TRACK, NO_ANON_PING, CI, config.json, a dev build); nothing
- * before the notice or on its day; once a day across two processes; the exact
+ * (NO_ANON_PING, the do-not-track convention, CI, a dev build); once a day per
+ * tool, also across two processes; `first` on one ping a day only; the exact
  * bytes; a failed send tries again at the next check.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveConfig, TELEMETRY_CI_VARS } from "./config";
-import {
-  checkDailyPing,
-  claimDailyPingNotice,
-  DAILY_PING_URL,
-  dailyPingAge,
-  dailyPingEndpoint,
-  dailyPingNoticeDue,
-  readDailyPingState,
-} from "./daily-ping";
+import { TELEMETRY_CI_VARS } from "./config";
+import { checkDailyPing, cliDailyPingTool, DAILY_PING_URL, dailyPingAge, dailyPingEndpoint, type DailyPingTool, readDailyPingState } from "./daily-ping";
 
 const VERSION = "0.28.46";
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-11-04T10:00:00Z"); // a Wednesday
 const TODAY = "2026-11-04";
-const YESTERDAY = "2026-11-03";
 
 interface Received {
   method: string;
@@ -43,7 +34,11 @@ function env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TELEMETRY_URL: `http://127.0.0.1:${server.port}`, ...extra };
 }
 
-function writeState(state: Record<string, string>): void {
+function check(tool: DailyPingTool, now = NOW, extra: Record<string, string> = {}, version: { v: string | undefined } = { v: VERSION }) {
+  return checkDailyPing({ version: version.v, tool, env: env(extra), now });
+}
+
+function writeState(state: Record<string, unknown>): void {
   writeFileSync(join(dataDir, "ping.json"), JSON.stringify(state));
 }
 
@@ -71,24 +66,50 @@ afterEach(() => {
 });
 
 describe("the request", () => {
-  test("exactly one POST /ping with the exact body bytes, then nothing more that day", async () => {
-    writeState({ firstWeek: "2026-10-12", noticeDay: YESTERDAY });
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("sent");
+  test("exactly one POST /ping with the exact body bytes, then nothing more from that tool that day", async () => {
+    writeState({ firstWeek: "2026-10-12" });
+    expect(await check("plan")).toBe("sent");
     expect(received).toHaveLength(1);
     const [r] = received;
     expect(r!.method).toBe("POST");
     expect(r!.path).toBe("/ping");
-    // The payload, byte for byte: the version and the install-age bucket (3 weeks: bucket 2). Nothing else.
-    expect(r!.body).toBe('{"version":"0.28.46","age":2}');
+    // The payload, byte for byte: version, install-age bucket (3 weeks: 2), tool, first of the day. Nothing else.
+    expect(r!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1}');
     expect(r!.headers["content-type"]).toBe("application/json");
     expect(r!.headers["user-agent"]).toBe("plannotator");
     expect(Object.keys(r!.headers).filter((h) => !["accept", "accept-encoding", "connection", "content-length", "content-type", "host", "user-agent"].includes(h))).toEqual([]);
-    expect(readDailyPingState(dataDir).lastDay).toBe(TODAY);
+    expect(readDailyPingState(dataDir)).toEqual({ firstWeek: "2026-10-12", day: TODAY, sent: ["plan"] });
 
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW + 3_600_000 })).toBe("sent-today");
+    expect(await check("plan", NOW + 3_600_000)).toBe("sent-today");
     expect(received).toHaveLength(1);
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW + DAY })).toBe("sent");
+    expect(await check("plan", NOW + DAY)).toBe("sent");
     expect(received).toHaveLength(2);
+    // A new day: the first ping of it carries first again.
+    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1}');
+  });
+
+  test("each tool sends its own ping once a day; only the day's first ping carries first: 1", async () => {
+    writeState({ firstWeek: "2026-10-12" });
+    const tools: DailyPingTool[] = ["inbox", "plan", "review", "annotate", "last"];
+    for (const tool of tools) expect(await check(tool)).toBe("sent");
+    for (const tool of tools) expect(await check(tool, NOW + 60_000)).toBe("sent-today");
+    expect(received.map((r) => r.body)).toEqual([
+      '{"version":"0.28.46","age_week":2,"tool":"inbox","first":1}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":0}',
+      '{"version":"0.28.46","age_week":2,"tool":"review","first":0}',
+      '{"version":"0.28.46","age_week":2,"tool":"annotate","first":0}',
+      '{"version":"0.28.46","age_week":2,"tool":"last","first":0}',
+    ]);
+  });
+
+  test("a CLI session counts as its tool: every annotate-last command is last; archive and goal setup count as nothing", () => {
+    expect(cliDailyPingTool("plan", undefined)).toBe("plan");
+    expect(cliDailyPingTool("plan", "copilot-plan")).toBe("plan");
+    expect(cliDailyPingTool("review", "review")).toBe("review");
+    expect(cliDailyPingTool("annotate", "annotate")).toBe("annotate");
+    for (const command of ["annotate-last", "last", "opencode-annotate-last", "copilot-last"]) expect(cliDailyPingTool("annotate", command)).toBe("last");
+    expect(cliDailyPingTool("archive", "archive")).toBeNull();
+    expect(cliDailyPingTool("goal-setup", "setup-goal")).toBeNull();
   });
 
   test("the age bucket is Fedora countme's: first week, weeks 2-4, 5-24, older", () => {
@@ -101,46 +122,40 @@ describe("the request", () => {
     expect(dailyPingAge(monday, "2027-04-19")).toBe(4);
   });
 
-  test("the first check records this week (its Monday) as the first-use week, and the ping says age 1", async () => {
-    claimDailyPingNotice({ version: VERSION, env: env(), now: NOW - DAY });
+  test("the first check sends at once (no notice, no wait), records this week's Monday, and says age_week 1", async () => {
+    expect(await check("review")).toBe("sent");
     expect(readDailyPingState(dataDir).firstWeek).toBe("2026-11-02");
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("sent");
-    expect(received[0]!.body).toBe('{"version":"0.28.46","age":1}');
+    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":1,"tool":"review","first":1}');
   });
 });
 
 describe("off means no request", () => {
-  beforeEach(() => writeState({ firstWeek: "2026-10-12", noticeDay: YESTERDAY }));
-
   const cases: [string, Record<string, string>, string][] = [
-    ["DO_NOT_TRACK=1", { DO_NOT_TRACK: "1" }, "DO_NOT_TRACK"],
-    ["DO_NOT_TRACK=true", { DO_NOT_TRACK: "true" }, "DO_NOT_TRACK"],
     ["NO_ANON_PING=1", { NO_ANON_PING: "1" }, "NO_ANON_PING"],
     ["NO_ANON_PING=yes (any non-empty value but 0)", { NO_ANON_PING: "yes" }, "NO_ANON_PING"],
+    ["NO_ANON_PING=false (still non-empty, not 0)", { NO_ANON_PING: "false" }, "NO_ANON_PING"],
+    ["DO_NOT_TRACK=1 (honoured quietly)", { DO_NOT_TRACK: "1" }, "DO_NOT_TRACK"],
+    ["DO_NOT_TRACK=true", { DO_NOT_TRACK: "true" }, "DO_NOT_TRACK"],
     ...TELEMETRY_CI_VARS.map((name): [string, Record<string, string>, string] => [`${name} set`, { [name]: name === "CI" ? "true" : "1" }, "CI"]),
   ];
   for (const [name, extra, reason] of cases) {
     test(name, async () => {
-      expect(await checkDailyPing({ version: VERSION, env: env(extra), now: NOW })).toBe(reason as never);
+      expect(await check("plan", NOW, extra)).toBe(reason as never);
       expect(received).toEqual([]);
-      expect(dailyPingNoticeDue({ version: VERSION, env: env(extra) })).toBe(false);
+      // Nothing is written while the ping is off.
+      expect(() => readFileSync(join(dataDir, "ping.json"))).toThrow();
     });
   }
 
-  test("DO_NOT_TRACK=0, NO_ANON_PING=0, an empty NO_ANON_PING and CI=false do not turn it off", async () => {
-    expect(await checkDailyPing({ version: VERSION, env: env({ DO_NOT_TRACK: "0", NO_ANON_PING: "0", CI: "false" }), now: NOW })).toBe("sent");
-    expect(await checkDailyPing({ version: VERSION, env: env({ NO_ANON_PING: "" }), now: NOW + DAY })).toBe("sent");
-  });
-
-  test("config.json telemetry: false (what the Settings switch writes)", async () => {
-    saveConfig({ telemetry: false });
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("config");
-    expect(received).toEqual([]);
+  test("NO_ANON_PING=0, an empty NO_ANON_PING, DO_NOT_TRACK=0 and CI=false do not turn it off", async () => {
+    expect(await check("plan", NOW, { DO_NOT_TRACK: "0", NO_ANON_PING: "0", CI: "false" })).toBe("sent");
+    expect(await check("plan", NOW + DAY, { NO_ANON_PING: "" })).toBe("sent");
+    expect(received).toHaveLength(2);
   });
 
   test("a dev or source build, whatever the endpoint", async () => {
     for (const version of [undefined, "dev", "0.0.0-dev", "0.28.46-rc.1", "0.28"]) {
-      expect(await checkDailyPing({ version, env: env(), now: NOW })).toBe("dev");
+      expect(await check("plan", NOW, {}, { v: version })).toBe("dev");
     }
     expect(received).toEqual([]);
   });
@@ -154,75 +169,75 @@ describe("off means no request", () => {
   });
 });
 
-describe("the notice", () => {
-  test("nothing before the notice, nothing on its day, a ping the next day", async () => {
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("no-notice");
-    expect(dailyPingNoticeDue({ version: VERSION, env: env() })).toBe(true);
-    expect(claimDailyPingNotice({ version: VERSION, env: env(), now: NOW })).toBe(true);
-    // Shown once: a second surface does not show it again.
-    expect(claimDailyPingNotice({ version: VERSION, env: env(), now: NOW })).toBe(false);
-    expect(dailyPingNoticeDue({ version: VERSION, env: env() })).toBe(false);
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW + 13 * 3_600_000 })).toBe("notice-today");
-    expect(received).toEqual([]);
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW + DAY })).toBe("sent");
-    expect(received).toHaveLength(1);
-  });
-
-  test("never due, never claimed, nothing written while the ping is off", () => {
-    expect(claimDailyPingNotice({ version: VERSION, env: env({ DO_NOT_TRACK: "1" }), now: NOW })).toBe(false);
-    expect(() => readFileSync(join(dataDir, "ping.json"))).toThrow();
-  });
-});
-
 describe("failures and the lock", () => {
-  beforeEach(() => writeState({ firstWeek: "2026-10-12", noticeDay: YESTERDAY }));
+  beforeEach(() => writeState({ firstWeek: "2026-10-12" }));
 
-  test("a failed send writes nothing and the next check tries again", async () => {
+  test("a failed send records nothing and the next check tries again", async () => {
     answer = () => 503;
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("failed");
-    expect(readDailyPingState(dataDir).lastDay).toBeUndefined();
+    expect(await check("annotate")).toBe("failed");
+    expect(readDailyPingState(dataDir).sent).toBeUndefined();
     answer = () => 204;
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW + 60_000 })).toBe("sent");
+    expect(await check("annotate", NOW + 60_000)).toBe("sent");
     expect(received).toHaveLength(2);
+    // The retry is still the day's first ping: the failed one did not count.
+    expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"annotate","first":1}');
   });
 
   test("offline (nothing listening) fails quietly and tries again next time", async () => {
     const closed = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
     const deadPort = closed.port;
     closed.stop(true);
-    expect(await checkDailyPing({ version: VERSION, env: env({ PLANNOTATOR_TELEMETRY_URL: `http://127.0.0.1:${deadPort}` }), now: NOW })).toBe("failed");
-    expect(readDailyPingState(dataDir).lastDay).toBeUndefined();
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("sent");
+    expect(await check("plan", NOW, { PLANNOTATOR_TELEMETRY_URL: `http://127.0.0.1:${deadPort}` })).toBe("failed");
+    expect(readDailyPingState(dataDir).sent).toBeUndefined();
+    expect(await check("plan")).toBe("sent");
   });
 
   test("a held lock means another process is sending; a lock over a minute old is stale", async () => {
     const lock = join(dataDir, "ping.lock");
     writeFileSync(lock, "");
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("busy");
+    expect(await check("plan")).toBe("busy");
     expect(received).toEqual([]);
     const old = (Date.now() - 2 * 60_000) / 1000;
     utimesSync(lock, old, old);
-    expect(await checkDailyPing({ version: VERSION, env: env(), now: NOW })).toBe("sent");
+    expect(await check("plan")).toBe("sent");
     expect(received).toHaveLength(1);
-  });
+  }, 15_000);
 
-  test("two processes checking at once send one request", async () => {
-    // The receiver holds its answer so both processes overlap on the lock.
-    answer = () => new Promise((resolve) => setTimeout(() => resolve(204), 400));
+  function spawnChecks(tools: DailyPingTool[]) {
     const module = join(import.meta.dir, "daily-ping.ts");
     const childEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(process.env)) if (v !== undefined) childEnv[k] = v;
     for (const name of [...TELEMETRY_CI_VARS, "DO_NOT_TRACK", "NO_ANON_PING"]) delete childEnv[name];
     Object.assign(childEnv, { PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir, PLANNOTATOR_TELEMETRY_URL: `http://127.0.0.1:${server.port}` });
     const startAt = Date.now() + 1500;
-    const code = `const { checkDailyPing } = await import(${JSON.stringify(module)});
+    return Promise.all(
+      tools.map(async (tool) => {
+        const code = `const { checkDailyPing } = await import(${JSON.stringify(module)});
 while (Date.now() < ${startAt}) {}
-process.stdout.write(await checkDailyPing({ version: "${VERSION}", now: ${NOW} }));`;
-    const children = [0, 1].map(() => Bun.spawn([process.execPath, "-e", code], { env: childEnv, stdout: "pipe", stderr: "pipe" }));
-    const results = await Promise.all(children.map(async (c) => (await new Response(c.stdout).text()).trim()));
-    await Promise.all(children.map((c) => c.exited));
-    expect(results.sort()).toEqual(["busy", "sent"]);
+process.stdout.write(await checkDailyPing({ version: "${VERSION}", tool: "${tool}", now: ${NOW} }));`;
+        const child = Bun.spawn([process.execPath, "-e", code], { env: childEnv, stdout: "pipe", stderr: "pipe" });
+        const out = (await new Response(child.stdout).text()).trim();
+        await child.exited;
+        return out;
+      }),
+    );
+  }
+
+  test("two processes checking the same tool at once send one request", async () => {
+    // The receiver holds its answer so both processes overlap on the lock.
+    answer = () => new Promise((resolve) => setTimeout(() => resolve(204), 400));
+    const results = await spawnChecks(["plan", "plan"]);
+    expect(results.sort()).toEqual(["sent", "sent-today"]);
     expect(received).toHaveLength(1);
-    expect(readDailyPingState(dataDir).lastDay).toBe(TODAY);
+    expect(readDailyPingState(dataDir)).toEqual({ firstWeek: "2026-10-12", day: TODAY, sent: ["plan"] });
+  });
+
+  test("two processes with different tools at once: both send, exactly one says first", async () => {
+    answer = () => new Promise((resolve) => setTimeout(() => resolve(204), 200));
+    const results = await spawnChecks(["plan", "review"]);
+    expect(results).toEqual(["sent", "sent"]);
+    expect(received).toHaveLength(2);
+    expect(received.map((r) => JSON.parse(r.body).first).sort()).toEqual([0, 1]);
+    expect(readDailyPingState(dataDir).sent).toEqual(["plan", "review"]);
   });
 });

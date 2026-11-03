@@ -1,20 +1,23 @@
 /**
  * The daily ping's Worker (src/handler.ts) against a fake D1 that records
- * every statement and runs the upsert on an in-memory table. Guards: only an
- * exact `{version, age}` body counts; one ping is one `n = n + 1`; nothing
- * from the request but the version and age (no IP, no header, no request.cf)
- * reaches the database; the table has no column that could hold one.
+ * every statement and runs the two upserts on in-memory tables. Guards: only
+ * an exact `{version, age_week, tool, first}` body counts; one ping is one
+ * `n = n + 1` on its tool's row, and a `first: 1` ping one more on the day's
+ * user total; nothing from the request but those four fields (no IP, no
+ * header, no request.cf) reaches the database; no table has a column that
+ * could hold one.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { handleRequest, MAX_BODY_BYTES, type PingDb } from "../src/handler";
+import { handleRequest, MAX_BODY_BYTES, type PingDb, TOOL_TOTALS_SQL, TOOL_UPSERT_SQL, TOTAL_UPSERT_SQL, USER_TOTALS_SQL } from "../src/handler";
 
 const NOW = Date.parse("2026-11-03T12:34:56Z");
 
 function fakeDb() {
   const calls: { sql: string; values: unknown[] }[] = [];
-  const table = new Map<string, { day: string; version: string; age: number; n: number }>();
+  const daily = new Map<string, { day: string; version: string; age_week: number; tool: string; n: number }>();
+  const total = new Map<string, { day: string; version: string; age_week: number; n: number }>();
   const db: PingDb = {
     prepare(sql: string) {
       return {
@@ -22,24 +25,33 @@ function fakeDb() {
           calls.push({ sql, values });
           return {
             async run() {
-              if (!sql.startsWith("INSERT INTO daily (day, version, age, n)") || !sql.includes("ON CONFLICT (day, version, age) DO UPDATE SET n = n + 1")) throw new Error(`unexpected write: ${sql}`);
-              const [day, version, age] = values as [string, string, number];
-              const key = `${day}|${version}|${age}`;
-              const row = table.get(key);
-              if (row) row.n += 1;
-              else table.set(key, { day, version, age, n: 1 });
+              if (sql === TOOL_UPSERT_SQL) {
+                const [day, version, age_week, tool] = values as [string, string, number, string];
+                const key = `${day}|${version}|${age_week}|${tool}`;
+                const row = daily.get(key);
+                if (row) row.n += 1;
+                else daily.set(key, { day, version, age_week, tool, n: 1 });
+              } else if (sql === TOTAL_UPSERT_SQL) {
+                const [day, version, age_week] = values as [string, string, number];
+                const key = `${day}|${version}|${age_week}`;
+                const row = total.get(key);
+                if (row) row.n += 1;
+                else total.set(key, { day, version, age_week, n: 1 });
+              } else throw new Error(`unexpected write: ${sql}`);
               return {};
             },
             async all<T>() {
               const [from] = values as [string];
-              return { results: [...table.values()].filter((r) => r.day >= from) as T[] };
+              if (sql === TOOL_TOTALS_SQL) return { results: [...daily.values()].filter((r) => r.day >= from) as T[] };
+              if (sql === USER_TOTALS_SQL) return { results: [...total.values()].filter((r) => r.day >= from) as T[] };
+              throw new Error(`unexpected read: ${sql}`);
             },
           };
         },
       };
     },
   };
-  return { db, calls, table };
+  return { db, calls, daily, total };
 }
 
 const IP = "203.0.113.77";
@@ -56,78 +68,108 @@ function ping(body: string, init: RequestInit = {}): Request {
   return req;
 }
 
+const body = (version: string, age_week: number, tool: string, first: 0 | 1) => JSON.stringify({ version, age_week, tool, first });
+
 describe("POST /ping", () => {
-  test("a valid ping adds 1 to today's (version, age) total and answers 204", async () => {
-    const { db, table } = fakeDb();
-    expect((await handleRequest(ping('{"version":"0.28.46","age":2}'), { DB: db }, NOW)).status).toBe(204);
-    expect((await handleRequest(ping('{"age":2,"version":"0.28.46"}'), { DB: db }, NOW)).status).toBe(204);
-    expect((await handleRequest(ping('{"version":"0.28.46","age":1}'), { DB: db }, NOW)).status).toBe(204);
-    expect([...table.values()]).toEqual([
-      { day: "2026-11-03", version: "0.28.46", age: 2, n: 2 },
-      { day: "2026-11-03", version: "0.28.46", age: 1, n: 1 },
+  test("a ping adds 1 to today's tool row; first: 1 also adds 1 to the day's user total; 204", async () => {
+    const { db, daily, total } = fakeDb();
+    expect((await handleRequest(ping(body("0.28.46", 2, "plan", 1)), { DB: db }, NOW)).status).toBe(204);
+    expect((await handleRequest(ping(body("0.28.46", 2, "review", 0)), { DB: db }, NOW)).status).toBe(204);
+    // Key order does not matter.
+    expect((await handleRequest(ping('{"first":1,"tool":"plan","age_week":2,"version":"0.28.46"}'), { DB: db }, NOW)).status).toBe(204);
+    expect((await handleRequest(ping(body("0.28.46", 1, "inbox", 1)), { DB: db }, NOW)).status).toBe(204);
+    expect([...daily.values()]).toEqual([
+      { day: "2026-11-03", version: "0.28.46", age_week: 2, tool: "plan", n: 2 },
+      { day: "2026-11-03", version: "0.28.46", age_week: 2, tool: "review", n: 1 },
+      { day: "2026-11-03", version: "0.28.46", age_week: 1, tool: "inbox", n: 1 },
+    ]);
+    expect([...total.values()]).toEqual([
+      { day: "2026-11-03", version: "0.28.46", age_week: 2, n: 2 },
+      { day: "2026-11-03", version: "0.28.46", age_week: 1, n: 1 },
     ]);
   });
 
-  test("anything but exactly {version: X.Y.Z, age: 1-4} is refused and counts nothing", async () => {
+  test("anything but exactly {version: X.Y.Z, age_week: 1-4, tool, first: 0|1} is refused and counts nothing", async () => {
     const { db, calls } = fakeDb();
     const bad = [
       "",
       "not json",
       "[]",
       "null",
-      '{"version":"0.28.46"}',
-      '{"age":2}',
-      '{"version":"0.28.46","age":2,"os":"darwin"}',
-      '{"version":"0.28.46","age":2,"id":"abc"}',
-      '{"version":"0.28","age":2}',
-      '{"version":"0.28.46-dev","age":2}',
-      '{"version":"v0.28.46","age":2}',
-      '{"version":28,"age":2}',
-      '{"version":"0.28.46","age":0}',
-      '{"version":"0.28.46","age":5}',
-      '{"version":"0.28.46","age":2.5}',
-      '{"version":"0.28.46","age":"2"}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan"}',
+      '{"version":"0.28.46","age_week":2,"first":1}',
+      '{"version":"0.28.46","tool":"plan","first":1}',
+      '{"age_week":2,"tool":"plan","first":1}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"os":"darwin"}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"id":"abc"}',
+      '{"version":"0.28.46","age":2,"tool":"plan","first":1}',
+      body("0.28", 2, "plan", 1),
+      body("0.28.46-dev", 2, "plan", 1),
+      body("v0.28.46", 2, "plan", 1),
+      '{"version":28,"age_week":2,"tool":"plan","first":1}',
+      body("0.28.46", 0, "plan", 1),
+      body("0.28.46", 5, "plan", 1),
+      body("0.28.46", 2.5, "plan", 1),
+      '{"version":"0.28.46","age_week":"2","tool":"plan","first":1}',
+      body("0.28.46", 2, "chat", 1),
+      body("0.28.46", 2, "Plan", 1),
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":2}',
+      '{"version":"0.28.46","age_week":2,"tool":"plan","first":true}',
     ];
-    for (const body of bad) expect({ body, status: (await handleRequest(ping(body), { DB: db }, NOW)).status }).toEqual({ body, status: 400 });
-    const big = JSON.stringify({ version: "0.28.46", age: 2, pad: "x".repeat(MAX_BODY_BYTES) });
+    for (const b of bad) expect({ b, status: (await handleRequest(ping(b), { DB: db }, NOW)).status }).toEqual({ b, status: 400 });
+    const big = JSON.stringify({ version: "0.28.46", age_week: 2, tool: "plan", first: 1, pad: "x".repeat(MAX_BODY_BYTES) });
     expect((await handleRequest(ping(big), { DB: db }, NOW)).status).toBe(413);
     expect((await handleRequest(new Request("https://ping.plannotator.ai/ping"), { DB: db }, NOW)).status).toBe(405);
     expect((await handleRequest(new Request("https://ping.plannotator.ai/other", { method: "POST", body: "{}" }), { DB: db }, NOW)).status).toBe(404);
     expect(calls).toEqual([]);
   });
 
-  test("stores no IP, header or request.cf field: only the day, the version and the age reach D1", async () => {
+  test("stores no IP, header or request.cf field: only the day, version, age_week and tool reach D1", async () => {
     const { db, calls } = fakeDb();
-    await handleRequest(ping('{"version":"0.28.46","age":3}'), { DB: db }, NOW);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.values).toEqual(["2026-11-03", "0.28.46", 3]);
+    await handleRequest(ping(body("0.28.46", 3, "annotate", 1)), { DB: db }, NOW);
+    expect(calls.map((c) => c.values)).toEqual([
+      ["2026-11-03", "0.28.46", 3, "annotate"],
+      ["2026-11-03", "0.28.46", 3],
+    ]);
     const written = JSON.stringify(calls);
     for (const leak of [IP, "Berlin", "DE", "3320", "plannotator\"", "T12:34"]) expect(written).not.toContain(leak);
   });
 
-  test("the table has no column for an IP, a time or an ID, and the handler never reads headers or request.cf", () => {
+  test("no table has a column for an IP, a time or an ID, and the handler never reads headers or request.cf", () => {
     const sql = readFileSync(join(import.meta.dir, "..", "migrations", "0001_daily.sql"), "utf-8").replace(/--.*$/gm, "");
-    const columns = [...sql.matchAll(/^\s*(\w+)\s+(TEXT|INTEGER)\b/gm)].map((m) => m[1]);
-    expect(columns).toEqual(["day", "version", "age", "n"]);
+    const tables = [...sql.matchAll(/CREATE TABLE (\w+) \(([\s\S]*?)\) WITHOUT ROWID;/g)].map((m) => [m[1], [...m[2]!.matchAll(/^\s*(\w+)\s+(TEXT|INTEGER)\b/gm)].map((c) => c[1])]);
+    expect(tables).toEqual([
+      ["daily", ["day", "version", "age_week", "tool", "n"]],
+      ["daily_total", ["day", "version", "age_week", "n"]],
+    ]);
     const source = readFileSync(join(import.meta.dir, "..", "src", "handler.ts"), "utf-8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
     expect(source).not.toMatch(/req\.headers|\.cf\b|console\./);
   });
 });
 
 describe("GET /totals", () => {
-  test("public JSON of daily sums: per day, per age bucket and per version", async () => {
+  test("public JSON of daily sums: users, per age bucket, per version, per tool", async () => {
     const { db } = fakeDb();
-    await handleRequest(ping('{"version":"0.28.46","age":1}'), { DB: db }, NOW);
-    await handleRequest(ping('{"version":"0.28.46","age":4}'), { DB: db }, NOW);
-    await handleRequest(ping('{"version":"0.28.45","age":4}'), { DB: db }, NOW);
-    await handleRequest(ping('{"version":"0.28.46","age":4}'), { DB: db }, NOW + 86_400_000);
+    const send = (b: string, at = NOW) => handleRequest(ping(b), { DB: db }, at);
+    await send(body("0.28.46", 1, "plan", 1));
+    await send(body("0.28.46", 1, "review", 0));
+    await send(body("0.28.46", 4, "inbox", 1));
+    await send(body("0.28.46", 4, "plan", 0));
+    await send(body("0.28.45", 4, "last", 1));
+    await send(body("0.28.46", 4, "annotate", 1), NOW + 86_400_000);
     const res = await handleRequest(new Request("https://ping.plannotator.ai/totals"), { DB: db }, NOW + 86_400_000);
     expect(res.status).toBe(200);
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
     expect(await res.json()).toEqual({
       days: [
-        { day: "2026-11-03", n: 3, age: { "1": 1, "4": 2 }, versions: { "0.28.46": 2, "0.28.45": 1 } },
-        { day: "2026-11-04", n: 1, age: { "4": 1 }, versions: { "0.28.46": 1 } },
+        {
+          day: "2026-11-03",
+          users: 3,
+          age_week: { "1": 1, "4": 2 },
+          versions: { "0.28.46": 2, "0.28.45": 1 },
+          tools: { plan: 2, review: 1, inbox: 1, last: 1 },
+        },
+        { day: "2026-11-04", users: 1, age_week: { "4": 1 }, versions: { "0.28.46": 1 }, tools: { annotate: 1 } },
       ],
     });
     expect((await handleRequest(new Request("https://ping.plannotator.ai/totals", { method: "POST", body: "{}" }), { DB: db }, NOW)).status).toBe(405);

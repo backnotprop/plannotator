@@ -76,7 +76,6 @@ import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay'
 import { useUpdateCheck } from '@plannotator/ui/hooks/useUpdateCheck';
 import { useUpdateToast } from '@plannotator/ui/hooks/useUpdateToast';
 import { useUpdateCheckSetting } from '@plannotator/ui/hooks/useUpdateCheckSetting';
-import { useTelemetrySetting } from '@plannotator/ui/hooks/useTelemetrySetting';
 import { useCookieHostSetting } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { parseUpdateAdvert, parseUpdateCheckFailing, type UpdateAdvert, type UpdateCheckFailingAdvert } from '@plannotator/ui/utils/updateNotice';
 import { claimAutoUpdateNotice, describeAutoUpdateNotice, parseAutoUpdateNotice, type AutoUpdateNotice } from '@plannotator/ui/utils/autoUpdateNotice';
@@ -675,7 +674,6 @@ const App: React.FC = () => {
   const [autoUpdateActive, setAutoUpdateActive] = useState(false);
   // The update-notice switch for Settings: present when the server reports it.
   const updateCheckSetting = useUpdateCheckSetting();
-  const telemetrySetting = useTelemetrySetting();
   const cookieHostSetting = useCookieHostSetting();
   // One-time notice after a background auto-update (#1634); the compiled
   // CLI's server attaches it to the initial payload.
@@ -3971,7 +3969,6 @@ const App: React.FC = () => {
         setUpdateAdvert(parseUpdateAdvert(data.updateAvailable));
         setUpdateCheckFailing(parseUpdateCheckFailing(data.updateCheckFailing));
         updateCheckSetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
-        telemetrySetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
         cookieHostSetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
         if (data.mode === 'goal-setup' && data.goalSetup) {
           setGoalSetupBundle(data.goalSetup);
@@ -7537,7 +7534,6 @@ const App: React.FC = () => {
           gitUser={gitUser}
           autoUpdateSetting={autoUpdateSetting}
           updateCheckSetting={updateCheckSetting.setting}
-          telemetrySetting={telemetrySetting.setting}
           cookieHostSetting={cookieHostSetting.setting}
           agentToolSetting={agentTool.setting}
           onAgentToolChange={agentTool.save}

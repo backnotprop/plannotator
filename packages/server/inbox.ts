@@ -99,9 +99,6 @@ import {
   resolveExperimental,
   parseInboxToolEnv,
   parseUpdateCheckEnv,
-  parseTelemetryEnvOff,
-  configuredTelemetry,
-  resolveTelemetry,
   resolveAutoUpdate,
   resolveUpdateCheck,
   resolveInboxAskAi,
@@ -117,7 +114,7 @@ import {
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
-import { claimDailyPingNotice, dailyPingNoticeDue, scheduleDailyPing } from "@plannotator/shared/daily-ping";
+import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
@@ -880,7 +877,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const at = Date.now();
       if (at - lastDailyPingCheck < DAILY_PING_CHECK_MS) return;
       lastDailyPingCheck = at;
-      scheduleDailyPing({ version, dataDir });
+      scheduleDailyPing({ version, dataDir, tool: "inbox" });
     },
     ...options.updates,
     onChange: () => {
@@ -1790,33 +1787,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     };
   };
 
-  /**
-   * The daily ping (Settings → About): `on` the effective value, `config` what
-   * config.json says, `env` what in the environment holds it off (DO_NOT_TRACK,
-   * NO_ANON_PING, CI) or null, and `notice_due` while its one-time
-   * notice waits for a page on this computer (POST /api/inbox/ping-notice).
-   */
-  const telemetryState = () => {
-    const config = loadConfig();
-    return {
-      on: resolveTelemetry(config),
-      config: configuredTelemetry(config),
-      env: parseTelemetryEnvOff() ?? null,
-      notice_due: dailyPingNoticeDue({ version, dataDir }),
-    };
-  };
-
-  /** Save `telemetry` (a boolean) into config.json. `validateOnly`: check and write nothing. */
-  const saveTelemetry = (input: unknown, validateOnly = false) => {
-    if (typeof input !== "boolean") throw new InboxError("validation_error", "telemetry: must be a boolean.", { field: "telemetry" });
-    if (validateOnly) return telemetryState();
-    saveConfig({ telemetry: input });
-    if (loadConfig().telemetry !== input) {
-      throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    }
-    return telemetryState();
-  };
-
   /** Save `update_check` / `auto_update` (booleans) into config.json. `validateOnly`: check and write nothing. */
   const saveUpdateSwitches = (body: Record<string, unknown>, validateOnly = false) => {
     const toSave: { updateCheck?: boolean; autoUpdate?: boolean } = {};
@@ -1962,8 +1932,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
-    /** Settings → About: the daily ping's switch and its one-time notice. */
-    telemetry: telemetryState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184); not for a tailnet guest's page. */
     ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
@@ -3132,10 +3100,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.board === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
-          body.telemetry === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update, telemetry or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -3143,8 +3110,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
-        // What this computer sends: the owner's to change.
-        if (body.telemetry !== undefined && !owner) return localOnly();
         // The reminder goes to every agent session on this computer: the owner's, like Settings → Agents.
         if (body.prompts !== undefined && !owner) return localOnly();
         // The address this computer's browser opens: the owner's to change.
@@ -3174,7 +3139,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.sound !== undefined) saveSound(body.sound, true);
         if (body.inbox_tool !== undefined) saveInboxTool(body.inbox_tool, true);
         if (updateSwitches) saveUpdateSwitches(body, true);
-        if (body.telemetry !== undefined) saveTelemetry(body.telemetry, true);
         if (body.theme !== undefined) saveTheme(body.theme, true);
         if (body.text_size !== undefined) saveTextSize(body.text_size, true);
         if (body.rows !== undefined) saveRows(body.rows, true);
@@ -3193,7 +3157,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const inboxTool = body.inbox_tool === undefined ? inboxToolState() : saveInboxTool(body.inbox_tool);
         const updateState = updateSwitches ? saveUpdateSwitches(body) : updatesState();
         if (updateSwitches) updates.refresh();
-        const telemetry = body.telemetry === undefined ? telemetryState() : saveTelemetry(body.telemetry);
         const theme = body.theme === undefined ? themeState() : saveTheme(body.theme);
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
         const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
@@ -3203,7 +3166,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, telemetry, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -3226,16 +3189,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ownerOrLocal(req, via)) throw new InboxError("owner_only", "Only this computer's owner can see its accounts.");
         const fresh = url.searchParams.get("fresh") === "1";
         return json(machineAccounts ? await machines.accountsOf(machineAccounts[1]!, fresh, req.signal) : await accounts.read({ fresh }));
-      }
-
-      // The daily ping's one-time notice (packages/shared/daily-ping.ts): the page that will show it claims it, and
-      // only the first claim ever gets `show: true`. Only on this computer: a page through the tailnet never shows it.
-      if (path === "/api/inbox/ping-notice") {
-        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const show = via === "local" && claimDailyPingNotice({ version, dataDir });
-        return json({ show, telemetry: telemetryState() });
       }
 
       // The one-time sound dialog: the page asks to show it, and only the first ask ever gets `show: true`.

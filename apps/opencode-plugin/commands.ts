@@ -279,7 +279,7 @@ export async function handleReviewCommand(
 
   const startServer = deps.startReviewServer ?? startReviewServer;
   // The daily ping (daily-ping.ts): in the background, never awaited.
-  scheduleOpenCodeDailyPing();
+  scheduleOpenCodeDailyPing("review");
   const reviewProject = (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? undefined;
   const server = await startServer({
     rawPatch,
@@ -369,7 +369,7 @@ export async function handleAnnotateCommand(
 ) {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
-  scheduleOpenCodeDailyPing();
+  scheduleOpenCodeDailyPing("annotate");
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
@@ -639,7 +639,7 @@ export async function handleAnnotateLastCommand(
 ): Promise<{ approved: boolean; feedback: string; agent?: string } | null> {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
-  scheduleOpenCodeDailyPing();
+  scheduleOpenCodeDailyPing("last");
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";

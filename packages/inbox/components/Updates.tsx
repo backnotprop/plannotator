@@ -17,7 +17,7 @@ import { Viewer } from '@plannotator/ui/components/Viewer';
 import { ImageResolverContext, type ImageResolution } from '@plannotator/ui/components/ImageResolverContext';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { InboxHealth } from '@plannotator/core/inbox-types';
-import { whatsNewImageUrl, type TelemetrySwitch, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel } from '../api';
+import { whatsNewImageUrl, type UpdateCheckFailing, type UpdateDetails, type UpdateSwitches, type WhatsNewModel } from '../api';
 import { clockTime, dayWords, formatCount, tildePath, whenTime } from '../format';
 import { Icon } from '../icons';
 import { CopyButton } from './ConnectPicker';
@@ -966,12 +966,7 @@ export function AboutBlock({
   where,
   updates = true,
   whatsNewRunning = false,
-  telemetry,
-  onTelemetry,
 }: {
-  /** The daily ping's switch (settings `telemetry`); none from an older Inbox or on a tailnet guest's page. */
-  telemetry?: TelemetrySwitch;
-  onTelemetry?: (on: boolean) => void;
   /**
    * False on a tailnet guest's page, where every /api/inbox/update* route
    * answers 403 local_only: the block shows the version, and no What's new,
@@ -1029,6 +1024,7 @@ export function AboutBlock({
             </div>
           </div>
         </section>
+        <AboutPrivacy />
         {where && <AboutWhere where={where} />}
       </>
     );
@@ -1132,56 +1128,31 @@ export function AboutBlock({
         {failing && details && <CheckFailingCommand command={details.command} />}
         {error && <div className="ib-error">{error}</div>}
       </section>
-      {telemetry && onTelemetry && <DailyPingGroup telemetry={telemetry} onToggle={onTelemetry} />}
+      <AboutPrivacy />
       {where && <AboutWhere where={where} />}
     </>
   );
 }
 
-/** Why the daily ping is off by the environment, in words; the shared developer convention variable is never named. */
-function dailyPingEnvWords(env: string): string {
-  if (env === 'NO_ANON_PING') return "Off: NO_ANON_PING is set in this Inbox's environment.";
-  if (env === 'CI') return 'Off: this Inbox runs in a CI environment.';
-  return "Off: this Inbox's environment asks tools not to send usage data.";
-}
-
 /**
- * The daily ping (packages/shared/daily-ping.ts): one switch, the same
- * config.json `telemetry` key plan review, code review and annotate write.
- * Locked while the environment holds it off.
+ * The daily ping (packages/shared/daily-ping.ts), in words. There is no switch:
+ * NO_ANON_PING is the one way to turn it off, so it is the one named.
  */
-function DailyPingGroup({ telemetry, onToggle }: { telemetry: TelemetrySwitch; onToggle: (on: boolean) => void }) {
+function AboutPrivacy() {
   return (
-    <section className="ib-sgroup" aria-labelledby="ib-g-ping" data-settings-telemetry={telemetry.env ? 'env' : telemetry.on ? 'on' : 'off'}>
-      <h2 id="ib-g-ping">Daily ping</h2>
-      <div className="ib-card">
-        <div className="ib-prow">
-          <span className="ib-txt">
-            <span className="ib-l" id="ib-ping">
-              Send one private daily ping
-            </span>
-            <span className="ib-desc">The version and roughly how long Plannotator has been installed. No ID, nothing about you or your work.</span>
-          </span>
-          <span className="ib-ctl">
-            <button
-              type="button"
-              role="switch"
-              className="ib-sw"
-              aria-checked={telemetry.on}
-              aria-labelledby="ib-ping"
-              disabled={telemetry.env !== null}
-              onClick={() => onToggle(!telemetry.config)}
-            />
-          </span>
-        </div>
-      </div>
-      <div className="ib-note">
-        <Icon name="info" />
-        {telemetry.env !== null ? dailyPingEnvWords(telemetry.env) : 'Off sends nothing. NO_ANON_PING=1 also turns it off.'}{' '}
+    <section className="ib-sgroup" aria-labelledby="ib-g-privacy" data-settings-privacy="">
+      <h2 id="ib-g-privacy">Privacy</h2>
+      <p>
+        Once a day, each Plannotator tool you use (Inbox, plan review, code review, annotate, last) sends one anonymous ping: the tool&apos;s name, the
+        version, and how many weeks since this computer first used Plannotator. There&apos;s no ID and nothing about you or your work. It helps us see how many
+        people use Plannotator and where to put our effort.
+      </p>
+      <p>
+        To turn it off, set <code>NO_ANON_PING=1</code> and restart Plannotator.{' '}
         <a className="ib-lnk" href="https://plannotator.ai/privacy" target="_blank" rel="noreferrer">
-          What it sends
+          Privacy policy
         </a>
-      </div>
+      </p>
     </section>
   );
 }

@@ -1,7 +1,7 @@
 /**
  * The daily ping for Pi's plan review, code review and annotate servers: the
  * same check the CLI and the Inbox run (generated/daily-ping.ts, sharing
- * ping.json in the data dir, so one computer sends once a day whichever runs
+ * ping.json in the data dir, so each tool sends once a day whichever runs
  * first), with this package's version. Never awaited, never throws.
  *
  * A Pi extension that runs from this repository (apps/pi-extension inside the
@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { scheduleDailyPing } from "../generated/daily-ping.ts";
+import { scheduleDailyPing, type DailyPingTool } from "../generated/daily-ping.ts";
 import { piExtensionVersion } from "./update-advert.ts";
 
 let versionForTests: { version: string | undefined } | null = null;
@@ -33,9 +33,9 @@ export function piPingVersion(): string | undefined {
 	return piExtensionVersion() ?? undefined;
 }
 
-export function schedulePiDailyPing(): void {
+export function schedulePiDailyPing(tool: DailyPingTool): void {
 	try {
-		scheduleDailyPing({ version: piPingVersion() });
+		scheduleDailyPing({ version: piPingVersion(), tool });
 	} catch {
 		// Never the session's problem.
 	}

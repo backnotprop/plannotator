@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
+import { scheduleDailyPing, type DailyPingTool } from "@plannotator/shared/daily-ping";
 
 let version: string | undefined | null = null;
 
@@ -27,10 +27,10 @@ export function openCodePingVersion(from: string = fileURLToPath(import.meta.url
   }
 }
 
-export function scheduleOpenCodeDailyPing(): void {
+export function scheduleOpenCodeDailyPing(tool: DailyPingTool): void {
   try {
     if (version === null) version = openCodePingVersion();
-    scheduleDailyPing({ version });
+    scheduleDailyPing({ version, tool });
   } catch {
     // Never the session's problem.
   }

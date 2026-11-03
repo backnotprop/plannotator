@@ -321,14 +321,6 @@ export interface PlannotatorConfig {
    */
   updateCheck?: boolean;
   /**
-   * The daily ping (packages/shared/daily-ping.ts): once a UTC day, this
-   * computer tells ping.plannotator.ai "Plannotator ran today", with the
-   * version and how long ago it was first used (a week bucket). No ID.
-   * `false` sends nothing. DO_NOT_TRACK, NO_ANON_PING and CI turn it
-   * off whatever this says. Default: TELEMETRY_DEFAULT_ON.
-   */
-  telemetry?: boolean;
-  /**
    * The Claude Code mod (apps/hook/hooks/mod/): non-blocking plan review,
    * annotate, code review and annotate-last, plus "Ask this session", where
    * Claude Code runs hooks modules. On by default; `false` turns it off.
@@ -990,8 +982,6 @@ export function getServerConfig(
   autoUpdateEnv?: boolean;
   updateCheck: boolean;
   updateCheckEnv?: boolean;
-  telemetry: boolean;
-  telemetryEnv?: TelemetryEnvOff;
   agentTool?: boolean;
   agentToolConfigured?: boolean;
   agentToolEnv?: boolean;
@@ -1004,7 +994,6 @@ export function getServerConfig(
   const packageLookupEnv = parsePackageLookupEnv();
   const autoUpdateEnv = parseAutoUpdateEnv();
   const updateCheckEnv = parseUpdateCheckEnv();
-  const telemetryEnv = parseTelemetryEnvOff();
   const agentToolEnv = parseAgentToolEnv();
   const agentToolHost = agentToolHostOf(agentToolIntegration);
   return {
@@ -1038,10 +1027,6 @@ export function getServerConfig(
     // PLANNOTATOR_UPDATE_CHECK when it overrides the file.
     updateCheck: coerceConfigBoolean(cfg.updateCheck, true),
     ...(updateCheckEnv !== undefined && { updateCheckEnv }),
-    // The daily ping's switch (config value, TELEMETRY_DEFAULT_ON when unset);
-    // telemetryEnv names what in the environment holds it off.
-    telemetry: configuredTelemetry(cfg),
-    ...(telemetryEnv !== undefined && { telemetryEnv }),
     ...agentToolAdvert(cfg, agentToolEnv, agentToolHost),
     // Always explicit: the lookup is server-enforced, so the page must never
     // show it on from a stale value. lookupEnv carries the env hard off.
@@ -1306,13 +1291,6 @@ export function resolveUpdateCheck(
   return coerceConfigBoolean(config.updateCheck, true);
 }
 
-/**
- * The daily ping's default when config.json has no `telemetry` key. The owner
- * has not yet decided between "on, with a notice" and "off until switched on":
- * this one line is the switch.
- */
-export const TELEMETRY_DEFAULT_ON = true;
-
 /** What in the environment turns the daily ping off (it can only turn it off). */
 export type TelemetryEnvOff = "DO_NOT_TRACK" | "NO_ANON_PING" | "CI";
 
@@ -1336,21 +1314,6 @@ export function parseTelemetryEnvOff(env: NodeJS.ProcessEnv = process.env): Tele
     if (v && v !== "0" && v !== "false") return "CI";
   }
   return undefined;
-}
-
-/** The daily ping as config.json says (TELEMETRY_DEFAULT_ON when unset), ignoring the environment. */
-export function configuredTelemetry(config: PlannotatorConfig): boolean {
-  return coerceConfigBoolean(config.telemetry, TELEMETRY_DEFAULT_ON);
-}
-
-/**
- * Whether the daily ping may send (before the notice and release-build gates
- * in daily-ping.ts). Priority: the environment's off → config.telemetry →
- * TELEMETRY_DEFAULT_ON.
- */
-export function resolveTelemetry(config: PlannotatorConfig, env: NodeJS.ProcessEnv = process.env): boolean {
-  if (parseTelemetryEnvOff(env)) return false;
-  return configuredTelemetry(config);
 }
 
 /** The PLANNOTATOR_UPDATE_CHECK override, or undefined when it does not decide. */

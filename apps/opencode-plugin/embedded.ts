@@ -82,7 +82,7 @@ export async function runEmbeddedPlanReview(
   input.abortSignal?.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
   // The daily ping (daily-ping.ts): in the background, never awaited.
-  scheduleOpenCodeDailyPing();
+  scheduleOpenCodeDailyPing("plan");
   const { listOpenCodeSession } = await import("./session-registry");
   const { detectProjectName } = await import("@plannotator/server/project");
   const server = await startPlannotatorServer({
