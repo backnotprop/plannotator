@@ -658,8 +658,6 @@ button.ib-mut { border-radius: 6px; }
 .ib-cpill-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pn-inbox .ib-cpill svg.ib-ic { flex: none; margin-right: -3px; color: var(--muted-foreground); transition: none; }
 .ib-cpill[data-connect-prompt="copied"] svg.ib-ic { color: var(--success); }
-/* Under reduced motion a theme switch lands in one frame (theme.ts holds this class for two frames). */
-html.ib-theme-instant, html.ib-theme-instant *, html.ib-theme-instant *::before, html.ib-theme-instant *::after { transition: none !important; }
 /* Settings → Appearance: Light, Dark, Match system, as one segmented control of native radios. */
 .ib-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--ib-r10-s, 8px); background: var(--ib-seg-bg-s, var(--muted)); border: 1px solid var(--ib-seg-line-s, var(--border)); }
 .ib-seg-o { --ib-seg-fg-s: var(--ib-soft-segmented) color-mix(in oklch, var(--ib-raise-mfg) 70%, var(--foreground)); position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13, 13px); color: var(--ib-seg-fg-s, var(--muted-foreground)); cursor: pointer; white-space: nowrap; }
@@ -7000,4 +6998,43 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   /* 44 px to press, drawn on the overlay: the count stays the size it is, and nothing moves. */
   .pn-inbox button.ib-comments-link::after { inset: auto -6px; top: 50%; height: 44px; transform: translateY(-50%); }
   .pn-inbox button.ib-draft-pc.ib-comments-link::after { inset: auto; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); }
+}
+
+/* The reply box's foot on a phone (components/ReplyFootPhone.tsx, approval "inbox-reply-foot-phone"): one row, the
+   paperclip, one quiet line for the questions and comments, the mic at the right. Drawn only on a phone; the desktop
+   box keeps its chips. The paperclip and the mic keep their phone size (36 px drawn, 44 px to press). */
+.pn-inbox .ib-rfoot.ib-rfoot-phone { flex-wrap: nowrap; align-items: center; gap: 2px; min-height: 52px; padding: 2px 4px 4px; }
+.ib-rfoot.ib-rfoot-phone > .ib-dtfoot { margin-left: 0; gap: 8px; }
+.ib-rfoot.ib-rfoot-phone > .ib-rclip { margin: 0 4px; }
+.ib-rfoot-phone .ib-fsum-w { flex: 0 1 auto; min-width: 0; }
+.pn-inbox .ib-fsum { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; min-height: 44px; padding: 0 10px; border: 0; border-radius: 10px; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; color: var(--muted-foreground); }
+.ib-fsum-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-fsum > .ib-ic { flex: none; }
+.pn-inbox .ib-fsum.ib-on { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-fsum.ib-skipping { color: var(--primary); }
+.pn-inbox .ib-fsum:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* The line's sheet: what goes with this reply, each with its one action. */
+.ib-fsheet-layer { position: fixed; inset: 0; z-index: 60; }
+.ib-fsheet-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / 0.2); }
+.ib-fsheet { position: absolute; left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); background: var(--popover); color: var(--foreground); border: 1px solid var(--border); border-bottom: 0; border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; max-height: calc(var(--ib-vvh, 100%) * 0.72); overflow-y: auto; overscroll-behavior: contain; padding-bottom: calc(8px + env(safe-area-inset-bottom)); box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.28); animation: ib-pm-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) { .ib-fsheet { animation: none; } }
+.ib-fsheet:focus { outline: none; }
+.ib-fsheet-h { display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 4px 0 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-15, 15px); }
+.ib-fsheet-h b { flex: 1; font-weight: 600; }
+.pn-inbox .ib-fsheet-x { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 10px; background: none; color: var(--muted-foreground); }
+.ib-fsheet-row { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 12px 10px 16px; }
+.ib-fsheet-row + .ib-fsheet-row { border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+.ib-fsheet-t { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; font-size: var(--ib-fs-14-5, 14.5px); line-height: 1.35; }
+.ib-fsheet-t > .ib-ic { flex: none; margin-top: 1px; color: var(--muted-foreground); }
+.ib-fsheet-t b { display: block; font-weight: 550; }
+.ib-fsheet-sub { display: block; margin-top: 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-fsheet-row .ib-btn { flex: none; min-height: 44px; }
+.ib-fsheet-quiet .ib-fsheet-t { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+/* Dictating in the reply box, the status line's Cancel: 44 px to press (it was 34). The reply box's row only: the
+   full-screen card's foot keeps its height, so starting to listen moves nothing there. */
+.pn-inbox .ib-rfoot-phone .ib-vline .ib-dtlink[data-voice-cancel] { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 2px; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The comments sheet: a comment's place (a long agent name's "…'s message, 2:58 PM") on one line from the left, cut
+     with an ellipsis, never a three-line centred link. Its whole name stays its accessible name. */
+  .pn-inbox .ib-arow .ib-af { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 }
