@@ -83,6 +83,8 @@ async function world(): Promise<World> {
   const env = {
     PATH: process.env.PATH ?? '',
     PLANNOTATOR_DATA_DIR: dataDir,
+    // A release version: never the live daily ping (packages/shared/daily-ping.ts).
+    NO_ANON_PING: '1',
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
