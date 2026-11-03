@@ -1,7 +1,7 @@
 /**
  * Scratch folders (launch PR 3), on a real launch module over a temp data dir and a temp home. What each
  * test guards: Settings → Agents' "Scratch folders" saves only a full path (`~/` is the home; empty is the
- * default) outside any git repository, never from the tailnet; the trust-once row reads Claude Code's own
+ * default) outside any git repository, never from a tailnet guest; the trust-once row reads Claude Code's own
  * trust record, where a trusted folder above the root counts and the root's own untrusted entry does not, and
  * a rewrite of that record is read again; and `claude purge` runs only on a folder whose purge reaches nothing
  * else: never below a repository's root or in a linked worktree (Claude's purge maps both to a repository and
@@ -58,6 +58,8 @@ function setup() {
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
+    // As inbox.ts's `isGuest`, with every tailnet caller here a guest (the owner over the tailnet: inbox-tailnet-owner.test.ts).
+    isGuest: (_req, via) => via === "tailnet",
   });
   restore.push(() => launch.stop());
   // A refusal the route throws (InboxError) is answered by the Inbox's error table; here its code is enough.
@@ -82,7 +84,7 @@ describe("Settings → Agents: Scratch folders", () => {
     expect(saved()).toEqual({ enabled: true, fullPermissions: false });
   });
 
-  test("a relative path, / or a non-string is refused and nothing changes; never from the tailnet", async () => {
+  test("a relative path, / or a non-string is refused and nothing changes; never from a tailnet guest", async () => {
     const { post, saved } = setup();
     for (const scratch_dir of ["scratch", "/", 7]) expect(await post({ scratch_dir })).toMatchObject({ status: 422, body: { code: "validation_error" } });
     expect(await post({ scratch_dir: "/tmp/x" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
