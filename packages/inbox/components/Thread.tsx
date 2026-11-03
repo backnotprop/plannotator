@@ -4625,11 +4625,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     openBox();
   };
   /** "Draft  Saved 4:51 PM  Discard" for the open box: under it in Send's row, or above it on a phone. Nothing until the first save. */
+  const stampSavedAt = replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null;
+  const stampTooLong = replyDraft.conflict === null && replyDraft.tooLong;
+  const stampFailed = replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0);
   const draftStamp = (
     <DraftStamp
-      savedAt={replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null}
-      tooLong={replyDraft.conflict === null && replyDraft.tooLong}
-      failed={replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
+      savedAt={stampSavedAt}
+      tooLong={stampTooLong}
+      failed={stampFailed}
       onDiscard={() => {
         replyDraft.discard();
         closeBox(true);
@@ -4637,6 +4640,25 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       }}
     />
   );
+  // On a phone the Draft line is above the box. Where the foot scrolls in its own box (the keyboard up, the phone
+  // on its side), a line coming or going at its top would push the box and its mic down or pull them up: the
+  // foot's scroll moves by the line's height instead, so what is in view stays where it is.
+  const draftAboveShows = phone && box.open && !(route.open && asking) && (stampTooLong || stampFailed || stampSavedAt !== null);
+  const draftAboveRef = useRef<HTMLDivElement>(null);
+  const draftAboveHeight = useRef(0);
+  useLayoutEffect(() => {
+    const line = draftAboveRef.current;
+    const was = draftAboveHeight.current;
+    let now = 0;
+    if (line && draftAboveShows) {
+      const style = getComputedStyle(line);
+      now = line.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom);
+    }
+    draftAboveHeight.current = now;
+    const foot = line?.closest<HTMLElement>('.ib-pfoot');
+    // A foot that does not scroll stays at 0 (the browser holds it there), and grows upward instead.
+    if (foot && now !== was) foot.scrollTop += now - was;
+  }, [draftAboveShows]);
   const rcptPill = pillActive ? (
     <ReplyRecipient
       rows={rcptAgents}
@@ -5795,7 +5817,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           />
         ) : box.open ? (
           <>
-            {/* Nothing above the box (approval "inbox-reply-recipient"), but after a conflict its line and choice. */}
+            {/* Above the box (approval "inbox-reply-recipient"): after a conflict its line and choice, and on a phone the
+                Draft line (below). On a computer nothing else. */}
             {replyDraft.conflict !== null && (
               <DraftHead
                 conflict={{
@@ -5820,9 +5843,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               />
             )}
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
-            {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved. */}
-            {phone && (
-              <div className="ib-draft-above" data-draft-above="">
+            {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
+                While the live-session choice stands in for Send's row it goes, as it does on a computer (it lives in
+                that row there), so Discard cannot close the box under the choice. */}
+            {phone && !(route.open && asking) && (
+              <div className="ib-draft-above" data-draft-above="" ref={draftAboveRef}>
                 {draftStamp}
               </div>
             )}

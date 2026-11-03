@@ -3118,7 +3118,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
      the home bar's gap goes, since the keyboard covers it. Under 400 px left (`tight`: an iPhone's ~257 in
      portrait, ~140 on its side) the thread's padding also closes and the reply's words scroll past a third of the
      visible height (about two and a half lines). */
-  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
+  /* overflow-anchor: none, since the Draft line's arrival keeps the foot's view itself (Thread.tsx, draftAboveRef). */
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot > .ib-acts { position: sticky; bottom: 0; z-index: 2; padding-bottom: 10px; background: var(--card); }
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
@@ -7089,10 +7090,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 
 /* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
-   Nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and in a thread with
-   more than one agent the pill after it names who gets the reply ("to [tile] Claude Code (plannotator) ⌄"). On a phone
-   the pill sits after Cancel (the folder alone), and the Draft line is above the box, at the right, once something is
-   saved; the foot grows upward, so the first save never moves the box. */
+   On a computer nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and
+   in a thread with more than one agent the pill after it names who gets the reply ("to [tile] Claude Code
+   (plannotator) ⌄"). A phone is the exception: the pill sits after Cancel (the folder alone), and the Draft line is
+   above the box, at the right, once something is saved; the foot grows upward, so the first save never moves the box. */
 .ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-replyrow > .ib-footstatus:empty { display: none; }
@@ -7149,7 +7150,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
      foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
   .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
   .ib-draft-above:empty { display: none; }
-  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; }
   /* The pill in Send's row: the folder alone, so the box stays where a one-agent thread has it. Send gets shorter. */
   .ib-rto-full { display: none; }
   .ib-rto-short { display: block; }
@@ -7168,7 +7168,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox:has(.ib-rpick) .ib-rbox { border-color: transparent; box-shadow: none; }
   /* The keyboard leaves about 257 px under the header, and the thread only a few dozen of them: the Draft line takes
      30 px (2 px above it, 8 px under it), so it comes out of the thread's room and the box does not move.
-     Discard's tap area shrinks to 36 px to stay between the foot's top and the box. */
+     Discard's tap area shrinks to 36 px to stay between the foot's top and the box. On its side (about 140 px) the
+     thread has no room and the foot already scrolls: the line comes in above the view (Thread.tsx keeps the foot's
+     scroll), so the box and its mic stay put and the line is a scroll up. */
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pfoot { padding-top: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-rbox { margin-bottom: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }

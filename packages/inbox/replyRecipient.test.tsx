@@ -148,20 +148,20 @@ async function settle(ms = 0) {
   });
 }
 
-function draw(thread: InboxThread) {
+function draw(thread: InboxThread, phone = false) {
   root!.render(
     <div className="pn-inbox">
-      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} phone={phone} />
     </div>,
   );
 }
 
-async function render(thread: InboxThread) {
+async function render(thread: InboxThread, phone = false) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    draw(thread);
+    draw(thread, phone);
   });
   await settle();
   await settle();
@@ -220,6 +220,24 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(el.querySelector('[data-reply-row]')?.contains(stamp)).toBe(true);
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside Send\'s row', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
+  await settle();
+  const above = el.querySelector('[data-draft-above]');
+  expect(above).not.toBeNull();
+  expect(above!.childNodes.length).toBe(0);
+  expect(el.querySelector('[data-draft-stamp]')).toBeNull();
+  await write(el, 'Ship it.');
+  await settle(1100);
+  // One line, above the box: none in Send's row.
+  expect(el.querySelectorAll('[data-draft-stamp]').length).toBe(1);
+  expect(el.querySelector('[data-reply-row] [data-draft-stamp]')).toBeNull();
+  expect(above!.querySelector('[data-draft-stamp] [data-draft-discard]')).not.toBeNull();
+  const box = el.querySelector('.ib-rbox')!;
+  expect(above!.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test.skipIf(!hasDom)('two agents: the pill names the last writer; a name picked, Send answers that agent\'s own latest message alone, and the draft keeps the choice', async () => {

@@ -74,9 +74,10 @@ export interface DraftConflict {
 }
 
 /**
- * Above the open reply box only after a conflict: the line and its choice (Keep mine, Discard mine). Nothing
- * else sits above the box (approval "inbox-reply-recipient": the "Reply to X in Z" label is gone, and the
- * Draft mark, the saved time and Discard are under it, `DraftStamp`).
+ * Above the open reply box only after a conflict: the line and its choice (Keep mine, Discard mine). On a
+ * computer nothing else sits above the box (approval "inbox-reply-recipient": the "Reply to X in Z" label is
+ * gone, and the Draft mark, the saved time and Discard are under it, `DraftStamp`); on a phone `DraftStamp`
+ * is above it.
  */
 export function DraftHead({ conflict }: { conflict: DraftConflict }) {
   // Not a live region: the thread's own region says it once when it appears.
@@ -99,7 +100,8 @@ export function DraftHead({ conflict }: { conflict: DraftConflict }) {
 }
 
 /**
- * Under the open reply box, in Send's row (approval "inbox-reply-recipient"): "Draft  Saved 4:51 PM  Discard",
+ * Under the open reply box, in Send's row (approval "inbox-reply-recipient"), or above the box, at the right, on a
+ * phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
  * nothing until the first save. "Not saved …" in place of the time when the words are longer than a draft holds
  * or the last save did not land.
  */
