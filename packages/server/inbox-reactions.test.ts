@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
-import { INBOX_BRIDGE_EVENT_PATH } from "@plannotator/shared/inbox/connection";
+import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -83,7 +83,36 @@ async function open(dataDir: string) {
     expect(result.isError ?? false).toBe(false);
     return JSON.stringify(result);
   };
-  return { server, settings, save, thread, exchange, agentRead };
+  /** An agent's message through plain MCP (no wake). */
+  const ask = async (project: string, session: string, host: string, name: string, body: string) =>
+    (await client.callTool({ name: "send_message", arguments: { body, project_path: project, agent_session: session, agent_host: host, agent_name: name } })).structuredContent as {
+      message_id: string;
+      thread_id: string;
+    };
+  const reply = async (messageId: string, body: Record<string, unknown>) => {
+    const response = await fetch(`${base}/api/inbox/messages/${messageId}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: `send-${messageId}-${Math.random()}`, ...body }),
+    });
+    expect(response.status).toBe(200);
+    return ((await response.json()) as { reply: { id: string } }).reply.id;
+  };
+  const bridge = (path: string, body: unknown) =>
+    fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` }, body: JSON.stringify(body) });
+  /** read_thread as one session calls it. */
+  const readAs = (threadId: string, session: string) => client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: session } });
+  return { server, settings, save, thread, exchange, agentRead, ask, reply, bridge, readAs };
+}
+
+/** The store asks its reactor only where a reaction may go; this one always answers ❤️ and counts the asks. */
+function alwaysReact(server: InboxServer) {
+  const asked: string[] = [];
+  server.store.setReactor((input) => {
+    asked.push(input.reply.id);
+    return { emoji: "❤️", at: new Date(input.reply.at + 1000).toISOString() };
+  });
+  return asked;
 }
 
 const THANKS = ["Perfect, that's exactly what I wanted.", "thanks, appreciate it", "It works now! Finally.", "Beautiful.", "Great work, thank you!", "YES IT WORKS", "Love it, thanks!", "Amazing, nice work."];
@@ -155,4 +184,49 @@ test("on: the reaction is stored with the delivery, the same after a restart, an
   inbox.server.stop();
   const again = await open(dataDir);
   expect((await again.thread(threadId)).messages.find((m) => m.id === replyId)!.reaction).toEqual(before);
+});
+
+test("only a reply that went into its owner's session gets one: never a tagged session's copy, never one an agent only read", async () => {
+  const { dataDir, project } = await world();
+  const inbox = await open(dataDir);
+  const asked = alwaysReact(inbox.server);
+  const infra = join(dataDir, "..", "infra");
+  mkdirSync(infra, { recursive: true });
+
+  // Codex asks over plain MCP (no wake); Pi's connection understands tags.
+  const codex = await inbox.ask(project, "ses-codex", "codex", "Codex", "Should the queue own retries?");
+  expect((await inbox.bridge(INBOX_BRIDGE_POLL_PATH, { session: "ses-pi", host: "pi", project_path: infra, waitMs: 0, tags: true })).status).toBe(200);
+  const tagged = await inbox.reply(codex.message_id, { words: "Thanks, that's perfect. @Pi raise the timeout.", tags: [{ host: "pi", session: "ses-pi" }] });
+
+  // Pi receives its tagged copy: delivered for Pi, no reaction.
+  expect((await inbox.bridge(INBOX_BRIDGE_EVENT_PATH, { session: "ses-pi", host: "pi", type: "delivered", id: tagged })).status).toBe(200);
+  let message = (await inbox.thread(codex.thread_id)).messages.find((m) => m.id === tagged)!;
+  expect(message.tags?.[0]?.delivery).toMatchObject({ session: "ses-pi" });
+  expect(message.reaction ?? null).toBeNull();
+
+  // Codex only reads the thread: the read settles its delivery, and still no reaction.
+  await inbox.readAs(codex.thread_id, "ses-codex");
+  message = (await inbox.thread(codex.thread_id)).messages.find((m) => m.id === tagged)!;
+  expect(message.delivery).toMatchObject({ state: "delivered", session: "ses-codex" });
+  expect(message.reaction ?? null).toBeNull();
+  expect(asked).toEqual([]);
+
+  // The same reactor, for a reply delivered into its session: asked, and the reaction is stored.
+  const { threadId, replyId } = await inbox.exchange(project, "ses-claude", "Ship it?", "Perfect, thanks!");
+  expect(asked).toEqual([replyId]);
+  expect((await inbox.thread(threadId)).messages.find((m) => m.id === replyId)!.reaction?.emoji).toBe("❤️");
+});
+
+test("a 1 MB reply is delivered at once and gets nothing", async () => {
+  const { dataDir, project } = await world();
+  const inbox = await open(dataDir);
+  expect((await inbox.save({ level: "often" })).status).toBe(200);
+  const huge = "it works thanks if ".repeat(Math.ceil(999_000 / 19)).slice(0, 999_000);
+  const started = performance.now();
+  const { threadId, replyId } = await inbox.exchange(project, "ses_huge", "Anything else?", huge);
+  // Well under 100 ms of gate work in practice; generous headroom for the whole exchange on a slow CI machine.
+  expect(performance.now() - started).toBeLessThan(5000);
+  const message = (await inbox.thread(threadId)).messages.find((m) => m.id === replyId)!;
+  expect(message.delivery?.state).toBe("delivered");
+  expect(message.reaction ?? null).toBeNull();
 });

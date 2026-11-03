@@ -5325,8 +5325,10 @@ export class InboxStore {
    * tagged session), and, for the owner, the thread counts as read by the
    * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
    * session's delivery marks nothing for the owner. Idempotent per session.
+   * `read`: the session read it with read_thread (`recordOwnRead`): delivered
+   * all the same, but never given an emoji reaction.
    */
-  recordDelivery(replyId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
+  recordDelivery(replyId: string, by: { host: string; session: string; intoTurn?: boolean; read?: boolean }): InboxMessage {
     const reply = this.messages.get(replyId);
     if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
     if (!this.isFor(reply, by.session)) {
@@ -5348,7 +5350,8 @@ export class InboxStore {
     if (reply.delivery) return reply;
     const at = this.stamp();
     // The agent received the person's reply: the moment an emoji reaction is decided, written in the same line.
-    const reaction = this.reactionFor(reply, at);
+    // Only a reply that went into the session (a connection, a wake, Codex's queue), never one an agent read with read_thread.
+    const reaction = by.read ? null : this.reactionFor(reply, at);
     const delivered: InboxMessage = {
       ...reply,
       delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) },
@@ -5394,7 +5397,7 @@ export class InboxStore {
       // session comes before it): its read settles it, as the mark does, so the wake never repeats it.
       const plain = !tag && !message.to && !hasTags(message);
       if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
-      this.recordDelivery(message.id, { host: host ?? "agent", session });
+      this.recordDelivery(message.id, { host: host ?? "agent", session, read: true });
     }
   }
 

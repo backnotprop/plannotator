@@ -25,7 +25,8 @@ import type { InboxSound } from './sound';
 const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
-const { ReactionBadge, ReactionLandedContext } = (hasDom ? await import('./components/ReactionBadge') : {}) as typeof import('./components/ReactionBadge');
+const { ReactionBadge, ReactionLandedContext, reactionSoundOn } = (hasDom ? await import('./components/ReactionBadge') : {}) as typeof import('./components/ReactionBadge');
+const { useInboxSound } = (hasDom ? await import('./sound') : {}) as typeof import('./sound');
 
 let root: Root | null = null;
 afterEach(() => {
@@ -148,7 +149,8 @@ describe.if(hasDom)('Settings → Capabilities: Emoji reactions', () => {
   });
 });
 
-function badge(id: string, at: string, onLanded: () => void): HTMLElement {
+
+function badge(id: string, at: string, onLanded: (key: string) => void): HTMLElement {
   return mount(
     <ReactionLandedContext.Provider value={onLanded}>
       <article className="ib-message">
@@ -163,36 +165,169 @@ function badge(id: string, at: string, onLanded: () => void): HTMLElement {
   );
 }
 
-describe.if(hasDom)('the badge on the person\'s message', () => {
+const phase = (host: HTMLElement) => host.querySelector('.ib-rx')?.getAttribute('data-phase') ?? 'hidden';
+
+/** Run `fn` with the page's visibility and reduced-motion preference as given, restored after. */
+async function withPage(page: { hidden?: boolean; reduce?: boolean }, fn: (set: (hidden: boolean) => void) => Promise<void> | void) {
+  let hidden = page.hidden ?? false;
+  const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+  const matchMedia = window.matchMedia;
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+  if (page.reduce) {
+    window.matchMedia = ((query: string) =>
+      ({ matches: query.includes('prefers-reduced-motion'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }) as unknown as MediaQueryList) as typeof window.matchMedia;
+  }
+  try {
+    await fn((next) => (hidden = next));
+  } finally {
+    if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+    else delete (document as unknown as Record<string, unknown>).visibilityState;
+    window.matchMedia = matchMedia;
+  }
+}
+
+const wait = (ms: number) =>
+  act(async () => {
+    await Bun.sleep(ms);
+  });
+
+describe.if(hasDom)("the badge on the person's message", () => {
   test('a stored reaction (a reload, another device later): shown still, named, and silent', () => {
-    let landed = 0;
-    const host = badge('m-stored', new Date(Date.now() - 60_000).toISOString(), () => landed++);
+    const landed: string[] = [];
+    const host = badge('m-stored', new Date(Date.now() - 60_000).toISOString(), (key) => landed.push(key));
     const rx = host.querySelector('.ib-rx') as HTMLElement;
     expect(rx).not.toBeNull();
     expect(rx.getAttribute('data-phase')).toBe('landed');
     expect(rx.getAttribute('role')).toBe('img');
     expect(rx.getAttribute('aria-label')).toBe('Claude Code reacted with ❤️');
     expect(rx.querySelector('.ib-rx-e')?.textContent).toBe('❤️');
-    expect(landed).toBe(0);
+    expect(landed).toEqual([]);
   });
 
-  test('landing while the thread is on screen: the sound once, as it lands; drawn again later, never again', async () => {
-    let landed = 0;
+  test('landing while the thread is on screen: the sound once, as it lands, named for the reaction; drawn again later, never again', async () => {
+    const landed: string[] = [];
     const at = new Date(Date.now() + 700).toISOString();
-    const host = badge('m-live', at, () => landed++);
+    const host = badge('m-live', at, (key) => landed.push(key));
     // Before it lands: nothing yet, or the waiting shell; no sound.
-    expect(host.querySelector('.ib-rx')?.getAttribute('data-phase') ?? 'hidden').not.toBe('landed');
-    expect(landed).toBe(0);
-    await act(async () => {
-      await Bun.sleep(900);
-    });
-    expect(host.querySelector('.ib-rx')?.getAttribute('data-phase')).toBe('landed');
-    expect(landed).toBe(1);
+    expect(phase(host)).not.toBe('landed');
+    expect(landed).toEqual([]);
+    await wait(900);
+    expect(phase(host)).toBe('landed');
+    expect(landed).toEqual([`m-live:${at}`]);
     // The thread closed and opened again (or re-rendered): still, silent.
     act(() => root?.unmount());
     document.body.innerHTML = '';
-    const again = badge('m-live', at, () => landed++);
-    expect(again.querySelector('.ib-rx')?.getAttribute('data-phase')).toBe('landed');
-    expect(landed).toBe(1);
+    const again = badge('m-live', at, (key) => landed.push(key));
+    expect(phase(again)).toBe('landed');
+    expect(landed).toHaveLength(1);
+  });
+
+  test('a page that is not in view: silent, whether it was hidden all along or went away before it landed', async () => {
+    await withPage({ hidden: true }, async () => {
+      const landed: string[] = [];
+      const host = badge('m-hidden', new Date(Date.now() + 300).toISOString(), (key) => landed.push(key));
+      await wait(500);
+      expect(phase(host)).toBe('landed');
+      expect(landed).toEqual([]);
+    });
+    act(() => root?.unmount());
+    document.body.innerHTML = '';
+    await withPage({}, async (setHidden) => {
+      const landed: string[] = [];
+      const host = badge('m-away', new Date(Date.now() + 700).toISOString(), (key) => landed.push(key));
+      setHidden(true);
+      await wait(900);
+      expect(phase(host)).toBe('landed');
+      expect(landed).toEqual([]);
+    });
+  });
+
+  test('reduced motion: no waiting shell, the badge appears as it lands', async () => {
+    await withPage({ reduce: true }, async () => {
+      const host = badge('m-reduce', new Date(Date.now() + 800).toISOString(), () => {});
+      const seen = new Set<string>([phase(host)]);
+      for (let i = 0; i < 10; i++) {
+        await wait(100);
+        seen.add(phase(host));
+      }
+      expect(seen.has('shell')).toBe(false);
+      expect(phase(host)).toBe('landed');
+    });
+  });
+
+  test("a device whose clock is behind the computer's still shows it within the longest delay", async () => {
+    // The reaction's time reads a minute ahead on this page's clock.
+    const host = badge('m-skew', new Date(Date.now() + 60_000).toISOString(), () => {});
+    await wait(2800);
+    expect(phase(host)).toBe('landed');
+  });
+});
+
+describe.if(hasDom)('the reaction sound', () => {
+  test('plays only while reactions are on and their Sound switch is', () => {
+    expect(reactionSoundOn({ level: 'sometimes', sound: true })).toBe(true);
+    expect(reactionSoundOn({ level: 'often', sound: true })).toBe(true);
+    expect(reactionSoundOn({ level: 'often', sound: false })).toBe(false);
+    expect(reactionSoundOn({ level: 'off', sound: true })).toBe(false);
+    expect(reactionSoundOn(undefined)).toBe(false);
+  });
+
+  test('two Inbox tabs showing the thread: the reaction plays once; the next reaction plays again', () => {
+    let oscillators = 0;
+    const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {}, linearRampToValueAtTime() {} });
+    class StubContext {
+      state = 'running';
+      currentTime = 0;
+      destination = {};
+      resume() {
+        return Promise.resolve();
+      }
+      createGain() {
+        return { gain: param(), connect: (to: unknown) => to };
+      }
+      createOscillator() {
+        oscillators++;
+        return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
+      }
+    }
+    const ctx = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    const locks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    (window as unknown as { AudioContext: unknown }).AudioContext = StubContext;
+    // No Web Locks: the localStorage claim, which every tab of this browser shares.
+    Object.defineProperty(navigator, 'locks', { configurable: true, get: () => undefined });
+    try {
+      const tabs: InboxSound[] = [];
+      function Tab({ n }: { n: number }) {
+        tabs[n] = useInboxSound({ settings: { enabled: true, volume: 60, dialog_shown_for: null }, onSettings: () => {} });
+        return null;
+      }
+      mount(
+        <>
+          <Tab n={0} />
+          <Tab n={1} />
+        </>,
+      );
+      act(() => {
+        window.dispatchEvent(new Event('pointerdown'));
+      });
+      act(() => {
+        tabs[0]!.reactionLanded('m1:t');
+        tabs[1]!.reactionLanded('m1:t');
+      });
+      // "Deeper" is four oscillators: one play.
+      expect(oscillators).toBe(4);
+      act(() => {
+        tabs[1]!.reactionLanded('m2:t');
+        tabs[0]!.reactionLanded('m2:t');
+      });
+      expect(oscillators).toBe(8);
+    } finally {
+      (window as unknown as { AudioContext: unknown }).AudioContext = ctx;
+      if (locks) Object.defineProperty(navigator, 'locks', locks);
+      else delete (navigator as unknown as Record<string, unknown>).locks;
+      try {
+        window.localStorage.clear();
+      } catch {}
+    }
   });
 });

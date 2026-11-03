@@ -78,12 +78,33 @@ export function chance(id: string, salt: string): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** The pacing's reading of a reply from its text and its mood. */
-export function paceKind(text: string, m: MoodResult): PaceKind {
+/**
+ * The most of a reply the mood gate ever reads. The gate's praise check is
+ * quadratic in a sentence's length and runs inside the delivery, so a long
+ * reply (up to 1,000,000 characters) is never read whole.
+ */
+export const MOOD_MAX_CHARS = 2000;
+
+/** More than 140 characters or more than 2 lines: linear, and stops at the third line. */
+export function isLongReply(t: string): boolean {
+  if (t.length > LONG_CHARS) return true;
+  let lines = 1;
+  for (let i = t.indexOf("\n"); i >= 0; i = t.indexOf("\n", i + 1)) if (++lines > LONG_LINES) return true;
+  return false;
+}
+
+/**
+ * The pacing's reading of a reply. `readMood` runs the mood gate (on at most
+ * `MOOD_MAX_CHARS`). Long replies, code and pasted errors never get one, so
+ * they are decided first from cheap checks; for them the gate reads only the
+ * head, to tell frustration (which starts the cool-down) from the rest.
+ */
+export function paceKind(text: string, readMood: (text: string) => MoodResult): PaceKind {
   const t = text.trim();
+  // Long first: the code and error patterns then only ever run on 140 characters.
+  if (isLongReply(t) || CODE.test(t) || ERR_STRONG_OUTPUT.test(t)) return readMood(text.slice(0, MOOD_MAX_CHARS)).mood === "frustrated" ? "frustrated" : "never";
+  const m = readMood(text);
   if (m.mood === "frustrated") return "frustrated";
-  if (CODE.test(t) || ERR_STRONG_OUTPUT.test(t)) return "never";
-  if (t.length > LONG_CHARS || t.split("\n").length > LONG_LINES) return "never";
   if (m.mood === "unsure") return "unsure";
   if (m.mood === "positive") return m.kind === "joke" ? "joke" : m.kind === "win" ? "win" : "thanks";
   if (m.mood === "neutral" && m.kind === "goahead") return "go";

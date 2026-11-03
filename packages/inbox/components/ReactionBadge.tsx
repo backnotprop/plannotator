@@ -24,19 +24,30 @@
  */
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { InboxReaction } from '@plannotator/core/inbox-types';
+import type { InboxReaction, InboxReactionsSettings } from '@plannotator/core/inbox-types';
 import { INBOX_REACTION_FALLBACK } from '@plannotator/core/inbox-reactions';
 import { whenTime } from '../format';
 import { prefersReducedMotion } from '../settle';
 import { Tip } from './Tip';
 
-/** What the thread does as a reaction lands on screen: the sound, when its switch is on. Null: silent. */
-export const ReactionLandedContext = createContext<(() => void) | null>(null);
+/**
+ * What the thread does as a reaction lands on screen: the sound, when its
+ * switch is on (`reactionSoundOn`). `key` names the reaction, so several tabs
+ * showing it play it once. Null: silent.
+ */
+export const ReactionLandedContext = createContext<((key: string) => void) | null>(null);
+
+/** Settings → Capabilities: the sound plays only while reactions are on and their Sound switch is. */
+export function reactionSoundOn(reactions: InboxReactionsSettings | null | undefined): boolean {
+  return !!reactions && reactions.level !== 'off' && reactions.sound;
+}
 
 /** The waiting shell's beat before the emoji lands (the mock's "typing beat"). */
 export const REACTION_BEAT_MS = 560;
 /** A reaction first seen this long after it landed is drawn still: the page was not there when it came. */
 export const REACTION_LATE_MS = 4000;
+/** The longest a reaction waits after delivery (pacing.ts `reactionDelayMs`): the most this page ever waits for one. */
+export const REACTION_MAX_WAIT_MS = 2500;
 
 const SIZE = 22;
 /** Its left edge starts this far before the end of the words. */
@@ -116,13 +127,19 @@ type Phase = 'hidden' | 'shell' | 'landed';
  */
 export function ReactionBadge({ messageId, reaction, agent, phone }: { messageId: string; reaction: InboxReaction; agent: string; phone: boolean }) {
   const key = `${messageId}:${reaction.at}`;
-  const landsAt = Date.parse(reaction.at);
   const onLanded = useContext(ReactionLandedContext);
   const onLandedRef = useRef(onLanded);
   onLandedRef.current = onLanded;
+  // When it lands on this page's clock: the server's time, but never more than the longest delay (2.5 s) from now,
+  // so a device whose clock is behind the computer's does not keep it hidden.
+  const [landsAt] = useState(() => {
+    const now = Date.now();
+    return now + Math.min(Math.max(0, Date.parse(reaction.at) - now), REACTION_MAX_WAIT_MS);
+  });
   // Arrives on screen only when this page sees it come: not drawn before, in view, and not long landed.
   const [arrive] = useState(
-    () => !drawn.has(key) && typeof document !== 'undefined' && document.visibilityState === 'visible' && Date.now() < landsAt + REACTION_LATE_MS,
+    () =>
+      !drawn.has(key) && typeof document !== 'undefined' && document.visibilityState === 'visible' && Date.now() < Date.parse(reaction.at) + REACTION_LATE_MS,
   );
   // Reduced motion: no waiting shell, the badge fades in as it lands.
   const [beat] = useState(() => (prefersReducedMotion() ? 0 : REACTION_BEAT_MS));
@@ -185,7 +202,7 @@ export function ReactionBadge({ messageId, reaction, agent, phone }: { messageId
     const e = badge.querySelector<HTMLElement>('.ib-rx-e');
     const dots = badge.querySelector<HTMLElement>('.ib-rx-dots');
     if (!body || !e || !dots || typeof body.animate !== 'function') {
-      if (phase === 'landed') onLandedRef.current?.();
+      if (phase === 'landed' && document.visibilityState === 'visible') onLandedRef.current?.(key);
       return;
     }
     const reduce = prefersReducedMotion();
@@ -214,9 +231,9 @@ export function ReactionBadge({ messageId, reaction, agent, phone }: { messageId
         e.animate([{ rotate: '-18deg' }, { rotate: '0deg' }], { ...SPR.tilt, delay: waited ? 0 : 50, fill: 'backwards', composite: 'add' });
       }
       // The sound, as the emoji lands, only on a page that shows the thread now.
-      if (document.visibilityState === 'visible') onLandedRef.current?.();
+      if (document.visibilityState === 'visible') onLandedRef.current?.(key);
     }
-  }, [phase, arrive]);
+  }, [phase, arrive, key]);
 
   if (phase === 'hidden') return null;
   const label = `${agent} reacted with ${emoji}`;

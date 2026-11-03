@@ -74,7 +74,7 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
 import { ThreadPane } from './components/Thread';
-import { ReactionLandedContext } from './components/ReactionBadge';
+import { ReactionLandedContext, reactionSoundOn } from './components/ReactionBadge';
 import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
@@ -879,13 +879,15 @@ function Inbox() {
     onSettings: (next) => setSettings((current) => (current ? { ...current, sound: next } : current)),
   });
   // An emoji reaction landed in the thread on screen: its sound, when Settings → Capabilities → Sound is on.
-  const reactionSoundOn = settings?.reactions ? settings.reactions.level !== 'off' && settings.reactions.sound : false;
-  const reactionSoundOnRef = useRef(reactionSoundOn);
-  reactionSoundOnRef.current = reactionSoundOn;
+  const reactionSoundOnRef = useRef(reactionSoundOn(settings?.reactions));
+  reactionSoundOnRef.current = reactionSoundOn(settings?.reactions);
   const reactionLandedSound = sound.reactionLanded;
-  const reactionLanded = useCallback(() => {
-    if (reactionSoundOnRef.current) reactionLandedSound();
-  }, [reactionLandedSound]);
+  const reactionLanded = useCallback(
+    (key: string) => {
+      if (reactionSoundOnRef.current) reactionLandedSound(key);
+    },
+    [reactionLandedSound],
+  );
   /**
    * Search (the approved "inbox-search" design): the palette's code loads on
    * the first open and stays mounted after. It opens from the sidebar's

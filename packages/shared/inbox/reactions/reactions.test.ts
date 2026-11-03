@@ -14,6 +14,7 @@ import CASES from "./fixtures/cases.json" with { type: "json" };
 import { mood } from "./gate";
 import { decideReaction, type ReactionReply } from "./index";
 import { decidePace, paceKind, type PaceEntry } from "./pacing";
+import { pythonSum } from "./vader";
 import { allowedEmoji, pickEmoji, REACTION_POOL, REACTION_TONE } from "./picker";
 
 interface Case {
@@ -115,7 +116,7 @@ describe("the pacing", () => {
       "Great, thanks.\nOne more thing.\nAnd another.",
     ];
     for (const text of never) {
-      expect(paceKind(text, mood(text))).toBe(mood(text).mood === "frustrated" ? "frustrated" : "never");
+      expect(paceKind(text, mood)).toBe(mood(text).mood === "frustrated" ? "frustrated" : "never");
       for (const level of ["sometimes", "often"] as const)
         for (let i = 0; i < 40; i++) {
           const reply: ReactionReply = { id: `m${i}`, thread: "t", text, at: T0 + i * 30 * MIN };
@@ -174,5 +175,38 @@ describe("the pacing", () => {
       expect(delay).toBeGreaterThanOrEqual(800);
       expect(delay).toBeLessThanOrEqual(2500);
     }
+  });
+});
+
+describe("Python parity at the edges", () => {
+  test("word scores that nearly cancel are summed as Python's sum() does (compensated), so the praise stays praise", () => {
+    // Found by review: a left-to-right sum gives 0 where Python 3.12+ gives 1.7e-16, which flips the sign once "!" adds emphasis.
+    expect(pythonSum([0.5, -2.4, 2.1, -2.7, -0.2, 2.7])).toBeGreaterThan(0);
+    for (const text of ["Nice, welldoer inferior sadden!", "Love it, idealistic embarrassingly degrader boredom!", "Nice, spitefully hateful depressive hand idealised!"]) {
+      expect(mood(text).mood).toBe("positive");
+    }
+  });
+});
+
+describe("a very long reply", () => {
+  const T0 = Date.parse("2026-11-03T09:00:00Z");
+  // The gate's praise check grows with the square of a sentence: 1 MB of unpunctuated words took 99 s before the cap.
+  const huge = "it works thanks if ".repeat(Math.ceil(1_000_000 / 19)).slice(0, 1_000_000);
+
+  test("is decided quickly and gets nothing, as the reply and in the day's history", () => {
+    for (const level of ["sometimes", "often"] as const) {
+      const started = performance.now();
+      const reply: ReactionReply = { id: `m-huge-${level}`, thread: "t", text: huge, at: T0 };
+      expect(decideReaction({ level, reply, history: [], recent: [] })).toBeNull();
+      const later: ReactionReply = { id: `m-after-${level}`, thread: "t2", text: "thanks, appreciate it", at: T0 + 60 * 60_000 };
+      decideReaction({ level, reply: later, history: [{ id: `m-huge-old-${level}`, thread: "t", text: huge, at: T0, reacted: false }], recent: [] });
+      // Well under 100 ms in practice; generous headroom for a slow CI machine.
+      expect(performance.now() - started).toBeLessThan(2000);
+    }
+  });
+
+  test("still starts the cool-down when it vents", () => {
+    const vent = "this is still broken, wtf. " + "the same thing again and again ".repeat(40_000);
+    expect(paceKind(vent, mood)).toBe("frustrated");
   });
 });

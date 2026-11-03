@@ -178,6 +178,26 @@ function punctuationEmphasis(text: string): number {
 const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
 /** VADER's `polarity_scores(text)["compound"]`, in -1..1. */
+/**
+ * Python's `sum()` of floats (3.12 and later): Neumaier's compensated sum, the
+ * compensation added at the end when it is finite. vaderSentiment sums the
+ * word scores with `sum()`; a plain left-to-right sum can leave 0 where Python
+ * leaves 1.7e-16, which flips the compound's sign once punctuation emphasis
+ * is added.
+ */
+export function pythonSum(values: readonly number[]): number {
+  let total = 0;
+  let c = 0;
+  for (const x of values) {
+    const t = total + x;
+    if (Math.abs(total) >= Math.abs(x)) c += total - t + x;
+    else c += x - t + total;
+    total = t;
+  }
+  if (c !== 0 && Number.isFinite(c)) total += c;
+  return total;
+}
+
 export function vaderCompound(input: string): number {
   // Emoji become their descriptions.
   let noEmoji = "";
@@ -234,7 +254,7 @@ export function vaderCompound(input: string): number {
   }
   sentiments = butCheck(lw, sentiments);
   if (sentiments.length === 0) return 0;
-  let sum = sentiments.reduce((n, s) => n + s, 0);
+  let sum = pythonSum(sentiments);
   const emphasis = punctuationEmphasis(text);
   if (sum > 0) sum += emphasis;
   else if (sum < 0) sum -= emphasis;

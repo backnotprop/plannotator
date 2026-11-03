@@ -210,6 +210,47 @@ function endRingHold(): void {
  * is one; else a timestamp in localStorage (the same origin as the channel),
  * which is close enough for a doorbell.
  */
+/** How long a tab holds a reaction it played, so another tab showing the same thread does not play it too. */
+const REACTION_CLAIM_MS = 10_000;
+const REACTION_CLAIM_KEY = `${SOUND_CHANNEL}-reaction`;
+
+/**
+ * Play the reaction `key` (message id and landing time) once across this
+ * browser's Inbox tabs, as the question sound rings once: a Web Lock named for
+ * the reaction, held a while, else a localStorage note of the last one played.
+ */
+async function claimReaction(key: string, play: () => void): Promise<boolean> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (locks?.request) {
+    try {
+      return await new Promise<boolean>((resolve, reject) => {
+        locks
+          .request(`${REACTION_CLAIM_KEY}:${key}`, { ifAvailable: true }, (lock) => {
+            if (!lock) {
+              resolve(false);
+              return undefined;
+            }
+            play();
+            resolve(true);
+            return new Promise<void>((done) => setTimeout(done, REACTION_CLAIM_MS));
+          })
+          .catch(reject);
+      });
+    } catch {
+      // Fall through to localStorage.
+    }
+  }
+  try {
+    const last = JSON.parse(window.localStorage.getItem(REACTION_CLAIM_KEY) ?? 'null') as { key?: string; at?: number } | null;
+    if (last?.key === key && Date.now() - (last.at ?? 0) < REACTION_CLAIM_MS) return false;
+    window.localStorage.setItem(REACTION_CLAIM_KEY, JSON.stringify({ key, at: Date.now() }));
+  } catch {
+    // No storage: this tab plays.
+  }
+  play();
+  return true;
+}
+
 async function withRingLock(ring: () => void): Promise<boolean> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (locks?.request) {
@@ -263,8 +304,10 @@ export interface InboxSound {
    * "inbox-emoji-reactions"): "Deeper" at the Inbox's sound volume. Only once
    * the tab has had a click (a browser drops it before). The question sound's
    * switch has no say: the reaction's own Sound switch is the caller's.
+   * `key` names the reaction (message id and landing time): several of this
+   * browser's tabs showing it play it once.
    */
-  reactionLanded: () => void;
+  reactionLanded: (key: string) => void;
   /** Settings → Capabilities → Sound's ▶: plays "Deeper" now. */
   previewReaction: () => void;
   /** The reaction sound's preview is playing ("Playing…"). */
@@ -459,9 +502,10 @@ export function useInboxSound(options: {
     },
     [],
   );
-  const reactionLanded = useCallback(() => {
+  const reactionLanded = useCallback((key: string) => {
     if (!armedRef.current) return;
-    audio.current?.play(settingsRef.current.volume, { create: true, notes: REACTION_DEEPER });
+    // Several Inbox tabs showing the thread: the first to claim the reaction plays it, the others stay quiet.
+    void claimReaction(key, () => audio.current?.play(settingsRef.current.volume, { create: true, notes: REACTION_DEEPER }));
   }, []);
   const previewReaction = useCallback(() => {
     // Play is a click: it arms the sound too.

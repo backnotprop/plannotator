@@ -8,19 +8,21 @@
 
 import type { InboxReaction } from "@plannotator/core/inbox-types";
 import { mood, type MoodResult } from "./gate";
-import { chance, decidePace, paceKind, reactionDelayMs, type PaceEntry, type ReactionLevel } from "./pacing";
+import { chance, decidePace, MOOD_MAX_CHARS, paceKind, reactionDelayMs, type PaceEntry, type ReactionLevel } from "./pacing";
 import { pickEmoji } from "./picker";
 
 export { mood } from "./gate";
 export { decidePace, paceKind, type ReactionLevel } from "./pacing";
 export { pickEmoji, REACTION_REST } from "./picker";
 
-/** The moods already read, by message id and text (a delivery reads the day's replies again). */
+/** The moods already read, by message id and the length read (a delivery reads the day's replies again). */
 const moods = new Map<string, MoodResult>();
 const MOOD_CACHE_MAX = 4000;
 
-function moodOf(id: string, text: string): MoodResult {
-  const key = `${id}\u0000${text}`;
+/** The gate on a message's text, never on more than `MOOD_MAX_CHARS` (its cost grows with the square of a sentence). */
+function moodOf(id: string, full: string): MoodResult {
+  const text = full.length > MOOD_MAX_CHARS ? full.slice(0, MOOD_MAX_CHARS) : full;
+  const key = `${id}\u0000${text.length}`;
   const hit = moods.get(key);
   if (hit) return hit;
   const m = mood(text);
@@ -49,11 +51,12 @@ export interface ReactionInput {
 /** The reaction a reply gets as its agent receives it, or null. Deterministic. */
 export function decideReaction(input: ReactionInput): InboxReaction | null {
   const { reply } = input;
-  const m = moodOf(reply.id, reply.text);
-  const kind = paceKind(reply.text, m);
-  const history: PaceEntry[] = input.history.map((h) => ({ id: h.id, thread: h.thread, at: h.at, kind: paceKind(h.text, moodOf(h.id, h.text)), reacted: h.reacted }));
+  const kind = paceKind(reply.text, (text) => moodOf(reply.id, text));
+  const history: PaceEntry[] = input.history.map((h) => ({ id: h.id, thread: h.thread, at: h.at, kind: paceKind(h.text, (text) => moodOf(h.id, text)), reacted: h.reacted }));
   const pace = decidePace(history, { id: reply.id, thread: reply.thread, at: reply.at, kind }, input.level);
   if (!pace.react) return null;
+  // Only a short reply gets this far (pacing.ts): the gate already read it, whole.
+  const m = moodOf(reply.id, reply.text);
   const emoji = pickEmoji({ text: reply.text, mood: m.mood, kind: m.kind, recent: input.recent, rand: chance(reply.id, "pick") });
   if (!emoji) return null;
   return { emoji, at: new Date(reply.at + reactionDelayMs(reply.id)).toISOString() };
