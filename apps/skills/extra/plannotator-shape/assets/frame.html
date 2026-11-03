@@ -8,10 +8,15 @@
 <style>
 /* A host's --background, --foreground, --font-sans, --font-mono win; the rest is mixed from paper, ink and mark. */
 :root{color-scheme:light dark;
-  --paper:var(--background,light-dark(#fbfaf7,#161618));--ink:var(--foreground,light-dark(#1c1c1e,#ececee));--mark:light-dark(#c4520f,#f08a4b);
+  --paper:var(--background,#fbfaf7);--ink:var(--foreground,#1c1c1e);--mark:#c4520f;
   --ink2:color-mix(in srgb,var(--ink) 78%,var(--paper));--grey:color-mix(in srgb,var(--ink) 48%,var(--paper));
   --rule:color-mix(in srgb,var(--ink) 12%,var(--paper));--mark-soft:color-mix(in srgb,var(--mark) 16%,var(--paper));
   --sans:var(--font-sans,ui-sans-serif,-apple-system,"SF Pro Text","Helvetica Neue",Arial,sans-serif);--mono:var(--font-mono,ui-monospace,"SF Mono",Menlo,monospace)}
+/* Fallbacks for engines without light-dark() (iOS before 17.5). */
+@media (prefers-color-scheme:dark){:root{--paper:var(--background,#161618);--ink:var(--foreground,#ececee);--mark:#f08a4b}}
+@supports (color:light-dark(#000,#fff)){:root{--paper:var(--background,light-dark(#fbfaf7,#161618));--ink:var(--foreground,light-dark(#1c1c1e,#ececee));--mark:light-dark(#c4520f,#f08a4b)}}
+@supports not (color:light-dark(#000,#fff)){:root[data-theme=light]{--paper:var(--background,#fbfaf7);--ink:var(--foreground,#1c1c1e);--mark:#c4520f}
+  :root[data-theme=dark]{--paper:var(--background,#161618);--ink:var(--foreground,#ececee);--mark:#f08a4b}}
 :root[data-theme=light]{color-scheme:light} :root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box}html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans)}
 main{max-width:1280px;margin:0 auto;padding:28px 40px 32px}
@@ -70,7 +75,7 @@ if(q.get('theme'))root.dataset.theme=q.get('theme');
 const still=q.has('static')||matchMedia('(prefers-reduced-motion: reduce)').matches;
 const views=[...document.querySelectorAll('svg[data-view]')],btns=[...document.querySelectorAll('.switch button')];
 if(views.length<2)document.querySelector('.switch')?.remove();
-let anims=[],busy=false;
+let anims=[],cur=null,gen=0;
 const steps=v=>{const m=new Map();v.querySelectorAll('[data-step]').forEach(g=>{const n=+g.dataset.step;(m.get(n)||m.set(n,[]).get(n)).push(g)});return [...m.keys()].sort((a,b)=>a-b).map(k=>m.get(k))};
 const strokes=g=>[...g.querySelectorAll('path,line,polyline,polygon,rect,circle,ellipse')].filter(e=>{const s=getComputedStyle(e);return s.stroke!=='none'&&s.strokeDasharray==='none'&&e.getTotalLength});
 function play(v,dir,total){const S=steps(v);if(dir<0)S.reverse();const per=total/Math.max(S.length,1);const done=[];
@@ -79,16 +84,20 @@ function play(v,dir,total){const S=steps(v);if(dir<0)S.reverse();const per=total
   strokes(g).forEach(e=>{const L=e.getTotalLength();if(!L)return;e.style.strokeDasharray=L;
    const a=e.animate([{strokeDashoffset:dir>0?L:0},{strokeDashoffset:dir>0?0:L}],{duration:d,delay,fill:'both',easing:'cubic-bezier(.3,.6,.2,1)'});
    a.finished.then(()=>{if(dir>0)e.style.strokeDasharray=''});anims.push(a)})}));
- anims.push(...v.getAnimations({subtree:true}));return Promise.all(done)}
+ anims.push(...v.getAnimations({subtree:true}));return Promise.all(done).catch(()=>{})}
 function skip(){anims.forEach(a=>{try{a.finish()}catch{}});anims=[]}
+function reset(v){v.getAnimations({subtree:true}).forEach(a=>a.cancel());v.querySelectorAll('*').forEach(e=>e.style.strokeDasharray='')}
+// A later switch cancels an earlier one, so the view shown matches the pressed tab.
 function show(name,first){const hid=v=>v.hasAttribute('hidden'),hide=(v,h)=>v.toggleAttribute('hidden',h);
- const to=views.find(v=>v.dataset.view===name)||views[0],from=views.find(v=>!hid(v));
+ const to=views.find(v=>v.dataset.view===name)||views[0];
  btns.forEach(b=>b.setAttribute('aria-pressed',b.dataset.show===to.dataset.view));
- if(still||(from===to&&!first)){views.forEach(v=>hide(v,v!==to));return}
- if(busy)skip();busy=true;
- const out=(!first&&from&&from!==to)?play(from,-1,420):Promise.resolve();
- out.then(()=>new Promise(r=>setTimeout(r,first?0:140))).then(()=>{if(from&&from!==to){hide(from,true);from.getAnimations({subtree:true}).forEach(a=>a.cancel());from.querySelectorAll('*').forEach(e=>e.style.strokeDasharray='')}
-  hide(to,false);return play(to,1,first?1500:1100)}).then(()=>{busy=false;anims=[]})}
+ if(to===cur&&!first)return;
+ cur=to;const g=++gen;
+ if(still){views.forEach(v=>hide(v,v!==to));return}
+ skip();const from=views.find(v=>v!==to&&!hid(v));
+ const out=(!first&&from)?play(from,-1,420):Promise.resolve();
+ out.then(()=>new Promise(r=>setTimeout(r,first?0:140))).then(()=>{if(g!==gen)return;
+  views.forEach(v=>{if(v!==to){hide(v,true);reset(v)}});reset(to);hide(to,false);return play(to,1,first?1500:1100)}).then(()=>{if(g===gen)anims=[]})}
 btns.forEach(b=>b.onclick=()=>show(b.dataset.show));
 addEventListener('keydown',e=>{if(e.key==='Escape')skip()});document.querySelector('.board').addEventListener('click',skip);
 show(q.get('view')==='tech'?'tech':'idea',true)})();
