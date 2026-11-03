@@ -469,32 +469,40 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const gatheredFrom = useRef<'bar' | 'composer'>('bar');
   /**
    * How far each floating control is from the corner control, and how small it must get to match it (`--ib-gx`,
-   * `--ib-gy`, `--ib-gs`, read by inbox.css): measured where they rest, before the tools gather and again after a
-   * resize or a rotation. Gathered (`gathered`), each is read with its flight's transform taken off for the moment
-   * (no transition), so the way back starts from where it rests now.
+   * `--ib-gy`, `--ib-gs`, read by inbox.css), measured where they rest:
+   * - `rest`: the tools are showing (before » or ⌄ gathers them, and after a resize);
+   * - `gathered`: after a resize while gathered, each read with its flight's transform taken off for the moment (no
+   *   transition), so the way back starts from where it rests now;
+   * - `tucking`: a pinch's tuck is committed but not drawn yet: read with the pane showing its tools for the moment,
+   *   so nothing has moved and the tuck still animates from where they rest.
+   * The Contents rail flies by its ticks (its dock), not by the whole box that holds its panel.
    */
-  const measureGather = (gathered = false) => {
+  const measureGather = (mode: 'rest' | 'gathered' | 'tucking' = 'rest') => {
     const section = sectionRef.current;
     const target = section?.querySelector<HTMLElement>('[data-full-view-handle]');
     if (!section || !target) return;
-    const to = target.getBoundingClientRect();
-    const tx = to.left + to.width / 2;
-    const ty = to.top + to.height / 2;
-    const size = Math.max(target.offsetWidth, 32);
     const floating = [...section.querySelectorAll<HTMLElement>(GATHERED)];
-    if (gathered) {
+    const anchorOf = (el: HTMLElement) => (el.matches('.pn-contents-rail') ? el.querySelector<HTMLElement>('.pn-contents-rail-dock') : null) ?? el;
+    if (mode === 'gathered') {
       for (const el of floating) {
         el.style.setProperty('transition', 'none');
         el.style.setProperty('transform', 'none');
       }
     }
-    const boxes = floating.map((el) => el.getBoundingClientRect());
-    if (gathered) {
+    const drawn = section.getAttribute('data-tools');
+    if (mode === 'tucking') section.setAttribute('data-tools', 'pinned');
+    const to = target.getBoundingClientRect();
+    const boxes = floating.map((el) => anchorOf(el).getBoundingClientRect());
+    if (mode === 'tucking' && drawn !== null) section.setAttribute('data-tools', drawn);
+    if (mode === 'gathered') {
       for (const el of floating) el.style.removeProperty('transform');
       // The flight's transform is back before the transition is, so it does not animate.
       void section.offsetWidth;
       for (const el of floating) el.style.removeProperty('transition');
     }
+    const tx = to.left + to.width / 2;
+    const ty = to.top + to.height / 2;
+    const size = Math.max(target.offsetWidth, 32);
     floating.forEach((el, i) => {
       const at = boxes[i]!;
       if (!at.width || !at.height) return;
@@ -505,16 +513,24 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   };
   /** The tools as drawn now (the pinch's tuck included), for the listeners below. */
   const shownToolbarRef = useRef<ToolbarState>('pinned');
-  // A resize or a rotation (or a phone's keyboard closing as ⌄ takes focus out of the field) moves where things rest.
+  // A resize or a rotation (or a phone's keyboard closing as ⌄ takes focus out of the field) moves where things rest:
+  // measured again once per frame, however many resize events the frame brings.
   useEffect(() => {
     if (!full) return;
-    const remeasure = () => measureGather(shownToolbarRef.current === 'tucked');
-    const first = requestAnimationFrame(remeasure);
+    let frame = 0;
+    const remeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measureGather(shownToolbarRef.current === 'tucked' ? 'gathered' : 'rest');
+      });
+    };
+    remeasure();
     window.addEventListener('resize', remeasure);
     window.addEventListener('orientationchange', remeasure);
     window.visualViewport?.addEventListener('resize', remeasure);
     return () => {
-      cancelAnimationFrame(first);
+      cancelAnimationFrame(frame);
       window.removeEventListener('resize', remeasure);
       window.removeEventListener('orientationchange', remeasure);
       window.visualViewport?.removeEventListener('resize', remeasure);
@@ -1612,13 +1628,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
   }, [shownToolbar]);
-  // A pinch's tuck does not pass through the toolbar's state: measured where they rest as it starts (this render runs
-  // before the tuck is drawn).
-  const pinchMeasured = useRef(false);
-  if (pinchTucks && toolbar === 'pinned' && !pinchMeasured.current) {
-    pinchMeasured.current = true;
-    measureGather();
-  } else if (!pinchTucks) pinchMeasured.current = false;
+  // A pinch's tuck does not pass through the toolbar's state: measured as it is committed, before it is drawn. (A tuck
+  // by hand is measured in onState; with the tools already gathered there is nothing to fly.)
+  const pinchFromShowing = pinchTucks && toolbar === 'pinned';
+  useLayoutEffect(() => {
+    if (pinchFromShowing) measureGather('tucking');
+  }, [pinchFromShowing]);
   // A zoom does not follow the person to the next file, where the browser lets go of it.
   useEffect(() => {
     if (phoneHtml) return releaseWindowZoom;

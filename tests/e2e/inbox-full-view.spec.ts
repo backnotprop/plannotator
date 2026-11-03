@@ -170,7 +170,7 @@ const hide = (page = world.page) => page.locator('[data-full-view-hide]');
 const count = (page = world.page) => bar(page).locator('[data-full-view-comments]');
 
 /** What floats over a file in full screen and gathers into the corner control with the toolbar. */
-const FLOATING = '.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open';
+const FLOATING = '.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
 
 /** Put the pointer where it reaches nothing of the toolbar. */
 async function pointerAway(page = world.page) {

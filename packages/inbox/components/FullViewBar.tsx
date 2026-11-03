@@ -147,10 +147,12 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
 /**
  * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
- * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip and Contents button.
- * The changed chip is not here: it is a fact about the file.
+ * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip, its Contents button
+ * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide). The changed chip is not
+ * here: it is a fact about the file.
  */
-export const GATHERED = '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open';
+export const GATHERED =
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
 /** Focus sits in something that is about to gather (and go inert or hidden). */
 const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
