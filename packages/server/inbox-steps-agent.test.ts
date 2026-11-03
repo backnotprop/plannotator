@@ -40,6 +40,8 @@ import { INBOX_MCP_INSTRUCTIONS } from "./inbox-mcp";
 /** The approved agent text, exact (approval "inbox-thread-steps", item 7). Pinned on purpose. */
 const APPROVED =
   "steps: your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.";
+/** The action's line in the agent tool (the owner, 2026-11-03), so the description stays under Claude Code's 2,048. */
+const ACTION_LINE = "steps: keep the person's checklist for this thread current (details on the steps field).";
 const APPROVED_WAKE = "Your steps here: 2 of 5 done; doing: Replay the failures in staging. Update them if that changed.";
 
 /** The word as an agent would read it: `steps` alone, not inside `diff_steps`. */
@@ -165,13 +167,17 @@ describe("off, the default: agents get nothing", () => {
 });
 
 describe("on", () => {
-  test("the action is the approved text, and the action and the field each write the session's list", async () => {
+  test("the field carries the approved text, the action its short line, and the action and the field each write the session's list", async () => {
     const w = await world();
     await w.setSteps(true);
     const served = await w.tools();
     expect(served.map((tool) => tool.name)).toContain("steps");
-    expect(served.find((tool) => tool.name === "steps")!.description).toBe(INBOX_STEPS_LEAD);
-    for (const tool of [inboxAgentTool(served)!, modAgentTool(served)!]) expect(tool.description.split("\n")).toContain(`- ${APPROVED}`);
+    expect(`steps: ${served.find((tool) => tool.name === "steps")!.description}`).toBe(APPROVED);
+    for (const tool of [inboxAgentTool(served)!, modAgentTool(served)!]) {
+      expect(tool.description.split("\n")).toContain(`- ${ACTION_LINE}`);
+      const field = (tool.inputSchema.properties as Record<string, { description: string }>).steps!.description;
+      expect(field).toBe(`(send_message, steps) ${APPROVED} No thread yet: send it with the send_message that starts one.`);
+    }
 
     const saved = await w.call("steps", { ...w.agent, thread_id: w.thread, steps: PLAN });
     expect(saved.isError).toBeFalsy();
@@ -218,5 +224,21 @@ describe("on", () => {
     await w.setSteps(true);
     const added = size(inboxAgentTool(await w.tools())) - off;
     expect(Math.abs(added - INBOX_TOOL_COST_STEPS.bytes) / INBOX_TOOL_COST_STEPS.bytes).toBeLessThanOrEqual(0.05);
+  });
+
+  // What regresses: Claude Code cuts a tool description at 2,048 characters, which would drop the wake note and the
+  // help pointer at its end. Steps on, with the Board off and on, both builders (the mod's copy and the shared one).
+  test("the description with steps on stays under Claude Code's 2,048 characters, the Board off or on", async () => {
+    const w = await world();
+    await w.setSteps(true);
+    for (const board of [false, true]) {
+      if (board) await fetch(`${w.base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ board: { on: true } }) });
+      const served = await w.tools();
+      expect(served.some((tool) => tool.name === "card")).toBe(board);
+      for (const tool of [inboxAgentTool(served)!, modAgentTool(served)!]) {
+        expect(tool.description.length).toBeLessThan(2_048);
+        expect(tool.description).toEndWith("Every field and question syntax: `plannotator inbox --help`.");
+      }
+    }
   });
 });
