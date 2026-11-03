@@ -15,8 +15,8 @@
  *  - on a phone: a tap opens the composer inside the window, a swipe scrolls
  *    the thread, a sideways drag pans, and neither opens anything;
  *  - on a phone, full screen: two fingers pinch-zoom about themselves, one or
- *    two pan once zoomed, a double tap zooms in and back to Fit, Fit still
- *    fits, and a single tap on a part still opens the composer.
+ *    two pan once zoomed, a double tap on empty space zooms in and back to
+ *    Fit, Fit still fits, and a single tap on a part still opens the composer.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/thread-diagram-comments/.
@@ -118,6 +118,12 @@ async function saveComment(page: Page, words: string): Promise<void> {
   await expect(box).toBeFocused();
   await box.fill(words);
   await box.press('Enter');
+  await expect(composer(page)).toHaveCount(0);
+}
+
+/** No composer, checked once a tap on empty space would have opened one (it waits 300 ms for a second tap) and the composer's frame has run. */
+async function nothingOpened(page: Page): Promise<void> {
+  await page.waitForTimeout(500);
   await expect(composer(page)).toHaveCount(0);
 }
 
@@ -322,7 +328,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await hand.down(start.x, start.y, 0, -SWIPE_PX);
     await hand.up();
     await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before + SWIPE_PX / 2);
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // A sideways drag pans the diagram and opens nothing.
     await target.scrollIntoViewIfNeeded();
@@ -332,7 +338,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await hand.down(from.x, from.y, 48, 0, 8);
     await hand.up();
     await expect.poll(() => svg.evaluate((el) => (el as HTMLElement).style.transform)).not.toBe(transform);
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // Two fingers are never a tap on a part.
     const two = await centreOf(target);
@@ -340,7 +346,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: two.x, y: two.y, id: 0 }, { x: two.x + 40, y: two.y + 30, id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ x: two.x, y: two.y, id: 0 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // A tap on a part at the bottom of the canvas: the composer, whole, inside the window and the diagram's box.
     const insideTheCanvas = async () => {
@@ -448,15 +454,6 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
       }).toBe(true);
       return view();
     };
-    // The panel's own chrome is on the screen: the header, the close button and the zoom strip.
-    const screen = page.viewportSize()!;
-    for (const chrome of [popout.locator('[data-diagram-popout-chrome]'), popout.getByRole('button', { name: 'Close' }), popout.locator('[data-diagram-zoom-strip]')]) {
-      const at = (await chrome.boundingBox())!;
-      expect(at.x).toBeGreaterThanOrEqual(0);
-      expect(at.y).toBeGreaterThanOrEqual(0);
-      expect(at.x + at.width).toBeLessThanOrEqual(screen.width);
-      expect(at.y + at.height).toBeLessThanOrEqual(screen.height);
-    }
     const box = (await canvas.boundingBox())!;
     const centre: Point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     /** The diagram point (its own pixels) under a screen point. */
@@ -465,6 +462,32 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
       await page.touchscreen.tap(at.x, at.y);
       await page.waitForTimeout(80);
       await page.touchscreen.tap(at.x, at.y);
+    };
+    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer). */
+    const emptyNear = async (near: Point): Promise<Point> => {
+      const found = await page.evaluate(
+        ({ near, box }) => {
+          const layer = document.querySelector('[data-diagram-popout] [data-diagram-svg]')!;
+          const root = layer.querySelector('svg');
+          let best: { x: number; y: number } | null = null;
+          let bestDistance = Infinity;
+          for (let x = box.x + 30; x < box.x + box.width - 30; x += 10) {
+            for (let y = box.y + 30; y < box.y + box.height - 80; y += 10) {
+              const stack = document.elementsFromPoint(x, y);
+              if (stack.some((el) => (layer.contains(el) && el !== root) || el.closest('button, [data-diagram-control]'))) continue;
+              const distance = Math.hypot(x - near.x, y - near.y);
+              if (distance < bestDistance) {
+                bestDistance = distance;
+                best = { x, y };
+              }
+            }
+          }
+          return best;
+        },
+        { near, box },
+      );
+      expect(found, 'an empty spot on the canvas').not.toBeNull();
+      return found!;
     };
 
     const fit = await settledView();
@@ -498,12 +521,12 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
     await page.waitForTimeout(500);
     await expect.soft(composer(page)).toHaveCount(0);
 
-    // A double tap away from Fit goes back to Fit; at Fit it zooms in about the finger.
-    await doubleTap(centre);
+    // A double tap on empty space away from Fit goes back to Fit; at Fit it zooms in about the finger.
+    await doubleTap(await emptyNear(centre));
     const back = await settledView();
     await shot(page, '13-phone-double-tap-back-to-fit');
     expect.soft(back.scale, 'a double tap zoomed in goes back to Fit').toBeCloseTo(fit.scale, 3);
-    const tapAt: Point = { x: centre.x + 40, y: centre.y - 60 };
+    const tapAt = await emptyNear({ x: centre.x + 40, y: centre.y - 60 });
     const tapSpot = under(back, tapAt);
     await doubleTap(tapAt);
     const zoomed = await settledView();

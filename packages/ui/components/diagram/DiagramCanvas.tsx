@@ -47,10 +47,12 @@ import {
  * then a cluster.
  *
  * Fingers: two pinch-zoom about their midpoint and pan with it, and the one
- * left behind when the other lifts pans on (never a tap). A double tap zooms
- * in about the finger from Fit and back to Fit from anywhere else, so a
- * finger's single tap waits out the double-tap window before it clicks; a
- * mouse's click lands at once.
+ * left behind when the other lifts pans on (never a tap). A tap on a part
+ * clicks at once, inside the touch, so iOS raises the keyboard for the
+ * composer. A double tap on empty space zooms in about the finger from Fit
+ * and back to Fit from anywhere else, so a tap there waits out the
+ * double-tap window before it clicks; a pinch, a pan or a press anywhere else
+ * cancels the wait. A mouse's click lands at once.
  *
  * In the document flow the canvas lets a finger scroll the page vertically
  * (`touch-action: pan-y`); a full-size host that owns the screen passes
@@ -257,26 +259,36 @@ export function DiagramCanvas({
     return { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2 };
   }, []);
 
-  // A finger's tap waits out the double-tap window before it clicks: the
-  // last tap, and its click while it waits.
-  const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  const pendingTapRef = useRef<{ timer: ReturnType<typeof setTimeout>; run: () => void } | null>(null);
+  // A finger's tap on empty space waits out the double-tap window before it
+  // clicks (a tap on a part clicks at once, inside the touch, so iOS raises
+  // the keyboard for the composer it opens): where and when it landed, and
+  // its click while it waits.
+  const pendingTapRef = useRef<{ t: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
   const onClickElementRef = useRef(onClickElement);
   onClickElementRef.current = onClickElement;
-  const flushTap = useCallback(() => {
+  const cancelTap = useCallback(() => {
     const pending = pendingTapRef.current;
     if (pending === null) return;
     pendingTapRef.current = null;
     clearTimeout(pending.timer);
-    pending.run();
   }, []);
-  useEffect(
-    () => () => {
-      if (pendingTapRef.current !== null) clearTimeout(pendingTapRef.current.timer);
-      pendingTapRef.current = null;
-    },
-    [],
-  );
+  useEffect(() => cancelTap, [cancelTap]);
+  // Anything else pressed first takes the waiting tap's place: a badge, the
+  // zoom strip, the expand button, anything outside the canvas.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null) return;
+    const doc = host.ownerDocument;
+    const onDown = (event: PointerEvent) => {
+      if (pendingTapRef.current === null) return;
+      const target = event.target;
+      // A badge is a button, so a control.
+      const onCanvas = target instanceof Node && host.contains(target);
+      if (!onCanvas || isDiagramControlEvent(event)) cancelTap();
+    };
+    doc.addEventListener('pointerdown', onDown, true);
+    return () => doc.removeEventListener('pointerdown', onDown, true);
+  }, [cancelTap]);
 
   const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -299,7 +311,7 @@ export function DiagramCanvas({
         pinchRef.current = pinchOf();
         if (pressRef.current?.panning) setPanning(false);
         pressRef.current = null;
-        lastTapRef.current = null;
+        cancelTap();
         return;
       }
     }
@@ -313,7 +325,7 @@ export function DiagramCanvas({
       threshold: event.pointerType === 'touch' ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX,
       panning: false,
     };
-  }, [pinchOf]);
+  }, [cancelTap, pinchOf]);
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -343,6 +355,7 @@ export function DiagramCanvas({
         press.panning = true;
         setPanning(true);
         onHoverElement(null);
+        cancelTap();
         if (typeof event.currentTarget.setPointerCapture === 'function') {
           event.currentTarget.setPointerCapture(event.pointerId);
         }
@@ -351,7 +364,7 @@ export function DiagramCanvas({
       press.lastX = event.clientX;
       press.lastY = event.clientY;
     },
-    [onHoverElement, panBy, pinchOf, targetUnder, zoomBy],
+    [cancelTap, onHoverElement, panBy, pinchOf, targetUnder, zoomBy],
   );
 
   const endPress = useCallback(
@@ -379,7 +392,6 @@ export function DiagramCanvas({
       }
       if (press.panning) {
         setPanning(false);
-        lastTapRef.current = null;
         const target = event.currentTarget;
         if (typeof target.hasPointerCapture === 'function' && target.hasPointerCapture(event.pointerId)) {
           target.releasePointerCapture(event.pointerId);
@@ -392,30 +404,31 @@ export function DiagramCanvas({
         onClickElement(element, event.shiftKey);
         return;
       }
-      // A finger: the second tap of a double tap zooms, and the first one's
-      // click never lands. Any other tap clicks once the window has passed
-      // (a tap elsewhere first lets the waiting one click at once).
+      // A finger. The second tap of a double tap begun on empty space zooms,
+      // and the first one's click never lands.
       const now = Date.now();
-      const last = lastTapRef.current;
-      if (last !== null && now - last.t <= DOUBLE_TAP_MS && Math.hypot(event.clientX - last.x, event.clientY - last.y) <= DOUBLE_TAP_SLOP_PX) {
-        lastTapRef.current = null;
-        if (pendingTapRef.current !== null) clearTimeout(pendingTapRef.current.timer);
-        pendingTapRef.current = null;
+      const pending = pendingTapRef.current;
+      cancelTap();
+      if (pending !== null && now - pending.t <= DOUBLE_TAP_MS && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) <= DOUBLE_TAP_SLOP_PX) {
         toggleZoom(event.clientX, event.clientY);
         return;
       }
-      flushTap();
-      lastTapRef.current = { t: now, x: event.clientX, y: event.clientY };
+      // A part clicks at once, inside the touch (iOS shows the keyboard only
+      // for a focus made there); a double tap on it opens its composer.
+      if (element !== null) {
+        onClickElement(element, event.shiftKey);
+        return;
+      }
+      // Empty space waits for a second tap.
       const shiftKey = event.shiftKey;
-      const run = () => onClickElementRef.current(element, shiftKey);
       const timer = setTimeout(() => {
         if (pendingTapRef.current?.timer !== timer) return;
         pendingTapRef.current = null;
-        run();
+        onClickElementRef.current(null, shiftKey);
       }, DOUBLE_TAP_MS);
-      pendingTapRef.current = { timer, run };
+      pendingTapRef.current = { t: now, x: event.clientX, y: event.clientY, timer };
     },
-    [flushTap, onClickElement, pinchOf, targetUnder, toggleZoom],
+    [cancelTap, onClickElement, pinchOf, targetUnder, toggleZoom],
   );
 
   const onKeyDown = useCallback(
