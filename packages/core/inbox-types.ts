@@ -2323,6 +2323,9 @@ export interface InboxReplyDraft {
 /** The most sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes. */
 export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
 
+/** A session id as a tag (and a reply draft's recipient) names it. */
+export const INBOX_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
 /**
  * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
  * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's

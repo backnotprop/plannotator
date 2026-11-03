@@ -1149,7 +1149,7 @@ export const inboxApi = {
       feedback?: string;
       annotation_ids?: string[];
       /** Another live session takes the reply: the session that asked has ended. */
-      to?: { host: string; session: string };
+      to?: { host?: string; session: string };
       /**
        * The open questions the person chose to skip ("Skip them"), on this message or (with
        * `message_id`) another of the same session. A Send never skips anything else.

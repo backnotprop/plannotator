@@ -87,7 +87,7 @@ import { InboxComposerField, type InboxComposerFieldProps } from './ComposerFiel
 import { VoiceFoot } from './VoiceMic';
 import { ReplyFootPhone } from './ReplyFootPhone';
 import { ReplyRecipient } from './ReplyRecipient';
-import { headFolder, latestBy, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
+import { headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -2049,7 +2049,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   /** Send already stopped once to show that the recipient has ended: pressed again, the reply waits for it. */
   const rcptAsked = useRef(false);
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
-  const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const rcptAgents = useMemo(() => {
     if (!pillActive) return [];
     const people: RecipientPerson[] = [...participants];
@@ -2071,7 +2071,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       (session) => recipientState(session, taggable, ended),
     );
   }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone]);
-  const rcptIds: string[] = handingTo ? [handingTo.id] : [...new Set([...(rcptPick ?? (rcptDefault ? [rcptDefault] : [])), ...taggedIds])];
+  /** The choice, without a session this window does not list (a restored draft's): the pill and Send both read it. */
+  const rcptPicked = knownRecipients(rcptPick, (id) => rcptAgents.some((r) => r.session === id) || tagOpts.some((o) => o.id === id));
+  const rcptIds: string[] = handingTo ? [handingTo.id] : [...new Set([...(rcptPicked ?? (rcptDefault ? [rcptDefault] : [])), ...taggedIds])];
   const rcptChosen: RecipientRow[] = rcptIds.flatMap((id) => {
     const row = rcptAgents.find((r) => r.session === id);
     if (row) return [row];
@@ -3752,12 +3754,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // The pill's choice: the first gets the words (they answer its own latest message), the rest ride as tags.
     // Aimed at a live session, the replies to an ended session's questions in this Send follow it (`to`), as
     // the route choice's pick did.
-    const first = pillActive && !handingTo ? (rcptPick?.[0] ?? rcptDefault) : null;
+    const first = pillActive && !handingTo ? (rcptPicked?.[0] ?? rcptDefault) : null;
     const aimed = first !== null && first !== rcptDefault ? first : null;
     const firstLive = first ? (live?.sessions.find((s) => s.session === first) ?? null) : null;
     const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : undefined;
-    const pillExtra = pillActive && !handingTo && rcptPick ? rcptPick.slice(1) : [];
+    const pillExtra = pillActive && !handingTo && rcptPicked ? rcptPicked.slice(1) : [];
     const to = chosen ? { host: chosen.host, session: chosen.session } : aimedTo;
+    // Aimed at a session with no message of its own here (tagged in the thread): the words go to it by name (`to`),
+    // live or not as this window last read it. One not live any more is the server's refusal (409), never another agent.
+    const aimedHost = aimed
+      ? (firstLive?.host ?? rcptAgents.find((r) => r.session === aimed)?.host ?? tagOpts.find((o) => o.id === aimed)?.host ?? rcptGone.get(aimed) ?? null)
+      : null;
+    const aimedAway: { host?: string; session: string } | undefined = aimed ? { session: aimed, ...(aimedHost ? { host: aimedHost } : {}) } : undefined;
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
@@ -3771,6 +3779,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     /** The reply that carries the box's words, once its POST went out (its idempotency key), and why the Send stopped. */
     let wordsKey: string | null = null;
     let failure: unknown = null;
+    /** The session the request being posted names (`to`): the one a "not live any more" refusal is about. */
+    let postingTo: { host?: string; session: string } | undefined;
     /** This Send's words, the requests it posts, and the uploads they carry. */
     let sendWords = '';
     /** The Send carries the draft (its words, or a long paste kept beside them): its clear_draft goes, and the draft is done. */
@@ -3865,55 +3875,60 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       const plain = sendTargetsOf(current, skip, aimedAt).filter(
         (t, index, all) => t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0 || (carries && index === all.length - 1),
       );
-      // Aimed at a live session that never wrote here (tagged in it): the reply carrying the words goes to it alone
-      // (`to`). When that reply also answers a live session's own questions, those answers stay that session's, and
-      // the aimed session is tagged on it instead.
-      let wordsTo: { host: string; session: string } | undefined;
-      const aimAsTag: string[] = [];
-      if (aimed && !aimedAt && aimedTo && carries) {
-        const wordsTarget = plain.at(-1);
-        const owner = wordsTarget?.message.author.kind === 'agent' ? (wordsTarget.message.author.session ?? null) : null;
-        const ownAnswers = !!wordsTarget && (wordsTarget.questions.length > 0 || wordsTarget.skip.length > 0 || wordsTarget.actions.length > 0);
-        if (ownAnswers && !(owner && sendEnded.has(owner))) aimAsTag.push(aimed);
-        else wordsTo = aimedTo;
-      }
+      // Aimed at a session that never wrote here: the reply carrying the words goes to it alone (`to`). When that
+      // reply would also answer another session's own questions, it splits in two: the answers go to the session
+      // that asked them, with no words, and the words go only to the aimed one. Each half keeps its own key.
+      const wordsTo = aimed && !aimedAt && carries ? aimedAway : undefined;
       // A comment on another session's message rides a reply to that message (routeSendAnnotations).
       const { targets, carried } = routeSendAnnotations(current, plain, pendingAnnotations);
       if (targets.length === 0) {
         setError('Write a reply or pick an answer first.');
         return;
       }
-      const lastId = targets.at(-1)!.message.id;
+      /** One request of this Send: its target, the key it keeps across retries, its comments, and where it goes. */
+      const parts = targets.map((t) => ({ target: t, key: replyKeyOf(t.message), own: carried.get(t.message.id) ?? [], wordsTo: undefined as typeof wordsTo }));
+      if (wordsTo) {
+        const tail = parts.at(-1)!;
+        const t = tail.target;
+        const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
+        if (t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0) {
+          tail.own = [];
+          parts.push(wordsPart);
+        } else {
+          parts[parts.length - 1] = wordsPart;
+        }
+      }
+      const lastKey = parts.at(-1)!.key;
       // Every tag of this Send (the words', the pill's other recipients' and every carried comment's), once each, on the last reply.
       const sendTags = sendTagsByTarget(
-        targets.map((t) => ({ id: t.message.id, owner: t.message.id === lastId && wordsTo ? wordsTo.session : t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null })),
-        [...taggedIds, ...pillExtra, ...aimAsTag],
-        new Map(targets.map((t) => [t.message.id, (carried.get(t.message.id) ?? []).flatMap((r) => commentTags(r))])),
+        parts.map((p) => ({ id: p.key, owner: p.wordsTo ? p.wordsTo.session : p.target.message.author.kind === 'agent' ? (p.target.message.author.session ?? null) : null })),
+        [...taggedIds, ...pillExtra],
+        new Map(parts.map((p) => [p.key, p.own.flatMap((r) => commentTags(r))])),
         tagOpts,
         sendMode,
       );
       // The line under the sent reply names the pill's recipients as the pill does ("Claude Code (plannotator)").
       // A typed `@` keeps its own label: the words carry it, and the sent reply paints it from the label.
-      const pillNamed = new Set([...pillExtra, ...aimAsTag].filter((id) => !taggedIds.includes(id)));
+      const pillNamed = new Set(pillExtra.filter((id) => !taggedIds.includes(id)));
       if (pillNamed.size > 0) {
         for (const [id, list] of sendTags) sendTags.set(id, list.map((t) => (pillNamed.has(t.session) ? { ...t, label: rcptAgents.find((r) => r.session === t.session)?.label ?? t.label } : t)));
       }
       if (!sendKeys.current) sendKeys.current = new Map();
-      // One key per session's reply, kept for a retry.
-      for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), newUuid());
+      // One key per session's reply (and one for words aimed away from it), kept for a retry.
+      for (const p of parts) if (!sendKeys.current.has(p.key)) sendKeys.current.set(p.key, newUuid());
       // A retry whose words, files or annotations changed, or that carries a pick or skip the last try did
       // not: each reply carrying them is a new one (a replay of the old key would drop the new answer). A pick
       // that went with the last try and is now sent only leaves the list, which keeps the key.
       const contents = new Map<string, SentContents>(
-        targets.map((t) => [
-          replyKeyOf(t.message),
+        parts.map((p) => [
+          p.key,
           {
             value: JSON.stringify([
-              t.message.id,
-              t.message.id === lastId ? [words, uploads, sendTags.get(lastId) ?? []] : [],
-              (carried.get(t.message.id) ?? []).map((r) => [r.id, r.updated_at]),
+              p.target.message.id,
+              p.key === lastKey ? [words, uploads, sendTags.get(lastKey) ?? [], p.wordsTo ?? null] : [],
+              p.own.map((r) => [r.id, r.updated_at]),
             ]),
-            answers: sendTargetAnswerIds(t),
+            answers: sendTargetAnswerIds(p.target),
           },
         ]),
       );
@@ -3923,16 +3938,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // a comment on another session's message rides the reply to it. The
       // skills each reply's words and comments reference ride it too, as one
       // block at its end (skills.ts: a human-only skill's SKILL.md pasted in, its folder named).
-      for (const [index, target] of targets.entries()) {
-        const last = index === targets.length - 1;
-        const own = carried.get(target.message.id) ?? [];
+      for (const [index, part] of parts.entries()) {
+        const { target, own } = part;
+        const last = index === parts.length - 1;
         const annotationsFeedback = own.length > 0 ? await buildFeedback(own) : '';
         const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE);
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
-        const tags = sendTags.get(target.message.id) ?? [];
+        const tags = sendTags.get(part.key) ?? [];
         requests.push({ messageId: target.message.id, input: {
-          idempotency_key: sendKeys.current.get(replyKeyOf(target.message)) ?? newUuid(),
+          idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
           words: last ? words : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
@@ -3947,9 +3962,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
           // Only a message an ended session of this Send asked goes to the session picked;
           // an answer to a live session's message still goes to that session.
-          // The words aimed with the pill at a live session that never wrote here go to it alone.
-          ...(last && wordsTo
-            ? { to: wordsTo }
+          // The words aimed with the pill at a session that never wrote here go to it alone.
+          ...(part.wordsTo
+            ? { to: part.wordsTo }
             : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session)
               ? { to }
               : {}),
@@ -3962,6 +3977,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       let handedReply: InboxMessageWire | null = null;
       for (const request of requests) {
         if (request.input.words) wordsKey = request.input.idempotency_key;
+        postingTo = request.input.to;
         const answer = await inboxApi.reply(request.messageId, request.input);
         const written = answer.reply as InboxMessageWire | null;
         if (written?.handoff && !answer.replayed) handedReply = written;
@@ -4032,16 +4048,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // The race: the chosen session ended before the reply went. Its row
       // greys and the next live one is selected; the error says what went
       // when an earlier part of this Send already had.
-      if (to && cause instanceof InboxApiError && cause.code === 'session_not_live') {
+      const raceTo = postingTo;
+      if (raceTo && cause instanceof InboxApiError && cause.code === 'session_not_live') {
         if (pillActive && !chosen) {
           // The pill's list opens with that agent ended (the route choice is gone, approval "inbox-reply-recipient").
-          setRcptGone((current) => new Map([...current, [to.session, to.host]]));
-          setError(raceWhat(to.host, { went, total }));
+          const host = raceTo.host ?? rcptAgents.find((r) => r.session === raceTo.session)?.host ?? null;
+          setRcptGone((current) => new Map([...current, [raceTo.session, host]]));
+          setError(raceWhat(host, { went, total }));
           rcptAsked.current = true;
           if (!box.open) openBox();
           setRcptOpen(true);
         } else {
-          setRoute((current) => routeRace(current, to.session, { went, total }));
+          setRoute((current) => routeRace(current, raceTo.session, { went, total }));
         }
         if (went > 0) await onChanged();
         void loadLive();
@@ -4586,7 +4604,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         announce(`This reply goes to ${row.label}.`);
       }}
       onToggle={(row) => {
-        const next = toggleRecipient(rcptPick ?? (rcptDefault ? [rcptDefault] : []), row.session);
+        // The agents typed with `@` count toward the most one reply goes to.
+        const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
+        const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length);
         aimReply(next);
         announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
       }}

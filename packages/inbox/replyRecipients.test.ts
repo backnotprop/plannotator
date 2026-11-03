@@ -5,7 +5,8 @@
  * makes two Claude Codes look the same, and the reply goes to the wrong one.
  */
 import { expect, test } from 'bun:test';
-import { canAddRecipient, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
+import { INBOX_TAGS_MAX } from '@plannotator/core/inbox-types';
+import { canAddRecipient, knownRecipients, RECIPIENTS_MAX, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
 import type { TaggableModel } from './api';
 
 const rowsOf = (people: { host: string; session: string }[], folders: Record<string, string | null>, states: Record<string, RecipientState> = {}) =>
@@ -53,6 +54,25 @@ test('an ended agent, or one on an older Plannotator, cannot be added as a secon
   expect(canAddRecipient(row('old'), ['a'])).toBe(false);
   expect(canAddRecipient(row('reader'), ['a'])).toBe(true);
   expect(canAddRecipient(row('ended'), ['a', 'x'])).toBe(true);
+});
+
+test('nine recipients at most: no circle can be ticked past them (typed tags counted), so a Send never goes past its eight tags', () => {
+  const row = { session: 'x', host: null, label: 'X', short: 'X', state: 'live' as const };
+  const nine = Array.from({ length: RECIPIENTS_MAX }, (_, i) => `s${i}`);
+  expect(RECIPIENTS_MAX).toBe(INBOX_TAGS_MAX + 1);
+  expect(canAddRecipient(row, nine.slice(0, -1))).toBe(true);
+  expect(canAddRecipient(row, nine)).toBe(false);
+  // One already in stays removable at the most.
+  expect(canAddRecipient({ ...row, session: 's0' }, nine)).toBe(true);
+  expect(toggleRecipient(nine, 'x')).toEqual(nine);
+  expect(toggleRecipient(['a'], 'b', 1)).toEqual(['a']);
+});
+
+test('a restored choice keeps only the sessions the window lists; none left falls back to the default', () => {
+  const known = (id: string) => id === 'a' || id === 'b';
+  expect(knownRecipients(['zz', 'b', 'a'], known)).toEqual(['b', 'a']);
+  expect(knownRecipients(['zz'], known)).toBeNull();
+  expect(knownRecipients(null, known)).toBeNull();
 });
 
 test('a circle adds, and takes away all but the last recipient', () => {

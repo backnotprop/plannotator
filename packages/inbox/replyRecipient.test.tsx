@@ -11,7 +11,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
 
 const hasDom = typeof document !== 'undefined';
@@ -46,6 +47,35 @@ function agentMessage(id: string, author: InboxMessageWire['author'], minute: nu
   };
 }
 
+const QUESTION_BODY = ['Which totals?', '', ':::question', 'Which totals should the report use?', '', '- [ ] The old totals', '- [ ] The new totals', ':::'].join('\n');
+
+/** The question of QUESTION_BODY on `messageId`, Claude Code's, picked and not sent yet. */
+function pickedQuestion(messageId: string): InboxQuestion[] {
+  return parseInboxQuestionBlocks(QUESTION_BODY).map((q) => ({
+    key: q.key,
+    position: q.position,
+    kind: q.kind,
+    prompt: q.prompt,
+    context: q.parsed.context,
+    choices: q.parsed.choices,
+    recommendation: null,
+    suggested_text: null,
+    stopped: q.stopped,
+    holds_up: q.holds_up,
+    asked_by_agent_id: 'ses_claude',
+    orphaned: false,
+    state: 'picked',
+    answer: { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['The old totals'] },
+    revision: 1,
+    sent_revision: 0,
+    picked_by: null,
+    picked_at: '2026-11-01T10:42:00.000Z',
+    sent_reply_id: null,
+    message_id: messageId,
+    superseded_by: null,
+  }));
+}
+
 const threadOf = (...messages: InboxMessageWire[]): InboxThread => ({ thread_id: M1, project: PROJECT, subject: 'Accounts and usage', thread_name: null, resolved_at: null, messages });
 
 function tagged(session: string, host: string, project: { id: string; name: string; root: string } = PROJECT): TaggableSession {
@@ -57,11 +87,17 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let taggable: TaggableSession[] = [];
+/** The draft the thread opens with (a reload's), or null. */
+let savedDraft: Record<string, unknown> | null = null;
+/** The live sessions the `@` model and the live list leave out (both read them as ended); a reply `to` one is the server's 409. */
+let notLive = new Set<string>();
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
+  savedDraft = null;
+  notLive = new Set();
   taggable = [tagged('ses_claude', 'claude-code'), tagged('ses_pi', 'pi'), tagged('ses_far', 'claude-code', FAR)];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -69,10 +105,14 @@ beforeEach(() => {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       posted.push({ path, body });
       if (path.endsWith('/draft')) return Response.json({ draft: { thread_id: M1, body: body.body, updated_at: new Date(Date.now() + posted.length).toISOString(), ...(body.recipients ? { recipients: body.recipients } : {}) } });
+      const to = body.to as { session?: string } | undefined;
+      if (path.endsWith('/reply') && to?.session && notLive.has(to.session)) {
+        return Response.json({ error: 'That session is not live any more: the reply was not sent.', code: 'session_not_live' }, { status: 409 });
+      }
       if (path.endsWith('/reply')) return Response.json({ reply: {}, questions: [], replayed: false });
       return Response.json({ questions: [] });
     }
-    if (path.endsWith('/draft')) return Response.json({ draft: null });
+    if (path.endsWith('/draft')) return Response.json({ draft: savedDraft });
     if (path.includes('/taggable')) return Response.json({ serverSession: 's', owner: null, sessions: taggable });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
@@ -257,4 +297,86 @@ test.skipIf(!hasDom)('Send to an agent that ended opens the list once; pressed a
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
   expect(replies()[0]!.body.to).toBeUndefined();
+});
+
+/** The person's reply that tagged Codex (`ses_gone`): Codex is in the thread, but never wrote in it. */
+const TAGGED_GONE = (): InboxMessageWire => ({
+  ...agentMessage(M2, { kind: 'person' } as InboxMessageWire['author'], 43, { wakes: undefined }),
+  tags: [{ host: 'codex', session: 'ses_gone', wakes: true }],
+});
+const sentTo = () => replies().map((r) => (r.body.to as { session?: string } | undefined)?.session ?? null);
+const tagSessions = () => replies().flatMap((r) => ((r.body.tags as { session: string }[] | undefined) ?? []).map((t) => t.session));
+
+test.skipIf(!hasDom)('aimed alone at a tagged agent that ended and never wrote here: the words go to it by name and draw the refusal, never to the agent that wrote', async () => {
+  notLive = new Set(['ses_gone']);
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
+  const text = await write(el, 'Codex, are you there?');
+  await openList(el);
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Codex', 'ended'],
+  ]);
+  await only(el, 'ses_gone');
+  expect(pillName(el)).toBe('Codex');
+  // Send opens the list once (it ended), and sends nothing.
+  await send(el);
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  // Pressed again (and again): the words go to Codex alone, by name; the 409 keeps them in the box.
+  await send(el);
+  await send(el);
+  expect(replies().length).toBeGreaterThan(0);
+  expect(sentTo().every((s) => s === 'ses_gone')).toBe(true);
+  expect(replies()[0]!.body).toMatchObject({ words: 'Codex, are you there?', to: { host: 'codex', session: 'ses_gone' } });
+  expect(tagSessions()).toEqual([]);
+  expect(el.querySelector('.ib-error[role="alert"]')?.textContent).toContain('ended before your reply went. Nothing was sent.');
+  expect(text.value).toBe('Codex, are you there?');
+});
+
+test.skipIf(!hasDom)('a restored draft aimed at a tagged agent that ended: Send goes to it alone, and a session the window does not know is dropped from the choice', async () => {
+  notLive = new Set(['ses_gone']);
+  savedDraft = { v: 1, thread_id: M1, body: 'Still on the migration?', created_at: '2026-11-01T10:46:00.000Z', updated_at: '2026-11-01T10:46:00.000Z', recipients: ['ses_unknown', 'ses_gone'] };
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
+  // The draft's box is open, with its words.
+  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Still on the migration?');
+  // The unknown session is not named, and not sent to or tagged.
+  expect(pillName(el)).toBe('Codex');
+  await send(el);
+  await send(el);
+  expect(replies().length).toBeGreaterThan(0);
+  expect(sentTo().every((s) => s === 'ses_gone')).toBe(true);
+  expect(tagSessions()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('aimed at a tagged live agent while answering the writer\'s own question: the answers go to the writer with no words, the words to the picked agent alone, and a retry sends neither twice', async () => {
+  const asked = agentMessage(M1, CLAUDE, 41, { body: QUESTION_BODY, questions: pickedQuestion(M1) });
+  const piTagged: InboxMessageWire = { ...TAGGED_GONE(), tags: [{ host: 'pi', session: 'ses_pi', wakes: true }] };
+  const el = await render(threadOf(asked, piTagged));
+  // The pick waits as a draft: the foot opens the box with Edit draft.
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Edit draft').click());
+  await settle();
+  await write(el, 'Pi, take the totals from here.');
+  await openList(el);
+  await only(el, 'ses_pi');
+  expect(pillName(el)).toBe('Pi');
+  // Pi ends as the words go: the answers already went to Claude Code.
+  notLive = new Set(['ses_pi']);
+  await send(el);
+  const firstTry = replies();
+  expect(firstTry.map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`, `/api/inbox/messages/${M1}/reply`]);
+  const [answers, words] = firstTry;
+  expect(answers!.body.words).toBe('');
+  expect((answers!.body.questions as unknown[]).length).toBe(1);
+  expect(answers!.body.to).toBeUndefined();
+  expect(answers!.body.tags).toBeUndefined();
+  expect(words!.body).toMatchObject({ words: 'Pi, take the totals from here.', questions: [], to: { host: 'pi', session: 'ses_pi' } });
+  expect(words!.body.tags).toBeUndefined();
+  expect(words!.body.idempotency_key).not.toBe(answers!.body.idempotency_key);
+  // Pressed again (Pi is back): each half keeps its key, so the server replays the answers and the words go once.
+  notLive = new Set();
+  posted = [];
+  await send(el);
+  const retry = replies();
+  expect(retry.map((r) => r.body.idempotency_key)).toEqual([answers!.body.idempotency_key, words!.body.idempotency_key]);
+  expect(retry.filter((r) => r.body.words !== '').map((r) => (r.body.to as { session: string }).session)).toEqual(['ses_pi']);
 });

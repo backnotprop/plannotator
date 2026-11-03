@@ -8,7 +8,7 @@
  * folder "Claude Code 2", numbered by who came first. A phone shows the folder
  * alone beside the tile ("plannotator"). Live agents come first, ended last.
  */
-import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableModel } from './api';
 import { agentName } from './tags';
 
@@ -98,13 +98,31 @@ export function recipientRows(
   return [...rows.filter((r) => r.state !== 'ended'), ...rows.filter((r) => r.state === 'ended')];
 }
 
-/** A tap on a circle: that agent too, or (already in, and not the only one) not any more. */
-export function toggleRecipient(current: readonly string[], session: string): string[] {
-  if (!current.includes(session)) return [...current, session];
+/**
+ * The most agents one reply goes to: the one it answers and as many tags as a reply takes. Counted with the
+ * agents typed with `@` in the box, so ticks never take a Send past its tags.
+ */
+export const RECIPIENTS_MAX = INBOX_REPLY_DRAFT_RECIPIENTS_MAX;
+
+/** A tap on a circle: that agent too (while under the most), or (already in, and not the only one) not any more. */
+export function toggleRecipient(current: readonly string[], session: string, max: number = RECIPIENTS_MAX): string[] {
+  if (!current.includes(session)) return current.length < max ? [...current, session] : [...current];
   return current.length > 1 ? current.filter((id) => id !== session) : [...current];
 }
 
-/** Whether a circle can be ticked: an ended agent, or one on an older Plannotator, can't be a second recipient. */
+/**
+ * Whether a circle can be ticked: an ended agent, or one on an older Plannotator, can't be a second recipient,
+ * and none can once the reply goes to the most it takes (`chosen`: everyone it goes to, typed tags too).
+ */
 export function canAddRecipient(row: RecipientRow, chosen: readonly string[]): boolean {
-  return chosen.includes(row.session) || (row.state !== 'ended' && row.state !== 'old');
+  if (chosen.includes(row.session)) return true;
+  return row.state !== 'ended' && row.state !== 'old' && chosen.length < RECIPIENTS_MAX;
+}
+
+/** A restored choice without the sessions this window does not know (a draft naming one it never listed): null when none is left. */
+export function knownRecipients(pick: readonly string[] | null, known: (session: string) => boolean): readonly string[] | null {
+  if (pick === null) return null;
+  const kept = pick.filter(known);
+  if (kept.length === pick.length) return pick;
+  return kept.length > 0 ? kept : null;
 }

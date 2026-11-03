@@ -92,6 +92,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
+  INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
   type InboxSentRecipient,
   type InboxTag,
@@ -468,7 +469,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
     const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
-    if (typeof session !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(session)) {
+    if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
@@ -2869,8 +2870,10 @@ export class InboxStore {
       ...thread,
       messages: thread.messages.map((message) => {
         let out: InboxMessageWire = message;
+        // The writer's own folder, by name only: an agent never reads another folder's absolute path.
+        if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
         if (message.ack !== undefined) {
-          const { ack, ...rest } = message;
+          const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for

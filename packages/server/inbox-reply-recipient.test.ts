@@ -104,6 +104,11 @@ describe("a reply draft remembers who it goes to", () => {
     expect(twice.status).toBe(422);
     const many = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: Array.from({ length: 10 }, (_, i) => `ses-${i}`) });
     expect(many.status).toBe(422);
+    // Only session ids as a tag names them: a path, a space or a line break is refused.
+    for (const id of ["../ses-a", "ses a", "ses-a\nx", ""]) {
+      const odd = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: [id] });
+      expect(odd.status).toBe(422);
+    }
     expect((await readDraft(server, asked.thread_id))?.body).toBe("Ship it today");
   });
 });
@@ -119,6 +124,13 @@ describe("an agent answering from another folder keeps its project", () => {
     expect(messages.find((m) => m.id === fromThere.message_id)?.from_project).toEqual({ name: "plannotator", root: plannotator });
     expect(messages.find((m) => m.id === fromHere.message_id)?.from_project).toBeUndefined();
     expect(messages.find((m) => m.id === started.message_id)?.from_project).toBeUndefined();
+
+    // An agent reading the thread's full records gets the folder's name only, never the other folder's absolute path.
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: started.thread_id, agent_session: "ses-c", format: "full" } });
+    expect(read.isError).toBeFalsy();
+    const seen = JSON.stringify(read);
+    expect(seen).not.toContain(plannotator);
+    expect(seen).toContain('"from_project":{"name":"plannotator"}');
   });
 });
 
