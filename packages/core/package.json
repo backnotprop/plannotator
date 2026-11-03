@@ -47,6 +47,7 @@
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
     "./inbox-actions": "./inbox-actions.ts",
+    "./inbox-reveals": "./inbox-reveals.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",

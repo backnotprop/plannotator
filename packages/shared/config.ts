@@ -452,12 +452,28 @@ export interface PlannotatorConfig {
   inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
-   * person turns on, off by default. On: the sidebar's Board row and page,
-   * and the Inbox serves the agents' `card` tool. Off: neither, every card
-   * kept. Written by the Inbox's Settings → Capabilities (`POST
-   * /api/inbox/settings` `{ board: { on } }`), read on every request.
+   * person turns on. On: the sidebar's Board row and page, and the Inbox
+   * serves the agents' `card` tool. Off: neither, every card kept. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ board: { on } }`), read on every request. Three readings (approval
+   * "inbox-feature-reveal"): unset = not decided yet (off, and the only state
+   * the reveal can turn on), `true` = on, `false` = the person switched it
+   * off. The reveal's claim is the only automatic write, unset -> `true`.
    */
   inboxBoard?: boolean;
+  /**
+   * The queue of one-time reveals for returning users (approval
+   * "inbox-feature-reveal"; rules in packages/core/inbox-reveals.ts). Written
+   * only by the server. `lastShownAt`: the last one-time announcement claimed
+   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * spacing's clock. `waitingSince`: when each reveal first became next, for
+   * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
+   */
+  inboxReveals?: {
+    lastShownAt?: string;
+    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    board?: { shownAt?: string };
+  };
   inboxSound?: {
     enabled?: boolean;
     volume?: number;

@@ -43,6 +43,7 @@ import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import type { RevealId as InboxRevealId } from '@plannotator/core/inbox-reveals';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
@@ -364,6 +365,8 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
+  /** The reveals for returning users: the one this page may arm (POST /api/inbox/reveal), or null. Absent from an older Inbox. */
+  reveal?: { next: InboxRevealId | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -1350,6 +1353,8 @@ export const inboxApi = {
   claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
   /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
   claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
+  /** A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). The Board's turns the Board on. */
+  claimReveal: (id: InboxRevealId) => post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean } }>(inboxUrl('/reveal'), { id }),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),

@@ -480,10 +480,18 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
      * A request the listener let in came from the machine's owner, not a login
      * config.json `inboxTailscaleAllow` added: only the owner may send
      * Feedback (inbox-feedback.ts).
+     *
+     * `taggedAllowed`: on a machine Tailscale names no owner for (a tagged
+     * device), a login the listener let in (config.json `inboxTailscaleAllow`)
+     * counts as the owner, since the owner can only reach it that way. Asked
+     * only by rules that must never hold the owner back on their own tailnet
+     * (the reveals: approval "inbox-feature-reveal").
      */
-    isOwnerRequest: (headers: Headers): boolean => {
+    isOwnerRequest: (headers: Headers, options: { taggedAllowed?: boolean } = {}): boolean => {
       const identity = checkTailnetIdentity(headers, state.allowed);
-      return identity.ok && state.owner !== null && normalizeTailnetLogin(identity.login) === state.owner;
+      if (!identity.ok) return false;
+      if (state.owner === null) return options.taggedAllowed === true;
+      return normalizeTailnetLogin(identity.login) === state.owner;
     },
   };
 }
