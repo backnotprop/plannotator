@@ -189,6 +189,15 @@ The Plannotator Inbox is one local window per machine where you leave the person
 - Never run `plannotator inbox` just to send: calls start a stopped Inbox in the background, and bare `plannotator inbox` opens the window for the person. `--tailscale` is the person's choice; never add it. `plannotator inbox status` only reads; never run `plannotator inbox stop` or `restart` unless the person asks.
 - When the person asks where their Inbox is, or to open it (a closed tab), run `plannotator inbox --open`: it opens the window in their browser (starting the Inbox in the background if needed), prints its address on stdout and returns at once. Tell them the address.
 
+## plannotator t3
+
+```bash
+plannotator t3 login --url <T3 MCP URL>
+plannotator t3 logout --url <T3 MCP URL>
+```
+
+If the person uses T3 Code, set it up once so their Inbox replies reach Claude threads in T3 as new turns: run `plannotator t3 --help` and follow its two steps. The person approves T3's sign-in page themselves.
+
 ## plannotator card
 
 ```bash
