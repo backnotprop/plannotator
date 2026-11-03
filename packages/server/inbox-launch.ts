@@ -1108,7 +1108,9 @@ export function createInboxLaunch(options: {
       const state = stateOf(host);
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
-      const line = runOfRoot(store.message(threadId)!);
+      const runLine = runOfRoot(store.message(threadId)!);
+      // The home folder is never trusted: the how-to then says to start in a folder inside it.
+      const line = runLine?.untrusted && resolve(root.launch.folder) === resolve(options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
