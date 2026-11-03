@@ -257,6 +257,8 @@ function switchLineText(line: SwitchLine, label: string): string {
     not_installed: 'claude-swap is not installed.',
     owner_only: 'Owner only.',
     unreachable: 'The Inbox did not answer.',
+    offline: 'The machine is asleep.',
+    needs_update: 'Update Plannotator there.',
   };
   return `Couldn't switch to ${label}. ${why[line]}`;
 }
@@ -515,6 +517,8 @@ function ToolList({
           <span>{tool.name}</span>
         </span>
       </div>
+      {/* A switch whose read after it shows no list (that machine went to sleep, say): its line stands over what there is. */}
+      {read?.state !== 'accounts' && change && !change.going && change.line && <SwitchNote change={change} tool={tool} onRetry={null} />}
       {body}
     </div>
   );

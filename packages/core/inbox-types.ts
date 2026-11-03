@@ -1986,6 +1986,13 @@ export type InboxAccountSwitchFailure = InboxAccountsFailure | "changed" | "renu
 /** The switch's answer. No address and no `cswap` words: `number` is the account in use after it. */
 export type InboxAccountSwitch = { state: "switched"; number: number } | { state: "failed"; reason: InboxAccountSwitchFailure } | { state: "not_installed" };
 
+/**
+ * `POST /api/inbox/m/<machine>/accounts/switch`: a linked machine's switch,
+ * sent now through its door and never held. Its own answer, or why there is
+ * none, as for its read: `offline`, `needs_update`, `unreachable`.
+ */
+export type InboxMachineAccountSwitch = InboxAccountSwitch | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;

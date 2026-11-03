@@ -52,6 +52,7 @@ import type {
   InboxAgentId,
   InboxAccountsRead,
   InboxAccountSwitch,
+  InboxMachineAccountSwitch,
   InboxAccountSwitchTarget,
   InboxMachineAccountsRead,
   InboxAgentsModel,
@@ -1439,6 +1440,8 @@ export const inboxApi = {
   switchAccount: (target: InboxAccountSwitchTarget) => post<InboxAccountSwitch>(inboxUrl('/accounts/switch'), { ...target }),
   /** A linked machine's, through its door. One call per machine, so a slow one holds up only itself. */
   machineAccounts: (machine: string, fresh = false) => get<InboxMachineAccountsRead>(inboxUrl(`/accounts/${encodeURIComponent(machine)}`, fresh ? 'fresh=1' : undefined)),
+  /** Switch a linked machine's Claude Code, through the forward: sent now, never held. The owner only; a read of that machine after it shows the account in use. */
+  switchMachineAccount: (machine: string, target: InboxAccountSwitchTarget) => post<InboxMachineAccountSwitch>(inboxUrl(`/m/${encodeURIComponent(machine)}/accounts/switch`), { ...target }),
   /** Settings → Agents and the agent-note dialog (packages/server/inbox-agents.ts, inbox-agent-notes.ts). */
   agents: () => get<InboxAgentsModel>(inboxUrl('/agents')),
   saveAgent: (agent: InboxAgentId, change: { reach?: boolean; reminder?: boolean; note?: boolean }) =>

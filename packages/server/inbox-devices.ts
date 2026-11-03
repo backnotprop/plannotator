@@ -64,6 +64,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
 import { INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { switchTarget } from "./inbox-accounts";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
   PAIRING_CHECKS_DEADLINE_MS,
@@ -227,11 +228,16 @@ const ALLOWLIST: readonly DoorRoute[] = [
 const MACHINE_DOOR_WRITES = ["link-back", "unlink"] as const;
 /** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
 const MACHINE_DOOR_ACCOUNTS = "accounts";
+/**
+ * This computer's account switch, for its owner's other machine: like the read, never on the allowlist, and never
+ * a `command` either, so no answer is kept on disk and no key replays it. A second copy re-lists and runs nothing.
+ */
+const MACHINE_DOOR_ACCOUNTS_SWITCH = "accounts/switch";
 
 /** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
 export function doorRouteNames(): string[] {
   const words = (route: RegExp) => route.source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
-  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), `GET ${MACHINE_DOOR_ACCOUNTS}`, ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`)];
+  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), `GET ${MACHINE_DOOR_ACCOUNTS}`, ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`), `POST ${MACHINE_DOOR_ACCOUNTS_SWITCH}`];
 }
 
 /** For rule 8's test: the door's POST routes, and which take a raw body (a file). */
@@ -841,6 +847,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
       // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
       if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
+      // The switch goes to this Inbox's own route, which re-lists and matches here. Only the target's four fields go on.
+      if (req.method === "POST" && route === MACHINE_DOOR_ACCOUNTS_SWITCH) {
+        const target = switchTarget(await context.readBody(req));
+        if (!target) throw new InboxError("validation_error", "number: cswap's account number; email and organizationName: as the list read them, or null.", { field: "number" });
+        return await toWindow(req, "/api/inbox/accounts/switch", "", JSON.stringify(target), req.signal);
+      }
     }
     for (const entry of ALLOWLIST) {
       if (entry.method !== req.method) continue;

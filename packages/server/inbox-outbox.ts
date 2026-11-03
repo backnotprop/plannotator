@@ -128,6 +128,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
   return messages.some((message) => message.author.kind === "agent" && (seqOf(message.id) ?? 0) > seenThroughSeq);
 }
 
+export type DoorWriteKind = "append" | "set" | "file" | "now";
+
 /**
  * Rule 8, scoped by one table: every write the device door takes, and why a
  * second copy of it is safe. A copy can reach the owner twice when the door's
@@ -140,10 +142,13 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  * - `set` puts a state (read, archived, a pick under its revision, an
  *   annotation under its own id), so a second copy changes nothing more.
  * - `file` is an upload or a drawing: never held, sent only while online.
+ * - `now` acts on the machine itself (a linked machine's account switch):
+ *   never held, sent once while online or answered offline. A second copy
+ *   re-lists there and finds the account already in use, so it runs nothing.
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = {
+export const DOOR_WRITES: Readonly<Record<string, DoorWriteKind>> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
@@ -173,6 +178,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = 
   "POST markups": "file",
   "POST link-back": "set",
   "POST unlink": "set",
+  "POST accounts/switch": "now",
 };
 
 const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).map(([name, kind]) => ({
@@ -186,7 +192,7 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).map(([name, kind]) => ({
  * held in the outbox. Null: no door write has that route, so it is never
  * forwarded (a write rule 8 has not classified cannot reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | null {
+export function doorWriteKind(route: string): DoorWriteKind | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
 }
 

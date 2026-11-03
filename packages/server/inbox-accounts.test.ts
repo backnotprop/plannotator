@@ -56,9 +56,11 @@ interface WorldOptions {
   accountsMs?: number;
   /** A stand-in for another Inbox's door, linked here. */
   linkedTo?: string;
+  /** A tagged Tailscale device: no owner, so its allowlist's login is the person who uses it. */
+  tagged?: boolean;
 }
 
-async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo, tagged = false }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -78,7 +80,9 @@ async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLim
   const serve = new Map<number, string>();
   const run: TailscaleRunner = (args) => {
     const done = (stdout = "") => ({ status: 0, stdout, stderr: "" });
-    if (args[0] === "status") return done(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+    if (args[0] === "status") {
+      return done(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
+    }
     if (args[1] === "status") {
       if (serve.size === 0) return done("{}");
       return done(JSON.stringify({ TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])), Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])) }));
@@ -133,7 +137,7 @@ async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLim
     expect(answer.status).toBe(200);
     return (await answer.json()) as InboxMachineAccountsRead;
   };
-  return { root, bin, dataDir, base, read, readOf, accounts, through, settings, switchTo };
+  return { root, bin, dataDir, base, server, read, readOf, accounts, through, settings, switchTo };
 }
 
 /** `from` links one way to `to` over its door, as `plannotator inbox link --one-way` does. Answers `to`'s id. */
@@ -148,7 +152,12 @@ async function link(from: { base: string }, to: { base: string }): Promise<strin
 const machineToken = (from: { dataDir: string }) => (JSON.parse(readFileSync(join(from.dataDir, "inbox", "machines.json"), "utf8")) as { links: { token: string }[] }).links[0]!.token;
 
 /** Another Inbox's door, played: `accounts` is the test's, and the line stays up. */
-function standInDoor(accounts: (request: Request) => Response | Promise<Response>, machineLinks = 1, health: () => Response | null = () => null) {
+function standInDoor(
+  accounts: (request: Request) => Response | Promise<Response>,
+  machineLinks = 1,
+  health: () => Response | null = () => null,
+  switched: ((request: Request) => Response | Promise<Response>) | null = null,
+) {
   const door = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -159,6 +168,7 @@ function standInDoor(accounts: (request: Request) => Response | Promise<Response
       if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
       if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [] });
       if (route === "accounts") return accounts(req);
+      if (route === "accounts/switch" && switched) return switched(req);
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
     },
   });
@@ -1119,20 +1129,111 @@ describe.skipIf(process.platform === "win32")("who may switch", () => {
     expect(fakeCswapCalls(w.bin)).toEqual([]);
   });
 
-  test("a linked machine can't switch this one: not through its door, not through the forward, for anyone, and nothing is held to send later", async () => {
+  test("a linked machine's switch goes through the forward now, never held: the owner here, the owner over the tailnet; a tailnet guest is refused and nothing runs there", async () => {
     const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
     const near = await world({ tailnet: true, cswap: null });
     const machine = await link(near, far);
     await onlineMachine(near);
-    const door = await fetch(`${far.base}/api/inbox/device/accounts/switch`, { method: "POST", headers: { Authorization: `Bearer ${machineToken(near)}`, "Content-Type": "application/json" }, body: JSON.stringify(PERSONAL) });
-    expect(door.status).toBe(404);
-    for (const route of ["accounts/switch", "%61ccounts/switch", "accounts/x"]) {
-      const path = `/api/inbox/m/${machine}/${route}`;
-      expect((await near.switchTo(PERSONAL, { path })).status).toBe(404);
-      for (const login of [GUEST, OWNER]) expect((await near.switchTo(PERSONAL, { path, login })).status).toBe(404);
-    }
+    const path = `/api/inbox/m/${machine}/accounts/switch`;
+    const switches = () => fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"));
+
+    // A guest of this machine's tailnet was never let onto that machine: refused before anything goes.
+    const refused = await near.switchTo(PERSONAL, { path, login: GUEST });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
     expect(fakeCswapCalls(far.bin)).toEqual([]);
-    expect(filesUnder(near.dataDir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
+
+    // The owner's window on this machine: the far Inbox re-lists, matches and switches; its answer, picked by name.
+    const here = await near.switchTo(PERSONAL, { path });
+    expect(here.status).toBe(200);
+    expect(await here.json()).toEqual({ state: "switched", number: 1 });
+    expect(switches()).toEqual(["switch 1 --json"]);
+    // The owner's browser on another device over the tailnet.
+    const owner = await near.switchTo(PERSONAL, { path, login: OWNER });
+    expect(owner.status).toBe(200);
+    expect(await owner.json()).toEqual({ state: "switched", number: 1 });
+
+    // Nothing else under `accounts/` is forwarded, for anyone, and a GET of the switch neither.
+    for (const route of ["%61ccounts/switch", "accounts/x", "accounts"]) {
+      for (const login of [undefined, GUEST, OWNER]) expect((await near.switchTo(PERSONAL, { path: `/api/inbox/m/${machine}/${route}`, login })).status).toBe(404);
+    }
+    expect((await near.switchTo(PERSONAL, { path, method: "GET" })).status).toBe(404);
+    // Another site, a page from an earlier Inbox, a body that is not a target: refused here, nothing sent.
+    const before = switches().length;
+    expect((await near.switchTo(PERSONAL, { path, headers: { Origin: "https://evil.example" } })).status).toBe(403);
+    expect((await near.switchTo({ ...PERSONAL, serverSession: "an-earlier-inbox" }, { path })).status).toBe(409);
+    expect((await near.switchTo({ number: "1" }, { path })).status).toBe(422);
+    expect(switches()).toHaveLength(before);
+
+    // Never held: nothing waits in the outbox, and no address is on either disk.
+    const outbox = (await (await fetch(`${near.base}/api/inbox/outbox`)).json()) as { waiting: unknown[]; notices: unknown[] };
+    expect(outbox).toEqual({ waiting: [], notices: [] });
+    for (const dir of [near.dataDir, far.dataDir]) expect(filesUnder(dir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
+  });
+
+  test("on a tagged machine (no Tailscale owner), the login its allowlist names is the owner: it switches a linked machine", async () => {
+    const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    const near = await world({ tailnet: true, tagged: true, cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    const answer = await near.switchTo(PERSONAL, { path: `/api/inbox/m/${machine}/accounts/switch`, login: GUEST });
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toEqual({ state: "switched", number: 1 });
+    expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual(["switch 1 --json"]);
+  });
+
+  test("the far side's rules hold: a renumbered list switches nothing there, and a failed switch comes back as its reason", async () => {
+    const far = await world({ cswapSwitch: { stdout: SWITCH_ERROR, exit: 1 } });
+    const near = await world({ cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    const path = `/api/inbox/m/${machine}/accounts/switch`;
+    expect(await (await near.switchTo({ ...PERSONAL, email: "someone-else@fake.test" }, { path })).json()).toEqual({ state: "failed", reason: "changed" });
+    expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual([]);
+    expect(await (await near.switchTo(PERSONAL, { path })).json()).toEqual({ state: "failed", reason: "run_failed" });
+  });
+
+  test("a linked machine's door answers its switch as its own, and keeps no answer: a second copy re-lists and runs nothing more", async () => {
+    const far = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER } });
+    const near = await world({ cswap: null });
+    await link(near, far);
+    const send = () =>
+      fetch(`${far.base}/api/inbox/device/accounts/switch`, { method: "POST", headers: { Authorization: `Bearer ${machineToken(near)}`, "Content-Type": "application/json" }, body: JSON.stringify(PERSONAL) });
+    expect(await (await send()).json()).toEqual({ state: "switched", number: 1 });
+    expect(await (await send()).json()).toEqual({ state: "switched", number: 1 });
+    expect(fakeCswapCalls(far.bin).filter((call) => call.startsWith("switch"))).toEqual(["switch 1 --json"]);
+    expect(filesUnder(far.dataDir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
+  });
+
+  test("a machine asleep, an older one, and one that answers more than a switch: each in a few fixed words", async () => {
+    // An older door: no such route.
+    const older = await world({ cswap: null, linkedTo: standInDoor(() => Response.json({ state: "accounts", accounts: [] })) });
+    await onlineMachine(older);
+    expect(await (await older.switchTo(PERSONAL, { path: `/api/inbox/m/${FAR}/accounts/switch` })).json()).toEqual({ state: "needs_update" });
+    // A door that says more than a switch's answer: only the number passes.
+    const chatty = await world({
+      cswap: null,
+      linkedTo: standInDoor(
+        () => Response.json({ state: "accounts", accounts: [] }),
+        1,
+        () => null,
+        () => Response.json({ state: "switched", number: 2, to: { email: "b@fake.test" }, message: "words of cswap" }),
+      ),
+    });
+    await onlineMachine(chatty);
+    expect(await (await chatty.switchTo(PERSONAL, { path: `/api/inbox/m/${FAR}/accounts/switch` })).json()).toEqual({ state: "switched", number: 2 });
+    // Asleep: answered at once, nothing kept to send later.
+    const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    const near = await world({ cswap: null, requestMs: 400 });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    servers.splice(servers.indexOf(far.server), 1)[0]!.stop(true);
+    await waitFor("the machine asleep", async () => {
+      const { machines } = (await (await fetch(`${near.base}/api/inbox/machines`)).json()) as { machines: { self: boolean; state: string }[] };
+      return machines.find((m) => !m.self)?.state === "offline";
+    });
+    expect(await (await near.switchTo(PERSONAL, { path: `/api/inbox/m/${machine}/accounts/switch` })).json()).toEqual({ state: "offline" });
+    expect(((await (await fetch(`${near.base}/api/inbox/outbox`)).json()) as { waiting: unknown[] }).waiting).toEqual([]);
   });
 });
 
