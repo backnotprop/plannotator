@@ -436,7 +436,9 @@ describe("cards: the Board page's fields (step 2)", () => {
       ["issue", "acme/widgets#11"],
     ]);
     expect(card.prs).toEqual([{ ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12" }]);
-    expect(refusal(() => store.updateCard(card.id, { by: AGENT, refs: ["https://evil.example/o/r/issues/1"] }))).toBe("validation_error");
+    // An issue-shaped path on a host no forge rule reads is no forge issue: a plain web link. A non-web ref is refused.
+    expect(refusal(() => store.updateCard(card.id, { by: AGENT, refs: ["javascript:alert(1)"] }))).toBe("validation_error");
+    expect(store.updateCard(card.id, { by: AGENT, refs: ["https://evil.example/o/r/issues/1"] }).refs.at(-1)).toMatchObject({ kind: "link", source: "web" });
     // A record from step 1 (prs, no refs) reads its PRs as refs.
     const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
     const lines = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));

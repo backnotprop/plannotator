@@ -121,9 +121,10 @@ import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
-import { combineSuggestions } from "./inbox-combine-suggestions";
+import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
-import { INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
+import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -161,7 +162,7 @@ import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
-import { createInboxProjectRoots, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
+import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
@@ -195,6 +196,7 @@ import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "@pla
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
+import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -401,8 +403,12 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
+  cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
+  /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
+  projectRootHome?: string | null;
   /**
    * How long after a Mark read the asking agents are told what it closed (the
    * window's Undo lasts 7 s). Default `INBOX_SET_ASIDE_DELAY_MS`. Tests shorten it.
@@ -484,7 +490,7 @@ const JSON_HEADERS = {
 };
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+  return new Response(perfPhase("json", () => JSON.stringify(body)), { status, headers: JSON_HEADERS });
 }
 
 const ERROR_STATUS: Record<string, number> = {
@@ -764,7 +770,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   try {
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
+  const storeLoadStarted = performance.now();
   const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
+  // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
+  const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
   sweepStaleInboxSendTemps(store.dir);
   const serverSession = createServerSessionNonce();
@@ -887,6 +896,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
+  const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
   const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
 
@@ -894,7 +904,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // worktree folds into its main repository's project) or the folder, cached
   // per folder (packages/server/inbox-project-root.ts). One cache for sends
   // and live sessions, so they always agree.
-  const projectRoots = createInboxProjectRoots(options.projectRootGit ? { git: options.projectRootGit } : {});
+  const projectRoots = createInboxProjectRoots({
+    ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+    ...(options.projectRootHome !== undefined ? { home: options.projectRootHome } : {}),
+  });
+  // The projects a guess (git past its time limit) may file into (inbox-project-root.ts `guessableProjects`).
+  const repositoryProjects = () => guessableProjects(store.allProjects(), projectRoots.home);
   // Images messages show that have no captured file yet: copied in the background after a read of their thread (inbox-message-images.ts).
   const imageCapture = createInboxImageCapture(store);
   const projectLocks = new Map<string, Promise<InboxProject>>();
@@ -909,8 +924,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // from disk, no git), else the agent is told to try again. A folder
       // project (`~`, a notes folder) never takes a guess: a new worktree or
       // repository under it would be filed there for good.
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) return holder;
       throw new InboxError(
         "project_unresolved",
@@ -940,8 +954,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const existing = store.projectByRoot(root);
     if (existing) projects.push(existing);
     else if (!settled) {
-      const repositories = store.allProjects().filter((project) => existsSync(join(project.root, ".git")));
-      const holder = nearestProjectHolding(repositories, folder);
+      const holder = nearestProjectHolding(repositoryProjects(), folder);
       if (holder) projects.push(holder);
     }
     const earlier = worktree ? store.projectByRoot(worktree) : null;
@@ -1979,7 +1992,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
     prompts: promptsState(!guest),
-    store: store.diskUsage(),
+    store: perfPhase("disk", () => store.diskUsage()),
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
     /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
@@ -2710,6 +2723,41 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
   });
 
+  /**
+   * Each project folder's agent messages (by the folder's own project id) for
+   * Tidy's "started a folder above" suggestion: who sent each, and the folder
+   * it was sent from (`base_path`). Built on the first read, then kept up by
+   * the store's lines: only a NEW agent message adds to it (a mark-read or any
+   * other rewrite of a message line does not), and a re-read from disk (a
+   * deletion, `reloadCount`) builds it again. Read by group at lookup, so a
+   * combine or an undo needs no rebuild.
+   */
+  let agentWorkIndex: { reloads: number; seen: Set<string>; byProject: Map<string, InboxAgentWork[]> } | null = null;
+  const addAgentWork = (index: NonNullable<typeof agentWorkIndex>, message: InboxMessage) => {
+    if (message.author.kind !== "agent" || index.seen.has(message.id)) return;
+    index.seen.add(message.id);
+    const work = index.byProject.get(message.project_id) ?? [];
+    work.push({ session: message.author.session, folder: message.base_path ?? null });
+    index.byProject.set(message.project_id, work);
+  };
+  const unsubscribeAgentWork = store.subscribe((line) => {
+    if (agentWorkIndex && line.kind === "message") addAgentWork(agentWorkIndex, line.record);
+  });
+  const agentWorkOf = (projectId: string): InboxAgentWork[] => {
+    if (agentWorkIndex?.reloads !== store.reloadCount()) {
+      const index = { reloads: store.reloadCount(), seen: new Set<string>(), byProject: new Map<string, InboxAgentWork[]>() };
+      for (const threadId of store.threadIds()) {
+        for (const id of store.threadMessageIds(threadId)) {
+          const message = store.message(id);
+          if (message) addAgentWork(index, message);
+        }
+      }
+      agentWorkIndex = index;
+    }
+    const index = agentWorkIndex;
+    return store.projectGroup(projectId).flatMap((id) => index.byProject.get(id) ?? []);
+  };
+
   // Tidy (packages/server/inbox-tidy.ts): the list header's and the Board's ⋮ menu.
   const tidy = createInboxTidy({
     store,
@@ -2731,7 +2779,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return threads.get(id) ?? 0;
       };
-      return combineSuggestions({ projects: store.listProjects(), repoOf: (root) => repos.peek(root), threads: threadsOf, sameProject: (a, b) => store.sameProject(a, b) });
+      return combineSuggestions({
+        projects: store.listProjects(),
+        everyProject: store.allProjects(),
+        repoOf: (root) => repos.peek(root),
+        threads: threadsOf,
+        sameProject: (a, b) => store.sameProject(a, b),
+        // A folder above a repository (read from disk, no git): not a repository, the home folder or `/`.
+        plainFolder: (root) => !existsSync(join(root, ".git")) && !isHomeOrRootFolder(root, projectRoots.home),
+        holdsOtherWork: folderHoldsOtherWork,
+        agentWork: agentWorkOf,
+      });
     },
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });
@@ -2900,7 +2958,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
+      if (path === "/api/inbox/threads" && req.method === "GET") return json(perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url))));
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -3362,6 +3420,43 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ serverSession, marks });
       }
+      // A web link's favicon on the opened card (inbox-card-favicons.ts): only a link the person added
+      // (`by: "person"`), https, fetched here and served from this origin, since the window's CSP never
+      // loads a remote image. An agent's link is refused before anything is fetched. Never on the device door.
+      const faviconMatch = /^\/api\/inbox\/cards\/([A-Za-z0-9_]+)\/favicon$/.exec(path);
+      if (faviconMatch) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        // It makes this computer ask another host: never for a tailnet guest (as the marks), never with the Board off.
+        if (!ownerOrLocal(req, via)) return localOnly();
+        const refused = crossSiteCardRead(req);
+        if (refused) return refused;
+        if (!boardOn()) return json({ error: "The Board is off.", code: "board_off" }, 409);
+        const card = store.card(faviconMatch[1]!);
+        if (!card) throw new InboxError("card_not_found", `No card ${faviconMatch[1]}.`);
+        const href = url.searchParams.get("url") ?? "";
+        const ref = inboxCardRefsOf(card).find((r) => r.url === href && r.source === "web");
+        if (!ref) return json({ error: "No such web link on this card.", code: "favicon_no_link" }, 404);
+        if (ref.by !== "person") return json({ error: "Only a link you added shows its site's icon.", code: "favicon_not_yours" }, 404);
+        let host: string;
+        try {
+          const parsed = new URL(ref.url);
+          if (parsed.protocol !== "https:") return json({ error: "Only an https link shows its site's icon.", code: "favicon_not_https" }, 404);
+          host = parsed.host;
+        } catch {
+          return json({ error: "No such web link on this card.", code: "favicon_no_link" }, 404);
+        }
+        const icon = await cardFavicons.get(host);
+        if (!icon.ok) return json({ error: "No icon for this site.", code: "favicon_miss", miss: icon.miss }, 404);
+        return new Response(icon.body, {
+          headers: {
+            "content-type": icon.type,
+            "cache-control": "private, max-age=86400",
+            "x-content-type-options": "nosniff",
+            "content-security-policy": "sandbox; default-src 'none'",
+            "cross-origin-resource-policy": "same-origin",
+          },
+        });
+      }
       // The opened card's links, resolved now (read only; each source's resolver, inbox-card-refs.ts).
       // Never on the device door, like /api/inbox/ref.
       const refsMatch = /^\/api\/inbox\/cards\/([A-Za-z0-9_]+)\/refs$/.exec(path);
@@ -3396,7 +3491,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The window's thread: each message's seq (what is new since the last look) and a reply's sent annotations.
         // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
         if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
-        const thread = store.windowThread(threadMatch[1]!);
+        const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
@@ -3671,9 +3766,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               }
               throw error;
             }
-            // The Send that carried the reply box's words: its draft goes (a replay too, since the first one sent them),
-            // while it is the draft those words were saved as (`updated_at`) or holds exactly those words and only
-            // pastes this Send carried, so another window's newer, different draft stays.
+            // The Send that carried the reply box's draft: its words go (a replay too, since the first one sent them)
+            // while it is the draft those words were saved as (`updated_at`), with the files this Send carried (a file
+            // it did not carry stays, as a draft of files only); or it goes whole while it holds exactly those words
+            // and only files this Send carried. Another window's newer, different draft stays.
             if (typeof body.clear_draft === "string") {
               const threadId = store.message(messageId)?.thread_id;
               const words = typeof body.words === "string" ? body.words : undefined;
@@ -3793,7 +3889,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return response;
   };
-  const served = debugLog ? debugLog.wrap(handleMarkingSnoozes, debugOwner) : handleMarkingSnoozes;
+  // With the debug log on only (inbox-perf.ts): Server-Timing on every API answer, slow requests and a stalled loop
+  // noted. Off, the handler is not wrapped and perfPhase does nothing but a compare.
+  // The store's load time and the loop watch start with the first request the log keeps, so the log stays empty until then.
+  let stopLoopWatch: (() => void) | null = null;
+  const releasePerfPhases = debugLog ? retainPerfPhases() : null;
+  const isLoggedApiPath = (req: Request): boolean => {
+    try {
+      const pathname = new URL(req.url, "http://127.0.0.1").pathname;
+      return pathname.startsWith("/api/inbox/") && pathname !== INBOX_DEBUG_PATH;
+    } catch {
+      return false;
+    }
+  };
+  const logged = debugLog
+    ? debugLog.wrap(async (req: Request, via: RequestVia) => {
+        if (!stopLoopWatch && isLoggedApiPath(req)) {
+          stopLoopWatch = watchLoopStalls((ms) => debugLog.note("loop_stall", { ms }));
+          let messages = 0;
+          const threadIds = store.threadIds();
+          for (const id of threadIds) messages += store.threadMessageIds(id).length;
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
+        }
+        return handleMarkingSnoozes(req, via);
+      }, debugOwner)
+    : handleMarkingSnoozes;
+  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handleMarkingSnoozes;
 
   /**
    * The window's own port: everything here came from this computer. A
@@ -3938,6 +4059,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     void foldCheckoutFolderProjects({
       store,
       ...(options.projectRootGit ? { git: options.projectRootGit } : {}),
+      // The same home the sends' resolver keeps apart (projectRootHome in tests).
+      home: projectRoots.home,
       log: (fold) => debugLog?.note("project_folded", fold),
     }).catch(() => {});
     // A set-aside note a stop interrupted (marked read, then the Inbox went away within the Undo window).
@@ -3960,6 +4083,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    stopLoopWatch?.();
+    releasePerfPhases?.();
     clearInterval(dataCheck);
     windows.stop();
     for (const timer of setAsideTimers) clearTimeout(timer);
@@ -3976,6 +4101,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);
     unsubscribeWaits();
+    unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
     voice.stop();
