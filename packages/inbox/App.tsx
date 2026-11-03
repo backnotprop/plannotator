@@ -2926,10 +2926,14 @@ function Inbox() {
   };
 
   /**
-   * Snooze a thread, from its row's menu or its ⋯ (approval "inbox-snooze"). The
-   * row leaves its section as Mark read's does: at once with no thread open,
-   * when the list settles with one. The toast says when it comes back; its Undo
-   * puts back exactly what was there, an earlier snooze included.
+   * Snooze a thread, from its row's menu, the thread header's clock or a
+   * phone's ⋯ (approval "inbox-snooze"). The row leaves its section at once
+   * (the owner, 2026-11-03: "ideally when snoozing they would move in the list
+   * after i snooze it"): with no thread open the write's read moves it, as
+   * Mark read's does; with one open beside the list, only this row moves
+   * (`moveSnoozedRow`) and the rest of the list holds still. The toast says
+   * when it comes back; its Undo puts back exactly what was there, an earlier
+   * snooze included, and the row with it.
    */
   const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
     const threadId = row.thread_id;
@@ -2942,17 +2946,42 @@ function Inbox() {
       return;
     }
     await afterWrite();
+    const drawnBefore = moveSnoozedRow(threadId);
     const when = inboxSnoozeWhen(until);
     showToast({
       icon: 'clock',
       lead: 'Snoozed',
       detail: when,
       speech: `Snoozed “${row.subject ?? '(no subject)'}” until ${when}.`,
-      onUndo: () => void putSnooze(threadId, earlier),
+      onUndo: () => void putSnooze(threadId, earlier, drawnBefore),
     });
   };
-  /** Snooze's Undo: the snooze it replaced, or none. */
-  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null) => {
+  /**
+   * The person's own snooze while a thread is open beside the list: that one
+   * row goes to the Snoozed band now (held.ts `settleThread`), fading from its
+   * place while the rows below slide up (settle.ts; nothing moves under
+   * reduced motion). Every other row holds, and agent activity stays behind
+   * "N new". Nothing to do with no thread open (the write's read adopted the
+   * list) or where the thread covers the list (Back moves it, `settlesOnBack`).
+   * Only a row the read shows snoozed moves: a write a linked machine's outbox
+   * holds has not snoozed anything yet. Returns the list as drawn before, for
+   * Undo, or null when nothing moved.
+   */
+  const moveSnoozedRow = (threadId: string): InboxListSection[] | null => {
+    const drawn = shownRef.current;
+    if (!routeRef.current.thread || listCovered() || !drawn || !latestRef.current) return null;
+    if (drawnSection(drawn, threadId) === null || !rowOf(threadId)?.snoozed) return null;
+    const groups = listGroups(latestRef.current);
+    armSlide();
+    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
+    return drawn;
+  };
+  /**
+   * Snooze's Undo: the snooze it replaced, or none. A row the snooze moved
+   * while a thread is open goes back where it was drawn, between the same
+   * neighbours (held.ts `putRowBack`), in its state as it is now.
+   */
+  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null, drawnBefore: InboxListSection[] | null = null) => {
     try {
       await inboxApi.snooze(threadId, earlier && inboxSnoozeRunning(earlier.until) ? earlier.until : null, earlier?.at);
     } catch (cause) {
@@ -2960,6 +2989,11 @@ function Inbox() {
       return;
     }
     await afterWrite();
+    const now = rowOf(threadId);
+    if (drawnBefore && now && routeRef.current.thread && !listCovered() && drawnSection(shownRef.current, threadId) === 'snoozed') {
+      armSlide();
+      setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
+    }
     dismissToast();
     say(earlier ? 'Snooze moved back.' : 'Unsnoozed.');
   };
