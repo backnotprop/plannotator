@@ -12,6 +12,7 @@
  * part the person changed goes to the server: a mode, or one half's palette.
  */
 
+import { perfInteraction } from './perfMarks';
 import { useCallback } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useThemePaletteHalves, type ThemePaletteHalves } from '@plannotator/ui/hooks/useThemePaletteHalves';
@@ -135,6 +136,7 @@ export function useInboxTheme(): InboxTheme {
     (next: Mode) => {
       markChosen('mode');
       landInstantlyIfReducedMotion();
+      perfInteraction('theme');
       setMode(next);
     },
     [setMode],

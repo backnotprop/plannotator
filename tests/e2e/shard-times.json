@@ -100,6 +100,7 @@
   "inbox-refresh.spec.ts": 19,
   "inbox-reload-hosts.spec.ts": 31,
   "inbox-replaced.spec.ts": 14,
+  "inbox-reply-draft-files.spec.ts": 6,
   "inbox-reply-drafts.spec.ts": 15,
   "inbox-reply-feedback-size.spec.ts": 8,
   "inbox-reply-file-links.spec.ts": 7,
