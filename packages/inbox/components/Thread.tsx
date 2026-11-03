@@ -1079,9 +1079,10 @@ export interface ThreadPaneProps {
   cardChip?: React.ReactNode;
   /**
    * Thread steps (approval "inbox-thread-steps"): the switch, and the window's steps changes (a steps line naming
-   * this thread, presence moved, a catch-up). Null or off: no steps button.
+   * this thread, presence moved, a catch-up). Null or off: no steps button. `boardCard`: the Board card that links
+   * the thread (the Board on), opened by the panel head's Board icon.
    */
-  threadSteps?: { on: boolean; subscribe: StepsSubscribe } | null;
+  threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
   /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
   phone?: boolean;
   /**
@@ -6081,6 +6082,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
                     const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
                     return target ? () => jumpTo(target) : null;
                   }}
+                  boardCard={threadSteps?.boardCard ?? null}
                 />
               )}
               {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}

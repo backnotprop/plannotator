@@ -22,7 +22,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
 import { dispatchInboxFrame, type InboxEventHandlers } from './api';
-import { pieGeometry, stepMeta, stepsAsOf, stepsCount, stepsName, stepsWaitTarget } from './steps/model';
+import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsCount, stepsDoneWords, stepsName, stepsWaitTarget, threadBoardCard } from './steps/model';
 import { createStepsBus } from './steps/useThreadSteps';
 
 const hasDom = typeof document !== 'undefined';
@@ -124,6 +124,23 @@ describe('the rules (steps/model.ts)', () => {
     ]);
   });
 
+  test('the Board (part 4): a card\'s lists come from every thread it links, the latest written first; the head\'s icon opens a card that links the thread, never a cancelled one', () => {
+    const older = { ...list('idle'), id: 'stp_old', thread_id: 'msg_old', updated_at: at(10, 0) };
+    const newer = { ...list('working'), id: 'stp_new', thread_id: 'msg_new', updated_at: at(14, 0) };
+    const cleared = { ...list('working'), id: 'stp_gone', thread_id: 'msg_gone', updated_at: at(15, 0), steps: [] };
+    const steps = { msg_old: [older], msg_new: [newer], msg_gone: [cleared] };
+    expect(cardStepLists(['msg_old', 'msg_new', 'msg_gone', 'msg_none'], steps).map((l) => l.id)).toEqual(['stp_new', 'stp_old']);
+    // The switch off: the read has no `steps`.
+    expect(cardStepLists(['msg_old'], undefined)).toEqual([]);
+    const cards = [
+      { id: 'crd_dropped', column: 'dropped', threads: [M1] },
+      { id: 'crd_live', column: 'in_progress', threads: ['msg_other', M1] },
+    ];
+    expect(threadBoardCard(cards, M1)?.id).toBe('crd_live');
+    expect(threadBoardCard(cards.slice(0, 1), M1)).toBeNull();
+    expect(stepsDoneWords(list('working'))).toBe('3 of 6 steps done');
+  });
+
   test('"3/6": a dropped step is not counted; the name says whose and how far', () => {
     expect(stepsCount(list('working'))).toEqual({ done: 3, total: 6, text: '3/6' });
     expect(stepsName('Claude Code', list('working'))).toBe("Claude Code's checklist: 3 of 6 steps done");
@@ -214,7 +231,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType<typeof createStepsBus> } = {}) {
+async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType<typeof createStepsBus>; boardCard?: { title: string; onOpen: () => void } | null } = {}) {
   const bus = options.bus ?? createStepsBus();
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -224,7 +241,7 @@ async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType
     root.render(
       <ThreadPane
         thread={THREAD}
-        threadSteps={{ on: options.on ?? true, subscribe: bus.subscribe }}
+        threadSteps={{ on: options.on ?? true, subscribe: bus.subscribe, boardCard: options.boardCard ?? null }}
         sent={null}
         lookSeq={3}
         phone={options.phone === true}
@@ -335,6 +352,28 @@ test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the butto
   await openPanel();
   expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
   expect(panel()!.getAttribute('aria-label')).toBe('Checklist');
+});
+
+// Part 4: "the head reads Steps ◑ 3/6 plus a small Board icon that opens the thread's card".
+test.skipIf(!hasDom)('the head\'s Board icon: there only when a card links the thread; it closes the list and opens the card', async () => {
+  await render();
+  await until(() => !!button(), 'the steps button');
+  await openPanel();
+  expect(panel()!.querySelector('[data-steps-card]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  document.querySelectorAll('[data-steps-panel]').forEach((n) => n.closest('.ib-st-pos')?.remove());
+
+  const opened: string[] = [];
+  await render({ boardCard: { title: 'Stripe retry worker', onOpen: () => opened.push('crd_stripe') } });
+  await until(() => !!button(), 'the steps button');
+  await openPanel();
+  const icon = panel()!.querySelector<HTMLButtonElement>('[data-steps-card]')!;
+  expect(icon.closest('[data-steps-head]')).not.toBeNull();
+  expect(icon.getAttribute('aria-label')).toBe('Open “Stripe retry worker” on the Board');
+  await act(async () => icon.click());
+  await until(() => !panel(), 'the panel to close');
+  expect(opened).toEqual(['crd_stripe']);
 });
 
 test.skipIf(!hasDom)('a phone: the sheet over a scrim, with a close', async () => {

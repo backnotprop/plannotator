@@ -14,6 +14,7 @@ import { Popover } from '@base-ui/react/popover';
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 import { agentName } from '../format';
 import { Icon } from '../icons';
+import { Tip } from '../components/Tip';
 import { presenceClass, stepsCount, stepsName } from './model';
 import { StepsPie } from './StepsMarks';
 import { StepsLists } from './StepsList';
@@ -24,11 +25,14 @@ export interface StepsButtonProps {
   phone: boolean;
   /** Where a list's "Waiting on you ›" goes (its session's open question), or null: the words stay, with no link. */
   onWaiting: (list: InboxStepsWire) => (() => void) | null;
-  /** What sits at the right of the panel's head (the Board's card, approval part 4). */
-  headExtra?: React.ReactNode;
+  /**
+   * The Board card that links the thread (approval part 4: "the small Board button in the head opens it"), while the
+   * Board is on and a card links it; null: no icon.
+   */
+  boardCard?: { title: string; onOpen: () => void } | null;
 }
 
-export function StepsButton({ lists, phone, onWaiting, headExtra = null }: StepsButtonProps) {
+export function StepsButton({ lists, phone, onWaiting, boardCard = null }: StepsButtonProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   /** A jump to the question takes focus there, not back to the button. */
@@ -79,7 +83,24 @@ export function StepsButton({ lists, phone, onWaiting, headExtra = null }: Steps
                 onWaiting={waitingFor}
                 headExtra={
                   <>
-                    {headExtra}
+                    {boardCard && (
+                      <Tip content="Open its card on the Board">
+                        <button
+                          type="button"
+                          className="ib-st-card"
+                          aria-label={`Open “${boardCard.title}” on the Board`}
+                          data-steps-card=""
+                          onClick={() => {
+                            // The Board takes the page: focus goes to the opened card, not back to this button.
+                            jumped.current = true;
+                            setOpen(false);
+                            boardCard.onOpen();
+                          }}
+                        >
+                          <Icon name="board" size={phone ? 18 : 15} />
+                        </button>
+                      </Tip>
+                    )}
                     {phone && (
                       <Popover.Close className="ib-st-x" aria-label="Close" data-steps-close="">
                         <Icon name="x" size={16} />

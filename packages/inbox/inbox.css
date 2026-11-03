@@ -5292,6 +5292,21 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-m { font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-oq-pos[data-phone] .ib-st-jump { min-height: 44px; }
 
+/* the Board (part 4): the lane card wears the pie alone (the opened card has the number); the opened card lists the
+   steps under a section head like Threads and Links; the panel's head has a Board icon that opens the card */
+.ib-bc-plan { flex: none; display: inline-flex; align-items: center; color: var(--ib-st-mut); }
+.ib-crdp-steps .ib-st-head { height: auto; padding: 0; margin: 0 0 4px; }
+.ib-crdp-sec.ib-crdp-steps h3.ib-st-lbl { margin: 0; }
+.ib-crdp-steps .ib-sts { margin: 0 -10px; }
+.ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
+.ib-crdp-steps .ib-stg-done .k, .ib-crdp-steps .ib-stg-drop path { stroke: var(--card); }
+.ib-crdp-phone .ib-crdp-steps .ib-st { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
+.pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
+@media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
+.ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-oq-pos[data-phone] .ib-st-card { width: 44px; height: 44px; border-radius: 8px; margin-right: 0; }
+
 /* ── A thread's Artifacts (approval "inbox-thread-artifacts", variant Swap) ──
    The header's right side is icons only: Artifacts (with its count), Expand / Fold all, Archive, a hairline, the
    close. The Artifacts view swaps the messages for a grid of every artifact, newest message first. */

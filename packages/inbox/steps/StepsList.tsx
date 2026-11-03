@@ -51,14 +51,30 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
  * A list's head: "Checklist ◑ 3/6", "· as of 2:40 PM" once its session ended, and what the caller adds at the right
  * (the Board icon, a phone's close). With more than one session's list, each head names its agent instead.
  */
-export function StepsHead({ list, label, children, now, headingId }: { list: InboxStepsWire; label: string; children?: React.ReactNode; now?: Date; headingId?: string }) {
+export function StepsHead({
+  list,
+  label,
+  children,
+  now,
+  headingId,
+  heading = false,
+}: {
+  list: InboxStepsWire;
+  label: string;
+  children?: React.ReactNode;
+  now?: Date;
+  headingId?: string;
+  /** The label is a section heading (the opened card's, beside Threads and Links), not plain words. */
+  heading?: boolean;
+}) {
   const { done, total, text } = stepsCount(list);
   const asOf = stepsAsOf(list, now);
+  const Label = heading ? 'h3' : 'span';
   return (
     <div className="ib-st-head" data-steps-head="">
-      <span className="ib-st-lbl" id={headingId}>
+      <Label className="ib-st-lbl" id={headingId}>
         {label}
-      </span>
+      </Label>
       <span className="ib-st-plan" aria-label={`${done} of ${total} done`}>
         <StepsPie done={done} total={total} size={12} />
         <span className="ib-st-num" aria-hidden="true">
@@ -82,6 +98,7 @@ export function StepsLists({
   onWaiting,
   headExtra,
   now,
+  heading = false,
 }: {
   lists: readonly InboxStepsWire[];
   /** "Waiting on you ›" for a list, or null where there is nowhere to go. */
@@ -89,12 +106,14 @@ export function StepsLists({
   /** What sits at the right of the first head (the Board icon, a phone's close). */
   headExtra?: React.ReactNode;
   now?: Date;
+  /** Each head's label is a section heading (the opened card). */
+  heading?: boolean;
 }) {
   return (
     <>
       {lists.map((list, index) => (
         <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(agentName(list.agent), list)}>
-          <StepsHead list={list} label={lists.length > 1 ? agentName(list.agent) : 'Checklist'} now={now}>
+          <StepsHead list={list} label={lists.length > 1 ? agentName(list.agent) : 'Checklist'} now={now} heading={heading}>
             {index === 0 ? headExtra : null}
           </StepsHead>
           <StepsList list={list} onWaiting={onWaiting?.(list) ?? null} now={now} />

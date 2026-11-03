@@ -16,7 +16,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxCardWire, InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxCardWire, InboxListRow, InboxStepStatus, InboxStepsWire } from '@plannotator/core/inbox-types';
 import type { BoardMove, BoardPageProps } from './board/BoardPage';
 import { sized, tooltipOf, unhover } from './testing/tooltip';
 
@@ -615,4 +615,58 @@ test.if(hasDom)('a card linking only a Jira issue (a link only) draws no lane ma
   await settle();
   const asked = calls.filter((c) => c.path === '/api/inbox/cards/marks');
   expect(asked.flatMap((c) => c.body!.cards as string[])).toEqual(['crd_both']);
+});
+
+// The checklist on the Board (approval "inbox-thread-steps", part 4): "the same pie mark appears on the lane card, with
+// no count"; "the opened card lists the same steps, read-only". It rides on the cards read's `steps` (switch on).
+function checklist(steps: { step: string; status: InboxStepStatus }[], presence: InboxStepsWire['presence'] = 'working', updated = NEW): InboxStepsWire {
+  return { id: 'stp_auto', project_id: 'prj_1', thread_id: 'msg_auto', agent: CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>, updated_at: updated, presence, steps: steps.map((s) => ({ ...s, note: null, at: NEW })) };
+}
+const AUTO_STEPS = checklist([
+  { step: 'Read the issue', status: 'done' },
+  { step: 'Pick the updater', status: 'waiting' },
+  { step: 'Wire the menu', status: 'doing' },
+]);
+
+test.if(hasDom)('the lane card: a checklist\'s pie, no count, named for the card; none without a list or with the switch off', async () => {
+  scriptFetch();
+  draw({ model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } } });
+  const auto = cardEl('crd_auto')!;
+  expect(auto.querySelector('.ib-bc-plan [data-steps-pie="1/3"]')).not.toBeNull();
+  expect(auto.querySelector('.ib-bc-plan')!.className).toContain('ib-st-working');
+  expect(auto.textContent).not.toContain('1/3');
+  expect(auto.querySelector('[data-card-open]')!.getAttribute('aria-label')).toEndWith('. Checklist: 1 of 3 steps done');
+  expect($$('.ib-bc-plan')).toHaveLength(1);
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  // Switch off: the read has no `steps`, so no card wears one.
+  draw();
+  expect($$('.ib-bc-plan')).toHaveLength(0);
+});
+
+test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and its rows; "Waiting on you ›" opens the list\'s thread', async () => {
+  scriptFetch();
+  const threads: string[] = [];
+  draw({
+    model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } },
+    openCard: 'crd_auto',
+    onOpenThread: (_card, thread) => threads.push(thread),
+  });
+  await settle();
+  const list = $('[data-card-panel="crd_auto"] [data-card-checklist]')!;
+  expect(list.querySelector('h3.ib-st-lbl')!.textContent).toBe('Checklist');
+  expect(list.querySelector('[data-steps-head]')!.textContent).toBe('Checklist1/3');
+  expect([...list.querySelectorAll<HTMLElement>('.ib-st')].map((r) => r.dataset.stepStatus)).toEqual(['done', 'waiting', 'doing']);
+  // Read only: the one control is the waiting row's way to the thread.
+  expect([...list.querySelectorAll('button')].map((b) => b.hasAttribute('data-steps-waiting'))).toEqual([true]);
+  await act(async () => list.querySelector<HTMLButtonElement>('[data-steps-waiting]')!.click());
+  expect(threads).toEqual(['msg_auto']);
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  draw({ openCard: 'crd_auto' });
+  await settle();
+  expect($('[data-card-panel="crd_auto"]')).not.toBeNull();
+  expect($('[data-card-checklist]')).toBeNull();
 });

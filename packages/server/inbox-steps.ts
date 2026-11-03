@@ -59,6 +59,22 @@ export function inboxStepsPresenceOf(record: InboxSteps, live: InboxStepsLive, n
   return "ended";
 }
 
+/**
+ * Tidy's rule for steps (approval "inbox-thread-steps", part 5; asked only while the switch is on): a list with a
+ * step still `doing` while its session has been idle for INBOX_STEPS_IDLE_MS or more, or has ended. Idle since: the
+ * session's last idle transition when its connection says (else when it was last heard), and never before the list's
+ * own last write.
+ */
+export function inboxStepsStale(record: InboxSteps, live: InboxStepsLive & { lastIdleOf: (session: string) => number | null }, now: number): boolean {
+  if (!record.steps.some((step) => step.status === "doing")) return false;
+  const presence = inboxStepsPresenceOf(record, live, now);
+  if (presence === "ended") return true;
+  if (presence !== "idle") return false;
+  const session = record.agent.session ?? "";
+  const quiet = Math.max(Date.parse(record.updated_at) || 0, live.lastIdleOf(session) ?? live.lastHeardOf(session) ?? 0);
+  return now - quiet >= INBOX_STEPS_IDLE_MS;
+}
+
 export function createInboxStepsRoute(options: {
   store: InboxStore;
   serverSession: string;

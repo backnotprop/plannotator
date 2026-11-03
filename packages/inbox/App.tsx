@@ -98,7 +98,8 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
-import { createStepsBus } from './steps/useThreadSteps';
+import { createStepsBus, STEPS_REFRESH_MS } from './steps/useThreadSteps';
+import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
@@ -1483,6 +1484,40 @@ function Inbox() {
     void refreshCards();
   }, [boardEnabled, refreshCards]);
   const onBoard = route.page === 'board' && boardEnabled === true;
+  /**
+   * The Board's checklists (approval "inbox-thread-steps", part 4) ride on the cards read: while the Board shows and
+   * the switch is on, a steps change for a thread a card links (or a presence move, a catch-up) reads the cards
+   * again, and so does the switch turning, and a minute passing while a card wears a checklist (its presence ages).
+   */
+  const cardsNowRef = useRef(cards);
+  cardsNowRef.current = cards;
+  const stepsShownOn = settings?.steps?.on === true;
+  const stepsBoardOn = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!onBoard) {
+      stepsBoardOn.current = null;
+      return;
+    }
+    // The switch turned while the Board was in front: its marks come or go now (entering the Board reads the cards anyway).
+    if (stepsBoardOn.current !== null && stepsBoardOn.current !== stepsShownOn) void refreshCards();
+    stepsBoardOn.current = stepsShownOn;
+    if (!stepsShownOn) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = stepsBus.subscribe((change) => {
+      if (change !== '*' && !cardsNowRef.current?.cards.some((card) => card.threads.includes(change))) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void refreshCards(), 250);
+    });
+    const tick = setInterval(() => {
+      const steps = cardsNowRef.current?.steps;
+      if (steps && Object.keys(steps).length > 0) void refreshCards();
+    }, STEPS_REFRESH_MS);
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+      clearInterval(tick);
+    };
+  }, [onBoard, stepsShownOn, stepsBus, refreshCards]);
   /**
    * The project the Board is filtered to (`#board&project=prj_…`). A project the Inbox does not
    * know (a stale or hand-edited link) is no filter once the projects have loaded; before that the
@@ -5074,7 +5109,24 @@ function Inbox() {
               </>
             }
             thread={thread}
-            threadSteps={settings?.steps ? { on: settings.steps.on, subscribe: stepsBus.subscribe } : null}
+            threadSteps={
+              settings?.steps
+                ? {
+                    on: settings.steps.on,
+                    subscribe: stepsBus.subscribe,
+                    // The checklist head's Board icon (part 4): the card that links this thread, while the Board is on.
+                    boardCard: (() => {
+                      const card = boardEnabled === true && cards ? threadBoardCard(cards.cards, thread.thread_id) : null;
+                      if (!card) return null;
+                      return {
+                        title: card.title,
+                        onOpen: () =>
+                          fromCard === card.id ? backToCard() : go({ page: 'board', project: null, thread: null, board: 'lanes', card: card.id }),
+                      };
+                    })(),
+                  }
+                : null
+            }
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
             drawn={drawnSection(shown, thread.thread_id)}

@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup() {
+async function setup(options: { steps?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-tidy-")));
   roots.push(root);
   const billing = join(root, "billing");
@@ -38,7 +38,8 @@ async function setup() {
   // What a test writes while `behind` is set reads as that much older.
   const clock = { behind: 0 };
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, binaryPath: null, board: true, storeNow: () => new Date(Date.now() - clock.behind) });
+  // The checklist switch is this test's (never the person's config.json): off unless a test turns it on.
+  const server = await startInboxServer({ dataDir, binaryPath: null, board: true, steps: options.steps ?? false, storeNow: () => new Date(Date.now() - clock.behind) });
   servers.push(server);
   const client = new Client({ name: "inbox-tidy-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -154,6 +155,51 @@ describe("Tidy: who gets asked", () => {
     expect(board.agents.map((a) => a.session)).toEqual(["ses-a"]);
     expect(board.agents[0]!.items).toEqual([expect.objectContaining({ thread_id: lane.thread_id, reasons: [expect.stringContaining("card idle")] })]);
     expect((await plan(server, `?project=${await projectOf(server, "billing")}`)).agents.map((a) => a.session).sort()).toEqual(["ses-a", "ses-c"]);
+  });
+});
+
+// Thread steps (approval "inbox-thread-steps", part 5): "Tidy asks about a step still in `doing` when the session has
+// been idle over 2 h or has ended", and with the switch off agents get "no Tidy rule".
+describe("Tidy: a checklist step left in progress", () => {
+  const PLAN = [
+    { step: "Classify failed charges", status: "done" },
+    { step: "Replay the failures in staging", status: "doing" },
+    { step: "Ship it behind a flag", status: "todo" },
+  ];
+  /** ses-a's thread with a step doing, written 3 h ago; its connection says it has been idle since `idleFor` ago. */
+  async function quietStep(steps: boolean, idleFor: number, plan: { step: string; status: string }[] = PLAN) {
+    const w = await setup({ steps });
+    w.clock.behind = 3 * HOUR;
+    await poll(w.server, "ses-a", w.billing, { busy: true });
+    const lane = await send(w.client, w.billing, "ses-a", { subject: "Retry worker", thread: "Retry worker", body: "Starting the retry worker." });
+    w.server.store.setThreadSteps({ thread_id: lane.thread_id, agent: { kind: "agent", host: "claude-code", session: "ses-a", name: "Claude Code" }, steps: plan });
+    w.clock.behind = 0;
+    await poll(w.server, "ses-a", w.billing, { busy: false, idle_since: Date.now() - idleFor });
+    return { ...w, lane };
+  }
+
+  test("on: listed for its session once it sat idle 2 h, and the wake names the step and how to update it", async () => {
+    const { server, billing, lane } = await quietStep(true, 3 * HOUR);
+    const found = await plan(server);
+    expect(found.agents.map((a) => a.session)).toEqual(["ses-a"]);
+    expect(found.agents[0]!.items).toEqual([expect.objectContaining({ thread_id: lane.thread_id, reasons: ["step in progress, 3 h"] })]);
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t-steps" })).status).toBe(200);
+    const commands = await deliver(server, "ses-a", billing);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]!.body).toContain(
+      `Your steps here: 1 of 3 done; doing: Replay the failures in staging, unchanged for 3 h. Update them if that changed (the steps action, thread_id ${lane.thread_id}).`,
+    );
+  });
+
+  test("off: the same quiet step is no Tidy item and no words", async () => {
+    const { server } = await quietStep(false, 3 * HOUR);
+    expect((await plan(server)).agents).toEqual([]);
+  });
+
+  test("on: not while the session went idle under 2 h ago, nor for a list with nothing doing", async () => {
+    expect((await plan((await quietStep(true, 30 * 60_000)).server)).agents).toEqual([]);
+    const finished = PLAN.map((step) => ({ ...step, status: "done" }));
+    expect((await plan((await quietStep(true, 3 * HOUR, finished)).server)).agents).toEqual([]);
   });
 });
 

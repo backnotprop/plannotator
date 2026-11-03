@@ -18,11 +18,13 @@ import {
   INBOX_TIDY_RUN_SHOWN_MS,
   inboxAgentName,
   inboxSessionRef,
+  inboxStepsProgress,
   inboxTidySessionLine,
   isInboxNote,
   type InboxCard,
   type InboxCardColumn,
   type InboxMessage,
+  type InboxSteps,
   type InboxTidyAgent,
   type InboxTidyItem,
   type InboxTidyReach,
@@ -47,6 +49,12 @@ export interface InboxTidyOptions {
   reachOf: (session: string) => InboxTidyReach | null;
   /** The Board is on: its cards count. */
   boardOn: boolean;
+  /**
+   * Thread steps (approval "inbox-thread-steps", part 5): whether a session's list in a thread has gone stale (a step
+   * still doing while the session has been idle 2 h or more, or has ended; the server's `inboxStepsStale`). Absent or
+   * null: the person's switch is off, and Tidy says nothing of steps.
+   */
+  stepsStale?: ((record: InboxSteps) => boolean) | null;
 }
 
 /** One item with what its wake lists. */
@@ -211,6 +219,19 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
         ]);
       }
       for (const line of actions) signal(who, threadId, messages, `action item, ${shortAge(aAge)}`, [`Action item open since ${inboxTidyAge(aAge)} ago: ${line}`]);
+    }
+
+    // Thread steps (only while the person's switch is on): a session's step still doing after it went quiet.
+    if (options.stepsStale) {
+      for (const record of store.threadSteps(threadId)) {
+        if (!record.agent.session || !options.stepsStale(record)) continue;
+        const { done, total, doing } = inboxStepsProgress(record.steps);
+        if (doing === null) continue;
+        const age = Math.max(0, now - Date.parse(record.updated_at));
+        signal({ session: record.agent.session, host: record.agent.host, name: inboxAgentName(record.agent) }, threadId, messages, `step in progress, ${shortAge(age)}`, [
+          `Your steps here: ${done} of ${total} done; doing: ${oneLine(doing, 80)}, unchanged for ${inboxTidyAge(age)}. Update them if that changed (the steps action, thread_id ${threadId}).`,
+        ]);
+      }
     }
   }
 

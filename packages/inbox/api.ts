@@ -113,6 +113,8 @@ export interface CardsModel {
   seen_seq?: number | null;
   /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
   threads?: Record<string, InboxListRow | null>;
+  /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
+  steps?: Record<string, InboxStepsWire[]>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */

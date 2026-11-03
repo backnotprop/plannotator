@@ -19,6 +19,28 @@ export function shownStepLists(lists: readonly InboxStepsWire[]): InboxStepsWire
   return lists.filter((list) => list.steps.length > 0);
 }
 
+/**
+ * A Board card's lists (approval part 4: "the thread is one Board card; its steps are inside it"): the lists of
+ * every thread the card links (the cards read's `steps`), the latest written first. The lane card's mark is the
+ * first one's.
+ */
+export function cardStepLists(threads: readonly string[], steps: Readonly<Record<string, readonly InboxStepsWire[]>> | undefined): InboxStepsWire[] {
+  if (!steps) return [];
+  const lists = threads.flatMap((id) => shownStepLists(steps[id] ?? []));
+  return lists.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
+}
+
+/** The Board card the checklist head's Board icon opens: the first card (the Board's order) that links the thread, not a cancelled one. */
+export function threadBoardCard<T extends { threads: readonly string[]; column: string }>(cards: readonly T[], threadId: string): T | null {
+  return cards.find((card) => card.column !== 'dropped' && card.threads.includes(threadId)) ?? null;
+}
+
+/** The lane card's mark, read aloud and on hover: "3 of 6 steps done" (no count on the card itself). */
+export function stepsDoneWords(list: Pick<InboxStepsWire, 'steps'>): string {
+  const { done, total } = stepsCount(list);
+  return `${done} of ${total} steps done`;
+}
+
 /** How a step reads to a screen reader after its text. */
 export const STEP_STATUS_WORDS: Record<InboxStepStatus, string> = {
   todo: 'not started',

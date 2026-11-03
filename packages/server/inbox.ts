@@ -207,7 +207,7 @@ import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favico
 import { createCardMarks } from "./inbox-card-marks";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
-import { createInboxStepsRoute } from "./inbox-steps";
+import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
@@ -248,6 +248,7 @@ import {
   type InboxAgentId,
   type InboxConnectReport,
   type InboxNoteAgentId,
+  type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
 
 /** The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex, which the Inbox wakes itself. */
@@ -1198,7 +1199,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // them out), so the opened card names a done card's thread; a deleted thread is not linked at all.
     const threads: Record<string, ReturnType<typeof store.listRow>> = {};
     for (const card of cards) for (const id of card.threads) if (!(id in threads)) threads[id] = store.listRow(id);
-    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads };
+    // `steps` (additive, approval "inbox-thread-steps", part 4): while the person's switch is on, each linked
+    // thread's lists that hold steps, with each session's presence, for the lane card's mark and the opened
+    // card's checklist. Switch off: absent, so the Board shows none.
+    let steps: Record<string, InboxStepsWire[]> | undefined;
+    if (stepsOn()) {
+      steps = {};
+      for (const id of Object.keys(threads)) {
+        const lists = stepsRoute.threadSteps(id).filter((list) => list.steps.length > 0);
+        if (lists.length > 0) steps[id] = lists;
+      }
+    }
+    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads, ...(steps ? { steps } : {}) };
   };
 
   /**
@@ -2877,6 +2889,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     idleSince: (session) => live.lastIdleOf(session),
     mcpAgents: () => live.mcpAgents(),
     boardOn,
+    // Thread steps (approval "inbox-thread-steps", part 5): a stale step in progress is a Tidy item only while the switch is on.
+    stepsStale: () => {
+      if (!stepsOn()) return null;
+      const t = Date.now();
+      return (record) => inboxStepsStale(record, live, t);
+    },
     readBody,
     json,
     combineSuggestions: () => {

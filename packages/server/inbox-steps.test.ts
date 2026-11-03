@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor, InboxSteps } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { INBOX_STEPS_IDLE_MS, INBOX_STEPS_WORKING_MS, inboxStepsPresenceOf, type InboxStepsLive } from "./inbox-steps";
+import { INBOX_STEPS_IDLE_MS, INBOX_STEPS_WORKING_MS, inboxStepsPresenceOf, inboxStepsStale, type InboxStepsLive } from "./inbox-steps";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -60,7 +60,7 @@ async function world() {
   const setSteps = (on: boolean) =>
     fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ steps: { on } }) });
   const read = async (id = thread) => (await (await fetch(`${base}/api/inbox/threads/${id}/steps`)).json()) as { on: boolean; steps: (InboxSteps & { presence: string })[] };
-  return { dataDir, server, base, thread, setSteps, read };
+  return { dataDir, server, base, project: project.id, thread, setSteps, read };
 }
 
 /** An open event stream's named frames and their data, as they arrive. */
@@ -121,6 +121,31 @@ describe("the steps switch", () => {
     const response = await fetch(`${w.base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ steps: true }) });
     expect(response.status).toBe(422);
     expect((await w.read()).on).toBe(false);
+  });
+});
+
+// Part 4: the lane card's pie and the opened card's checklist ride on the Board's one cards read.
+describe("the Board's cards read", () => {
+  test("carries each linked thread's lists with presence only while the switch is on; a cleared list is gone", async () => {
+    const w = await world();
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: PLAN });
+    w.server.store.createCard({ project_id: w.project, by: AGENT, title: "Retry worker", column: "in_progress", threads: [w.thread] });
+    const cards = async () => {
+      const response = await fetch(`${w.base}/api/inbox/cards`);
+      expect(response.status).toBe(200);
+      return (await response.json()) as { cards: unknown[]; steps?: Record<string, (InboxSteps & { presence: string })[]> };
+    };
+    const off = await cards();
+    expect(off.cards).toHaveLength(1);
+    expect("steps" in off).toBe(false);
+
+    await w.setSteps(true);
+    const on = await cards();
+    expect(Object.keys(on.steps!)).toEqual([w.thread]);
+    expect(on.steps![w.thread]!.map((list) => [list.steps.length, list.presence])).toEqual([[3, "working"]]);
+
+    w.server.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: [] });
+    expect((await cards()).steps).toEqual({});
   });
 });
 
@@ -185,6 +210,27 @@ describe("presence", () => {
     expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_WORKING_MS - 1), live(null), now)).toBe("idle");
     expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live(null), now)).toBe("ended");
     expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live({ busy: null }, now - 1000), now)).toBe("working");
+  });
+
+  // Part 5, Tidy's rule: "a step still in `doing` when the session has been idle over 2 h or has ended".
+  test("stale for Tidy: a step still doing once its session sat idle 2 h or ended; never while it works, sooner, or with nothing doing", () => {
+    const doing = (updatedAt: number, status: "doing" | "done" = "doing"): InboxSteps => ({ ...record("claude-code", updatedAt), steps: [{ step: "Replay", status }] });
+    const idleSince = (at: number | null, base: InboxStepsLive) => ({ ...base, lastIdleOf: () => at });
+    const longAgo = now - INBOX_STEPS_IDLE_MS - 60_000;
+    // A connection that says idle: its last idle transition is the clock.
+    expect(inboxStepsStale(doing(longAgo), idleSince(longAgo, live({ busy: false }, now)), now)).toBe(true);
+    expect(inboxStepsStale(doing(longAgo), idleSince(now - 30 * 60_000, live({ busy: false }, now)), now)).toBe(false);
+    // The list's own last write is never older than the quiet: written 10 min ago, it is not stale.
+    expect(inboxStepsStale(doing(now - 10 * 60_000), idleSince(longAgo, live({ busy: false }, now)), now)).toBe(false);
+    // Working, whatever the ages.
+    expect(inboxStepsStale(doing(longAgo), idleSince(longAgo, live({ busy: true }, now)), now)).toBe(false);
+    // Ended: stale at once.
+    expect(inboxStepsStale(doing(now - 60_000), idleSince(null, live(null, now - 60_000, true)), now)).toBe(true);
+    // No connection: heard 1 h ago is idle (not 2 h); unheard past the bar is ended.
+    expect(inboxStepsStale(doing(longAgo), idleSince(null, live(null, now - 60 * 60_000)), now)).toBe(false);
+    expect(inboxStepsStale(doing(longAgo), idleSince(null, live(null, longAgo)), now)).toBe(true);
+    // Nothing doing: never stale, even ended.
+    expect(inboxStepsStale(doing(longAgo, "done"), idleSince(null, live(null, now, true)), now)).toBe(false);
   });
 
   // Review of #2565, finding 1: a session never seen polling is never ended for its host's name (inbox-compose.md,
