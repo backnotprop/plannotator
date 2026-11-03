@@ -91,6 +91,10 @@ let taggable: TaggableSession[] = [];
 let savedDraft: Record<string, unknown> | null = null;
 /** The live sessions the `@` model and the live list leave out (both read them as ended); a reply `to` one is the server's 409. */
 let notLive = new Set<string>();
+/** Sessions the sessions route's `?asker=` answers as ended. */
+let askerGone = new Set<string>();
+/** A reply `to` one of these is refused for now (429), nothing written: Send may be pressed again. */
+let brokenTo = new Set<string>();
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -98,6 +102,8 @@ beforeEach(() => {
   posted = [];
   savedDraft = null;
   notLive = new Set();
+  askerGone = new Set();
+  brokenTo = new Set();
   taggable = [tagged('ses_claude', 'claude-code'), tagged('ses_pi', 'pi'), tagged('ses_far', 'claude-code', FAR)];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -109,6 +115,9 @@ beforeEach(() => {
       if (path.endsWith('/reply') && to?.session && notLive.has(to.session)) {
         return Response.json({ error: 'That session is not live any more: the reply was not sent.', code: 'session_not_live' }, { status: 409 });
       }
+      if (path.endsWith('/reply') && to?.session && brokenTo.has(to.session)) {
+        return Response.json({ error: 'Too many replies at once; try again.', code: 'rate_limited' }, { status: 429 });
+      }
       if (path.endsWith('/reply')) return Response.json({ reply: {}, questions: [], replayed: false });
       return Response.json({ questions: [] });
     }
@@ -118,7 +127,7 @@ beforeEach(() => {
     if (path.includes('/sessions')) {
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
       const sessions = taggable.map((t) => ({ session: t.session, host: t.host, started_at: t.last_at, last_seen_at: t.last_at, busy: false, idle_since: null, wrote_thread: true }));
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions, ...(asked ? { asker: { session: asked, live: true } } : {}) });
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions, ...(asked ? { asker: { session: asked, live: !askerGone.has(asked) } } : {}) });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -307,45 +316,88 @@ const TAGGED_GONE = (): InboxMessageWire => ({
 const sentTo = () => replies().map((r) => (r.body.to as { session?: string } | undefined)?.session ?? null);
 const tagSessions = () => replies().flatMap((r) => ((r.body.tags as { session: string }[] | undefined) ?? []).map((t) => t.session));
 
-test.skipIf(!hasDom)('aimed alone at a tagged agent that ended and never wrote here: the words go to it by name and draw the refusal, never to the agent that wrote', async () => {
+const nameRow = (el: HTMLElement, session: string) => el.querySelector(`[data-recipient-row="${session}"] .ib-rpick-name`) as HTMLButtonElement;
+const tick = (el: HTMLElement, session: string) => el.querySelector(`[data-recipient-tick="${session}"]`) as HTMLButtonElement;
+async function tap(button: HTMLButtonElement) {
+  act(() => button.click());
+  await settle();
+}
+/** The person's reply that tagged Cursor, an agent that reads the Inbox (MCP): in the thread, never wrote in it. */
+const TAGGED_READER = (): InboxMessageWire => ({ ...TAGGED_GONE(), tags: [{ host: 'cursor', session: 'ses_cursor', wakes: false }] });
+const reader = (): TaggableSession => ({ ...tagged('ses_cursor', 'cursor'), kind: 'mcp' });
+
+test.skipIf(!hasDom)('a tagged agent that ended and never wrote here can\'t be picked alone (no reply could reach it): its name and circle are off, and the reply stays with the agent that wrote', async () => {
   notLive = new Set(['ses_gone']);
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
-  const text = await write(el, 'Codex, are you there?');
+  await write(el, 'Codex, are you there?');
   await openList(el);
   expect(rows(el)).toEqual([
     ['Claude Code', null],
     ['Codex', 'ended'],
   ]);
-  await only(el, 'ses_gone');
-  expect(pillName(el)).toBe('Codex');
-  // Send opens the list once (it ended), and sends nothing.
+  expect(nameRow(el, 'ses_gone').disabled).toBe(true);
+  expect(tick(el, 'ses_gone').disabled).toBe(true);
+  expect(nameRow(el, 'ses_claude').disabled).toBe(false);
+  await tap(nameRow(el, 'ses_gone'));
+  expect(pillName(el)).toBe('Claude Code');
   await send(el);
-  expect(replies()).toEqual([]);
-  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
-  // Pressed again (and again): the words go to Codex alone, by name; the 409 keeps them in the box.
-  await send(el);
-  await send(el);
-  expect(replies().length).toBeGreaterThan(0);
-  expect(sentTo().every((s) => s === 'ses_gone')).toBe(true);
-  expect(replies()[0]!.body).toMatchObject({ words: 'Codex, are you there?', to: { host: 'codex', session: 'ses_gone' } });
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+  expect(sentTo()).toEqual([null]);
   expect(tagSessions()).toEqual([]);
-  expect(el.querySelector('.ib-error[role="alert"]')?.textContent).toContain('ended before your reply went. Nothing was sent.');
-  expect(text.value).toBe('Codex, are you there?');
 });
 
-test.skipIf(!hasDom)('a restored draft aimed at a tagged agent that ended: Send goes to it alone, and a session the window does not know is dropped from the choice', async () => {
-  notLive = new Set(['ses_gone']);
+test.skipIf(!hasDom)('a tagged agent that only reads the Inbox can\'t be picked alone, but its circle tags it; taking away the agent that wrote leaves the reader second, never first', async () => {
+  taggable = [...taggable, reader()];
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_READER()));
+  await write(el, 'Cursor, read this too.');
+  await openList(el);
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Cursor', 'Not woken'],
+  ]);
+  expect(nameRow(el, 'ses_cursor').disabled).toBe(true);
+  expect(tick(el, 'ses_cursor').disabled).toBe(false);
+  await tap(tick(el, 'ses_cursor'));
+  expect(pillName(el)).toBe('2 agents');
+  // Claude Code's circle off: Cursor would be left alone, so nothing changes.
+  await tap(tick(el, 'ses_claude'));
+  expect(pillName(el)).toBe('2 agents');
+  await send(el);
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+  expect(sentTo()).toEqual([null]);
+  expect(tagSessions()).toEqual(['ses_cursor']);
+  expect(el.querySelector('.ib-error[role="alert"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a restored draft led by an agent that can\'t take the reply alone falls back to the agent that wrote, and the pill says so; an unknown session is dropped', async () => {
   savedDraft = { v: 1, thread_id: M1, body: 'Still on the migration?', created_at: '2026-11-01T10:46:00.000Z', updated_at: '2026-11-01T10:46:00.000Z', recipients: ['ses_unknown', 'ses_gone'] };
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
   // The draft's box is open, with its words.
   expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Still on the migration?');
-  // The unknown session is not named, and not sent to or tagged.
-  expect(pillName(el)).toBe('Codex');
+  expect(pillName(el)).toBe('Claude Code');
   await send(el);
-  await send(el);
-  expect(replies().length).toBeGreaterThan(0);
-  expect(sentTo().every((s) => s === 'ses_gone')).toBe(true);
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+  expect(sentTo()).toEqual([null]);
   expect(tagSessions()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a tagged live agent that ends as the words go: the refusal says so once, and pressed again nothing is posted (its row can\'t be picked alone now)', async () => {
+  const piTagged: InboxMessageWire = { ...TAGGED_GONE(), tags: [{ host: 'pi', session: 'ses_pi', wakes: true }] };
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), piTagged));
+  const text = await write(el, 'Pi, take this one.');
+  await openList(el);
+  await only(el, 'ses_pi');
+  expect(pillName(el)).toBe('Pi');
+  notLive = new Set(['ses_pi']);
+  await send(el);
+  expect(replies().map((r) => r.body.to)).toEqual([{ host: 'pi', session: 'ses_pi' }]);
+  expect(el.querySelector('.ib-error[role="alert"]')?.textContent).toBe('That Pi session ended before your reply went. Nothing was sent.');
+  expect(nameRow(el, 'ses_pi').disabled).toBe(true);
+  await send(el);
+  await send(el);
+  expect(replies()).toHaveLength(1);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  expect(text.value).toBe('Pi, take this one.');
 });
 
 test.skipIf(!hasDom)('aimed at a tagged live agent while answering the writer\'s own question: the answers go to the writer with no words, the words to the picked agent alone, and a retry sends neither twice', async () => {
@@ -359,8 +411,8 @@ test.skipIf(!hasDom)('aimed at a tagged live agent while answering the writer\'s
   await openList(el);
   await only(el, 'ses_pi');
   expect(pillName(el)).toBe('Pi');
-  // Pi ends as the words go: the answers already went to Claude Code.
-  notLive = new Set(['ses_pi']);
+  // The words' POST is refused for now: the answers already went to Claude Code.
+  brokenTo = new Set(['ses_pi']);
   await send(el);
   const firstTry = replies();
   expect(firstTry.map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`, `/api/inbox/messages/${M1}/reply`]);
@@ -372,11 +424,78 @@ test.skipIf(!hasDom)('aimed at a tagged live agent while answering the writer\'s
   expect(words!.body).toMatchObject({ words: 'Pi, take the totals from here.', questions: [], to: { host: 'pi', session: 'ses_pi' } });
   expect(words!.body.tags).toBeUndefined();
   expect(words!.body.idempotency_key).not.toBe(answers!.body.idempotency_key);
-  // Pressed again (Pi is back): each half keeps its key, so the server replays the answers and the words go once.
-  notLive = new Set();
+  // Pressed again: each half keeps its key, so the server replays the answers and the words go once.
+  brokenTo = new Set();
   posted = [];
   await send(el);
   const retry = replies();
   expect(retry.map((r) => r.body.idempotency_key)).toEqual([answers!.body.idempotency_key, words!.body.idempotency_key]);
   expect(retry.filter((r) => r.body.words !== '').map((r) => (r.body.to as { session: string }).session)).toEqual(['ses_pi']);
+});
+
+test.skipIf(!hasDom)('aimed at a tagged live agent while answering the questions of an asker that ended: both go to the picked agent, so one reply carries them', async () => {
+  taggable = taggable.filter((t) => t.session !== 'ses_claude');
+  askerGone = new Set(['ses_claude']);
+  notLive = new Set(['ses_claude']);
+  const asked = agentMessage(M1, CLAUDE, 41, { body: QUESTION_BODY, questions: pickedQuestion(M1) });
+  const piTagged: InboxMessageWire = { ...TAGGED_GONE(), tags: [{ host: 'pi', session: 'ses_pi', wakes: true }] };
+  const el = await render(threadOf(asked, piTagged));
+  act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Edit draft').click());
+  await settle();
+  await write(el, 'Pi, take the totals from here.');
+  await openList(el);
+  await only(el, 'ses_pi');
+  expect(pillName(el)).toBe('Pi');
+  await send(el);
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toBe(`/api/inbox/messages/${M1}/reply`);
+  expect(replies()[0]!.body).toMatchObject({ words: 'Pi, take the totals from here.', to: { host: 'pi', session: 'ses_pi' } });
+  expect((replies()[0]!.body.questions as unknown[]).length).toBe(1);
+});
+
+/** Types into the box as a person does (the `@` list reads the caret). */
+async function typeBox(text: HTMLTextAreaElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, value);
+    text.selectionStart = text.selectionEnd = value.length;
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+    text.dispatchEvent(new KeyboardEvent('keyup', { key: value.slice(-1) || 'a', bubbles: true }));
+  });
+  await settle(10);
+}
+async function key(target: HTMLElement, name: string) {
+  await act(async () => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  });
+  await settle(10);
+}
+/** Tags one agent with `@` from the box's list, as typed. */
+async function tagWith(text: HTMLTextAreaElement, typed: string) {
+  await typeBox(text, `${text.value}@${typed}`);
+  for (let i = 0; i < 40 && !document.querySelector('[data-tag-picker]'); i++) await settle(25);
+  expect(document.querySelector('[data-tag-picker]')).not.toBeNull();
+  await key(text, 'ArrowDown');
+  await key(text, 'Enter');
+  await typeBox(text, `${text.value} `);
+}
+
+test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typed, the seventh circle is off and a Send carries eight tags at most', async () => {
+  const writers = Array.from({ length: 8 }, (_, i) => `ses_c${i + 1}`);
+  taggable = [...writers.map((s) => tagged(s, 'claude-code')), tagged('ses_pi', 'pi'), tagged('ses_codex', 'codex')];
+  const ids = [M1, M2, M3, M4, 'msg_01M4H7DDDDDDDDDDDDDDDDDDDD', 'msg_01M4H7EEEEEEEEEEEEEEEEEEEE', 'msg_01M4H7FFFFFFFFFFFFFFFFFFFF', 'msg_01M4H7GGGGGGGGGGGGGGGGGGGG'];
+  const el = await render(threadOf(...writers.map((s, i) => agentMessage(ids[i]!, { ...CLAUDE, session: s }, 30 + i))));
+  const text = await write(el, 'All hands. ');
+  await tagWith(text, 'pi');
+  await tagWith(text, 'codex');
+  // The last writer and the two typed.
+  expect(pillName(el)).toBe('3 agents');
+  await openList(el);
+  for (const s of writers.slice(0, 6)) await tap(tick(el, s));
+  expect(pillName(el)).toBe('9 agents');
+  expect(tick(el, 'ses_c7').disabled).toBe(true);
+  await send(el);
+  expect(replies()).toHaveLength(1);
+  const tags = (replies()[0]!.body.tags as { session: string }[]).map((t) => t.session);
+  expect(tags.length).toBe(8);
+  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
 });

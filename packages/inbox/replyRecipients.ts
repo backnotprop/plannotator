@@ -23,6 +23,16 @@ export interface RecipientRow {
   /** What a phone's pill shows: the folder alone when the label carries one ("plannotator"), else the label. */
   short: string;
   state: RecipientState;
+  /**
+   * It can take the reply alone (be the first recipient): false for an agent with no message of its own in the
+   * thread that the reply route's `to` cannot reach (it ended, or it only reads the Inbox). Absent: it can.
+   */
+  alone?: boolean;
+}
+
+/** Whether a session can take the reply alone: it wrote here (the reply answers its message), or `to` reaches it (live). */
+export function canTakeAlone(state: RecipientState, wroteHere: boolean): boolean {
+  return wroteHere || (state !== 'ended' && state !== 'reader');
 }
 
 /** A session the pill may name: one that wrote in the thread or was tagged in it, or a live one of its project. */
@@ -104,10 +114,21 @@ export function recipientRows(
  */
 export const RECIPIENTS_MAX = INBOX_REPLY_DRAFT_RECIPIENTS_MAX;
 
-/** A tap on a circle: that agent too (while under the most), or (already in, and not the only one) not any more. */
-export function toggleRecipient(current: readonly string[], session: string, max: number = RECIPIENTS_MAX): string[] {
+/**
+ * A tap on a circle: that agent too (while under the most), or (already in, and not the only one) not any more.
+ * The first recipient stays one that can take the reply alone (`alone`): taking it away moves the next such one
+ * first, and with none left the tap does nothing.
+ */
+export function toggleRecipient(current: readonly string[], session: string, max: number = RECIPIENTS_MAX, alone: (session: string) => boolean = () => true): string[] {
   if (!current.includes(session)) return current.length < max ? [...current, session] : [...current];
-  return current.length > 1 ? current.filter((id) => id !== session) : [...current];
+  if (current.length <= 1) return [...current];
+  return aimable(current.filter((id) => id !== session), alone) ?? [...current];
+}
+
+/** The choice with a recipient that can take the reply alone first, or null when it has none. */
+export function aimable(pick: readonly string[], alone: (session: string) => boolean): string[] | null {
+  const lead = pick.find(alone);
+  return lead === undefined ? null : [lead, ...pick.filter((id) => id !== lead)];
 }
 
 /**

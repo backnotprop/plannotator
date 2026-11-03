@@ -385,10 +385,11 @@ export function routeRace(state: RouteState, ended: string, sent: { went: number
 
 /** The race's first words: the session ended before the reply (or all of it) went, and what went. */
 export function raceWhat(host: string | null, sent: { went: number; total: number }): string {
-  const name = host ? hostName(host) : 'That';
+  // "That Codex session"; with no host known, "That session".
+  const name = host ? `${hostName(host)} ` : '';
   return sent.went > 0
-    ? `That ${name} session ended before all of your reply went. ${sent.went} of ${sent.total} agents got their reply; the rest did not.`
-    : `That ${name} session ended before your reply went. Nothing was sent.`;
+    ? `That ${name}session ended before all of your reply went. ${sent.went} of ${sent.total} agents got their reply; the rest did not.`
+    : `That ${name}session ended before your reply went. Nothing was sent.`;
 }
 
 /**

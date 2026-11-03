@@ -87,7 +87,7 @@ import { InboxComposerField, type InboxComposerFieldProps } from './ComposerFiel
 import { VoiceFoot } from './VoiceMic';
 import { ReplyFootPhone } from './ReplyFootPhone';
 import { ReplyRecipient } from './ReplyRecipient';
-import { headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
+import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -2050,7 +2050,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const rcptAsked = useRef(false);
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
-  const rcptAgents = useMemo(() => {
+  const rcptAgents = useMemo((): RecipientRow[] => {
     if (!pillActive) return [];
     const people: RecipientPerson[] = [...participants];
     const add = (host: string | null, session: string) => {
@@ -2069,10 +2069,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       (session) =>
         sessionFolder(session, thread, taggable) ?? (rcptGone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
       (session) => recipientState(session, taggable, ended),
-    );
-  }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone]);
-  /** The choice, without a session this window does not list (a restored draft's): the pill and Send both read it. */
-  const rcptPicked = knownRecipients(rcptPick, (id) => rcptAgents.some((r) => r.session === id) || tagOpts.some((o) => o.id === id));
+    ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined) }));
+  }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault]);
+  /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
+  const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
+  /** The choice came back with a draft (not the person's own tap): one led by an agent that can't take it alone is not kept. */
+  const [rcptRestored, setRcptRestored] = useState(false);
+  /**
+   * The choice, without a session this window does not list (a restored draft's): the pill and Send both read it.
+   * A restored one led by an agent that can't take the reply alone is led by the next that can, else the default.
+   */
+  const rcptKnown = knownRecipients(rcptPick, (id) => rcptAgents.some((r) => r.session === id) || tagOpts.some((o) => o.id === id));
+  const rcptPicked = rcptRestored && rcptKnown ? aimable(rcptKnown, rcptAlone) : rcptKnown;
   const rcptIds: string[] = handingTo ? [handingTo.id] : [...new Set([...(rcptPicked ?? (rcptDefault ? [rcptDefault] : [])), ...taggedIds])];
   const rcptChosen: RecipientRow[] = rcptIds.flatMap((id) => {
     const row = rcptAgents.find((r) => r.session === id);
@@ -2089,7 +2097,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   useEffect(() => {
     if (!pillActive || !draftAim) return;
     const list = draftAim.split('\u0000');
-    setRcptPick((current) => (current === null || (!boxRef.current.open && current.join('\u0000') !== draftAim) ? list : current));
+    if (rcptPick === null || (!boxRef.current.open && rcptPick.join('\u0000') !== draftAim)) {
+      setRcptPick(list);
+      setRcptRestored(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftAim, pillActive]);
   // Fixed when the box opens: a new message does not move it. A box closed with no draft forgets it.
@@ -2098,8 +2109,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (box.open) {
       if (rcptPick === null) {
         const saved = replyDraft.draft?.recipients;
-        if (saved && saved.length > 0) setRcptPick(saved);
-        else if (rcptDefault) setRcptPick([rcptDefault]);
+        if (saved && saved.length > 0) {
+          setRcptPick(saved);
+          setRcptRestored(true);
+        } else if (rcptDefault) {
+          setRcptPick([rcptDefault]);
+          setRcptRestored(false);
+        }
       }
       return;
     }
@@ -2109,6 +2125,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   }, [box.open, pillActive]);
   useEffect(() => {
     setRcptPick(null);
+    setRcptRestored(false);
     setRcptOpen(false);
     setRcptGone(new Map());
     rcptAsked.current = false;
@@ -2121,6 +2138,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   /** The person changed who gets the reply: a draft already kept learns it now. */
   const aimReply = (pick: readonly string[]) => {
     setRcptPick(pick);
+    setRcptRestored(false);
     rcptAsked.current = false;
     replyDraft.aim(pick);
     const text = replyText.get();
@@ -3731,6 +3749,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         if (options.stayFull) fileToThread();
         return;
       }
+      // The words' agent can't take them alone any more (it ended after it was picked, and never wrote here): nothing
+      // goes, and the list stays open for another pick (its row can't be picked alone).
+      const lead = handingTo ? null : rcptPicked?.[0];
+      if (lead && sendCarries && !rcptAlone(lead)) {
+        if (!box.open) openBox();
+        setRcptOpen(true);
+        if (options.stayFull) fileToThread();
+        return;
+      }
     }
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
@@ -3891,11 +3918,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const tail = parts.at(-1)!;
         const t = tail.target;
         const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
-        if (t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0) {
+        // Where the tail's own answers go: their asker, or (it ended) the live agent the pill names.
+        const owner = t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null;
+        const answersTo = to && owner && sendEnded.has(owner) ? to.session : owner;
+        if ((t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0) && answersTo !== wordsTo.session) {
           tail.own = [];
           parts.push(wordsPart);
         } else {
-          parts[parts.length - 1] = wordsPart;
+          // One agent gets both: one reply, as before.
+          parts[parts.length - 1] = { ...wordsPart, target: t };
         }
       }
       const lastKey = parts.at(-1)!.key;
@@ -4606,7 +4637,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       onToggle={(row) => {
         // The agents typed with `@` count toward the most one reply goes to.
         const base = rcptPicked ?? (rcptDefault ? [rcptDefault] : []);
-        const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length);
+        const next = toggleRecipient(base, row.session, RECIPIENTS_MAX - taggedIds.filter((id) => !base.includes(id)).length, rcptAlone);
         aimReply(next);
         announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
       }}

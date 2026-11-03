@@ -6,7 +6,8 @@
  */
 import { expect, test } from 'bun:test';
 import { INBOX_TAGS_MAX } from '@plannotator/core/inbox-types';
-import { canAddRecipient, knownRecipients, RECIPIENTS_MAX, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
+import { raceWhat } from './components/ReplyRoute';
+import { aimable, canAddRecipient, canTakeAlone, knownRecipients, RECIPIENTS_MAX, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
 import type { TaggableModel } from './api';
 
 const rowsOf = (people: { host: string; session: string }[], folders: Record<string, string | null>, states: Record<string, RecipientState> = {}) =>
@@ -73,6 +74,25 @@ test('a restored choice keeps only the sessions the window lists; none left fall
   expect(knownRecipients(['zz', 'b', 'a'], known)).toEqual(['b', 'a']);
   expect(knownRecipients(['zz'], known)).toBeNull();
   expect(knownRecipients(null, known)).toBeNull();
+});
+
+test('alone: an agent with no message here takes the reply alone only while `to` reaches it (live), never ended or a reader', () => {
+  expect((['live', 'old', 'reader', 'ended'] as const).map((s) => canTakeAlone(s, false))).toEqual([true, true, false, false]);
+  expect((['reader', 'ended'] as const).map((s) => canTakeAlone(s, true))).toEqual([true, true]);
+});
+
+test('the first recipient stays one that can take the reply alone: taking it away moves the next such one first, or does nothing', () => {
+  const alone = (id: string) => id !== 'reader';
+  expect(toggleRecipient(['a', 'reader'], 'a', 9, alone)).toEqual(['a', 'reader']);
+  expect(toggleRecipient(['a', 'reader', 'b'], 'a', 9, alone)).toEqual(['b', 'reader']);
+  expect(aimable(['reader'], alone)).toBeNull();
+  expect(aimable(['reader', 'b'], alone)).toEqual(['b', 'reader']);
+});
+
+test('the race line names the agent, or reads "That session" with no host known', () => {
+  expect(raceWhat(null, { went: 0, total: 1 })).toBe('That session ended before your reply went. Nothing was sent.');
+  expect(raceWhat('pi', { went: 0, total: 1 })).toBe('That Pi session ended before your reply went. Nothing was sent.');
+  expect(raceWhat(null, { went: 1, total: 2 })).toStartWith('That session ended before all of your reply went.');
 });
 
 test('a circle adds, and takes away all but the last recipient', () => {

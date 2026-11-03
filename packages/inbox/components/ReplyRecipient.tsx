@@ -142,7 +142,7 @@ export function ReplyRecipient({
         const quiet = QUIET[row.state];
         return (
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
-            <button type="button" className="ib-rpick-name" onClick={() => onOnly(row)}>
+            <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
               <span className="ib-atile">
                 <HostMark host={row.host} />
               </span>
