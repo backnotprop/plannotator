@@ -106,6 +106,8 @@ export interface InboxMachinesContext {
    * whose thread, message, file, comment or project is this machine's: whatever a window believes, it never goes to a peer.
    */
   holds: (kind: HeldKind, id: string) => boolean;
+  /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
+  isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -571,7 +573,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The forward: /api/inbox/m/<machine>/<door route> ──
 
-  const forward = async (req: Request, url: URL, machine: string, route: string): Promise<Response> => {
+  const forward = async (req: Request, url: URL, machine: string, route: string, via: "local" | "tailnet"): Promise<Response> => {
     const peer = peers.get(machine);
     if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
     // The window's own stream carries other machines' records; a merged view is never asked of a machine.
@@ -601,6 +603,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+    // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
+    if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
     // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -713,7 +717,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
     }
     const forwarded = FORWARD.exec(path);
-    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!);
+    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!, via);
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       return json({ self: links.selfId, machines: machinesView() });
