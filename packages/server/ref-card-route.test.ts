@@ -7,7 +7,7 @@ import { startPlannotatorServer } from "./index";
 import { startAnnotateServer } from "./annotate";
 import { startReviewServer } from "./review";
 import { allowServedHostname, resetServedHostnamesForTests } from "./request-host-guard";
-import { resetSessionTailnetForTests, setSessionTailnetOwner, setSessionTailnetServedUrl } from "./session-tailnet";
+import { resetSessionTailnetForTests, setSessionTailnetOwners, setSessionTailnetServedUrl } from "./session-tailnet";
 
 const PATCH = "diff --git a/notes.md b/notes.md\n--- a/notes.md\n+++ b/notes.md\n@@ -1 +1 @@\n-a\n+# Notes\n";
 
@@ -24,7 +24,7 @@ defineRefCardRouteScenarios(
       kinds: ["annotate", "review"],
       // What the CLI records once `tailscale serve` is up (apps/hook/server/index.ts).
       publish(owner, servedUrl) {
-        setSessionTailnetOwner(owner || null);
+        setSessionTailnetOwners(owner ? [owner] : []);
         setSessionTailnetServedUrl(servedUrl);
         allowServedHostname(new URL(servedUrl).hostname);
       },
