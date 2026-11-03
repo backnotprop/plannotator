@@ -136,7 +136,7 @@ import { parsePRUrl, checkPRAuth, fetchPR, type PRAuthResult, getCliName, getCli
 import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { announceTailscaleSession, enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
-import { readTailnetOwner, setSessionTailnetOwner, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
+import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
 import { scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
@@ -478,18 +478,19 @@ if (tailscaleFlag) {
  */
 async function handleTailscaleReady(port: number): Promise<void> {
   // A host handed this CLI an "Ask this session" bridge: say who may use it
-  // over the tailnet (the owner of this machine) before the address exists.
+  // over the tailnet (the owner of this machine, or the inboxTailscaleAllow
+  // logins when Tailscale names no owner) before the address exists.
   // A plain `--tailscale` run (no bridge) asks Tailscale nothing more.
   const bridged = resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined;
   let askOverTailnet = false;
   if (bridged) {
-    const owner = readTailnetOwner();
-    setSessionTailnetOwner(owner.login);
-    askOverTailnet = owner.login !== null;
+    const owners = readTailnetOwners();
+    setSessionTailnetOwners(owners.logins);
+    askOverTailnet = owners.logins.length > 0;
     process.stderr.write(
-      owner.login !== null
-        ? `[plannotator] Ask this session: on here, and over your tailnet for ${owner.login} only.\n`
-        : `[plannotator] Ask this session: on this computer only (${owner.reason}); other devices get Ask AI without it.\n`,
+      "reason" in owners
+        ? `[plannotator] Ask this session: on this computer only (${owners.reason}); other devices get Ask AI without it.\n`
+        : `[plannotator] Ask this session: on here, and over your tailnet for ${owners.logins.join(", ")} only${owners.source === "allowlist" ? " (inboxTailscaleAllow: Tailscale names no owner for this machine)" : ""}.\n`,
     );
   }
   let url: string;

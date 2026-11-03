@@ -277,12 +277,44 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
     expect((await local(port, "/api/host/status", { headers: bearer })).status).toBe(200);
   }, 30_000);
 
-  unix("a tagged machine has no owner: Ask this session stays on this computer, the ready line says so", async () => {
+  unix("a tagged machine with no inboxTailscaleAllow has no owner: Ask this session stays on this computer, the ready line says so", async () => {
     const { port, ready } = await start(["--tailscale"], { mode: "tagged" });
     expect(ready.tailnet).toEqual({ ask: false });
     expect(await providerIds(await local(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).not.toContain("session-bridge");
   });
+
+  unix("a tagged machine with inboxTailscaleAllow: the listed login is the owner and asks; anyone else does not", async () => {
+    const config = join(root, "data", "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: [OWNER] }));
+    try {
+      const { port, ready } = await start(["--tailscale"], { mode: "tagged" });
+      expect(ready.tailnet).toEqual({ ask: true });
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
+      const created = await throughServe(port, "/api/ai/session", { method: "POST", headers: ownerPage(port), body: SESSION_BODY });
+      expect(created.status).toBe(200);
+      for (const login of ["guest@example.com", null]) {
+        expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login }))).not.toContain("session-bridge");
+        const refused = await throughServe(port, "/api/ai/session", { method: "POST", login, headers: ownerPage(port), body: SESSION_BODY });
+        expect(refused.status).toBe(503);
+      }
+    } finally {
+      rmSync(config, { force: true });
+    }
+  }, 30_000);
+
+  unix("a machine with an owner ignores inboxTailscaleAllow: a listed login that is not the owner does not ask", async () => {
+    const config = join(root, "data", "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: ["friend@example.com"] }));
+    try {
+      const { port, ready } = await start(["--tailscale"]);
+      expect(ready.tailnet).toEqual({ ask: true });
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login: "friend@example.com" }))).not.toContain("session-bridge");
+    } finally {
+      rmSync(config, { force: true });
+    }
+  }, 30_000);
 
   unix("SIGTERM takes the serve mapping down", async () => {
     const { port } = await start(["--tailscale"]);
