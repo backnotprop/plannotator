@@ -395,7 +395,7 @@ describe("Pi's launch host, against the fake pi", () => {
   test("the Terminal's Pi takes the session through this Inbox's bridge; nothing starts here until it quit, however long it runs", async () => {
     const { fake, host, dataDir, bridge, runTerminal, started } = setup({ noConnect: true }, { handoffMs: 300 });
     const { launch, session, pid } = await started();
-    runTerminal(host.terminal(launch, false));
+    const shell = runTerminal(host.terminal(launch, false));
     // It runs only once the Inbox's process is gone, and it polls this Inbox: the Inbox tool on, this data dir.
     await until("the Terminal's Pi on the bridge", () => bridge.runStateOf(session));
     const [terminal] = fake.terminals();
@@ -410,6 +410,9 @@ describe("Pi's launch host, against the fake pi", () => {
     // It quit there: the next reply continues the session here.
     process.kill(terminal!.pid, "SIGTERM"); // inbox-guard: own child (the fake pi this test's Terminal command ran)
     await until("the bridge to lose it", () => !bridge.runStateOf(session));
+    // Quit means gone: the bridge can lose the Pi a moment before its process and the Terminal's shell (whose
+    // command line names the session too) have ended, and a reply in that moment rightly waits (CI, Linux).
+    await until("the Terminal's Pi and its shell to end", () => !fake.alive(terminal!.pid) && shell.exitCode !== null);
     expect((await host.resume(launch)).failure).toBeNull();
     expect(fake.starts()).toHaveLength(2);
   });

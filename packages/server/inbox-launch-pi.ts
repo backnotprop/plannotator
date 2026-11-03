@@ -50,6 +50,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -287,7 +288,7 @@ interface PiSessionRecord {
  */
 function processListing(ps: string): string | null {
   try {
-    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { stdout: "pipe", stderr: "ignore" });
+    const run = Bun.spawnSync([ps, "-A", "-ww", "-o", "pid=,ppid=,command="], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
     return run.exitCode === 0 ? run.stdout.toString() : null;
   } catch {
     return null;
