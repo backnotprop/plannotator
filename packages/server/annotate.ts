@@ -164,6 +164,11 @@ export interface AnnotateServerOptions {
   pasteApiUrl?: string;
   /** Source attribution: original URL or filename (e.g. "https://..." or "index.html") */
   sourceInfo?: string;
+  /**
+   * The caller's `--title` (#2289): the whole tab title, and the desktop
+   * header's name, in place of the ones the page builds. Absent: unchanged.
+   */
+  title?: string;
   /** True when `markdown` was produced by Turndown/Jina (HTML or URL) —
    *  feedback line numbers won't match the original source. */
   sourceConverted?: boolean;
@@ -299,6 +304,7 @@ export async function startAnnotateServer(
     folderPath,
     recentMessages,
     sourceInfo,
+    title,
     sourceConverted,
     sharingEnabled = true,
     shareBaseUrl,
@@ -942,6 +948,7 @@ export async function startAnnotateServer(
               mode,
               filePath,
               sourceInfo: sourceInfo ?? liveApp.targetUrl,
+              ...(title ? { title } : {}),
               appUrl: liveAppUrl,
               targetUrl: liveApp.targetUrl,
               liveToken: liveSessionToken,
@@ -998,6 +1005,7 @@ export async function startAnnotateServer(
               mode,
               filePath,
               sourceInfo,
+              ...(title ? { title } : {}),
               sourceConverted: sourceConverted ?? false,
               sourceSave: primarySource.sourceSave,
               serverSession,

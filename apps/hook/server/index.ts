@@ -232,6 +232,7 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
   parseStrictAnnotateOptions,
+  parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
 } from "./cli";
@@ -416,6 +417,19 @@ const browserIdx = args.indexOf("--browser");
 if (browserIdx !== -1 && args[browserIdx + 1]) {
   process.env.PLANNOTATOR_BROWSER = args[browserIdx + 1];
   args.splice(browserIdx, 2);
+}
+
+// Session flag: --title <text> (review / annotate / annotate-last) — the whole
+// tab title, and the annotate header's name, chosen by the caller (#2289).
+// Before the boolean flags, so a title can never be read as one of them.
+let sessionTitle: string | undefined;
+try {
+  const parsedTitle = parseTitleOption(args);
+  sessionTitle = parsedTitle.title;
+  args.splice(0, args.length, ...parsedTitle.remainingArgs);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(annotateStartupFailureExitCode({ requireApproval: requireApprovalFlag, resultFile }));
 }
 
 // Transport flag: --tailscale (review / annotate / annotate-last) — publish
@@ -1522,6 +1536,8 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
+    // `--title`: the tab names what the caller chose (#2289).
+    title: sessionTitle,
     includeReviewDirectory: !!reviewDirectory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
@@ -1819,6 +1835,8 @@ if (args[0] === "sessions") {
     bundleFiles,
     sourceInfo,
     sourceConverted,
+    // `--title`: the tab and the header name what the caller chose (#2289).
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -2146,6 +2164,7 @@ if (args[0] === "sessions") {
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
     mode: "annotate-last",
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,

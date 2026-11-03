@@ -199,6 +199,16 @@ The annotation UI in annotate mode works the same as plan review, with a few cha
 
 All annotation types work identically: deletions, comments, global comments, quick labels, "looks good" approvals, image attachments, and [comments on part of an image](/docs/commands/plan-review/#comments-on-part-of-an-image) in a markdown file. HTML and live app surfaces are the exception: they are comment-only, so deletions and quick labels are unavailable there, though deletions saved earlier still restore.
 
+## Naming the tab (`--title`)
+
+The tab names the open document, so several reviews of the same repository stay apart. When the caller knows better what the review is for, `--title` names it instead:
+
+```bash
+plannotator annotate docs/changes/add-refund-flow/ --title "add-refund-flow review"
+```
+
+The text is the whole tab title, exactly as given, with no repository or file name added. The header beside the logo shows the same text, and its tooltip still names the file or folder. It stays put whichever file you open in a folder, and when you follow a link to another document. A blank title is ignored. `plannotator annotate-last` and `plannotator review` take it too.
+
 ## Flags
 
 Three opt-in flags turn annotate into a review gate for hook integrations (spec-driven frameworks, turn-by-turn review, and so on). They compose: use any alone or combine them.
