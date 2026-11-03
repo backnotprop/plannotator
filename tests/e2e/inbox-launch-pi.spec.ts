@@ -382,13 +382,8 @@ test('a Pi that runs but never connected: Open in Terminal ends it only once the
     const start = fake.starts().at(-1)!;
     const session = start.argv[3]!;
     expect(fake.alive(start.pid)).toBe(true);
-    // The line's button; ⋯'s item on a branch without it.
-    const onLine = p.locator('[data-run-open]');
-    if ((await onLine.count()) > 0) await onLine.click();
-    else {
-      await p.locator('[data-thread-more]').click();
-      await page.locator('[data-launch-item="open"]').click();
-    }
+    // The line's button: ⋯ has no Open in Terminal.
+    await p.locator('[data-run-open]').click();
     const ran = await waitFor('osascript', () => fake.osascript().at(-1));
     const command = ran.at(-1)!;
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
