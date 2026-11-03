@@ -63,7 +63,7 @@ async function serverSections(): Promise<Map<string, string>> {
   return new Map(model.sections.flatMap((s) => s.threads.map((r) => [r.thread_id, s.id] as const)));
 }
 
-const TESTS = 20;
+const TESTS = 22;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -700,6 +700,55 @@ test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves
   expect(snoozedBand()).not.toBeNull();
   expect(window.location.hash).toContain(`thread=${ids.waiting}`);
   await until(() => !!document.querySelector('section.ib-pane [data-snooze-line]'), 'the snooze line');
+});
+
+test.skipIf(!hasDom)('Snooze the open thread, then Unsnooze in it: its row comes back between the same neighbours at once, the band as it was', async () => {
+  await renderApp(`#thread=${ids.waiting}`);
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!rowButton(ids.waiting), 'the open row');
+  const before = placedRows();
+  // Another test's world may have left a snooze: the band's count, not its absence.
+  const band = () => snoozedBand()?.textContent ?? null;
+  const bandBefore = band();
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
+  });
+  await snoozeTomorrow('[data-thread-snooze-menu]');
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  await until(() => !!document.querySelector('section.ib-pane [data-unsnooze]'), 'Unsnooze in the thread');
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-unsnooze]')!.click();
+  });
+  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the unsnooze written');
+  await until(() => !!rowButton(ids.waiting), 'the row back');
+  expect(placedRows()).toEqual(before);
+  expect(band()).toBe(bandBefore);
+  expect(window.location.hash).toContain(`thread=${ids.waiting}`);
+});
+
+test.skipIf(!hasDom)('with a thread open, a mouse Snooze from another row whose write is slow: when the row leaves, focus goes to the row now in its slot', async () => {
+  await renderApp(`#thread=${ids.stopped}`);
+  await until(() => !!document.querySelector('section.ib-pane'), 'the thread');
+  const order = [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!);
+  const at = order.indexOf(ids.waiting);
+  const next = order[at + 1] ?? order[at - 1]!;
+  // A slow write: the menu has closed and put focus back on the row well before the row leaves.
+  const fast = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && String(input).includes('/snooze')) await new Promise((r) => setTimeout(r, 600));
+    return fast(input, init);
+  }) as typeof fetch;
+  act(() => {
+    window.dispatchEvent(new Event('pointerdown'));
+  });
+  await openMenu(ids.waiting);
+  mouseClick(item('snooze')!);
+  await until(() => !!document.querySelector(`[data-row-menu="${ids.waiting}"] [data-snooze-choice="tomorrow"]`), 'the times');
+  mouseClick(document.querySelector<HTMLElement>(`[data-row-menu="${ids.waiting}"] [data-snooze-choice="tomorrow"]`)!);
+  await until(() => !menu(), 'the menu to close');
+  expect(rowButton(ids.waiting)).not.toBeNull();
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  await until(() => document.activeElement === rowButton(next), 'focus on the row in its slot');
 });
 
 test.skipIf(!hasDom)('with a thread open, Snooze by keyboard from another row: focus goes to the row now in its slot, never the page', async () => {

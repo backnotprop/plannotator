@@ -1126,6 +1126,12 @@ function Inbox() {
    */
   const closing = useRef<OpenThread | null>(null);
   /**
+   * Rows this window's own snooze moved while the list held (`moveSnoozedRow`),
+   * each with the list as drawn before it: an Unsnooze puts the row back there.
+   * Emptied whenever the list settles or adopts, since the slots are gone then.
+   */
+  const snoozeMoved = useRef(new Map<string, InboxListSection[]>());
+  /**
    * The thread the held list treats as open: the route's, else the one
    * closing (with its row as it stood at the close, so an agent message after
    * the close waits behind "N new" like any other); the close's own render
@@ -1155,6 +1161,7 @@ function Inbox() {
       const next = latestRef.current;
       if (!next) return;
       if (slide) armSlide();
+      snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
     },
@@ -1193,6 +1200,7 @@ function Inbox() {
       if (adopt && refresh?.light) showFrom.current = shownRef.current;
       // A refresh beside an open thread keeps that thread's row where it is on screen (held.ts adoptKeepingOpen).
       const keep = adopt && refresh?.keepOpen ? routeRef.current.thread : null;
+      if (adopt) snoozeMoved.current.clear();
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
       setRestartAgents(restartAgentsOf(next.restart_agents, next.restart_claude_code));
@@ -2952,6 +2960,7 @@ function Inbox() {
     }
     await afterWrite();
     const drawnBefore = moveSnoozedRow(threadId);
+    if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
     const when = inboxSnoozeWhen(until);
     showToast({
       icon: 'clock',
@@ -2987,6 +2996,7 @@ function Inbox() {
    * neighbours (held.ts `putRowBack`), in its state as it is now.
    */
   const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null, drawnBefore: InboxListSection[] | null = null) => {
+    snoozeMoved.current.delete(threadId);
     try {
       await inboxApi.snooze(threadId, earlier && inboxSnoozeRunning(earlier.until) ? earlier.until : null, earlier?.at);
     } catch (cause) {
@@ -2994,25 +3004,44 @@ function Inbox() {
       return;
     }
     await afterWrite();
-    const now = rowOf(threadId);
-    if (drawnBefore && now && routeRef.current.thread && !listCovered() && drawnSection(shownRef.current, threadId) === 'snoozed') {
-      armSlide();
-      setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
-    }
+    putSnoozedRowBack(threadId, drawnBefore);
     dismissToast();
     say(earlier ? 'Snooze moved back.' : 'Unsnoozed.');
   };
-  /** Unsnooze: the thread is back in its section now. Undo snoozes it again, to the same time. */
+  /**
+   * A row this window's own snooze moved (`moveSnoozedRow`) whose snooze then
+   * changed, the thread still open beside the list: unsnoozed, it goes back
+   * between the neighbours it had (held.ts `putRowBack`), in its state as it is
+   * now; snoozed again, it takes its place in the band. Nothing once the list
+   * has settled since (`snoozeMoved` is emptied then) or with no thread open
+   * (the write's read adopted the list).
+   */
+  const putSnoozedRowBack = (threadId: string, drawnBefore: InboxListSection[] | null) => {
+    const now = rowOf(threadId);
+    if (!drawnBefore || !now || !routeRef.current.thread || listCovered() || drawnSection(shownRef.current, threadId) !== 'snoozed') return;
+    armSlide();
+    setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
+  };
+  /**
+   * Unsnooze: the thread is back in its section now. A row this window's own
+   * snooze moved comes back at once, as Snooze's Undo brings it (the person's
+   * own snooze undone); any other held row waits for the list to settle. Undo
+   * snoozes it again, to the same time, and sends a row that came back to the
+   * band again.
+   */
   const unsnooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>) => {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
+    const drawnBefore = snoozeMoved.current.get(threadId) ?? null;
     try {
       await inboxApi.snooze(threadId, null);
     } catch (cause) {
       showError(cause);
       return;
     }
+    snoozeMoved.current.delete(threadId);
     await afterWrite();
+    putSnoozedRowBack(threadId, drawnBefore);
     showToast({
       icon: 'clock',
       lead: 'Unsnoozed',
@@ -3020,7 +3049,11 @@ function Inbox() {
       onUndo: earlier
         ? () => {
             dismissToast();
-            void restoreSnooze(threadId, earlier);
+            void restoreSnooze(threadId, earlier).then(() => {
+              if (!drawnBefore) return;
+              const moved = moveSnoozedRow(threadId);
+              if (moved) snoozeMoved.current.set(threadId, moved);
+            });
           }
         : undefined,
     });
