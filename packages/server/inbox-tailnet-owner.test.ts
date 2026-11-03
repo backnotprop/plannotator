@@ -330,6 +330,15 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
     expect(await answerOf(await call(w, "local", launchSend(w.project.id, "k-local")))).toEqual([409, "agent_unavailable"]);
   });
 
+  test("New message to a scratch folder: a guest is refused before the folder is made; the owner reaches the agent check", async () => {
+    const w = await launchWorld();
+    const scratchSend = (key: string): Call => ({ path: "/api/inbox/messages", body: { idempotency_key: key, body: "Try an idea.", thread_name: "idea", to: { launch: { agent: "claude-code", scratch: true } } } });
+    expect(await answerOf(await call(w, "guest", scratchSend("k-guest")))).toEqual([403, "owner_only"]);
+    expect(existsSync(join(w.dataDir, "scratch"))).toBe(false);
+    expect(w.inbox.store.launchedRoots()).toEqual([]);
+    expect(await answerOf(await call(w, "owner", scratchSend("k-owner")))).toEqual([409, "agent_unavailable"]);
+  });
+
   test("Try again on a failed launch: a guest is refused and no start runs; the owner starts it again", async () => {
     const w = await launchWorld();
     const id = inboxId("lch");
