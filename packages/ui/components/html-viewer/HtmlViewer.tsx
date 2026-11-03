@@ -59,6 +59,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  injectPrintDefaults,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -562,7 +563,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
+      return injectIntoHead(injectPrintDefaults(rawHtml), injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     useLayoutEffect(() => {

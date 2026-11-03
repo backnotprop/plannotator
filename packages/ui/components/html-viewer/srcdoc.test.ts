@@ -5,7 +5,8 @@
  * viewer writes NOTHING into the document's namespace — no bare CSS custom
  * properties (a host `--muted` clobbering an author `--muted` visibly corrupts
  * documents), no `color-scheme`, no root classes, no styling of author
- * elements. Host tokens travel only under the viewer-owned `--pn-*` prefix
+ * elements on screen. Print-only pagination defaults are the exception.
+ * Host tokens travel only under the viewer-owned `--pn-*` prefix
  * unless the document opts in via <meta name="plannotator-theme" content="host">.
  *
  * These tests are the mutation guard: reintroducing any bare-token injection

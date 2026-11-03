@@ -4,8 +4,9 @@
  * Product rule: arbitrary HTML must render exactly as it would in a plain
  * browser tab. The viewer never writes into the document's namespace — no bare
  * CSS custom properties, no classes on the author's root, no `color-scheme`,
- * no styling of author elements. Host theme tokens are pushed under the
- * viewer-owned `--pn-*` prefix, which the annotation CSS reads.
+ * no screen styling of author elements. Print-only defaults let sections
+ * paginate on paper; author print rules can override them. Host theme tokens
+ * are pushed under the viewer-owned `--pn-*` prefix, which the annotation CSS reads.
  *
  * Documents that WANT to follow the host theme (e.g. Plannotator-generated
  * artifacts) opt in with `<meta name="plannotator-theme" content="host">`,
@@ -158,6 +159,29 @@ export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
     );
   }
   return `<script>${BRIDGE_SCRIPT}</script>`;
+}
+
+// These defaults live inside the sandbox: host print.css cannot style a
+// child document. Low specificity leaves authored print layouts in control.
+const DOCUMENT_PRINT_CSS = `
+@layer plannotator-print-defaults {
+@media print {
+  :where(html, body) { height: auto; min-height: 0; overflow: visible; }
+  :where(section ~ section) { break-before: page; }
+  :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  :where(figure, img, svg, pre, table) { break-inside: avoid; }
+  :where(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+}
+`;
+
+/** Declare the defaults' layer before author styles, including authored layers. */
+export function injectPrintDefaults(rawHtml: string): string {
+  const style = `<style>${DOCUMENT_PRINT_CSS}</style>`;
+  const head = /<head\b[^>]*>/i.exec(rawHtml);
+  if (!head) return style + rawHtml;
+  const position = head.index + head[0].length;
+  return rawHtml.slice(0, position) + style + rawHtml.slice(position);
 }
 
 /** The `<style>` + `<script>` block spliced into the document's head. */
