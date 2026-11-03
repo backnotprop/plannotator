@@ -52,7 +52,7 @@ import { registerReloadFlush } from '../stalePage';
 import { landInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
-import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
+import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
@@ -73,6 +73,7 @@ import {
   mergeRouteRows,
   othersLive,
   redirectedName,
+  raceWhat,
   routeRace,
   useEndedSessions,
   type AskingSession,
@@ -85,6 +86,8 @@ import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replaced
 import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { ReplyFootPhone } from './ReplyFootPhone';
+import { ReplyRecipient } from './ReplyRecipient';
+import { headFolder, latestBy, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -1969,8 +1972,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const askerEnded = wordsEnded || endedOther !== null;
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
-  // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open.
-  const taggable = useTaggable(thread.thread_id, (box.open || !!file) && !resolved);
+  // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
+  // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
+  // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
+  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
+  const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
@@ -2028,6 +2034,97 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     [tagOpts],
   );
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
+  // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
+  // more than one agent, or one whose only agent ended while another is live (it does the old route choice's job).
+  const pillActive = !resolved && (multiAgent || (askerEnded && anyOtherLive));
+  /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
+  const rcptDefault = (() => {
+    const words = wordsMessage(thread);
+    return words.author.kind === 'agent' ? (words.author.session ?? null) : (words.to?.session ?? null);
+  })();
+  // The choice: the first answers its own latest message, the rest ride as tags. Null: not fixed yet (it is fixed
+  // when the box opens, so a new message does not move it). Kept with the draft (its `recipients`).
+  const [rcptPick, setRcptPick] = useState<readonly string[] | null>(null);
+  const [rcptOpen, setRcptOpen] = useState(false);
+  /** Send already stopped once to show that the recipient has ended: pressed again, the reply waits for it. */
+  const rcptAsked = useRef(false);
+  /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
+  const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const rcptAgents = useMemo(() => {
+    if (!pillActive) return [];
+    const people: RecipientPerson[] = [...participants];
+    const add = (host: string | null, session: string) => {
+      if (!people.some((p) => p.session === session)) people.push({ host, session });
+    };
+    const handed = activeHandoff(thread);
+    if (handed?.to) add(handed.to.host, handed.to.session);
+    // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
+    if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
+    // One that ended as a Send went to it stays in the list, ended.
+    for (const [session, host] of rcptGone) add(host, session);
+    const ended = new Set([...(askerEnded && asking ? [asking.session] : []), ...rcptGone.keys()]);
+    return recipientRows(
+      people,
+      // A live session of the project's list that the `@` list has not read: the thread's folder (the list is its project's).
+      (session) =>
+        sessionFolder(session, thread, taggable) ?? (rcptGone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
+      (session) => recipientState(session, taggable, ended),
+    );
+  }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone]);
+  const rcptIds: string[] = handingTo ? [handingTo.id] : [...new Set([...(rcptPick ?? (rcptDefault ? [rcptDefault] : [])), ...taggedIds])];
+  const rcptChosen: RecipientRow[] = rcptIds.flatMap((id) => {
+    const row = rcptAgents.find((r) => r.session === id);
+    if (row) return [row];
+    const option = tagOpts.find((o) => o.id === id);
+    return option ? [{ session: id, host: option.host, label: option.label, short: option.label, state: 'live' as const }] : [];
+  });
+  const rcptNames = namesList(rcptChosen.map((r) => r.label));
+  /** Whom the box's words go to, named: the pill's names where it shows, else as before (the field's name, full screen's card). */
+  const replyToNames = pillActive && rcptNames ? rcptNames : replyTo;
+  // The choice a draft was saved with comes back (a reload, another window, back to the thread). While the box is
+  // open the person's own choice stands: a save's answer never takes it back.
+  const draftAim = replyDraft.draft?.recipients?.join('\u0000') ?? '';
+  useEffect(() => {
+    if (!pillActive || !draftAim) return;
+    const list = draftAim.split('\u0000');
+    setRcptPick((current) => (current === null || (!boxRef.current.open && current.join('\u0000') !== draftAim) ? list : current));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftAim, pillActive]);
+  // Fixed when the box opens: a new message does not move it. A box closed with no draft forgets it.
+  useEffect(() => {
+    if (!pillActive) return;
+    if (box.open) {
+      if (rcptPick === null) {
+        const saved = replyDraft.draft?.recipients;
+        if (saved && saved.length > 0) setRcptPick(saved);
+        else if (rcptDefault) setRcptPick([rcptDefault]);
+      }
+      return;
+    }
+    setRcptOpen(false);
+    if (!replyDraft.draft) setRcptPick(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box.open, pillActive]);
+  useEffect(() => {
+    setRcptPick(null);
+    setRcptOpen(false);
+    setRcptGone(new Map());
+    rcptAsked.current = false;
+  }, [thread.thread_id]);
+  // The draft's saves name the choice (the server keeps it with the words).
+  useEffect(() => {
+    if (pillActive) replyDraft.aim(rcptPick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rcptPick, pillActive]);
+  /** The person changed who gets the reply: a draft already kept learns it now. */
+  const aimReply = (pick: readonly string[]) => {
+    setRcptPick(pick);
+    rcptAsked.current = false;
+    replyDraft.aim(pick);
+    const text = replyText.get();
+    const files = replyFiles.draftFiles(text);
+    if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
+  };
   const noteId = `ib-asker-note-${thread.thread_id}`;
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;
   // The choice at Send, when the session that asked has ended.
@@ -3550,6 +3647,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     else replyDraft.release();
     setTaggedIds([]);
     setTagMode('ask');
+    // The pill's choice resets after Send: the next reply goes to the last writer until the person aims it.
+    setRcptPick(null);
+    setRcptOpen(false);
+    rcptAsked.current = false;
   };
 
   /**
@@ -3606,9 +3707,32 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       }
     }
     const gateOtherLive = gateAsking !== null && othersLive(gateAsking, live).length > 0;
+    /** This Send's sessions that ended, with what the read it waited for found (its state may not show it yet). */
+    const sendEnded = new Set([...endedSends, ...(options.endedChecked && !resolved ? otherSessions.filter((s) => options.endedChecked!.has(s.session)).map((s) => s.session) : [])]);
+    // The recipient pill takes the route choice's place (approval "inbox-reply-recipient"): a Send to agents
+    // that have all ended opens its list once, with the live ones in it; pressed again, the reply waits for them.
+    if (pillActive && !options.routed) {
+      const gone = rcptChosen.length > 0 && rcptChosen.every((r) => r.state === 'ended');
+      // Only when the pill's agents get something: the words (or files, comments), or their own questions' answers.
+      // Picks on a live agent's question alone go to it, whoever the pill names.
+      const reaches = sendCarries || rcptChosen.some((r) => sendEnded.has(r.session));
+      if (gone && reaches && rcptAgents.some((r) => r.state === 'live') && !rcptAsked.current) {
+        const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
+        if (empty) {
+          setError('Write a reply or pick an answer first.');
+          return;
+        }
+        rcptAsked.current = true;
+        setError(null);
+        if (!box.open) openBox();
+        setRcptOpen(true);
+        if (options.stayFull) fileToThread();
+        return;
+      }
+    }
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
-    if (gateEnded && gateOtherLive && gateAsking && !options.routed) {
+    if (!pillActive && gateEnded && gateOtherLive && gateAsking && !options.routed) {
       const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
@@ -3625,7 +3749,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       options.routed && route.selected && route.selected !== LEAVE && route.selected !== asking?.session
         ? (route.rows.find((row) => row.live.session === route.selected && !row.ended)?.live ?? null)
         : null;
-    const to = chosen ? { host: chosen.host, session: chosen.session } : undefined;
+    // The pill's choice: the first gets the words (they answer its own latest message), the rest ride as tags.
+    // Aimed at a live session, the replies to an ended session's questions in this Send follow it (`to`), as
+    // the route choice's pick did.
+    const first = pillActive && !handingTo ? (rcptPick?.[0] ?? rcptDefault) : null;
+    const aimed = first !== null && first !== rcptDefault ? first : null;
+    const firstLive = first ? (live?.sessions.find((s) => s.session === first) ?? null) : null;
+    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : undefined;
+    const pillExtra = pillActive && !handingTo && rcptPick ? rcptPick.slice(1) : [];
+    const to = chosen ? { host: chosen.host, session: chosen.session } : aimedTo;
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
@@ -3728,9 +3860,23 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // One reply per session, its picks, skips and action items in the draft. The latest agent message rides
       // last only to carry the words, the annotations and the pasted files; with none, a target with nothing to
       // send is left out.
-      const plain = sendTargetsOf(current, skip).filter(
+      // Aimed with the pill at a session that wrote here: the words answer its latest message.
+      const aimedAt = aimed ? latestBy(current, aimed) : undefined;
+      const plain = sendTargetsOf(current, skip, aimedAt).filter(
         (t, index, all) => t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0 || (carries && index === all.length - 1),
       );
+      // Aimed at a live session that never wrote here (tagged in it): the reply carrying the words goes to it alone
+      // (`to`). When that reply also answers a live session's own questions, those answers stay that session's, and
+      // the aimed session is tagged on it instead.
+      let wordsTo: { host: string; session: string } | undefined;
+      const aimAsTag: string[] = [];
+      if (aimed && !aimedAt && aimedTo && carries) {
+        const wordsTarget = plain.at(-1);
+        const owner = wordsTarget?.message.author.kind === 'agent' ? (wordsTarget.message.author.session ?? null) : null;
+        const ownAnswers = !!wordsTarget && (wordsTarget.questions.length > 0 || wordsTarget.skip.length > 0 || wordsTarget.actions.length > 0);
+        if (ownAnswers && !(owner && sendEnded.has(owner))) aimAsTag.push(aimed);
+        else wordsTo = aimedTo;
+      }
       // A comment on another session's message rides a reply to that message (routeSendAnnotations).
       const { targets, carried } = routeSendAnnotations(current, plain, pendingAnnotations);
       if (targets.length === 0) {
@@ -3738,14 +3884,20 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         return;
       }
       const lastId = targets.at(-1)!.message.id;
-      // Every tag of this Send (the words' and every carried comment's), once each, on the last reply.
+      // Every tag of this Send (the words', the pill's other recipients' and every carried comment's), once each, on the last reply.
       const sendTags = sendTagsByTarget(
-        targets.map((t) => ({ id: t.message.id, owner: t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null })),
-        taggedIds,
+        targets.map((t) => ({ id: t.message.id, owner: t.message.id === lastId && wordsTo ? wordsTo.session : t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null })),
+        [...taggedIds, ...pillExtra, ...aimAsTag],
         new Map(targets.map((t) => [t.message.id, (carried.get(t.message.id) ?? []).flatMap((r) => commentTags(r))])),
         tagOpts,
         sendMode,
       );
+      // The line under the sent reply names the pill's recipients as the pill does ("Claude Code (plannotator)").
+      // A typed `@` keeps its own label: the words carry it, and the sent reply paints it from the label.
+      const pillNamed = new Set([...pillExtra, ...aimAsTag].filter((id) => !taggedIds.includes(id)));
+      if (pillNamed.size > 0) {
+        for (const [id, list] of sendTags) sendTags.set(id, list.map((t) => (pillNamed.has(t.session) ? { ...t, label: rcptAgents.find((r) => r.session === t.session)?.label ?? t.label } : t)));
+      }
       if (!sendKeys.current) sendKeys.current = new Map();
       // One key per session's reply, kept for a retry.
       for (const t of targets) if (!sendKeys.current.has(replyKeyOf(t.message))) sendKeys.current.set(replyKeyOf(t.message), newUuid());
@@ -3795,7 +3947,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
           // Only a message an ended session of this Send asked goes to the session picked;
           // an answer to a live session's message still goes to that session.
-          ...(to && target.message.author.kind === 'agent' && !!target.message.author.session && endedSends.has(target.message.author.session) ? { to } : {}),
+          // The words aimed with the pill at a live session that never wrote here go to it alone.
+          ...(last && wordsTo
+            ? { to: wordsTo }
+            : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session)
+              ? { to }
+              : {}),
         } });
       }
       // The tiles this Send carries, by the uploads its requests carry: a file pasted while it is in flight stays.
@@ -3816,7 +3973,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       focusSent.current = !options.stayFull;
       if (options.stayFull) {
         setComposerSentAt(Date.now());
-        announce(`Sent to ${replyTo}.`);
+        announce(`Sent to ${replyToNames}.`);
       }
       finishSent(sentUploads, sendClears);
       if (handedReply) {
@@ -3876,7 +4033,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // greys and the next live one is selected; the error says what went
       // when an earlier part of this Send already had.
       if (to && cause instanceof InboxApiError && cause.code === 'session_not_live') {
-        setRoute((current) => routeRace(current, to.session, { went, total }));
+        if (pillActive && !chosen) {
+          // The pill's list opens with that agent ended (the route choice is gone, approval "inbox-reply-recipient").
+          setRcptGone((current) => new Map([...current, [to.session, to.host]]));
+          setError(raceWhat(to.host, { went, total }));
+          rcptAsked.current = true;
+          if (!box.open) openBox();
+          setRcptOpen(true);
+        } else {
+          setRoute((current) => routeRace(current, to.session, { went, total }));
+        }
         if (went > 0) await onChanged();
         void loadLive();
         return;
@@ -4383,6 +4549,52 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const draftNoteId = `ib-foot-draft-${thread.thread_id}`;
   const skipNoteId = `ib-foot-skip-${thread.thread_id}`;
   const footStatusIds = [draftNoteId, waiting && unanswered.length > 0 ? skipNoteId : null].filter(Boolean).join(' ');
+  /** "Tag another agent": a real `@` at the end of the words, so everything after it is today's tagging. */
+  const tagAnother = () => {
+    setRcptOpen(false);
+    const field = textRef.current;
+    if (!field) return;
+    field.focus();
+    const end = field.value.length;
+    field.setSelectionRange(end, end);
+    document.execCommand('insertText', false, end === 0 || /\s$/.test(field.value) ? '@' : ' @');
+  };
+  /** The Reply arrow on an agent's message: the pill aims at that message's agent, and the words stay. */
+  const replyToMessage = (message: InboxMessageWire) => {
+    const session = message.author.kind === 'agent' ? (message.author.session ?? null) : null;
+    if (!pillActive || !session) {
+      openBox();
+      return;
+    }
+    aimReply([session]);
+    setRcptOpen(false);
+    if (boxRef.current.open) {
+      focusReplyEnd();
+      return;
+    }
+    openBox();
+  };
+  const rcptPill = pillActive ? (
+    <ReplyRecipient
+      rows={rcptAgents}
+      chosen={rcptChosen}
+      open={rcptOpen}
+      onOpen={setRcptOpen}
+      onOnly={(row) => {
+        aimReply([row.session]);
+        setRcptOpen(false);
+        announce(`This reply goes to ${row.label}.`);
+      }}
+      onToggle={(row) => {
+        const next = toggleRecipient(rcptPick ?? (rcptDefault ? [rcptDefault] : []), row.session);
+        aimReply(next);
+        announce(`This reply goes to ${namesList(next.map((id) => rcptAgents.find((r) => r.session === id)?.label ?? id))}.`);
+      }}
+      onTagAnother={tagAnother}
+      phone={phone}
+      section={sectionRef.current}
+    />
+  ) : null;
   const routeChoice = asking ? (
     <RouteChoice
       kind={routeFor}
@@ -5206,7 +5418,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     {/* The project gives way first; "to you", the session-ended mark and the count never shrink (the row wraps instead). */}
                     <span className="ib-fl-meta">
                       <span className="ib-fl-in" aria-hidden={hide}>
-                        in <bdi>{thread.project.name}</bdi>{' '}
+                        in <bdi>{multiAgent ? headFolder(message, thread, taggable) : thread.project.name}</bdi>{' '}
                       </span>
                       <span className="ib-fl-to" aria-hidden={hide}>
                         <span className="ib-to-sep">·</span> <span className="ib-to">{toWords}</span>
@@ -5221,7 +5433,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                       </Tip>
                       {isAgent && liveMessage(message) && (
                         <Tip content="Reply">
-                          <button type="button" className="ib-mut" onClick={() => openBox()} aria-label="Reply">
+                          <button type="button" className="ib-mut" onClick={() => replyToMessage(message)} aria-label="Reply">
                             <Icon name="reply" size={15} />
                           </button>
                         </Tip>
@@ -5462,7 +5674,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       <div className="ib-pfoot" hidden={artifactsOn}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
-          {showAskerNote && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
+          {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
+          {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
         </div>
         {cameBack && (
           <div className="ib-acts ib-archnote" data-came-back="">
@@ -5517,40 +5730,30 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           />
         ) : box.open ? (
           <>
-            <DraftHead
-              label={replyName ? `Reply to ${replyName}` : `Reply to ${replyTo} in ${thread.project.name}`}
-              savedAt={boxHasWords || replyDraft.draft?.files?.length ? (replyDraft.draft?.updated_at ?? null) : null}
-              tooLong={replyDraft.tooLong}
-              failed={replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
-              conflict={
-                replyDraft.conflict !== null
-                  ? {
-                      id: conflictId,
-                      text: conflictText(conflictSentElsewhere),
-                      onKeepMine: () => {
-                        const mine = replyText.get();
-                        replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
-                        announce('Your words are saved.');
-                        requestAnimationFrame(() => textRef.current?.focus());
-                      },
-                      onDiscard: () => {
-                        // Only this window's words and file changes go: the other window's draft stays and comes into the box.
-                        const draft = replyDraft.takeTheirs();
-                        const theirs = draft?.body ?? '';
-                        setBox({ open: true, text: theirs });
-                        takeDraftFiles(draft?.files ?? [], theirs);
-                        announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
-                        requestAnimationFrame(() => textRef.current?.focus());
-                      },
-                    }
-                  : null
-              }
-              onDiscard={() => {
-                replyDraft.discard();
-                closeBox(true);
-                announce('Draft discarded.');
-              }}
-            />
+            {/* Nothing above the box (approval "inbox-reply-recipient"), but after a conflict its line and choice. */}
+            {replyDraft.conflict !== null && (
+              <DraftHead
+                conflict={{
+                  id: conflictId,
+                  text: conflictText(conflictSentElsewhere),
+                  onKeepMine: () => {
+                    const mine = replyText.get();
+                    replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
+                    announce('Your words are saved.');
+                    requestAnimationFrame(() => textRef.current?.focus());
+                  },
+                  onDiscard: () => {
+                    // Only this window's words and file changes go: the other window's draft stays and comes into the box.
+                    const draft = replyDraft.takeTheirs();
+                    const theirs = draft?.body ?? '';
+                    setBox({ open: true, text: theirs });
+                    takeDraftFiles(draft?.files ?? [], theirs);
+                    announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
+                    requestAnimationFrame(() => textRef.current?.focus());
+                  },
+                }}
+              />
+            )}
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             <div
               className="ib-rbox"
@@ -5567,7 +5770,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 replyText={replyText}
                 textareaRef={textRef}
                 voice={voice}
-                ariaLabel={`Reply to ${replyTo}`}
+                ariaLabel={`Reply to ${replyToNames}`}
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
                 destination="your reply"
@@ -5677,17 +5880,35 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             ) : (
               <>
               {error && errorLine}
-              <div className="ib-acts">
-                <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
-                  <Icon name="send" size={15} />
-                  Send
-                </button>
-                <button type="button" className="ib-btn ib-ghost" onClick={() => closeBox()}>
-                  Cancel
-                </button>
-                <span className="ib-sp" />
-                {/* The in-thread New message button is off (approval "inbox-acknowledge"); its route and code stay. */}
-                {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
+              {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
+                  Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
+                  the Draft line takes its own line above the buttons (wrap-reverse), only once something is saved. */}
+              <div className="ib-acts ib-footrow ib-replyrow" data-reply-row="">
+                <div className="ib-footbtns">
+                  <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
+                    <Icon name="send" size={15} />
+                    Send
+                  </button>
+                  <button type="button" className="ib-btn ib-ghost" onClick={() => closeBox()}>
+                    Cancel
+                  </button>
+                  {/* The in-thread New message button is off (approval "inbox-acknowledge"); its route and code stay. */}
+                  {SHOW_NEW_MESSAGE_BUTTON && !archived && <NewMessageButton live={live} mode={newMessage} onClick={() => void pressNewMessage()} />}
+                  {pillActive && phone && rcptPill}
+                </div>
+                <div className="ib-footstatus">
+                  <DraftStamp
+                    savedAt={replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null}
+                    tooLong={replyDraft.conflict === null && replyDraft.tooLong}
+                    failed={replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
+                    onDiscard={() => {
+                      replyDraft.discard();
+                      closeBox(true);
+                      announce('Draft discarded.');
+                    }}
+                  />
+                  {pillActive && !phone && rcptPill}
+                </div>
               </div>
               </>
             )}
@@ -5809,7 +6030,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             thread={thread}
             asker={asker}
             askerHost={root.author.kind === 'agent' ? root.author.host : null}
-            replyTo={replyTo}
+            replyTo={replyToNames}
             live={live}
             mode={newMessage}
             onPick={(target) => setNewMessage({ kind: 'compose', target })}

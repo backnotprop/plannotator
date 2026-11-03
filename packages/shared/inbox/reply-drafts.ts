@@ -33,7 +33,7 @@
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
+import { INBOX_REPLY_DRAFT_RECIPIENTS_MAX, isInboxId, type InboxDraftFile, type InboxReplyDraft } from "@plannotator/core/inbox-types";
 import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
@@ -57,6 +57,8 @@ function parse(text: string): InboxReplyDraft | null {
     const files = Array.isArray(value.files)
       ? value.files.filter((file) => file && typeof file.upload_id === "string" && (file.pasted === undefined || (!!file.pasted && typeof file.pasted.at === "number")))
       : [];
+    // Who the reply goes to (the recipient pill): kept only when well formed.
+    const recipients = recipientList(value.recipients);
     return {
       v: 1,
       thread_id: value.thread_id,
@@ -64,10 +66,19 @@ function parse(text: string): InboxReplyDraft | null {
       created_at: value.created_at,
       updated_at: value.updated_at,
       ...(files.length > 0 ? { files } : {}),
+      ...(recipients && recipients.length > 0 ? { recipients } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** A list of recipient session ids, or null when it is not one (too many, not strings, empty or overlong ids, repeats). */
+function recipientList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > INBOX_REPLY_DRAFT_RECIPIENTS_MAX) return null;
+  if (value.some((id) => typeof id !== "string" || id.length === 0 || id.length > 200)) return null;
+  if (new Set(value).size !== value.length) return null;
+  return [...(value as string[])];
 }
 
 /** Every reply draft on disk, by thread id (a file that does not parse is skipped). */
@@ -121,6 +132,8 @@ export function checkInboxReplyDraftInput(
   allFiles: boolean;
   /** The file changes this save makes (an Inbox page that sends them), applied to the draft's files as they are. */
   ops: ReplyDraftFileOps<InboxDraftFile> | null;
+  /** Who the reply goes to (the recipient pill); null: not sent, the draft keeps its own. */
+  recipients: string[] | null;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -146,7 +159,11 @@ export function checkInboxReplyDraftInput(
         place: checkInboxDraftPlaces(input.files_place, body.length, "files_place"),
       }
     : null;
-  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops };
+  const recipients = input.recipients === undefined || input.recipients === null ? null : recipientList(input.recipients);
+  if (input.recipients !== undefined && input.recipients !== null && recipients === null) {
+    throw new InboxError("validation_error", `recipients: at most ${INBOX_REPLY_DRAFT_RECIPIENTS_MAX} session ids, each once.`, { field: "recipients" });
+  }
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients };
 }
 
 /** What a reply draft save may carry (`POST /api/inbox/threads/:id/draft`). */
@@ -160,6 +177,8 @@ export interface InboxReplyDraftInput {
   files_add?: unknown;
   files_remove?: unknown;
   files_place?: unknown;
+  /** Who the reply goes to: session ids (the recipient pill); absent, the draft keeps its own. */
+  recipients?: unknown;
 }
 
 /** Write one draft whole (owner-only folder and file). */

@@ -379,13 +379,16 @@ export function routeRace(state: RouteState, ended: string, sent: { went: number
   const rows = state.rows.map((row) => (row.live.session === ended ? { ...row, ended: true } : row));
   const gone = state.rows.find((row) => row.live.session === ended);
   const next = rows.find((row) => !row.ended) ?? null;
-  const name = gone ? hostName(gone.live.host) : 'That';
-  const what =
-    sent.went > 0
-      ? `That ${name} session ended before all of your reply went. ${sent.went} of ${sent.total} agents got their reply; the rest did not.`
-      : `That ${name} session ended before your reply went. Nothing was sent.`;
-  const error = `${what} ${next ? `${hostName(next.live.host)} is selected now.` : 'Leave it for the next agent, or start a session.'}`;
+  const error = `${raceWhat(gone?.live.host ?? null, sent)} ${next ? `${hostName(next.live.host)} is selected now.` : 'Leave it for the next agent, or start a session.'}`;
   return { ...state, rows, selected: next?.live.session ?? LEAVE, error, focus: state.focus + 1 };
+}
+
+/** The race's first words: the session ended before the reply (or all of it) went, and what went. */
+export function raceWhat(host: string | null, sent: { went: number; total: number }): string {
+  const name = host ? hostName(host) : 'That';
+  return sent.went > 0
+    ? `That ${name} session ended before all of your reply went. ${sent.went} of ${sent.total} agents got their reply; the rest did not.`
+    : `That ${name} session ended before your reply went. Nothing was sent.`;
 }
 
 /**

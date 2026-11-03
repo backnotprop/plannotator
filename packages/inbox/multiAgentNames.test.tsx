@@ -3,7 +3,8 @@
  * say what is true). Claude Code started the thread and Pi wrote last: the
  * person's reply goes to Pi, so the line under it says "to Pi", its delivery
  * line "Delivered to Pi" (or "Saved for Cursor" for an agent with no wake),
- * and the reply box "Reply to Pi in superfans". They used to name the
+ * and the reply box "Reply to Pi" (its field; the recipient pill under it
+ * says "to Pi", approval "inbox-reply-recipient"). They used to name the
  * thread's first agent, Claude Code, which never got the reply. A thread with
  * one agent reads exactly as before.
  *
@@ -150,20 +151,27 @@ function type(el: HTMLElement, words: string) {
   });
 }
 
-/** The "to" line under a message, the last reply's delivery line, and the reply box's head and field name. */
+/**
+ * The "to" line under a message, the last reply's delivery line, and the reply box: any label above it (none, approval
+ * "inbox-reply-recipient"), its field's name, and the recipient pill's name (only in a thread with more than one agent).
+ */
 const toLine = (el: HTMLElement, id: string) => el.querySelector(`[data-message-article="${id}"] .ib-to`)?.textContent ?? null;
 const deliveryText = (el: HTMLElement) => el.querySelector('.ib-delivered .ib-dl-text')?.textContent ?? null;
 async function boxHead(el: HTMLElement) {
   act(() => button(el, 'Reply').click());
   await settle();
-  return { head: el.querySelector('[data-draft-head] .ib-draft-for')?.textContent ?? null, field: el.querySelector('textarea')?.getAttribute('aria-label') ?? null };
+  return {
+    head: [...el.querySelectorAll('.ib-pfoot *')].find((n) => n.children.length === 0 && n.textContent?.startsWith('Reply to'))?.textContent ?? null,
+    field: el.querySelector('textarea')?.getAttribute('aria-label') ?? null,
+    pill: el.querySelector('[data-recipient] .ib-rto-full')?.textContent ?? null,
+  };
 }
 
-test.skipIf(!hasDom)('Claude Code started, Pi wrote last: "to Pi" under the reply, "Delivered to Pi", and the box says "Reply to Pi in superfans"', async () => {
+test.skipIf(!hasDom)('Claude Code started, Pi wrote last: "to Pi" under the reply, "Delivered to Pi", and the box names Pi, in its field and its pill', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE), agentMessage(M2, PI), personReply(M2)), { at: '2026-11-01T10:52:00.000Z', checked_at: CHECKED });
   expect(toLine(el, R1)).toBe('to Pi');
   expect(deliveryText(el)).toMatch(/^Delivered to Pi, /);
-  expect(await boxHead(el)).toEqual({ head: 'Reply to Pi in superfans', field: 'Reply to Pi' });
+  expect(await boxHead(el)).toEqual({ head: null, field: 'Reply to Pi', pill: 'Pi' });
 });
 
 test.skipIf(!hasDom)('a second agent with no wake, not read yet: "Saved for Cursor", never the first agent', async () => {
@@ -190,11 +198,11 @@ test.skipIf(!hasDom)('a thread the person started to Claude Code, Pi wrote last:
   expect(deliveryText(el)).toMatch(/^Delivered to Pi, /);
 });
 
-test.skipIf(!hasDom)('one agent: every name is the thread\'s agent, as before ("to Claude Code", "Delivered to Claude Code", "Reply to Claude Code in superfans")', async () => {
+test.skipIf(!hasDom)('one agent: every name is the thread\'s agent, as before ("to Claude Code", "Delivered to Claude Code", "Reply to Claude Code", no pill)', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE), agentMessage(M2, CLAUDE), personReply(M2)), { at: '2026-11-01T10:52:00.000Z', checked_at: CHECKED });
   expect(toLine(el, R1)).toBe('to Claude Code');
   expect(deliveryText(el)).toMatch(/^Delivered to Claude Code, /);
-  expect(await boxHead(el)).toEqual({ head: 'Reply to Claude Code in superfans', field: 'Reply to Claude Code' });
+  expect(await boxHead(el)).toEqual({ head: null, field: 'Reply to Claude Code', pill: null });
 });
 
 test.skipIf(!hasDom)('one agent that named itself: its own name, as before, wherever it wrote', async () => {
@@ -205,7 +213,7 @@ test.skipIf(!hasDom)('one agent that named itself: its own name, as before, wher
   // The thread's name for its one agent (the root's), whichever message the reply answers.
   expect(toLine(el, R1)).toBe('to Cursor');
   expect(deliveryText(el)).toBe('Saved for Cursor. It sees it when it next reads this thread.');
-  expect(await boxHead(el)).toEqual({ head: 'Reply to Cursor in superfans', field: 'Reply to Cursor' });
+  expect(await boxHead(el)).toEqual({ head: null, field: 'Reply to Cursor', pill: null });
 });
 
 test.skipIf(!hasDom)('an archived thread Claude Code started that Pi wrote in after the archive: the came-back note names Pi, whom the reply goes to', async () => {

@@ -7029,3 +7029,83 @@ mark.ib-vmark.ib-vfade { background: transparent; }
      with an ellipsis, never a three-line centred link. Its whole name stays its accessible name. */
   .pn-inbox .ib-arow .ib-af { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
 }
+
+/* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
+   Nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and in a thread with
+   more than one agent the pill after it names who gets the reply ("to [tile] Claude Code (plannotator) ⌄"). On a phone
+   the pill sits after Cancel (the folder alone), and the Draft line takes its own line above the buttons once saved. */
+.ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-replyrow > .ib-footstatus:empty { display: none; }
+.ib-replyrow > .ib-footstatus { flex-wrap: nowrap; }
+.ib-replyrow > .ib-footstatus > .ib-draft-stamp { flex: 0 1 auto; }
+.pn-inbox .ib-rto { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 26px; min-width: 0; max-width: 100%; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; cursor: pointer; }
+.pn-inbox .ib-rto:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rto:hover .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
+.pn-inbox .ib-rto:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rto-n { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); font-weight: 500; }
+.ib-rto-full, .ib-rto-short { overflow: hidden; text-overflow: ellipsis; }
+.ib-rto-short { display: none; }
+.ib-rto-c, .ib-rto-q { flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-rto[data-ended] .ib-atile { opacity: 0.55; }
+.pn-inbox .ib-rto[data-ended] .ib-rto-n { color: var(--muted-foreground); }
+.ib-rto .ib-tg-stack .ib-mk { box-shadow: 0 0 0 1.5px var(--card); }
+.ib-rto-wrap { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+/* A wide window: the Draft words step back to plain words on the pill's left, and the slot keeps the widest name's
+   width (the names stacked, hidden), so Discard never moves when the recipient changes. */
+.ib-replyrow:has(.ib-rto-slot) .ib-draft-pill { padding: 0; background: none; color: var(--muted-foreground); font-weight: 400; }
+.ib-rto-slot { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: end; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 260px; margin-left: 6px; margin-right: -6px; }
+.ib-rto-slot > * { grid-area: 1 / 1; }
+.pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
+/* The list: the `@` list's box and tiles, over the pill's right end. */
+.ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
+.ib-rpick-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
+@media (hover: hover) { .ib-rpick-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
+.pn-inbox .ib-rpick-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 4px 0 8px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.ib-rpick-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ib-rpick-q { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-rpick-tick { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: none; color: transparent; cursor: pointer; }
+.ib-rpick-tick > span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border); }
+.pn-inbox .ib-rpick-tick[aria-checked="true"] > span { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+.pn-inbox .ib-rpick-tick:disabled { cursor: default; opacity: 0.4; }
+.pn-inbox :is(.ib-rpick-name, .ib-rpick-tick, .ib-rpick-more):focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-rpick-more { display: block; width: 100%; height: 34px; margin-top: 4px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) { .pn-inbox .ib-rpick-more:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); } }
+/* A pane too narrow for the Draft words and the widest name on one line: the saved time gives way, then the
+   names take their short form, so the row stays one line and the box stays where it is. */
+.ib-replyrow { container-type: inline-size; }
+@media (min-width: 768px) {
+  @container (max-width: 640px) {
+    .ib-replyrow:has(.ib-rto-slot) .ib-draft-saved { display: none; }
+  }
+  @container (max-width: 480px) {
+    .ib-rto-slot .ib-rto-full { display: none; }
+    .ib-rto-slot .ib-rto-short { display: block; }
+  }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The Draft line on its own line above Send's row, at the right, once something is saved. */
+  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; }
+  /* Discard's 44 px tap area never takes a tap meant for Send, Cancel or the box: the buttons sit over it, and the
+     line keeps the box's margin plus 4 px above it, so its area ends where the box's margin begins. */
+  .ib-replyrow > .ib-footbtns { position: relative; z-index: 1; }
+  .ib-replyrow > .ib-footstatus:has(.ib-draft-discard) { padding-top: 4px; }
+  /* The pill in Send's row: the folder alone, so the box stays where a one-agent thread has it. Send gets shorter. */
+  .ib-rto-full { display: none; }
+  .ib-rto-short { display: block; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) { flex: 1 1 100%; flex-wrap: nowrap; gap: 6px; min-width: 0; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn { flex: none; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-pri { flex: 1 1 auto; min-width: 72px; padding-left: 10px; padding-right: 10px; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-ghost { padding-left: 8px; padding-right: 8px; }
+  .ib-footbtns > .ib-rto-wrap { flex: 0 1 auto; max-width: 52%; }
+  .ib-footbtns > .ib-rto-wrap .ib-rto-l { display: none; }
+  .pn-inbox .ib-footbtns > .ib-rto-wrap .ib-rto { height: 44px; padding: 0 2px 0 4px; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-rpick-name { height: 44px; gap: 8px; }
+  .pn-inbox .ib-rpick-tick { width: 44px; height: 44px; }
+  .ib-rpick-tick > span { width: 20px; height: 20px; }
+  .pn-inbox .ib-rpick-more { height: 44px; margin-top: 0; }
+  /* The list covers the box on a phone: the box's ring would show around it. */
+  .pn-inbox:has(.ib-rpick) .ib-rbox { border-color: transparent; box-shadow: none; }
+  /* The keyboard leaves about 257 px under the header: the Draft line must not push the box under Send's row. */
+  :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }
+}
