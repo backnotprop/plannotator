@@ -5,7 +5,8 @@
  *
  * Who (the server, config.json `inboxSnoozeIntro`): a release build, first use at least two days ago (rebuilt once
  * from the event log on upgrade), never snoozed anything (a mark of its own: snoozes.json deletes itself with the last
- * snooze), and not shown yet. There is no active-days rule (the owner, 2026-11-02).
+ * snooze), and not shown yet. There is no active-days rule (the owner, 2026-11-02). It shows on this computer and on
+ * the owner's phone, never to a tailnet guest (the owner, q-e29f8cd6).
  *
  * When (the window): right after the person leaves a thread that still waits on them without answering it, with two or
  * more threads read and left for a day or more. The page's own thresholds are in packages/inbox/snoozeIntro.ts.
@@ -14,14 +15,6 @@ import type { InboxListRow } from "./inbox-types";
 
 /** First use must be at least this long ago: two days (the owner: "I think this needs to be 2 days"). */
 export const SNOOZE_INTRO_TENURE_MS = 2 * 24 * 60 * 60 * 1000;
-
-/**
- * THE PHONE SWITCH (open question q-e29f8cd6, "May the phone page show it?"). Off: only a page on this computer may
- * show it, like every other one-time dialog. On: the owner's own page over the tailnet (their phone) may show it too.
- * A tailnet guest never does, either way. The server's claim and settings and the window's gate all read this one
- * constant, so flipping it here is the whole change.
- */
-export const SNOOZE_INTRO_ON_PHONES = false;
 
 /** A row "read and left" for this long (the agent's last word is older) counts toward the need. */
 export const SNOOZE_INTRO_LEFT_MS = 24 * 60 * 60 * 1000;
@@ -47,15 +40,6 @@ export function snoozeIntroDue(saved: SnoozeIntroSaved | undefined, now: Date, r
   const first = saved.firstUseAt ? Date.parse(saved.firstUseAt) : Number.NaN;
   if (Number.isNaN(first)) return false;
   return now.getTime() - first >= SNOOZE_INTRO_TENURE_MS;
-}
-
-/**
- * Whether a page may show it at all. `local`: a page on this computer. Otherwise the page came through the tailnet:
- * the owner's own (their phone) only while the phone switch is on, and a guest never.
- */
-export function snoozeIntroPageMay(page: { local: boolean; owner: boolean }, onPhones: boolean = SNOOZE_INTRO_ON_PHONES): boolean {
-  if (page.local) return true;
-  return onPhones && page.owner;
 }
 
 /**

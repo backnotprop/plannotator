@@ -5,8 +5,7 @@
  *
  * What regresses: the dialog showing on load, or with any one blocker present (a thread left too soon, too young a
  * page, a thread answered or typed in, too few read-and-left rows or rows, the tour or another dialog this load, a
- * toast, something typed or open, a page not clear, a list that has not settled, a page that snoozed, a page the
- * phone switch leaves out); a second claim after any dismiss (Got it, Escape, a click outside); a dialog drawn before
+ * toast, something typed or open, a page not clear, a list that has not settled, a page that snoozed); a second claim after any dismiss (Got it, Escape, a click outside); a dialog drawn before
  * the Inbox stamped it; Try it snoozing anything, or not opening the menu.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -15,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxThread } from '@plannotator/core/inbox-types';
-import { snoozeIntroPageMay } from '@plannotator/core/inbox-snooze-intro';
 
 const hasDom = typeof document !== 'undefined';
 const { SnoozeIntro } = (hasDom ? await import('./components/SnoozeIntro') : {}) as typeof import('./components/SnoozeIntro');
@@ -104,7 +102,6 @@ const ROWS = [row('msg_a'), row('msg_b'), row('msg_c')];
 
 interface State {
   due: boolean;
-  page: boolean;
   blocked: boolean;
   snoozedHere: boolean;
   rows: InboxListRow[];
@@ -114,13 +111,12 @@ interface State {
   held: boolean;
 }
 
-const BASE: State = { due: true, page: true, blocked: false, snoozedHere: false, rows: ROWS, toast: false, thread: 'msg_a', clear: true, held: false };
+const BASE: State = { due: true, blocked: false, snoozedHere: false, rows: ROWS, toast: false, thread: 'msg_a', clear: true, held: false };
 
 /** The window's wiring, as App does it: the gate, then the dialog while it is open. */
 function Harness({ state, onTry }: { state: State; onTry?: (target: string | null, close: () => void) => void }) {
   const z = intro.useSnoozeIntro({
     due: state.due,
-    page: state.page,
     listLoaded: true,
     firstRun: false,
     blocked: state.blocked,
@@ -189,7 +185,6 @@ describe('the calm moment', () => {
     ['the Inbox page is not clear (a search, a file, Settings)', { clear: false }],
     ['this page snoozed something', { snoozedHere: true }],
     ['the Inbox has it not due', { due: false }],
-    ['the phone switch off: the owner’s page over the tailnet', { page: snoozeIntroPageMay({ local: false, owner: true }) }],
   ];
   for (const [name, state, options] of BLOCKERS) {
     test(`blocked: ${name}`, async () => {

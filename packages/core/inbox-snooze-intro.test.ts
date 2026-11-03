@@ -1,8 +1,7 @@
 /**
  * The Snooze announcement's rules (approval "inbox-snooze-announce"). What regresses: the two-day line moving (the
  * owner changed it from seven), an active-days rule coming back, a used or shown mark not ending it, a dev build
- * deciding it, the phone switch letting a guest in or a phone in while off, first use read from the wrong end of the
- * log, and a row counting as "read and left" when it is unread, typed in, snoozed, fresh, Sent or Quiet.
+ * deciding it, first use read from the wrong end of the log, and a row counting as "read and left" when it is unread, typed in, snoozed, fresh, Sent or Quiet.
  */
 import { describe, expect, test } from "bun:test";
 import type { InboxListRow } from "./inbox-types";
@@ -11,7 +10,6 @@ import {
   snoozeIntroDue,
   snoozeIntroFirstUse,
   snoozeIntroNeed,
-  snoozeIntroPageMay,
   snoozeIntroReadAndLeft,
   snoozeIntroWaits,
 } from "./inbox-snooze-intro";
@@ -40,20 +38,6 @@ describe("snoozeIntroDue", () => {
     expect(snoozeIntroDue({ firstUseAt: "not a date" }, NOW, true)).toBe(false);
     // A first use in the future (a clock moved back) is no tenure.
     expect(snoozeIntroDue({ firstUseAt: new Date(NOW.getTime() + DAY).toISOString() }, NOW, true)).toBe(false);
-  });
-});
-
-describe("snoozeIntroPageMay: the phone switch", () => {
-  test("off: this computer only; on: the owner's phone too; a guest never", () => {
-    expect(snoozeIntroPageMay({ local: true, owner: true }, false)).toBe(true);
-    expect(snoozeIntroPageMay({ local: false, owner: true }, false)).toBe(false);
-    expect(snoozeIntroPageMay({ local: false, owner: false }, false)).toBe(false);
-    expect(snoozeIntroPageMay({ local: false, owner: true }, true)).toBe(true);
-    expect(snoozeIntroPageMay({ local: false, owner: false }, true)).toBe(false);
-  });
-
-  test("the switch is off by default (owner question q-e29f8cd6 open)", () => {
-    expect(snoozeIntroPageMay({ local: false, owner: true })).toBe(false);
   });
 });
 

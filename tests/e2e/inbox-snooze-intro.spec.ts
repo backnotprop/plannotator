@@ -242,6 +242,11 @@ test('a 390 px phone layout, light: the ⋯ sheet picture; Try it opens the thre
   // 44 px targets.
   for (const sel of ['[data-snooze-intro-try]', '[data-snooze-intro-close]']) expect((await page.locator(sel).boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await shot(page, 'phone-light');
+  // The same dialog in dark (the Inbox follows the system's mode), for its picture.
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).not.toHaveClass(/(^|\s)light(\s|$)/);
+  await shot(page, 'phone-dark');
+  await page.emulateMedia({ colorScheme: 'light' });
   await page.locator('[data-snooze-intro-try]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect(page.locator('section.ib-pane')).toBeVisible();

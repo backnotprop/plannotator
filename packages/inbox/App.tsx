@@ -108,7 +108,6 @@ import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, useSnoozeIntro } from './snoozeIntro';
 import { openSnoozeMenu } from './snoozeIntroTry';
-import { snoozeIntroPageMay } from '@plannotator/core/inbox-snooze-intro';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
@@ -852,7 +851,7 @@ function Inbox() {
   const [listIntroSettled, setListIntroSettled] = useState(false);
   const voiceIntroDueAtLoad = useRef(false);
   /** The one-time Snooze announcement (snoozeIntro.ts): due for this page, read once per load. */
-  const snoozeIntroLatch = useRef<{ due: boolean; page: boolean } | null>(null);
+  const snoozeIntroLatch = useRef<{ due: boolean } | null>(null);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -3818,15 +3817,11 @@ function Inbox() {
   // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
-    snoozeIntroLatch.current = {
-      due: settings.snooze_intro?.due === true,
-      page: snoozeIntroPageMay({ local: (settings.via ?? 'local') === 'local', owner: !tailnetGuest(settings) }),
-    };
+    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   const snoozeIntro = useSnoozeIntro({
     due: snoozeIntroLatch.current?.due ?? false,
-    page: snoozeIntroLatch.current?.page ?? false,
     listLoaded: snoozeIntroLatch.current !== null,
     firstRun,
     blocked:

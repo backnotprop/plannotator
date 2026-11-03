@@ -191,7 +191,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
-import { snoozeIntroDue, snoozeIntroFirstUse, snoozeIntroPageMay, type SnoozeIntroSaved } from "@plannotator/core/inbox-snooze-intro";
+import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "@plannotator/core/inbox-snooze-intro";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -1786,9 +1786,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
     saveConfig({ inboxSnoozeIntro: { ...(firstUseAt ? { firstUseAt } : {}), ...(store.snoozes().length > 0 ? { snoozedAt: new Date().toISOString() } : {}) } });
   }
-  /** Whether it is due, and for this page: a page on this computer, or the owner's over the tailnet with the phone switch on. */
-  const snoozeIntroState = (page: { local: boolean; owner: boolean }) => ({
-    due: snoozeIntroPageMay(page) && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
+  /** Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. */
+  const snoozeIntroState = (owner: boolean) => ({
+    due: owner && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
   });
   /** The person snoozed something: the dialog never shows. Once; a release build only. */
   const markSnoozeUsed = () => {
@@ -1801,8 +1801,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
    * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
    */
-  const claimSnoozeIntro = (page: { local: boolean; owner: boolean }): boolean => {
-    if (!snoozeIntroState(page).due) return false;
+  const claimSnoozeIntro = (owner: boolean): boolean => {
+    if (!snoozeIntroState(owner).due) return false;
     const at = new Date().toISOString();
     saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at } });
     return loadConfig().inboxSnoozeIntro?.shownAt === at;
@@ -1959,7 +1959,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
     /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
-    snooze_intro: snoozeIntroState({ local: via === "local", owner: !guest }),
+    snooze_intro: snoozeIntroState(!guest),
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -3208,14 +3208,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
-      // once per machine. A page on this computer; the owner's over the tailnet only with the phone switch on (core
-      // inbox-snooze-intro.ts `SNOOZE_INTRO_ON_PHONES`); a tailnet guest never.
+      // once per machine, on this computer or the owner's phone; a tailnet guest never.
       if (path === "/api/inbox/snooze-intro") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const page = { local: via === "local", owner: ownerOrLocal(req, via) };
-        return json({ show: claimSnoozeIntro(page), snooze_intro: snoozeIntroState(page) });
+        const owner = ownerOrLocal(req, via);
+        return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this

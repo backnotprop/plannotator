@@ -3,8 +3,8 @@
  * data dir. What regresses: a dev build deciding it; a new user (first use under two days) getting it; the backfill
  * not reading first use from the event log on upgrade, or missing a snooze running at upgrade; a snooze by some route
  * (the window, the owner's phone over the tailnet, a phone app through the door, a linked machine's forward) not
- * marking it, or a tailnet guest's marking it; the dialog showing twice (two tabs at once, or after the stamp); a page
- * the phone switch leaves out claiming it; a claim with another server session going through.
+ * marking it, or a tailnet guest's marking it; the dialog showing twice (two tabs at once, or after the stamp); a
+ * tailnet guest claiming it; a claim with another server session going through.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { SNOOZE_INTRO_ON_PHONES } from "@plannotator/core/inbox-snooze-intro";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 
@@ -211,16 +210,17 @@ describe("the claim", () => {
     expect(await (await w.post("/api/inbox/snooze-intro")).json()).toEqual({ show: false, snooze_intro: { due: false } });
   });
 
-  test("the phone switch: off, the owner's phone over the tailnet neither sees it due nor claims it; a guest never", async () => {
-    expect(SNOOZE_INTRO_ON_PHONES).toBe(false);
+  test("over the tailnet: a guest never sees it due nor claims it; the owner's phone does", async () => {
     const w = await world({ logDaysAgo: 3, tailnet: true });
-    for (const who of ["owner", "guest"] as const) {
-      expect(((await (await w.viaTailnet(who, "/api/inbox/settings")).json()) as { snooze_intro: { due: boolean } }).snooze_intro.due).toBe(false);
-      expect(((await (await w.viaTailnet(who, "/api/inbox/snooze-intro", {})).json()) as { show: boolean }).show).toBe(false);
-    }
-    // Still due for a page on this computer: the phone's ask spent nothing.
+    const due = async (who: "owner" | "guest") => ((await (await w.viaTailnet(who, "/api/inbox/settings")).json()) as { snooze_intro: { due: boolean } }).snooze_intro.due;
+    const claim = async (who: "owner" | "guest") => ((await (await w.viaTailnet(who, "/api/inbox/snooze-intro", {})).json()) as { show: boolean }).show;
+    expect(await due("guest")).toBe(false);
+    expect(await claim("guest")).toBe(false);
+    // The guest's ask spent nothing.
     expect(w.saved()!.shownAt).toBeUndefined();
-    expect(await w.due()).toBe(true);
+    expect(await due("owner")).toBe(true);
+    expect(await claim("owner")).toBe(true);
+    expect(w.saved()!.shownAt).toMatch(/^\d{4}-/);
   });
 });
 

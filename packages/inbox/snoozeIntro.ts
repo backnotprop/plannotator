@@ -60,12 +60,10 @@ export function snoozeIntroLeaveCounts(visit: SnoozeIntroVisit, now: number, row
   return snoozeIntroWaits(row) && !row.unsent;
 }
 
-/** What one load knows (read once: `due` and `page`) and what holds now. */
+/** What one load knows (read once: `due`) and what holds now. */
 export interface SnoozeIntroGate {
-  /** The Inbox has it due for this page (settings `snooze_intro.due`), read once per load. */
+  /** The Inbox has it due for this page (settings `snooze_intro.due`; never for a tailnet guest), read once per load. */
   due: boolean;
-  /** This page may show it at all (core `snoozeIntroPageMay`: this computer, or the owner's phone with the switch on). */
-  page: boolean;
   listLoaded: boolean;
   firstRun: boolean;
   /** The tour, an update or another one-time dialog was on screen (or due) on this load. */
@@ -81,8 +79,8 @@ export interface SnoozeIntroGate {
 }
 
 /** Whether this load may still show it at all: false ends it for the load. */
-export function snoozeIntroWanted(gate: Pick<SnoozeIntroGate, 'due' | 'page' | 'blocked' | 'snoozedHere'>): boolean {
-  return gate.due && gate.page && !gate.blocked && !gate.snoozedHere;
+export function snoozeIntroWanted(gate: Pick<SnoozeIntroGate, 'due' | 'blocked' | 'snoozedHere'>): boolean {
+  return gate.due && !gate.blocked && !gate.snoozedHere;
 }
 
 /** Whether, at a settled moment, the page may claim it now. */
