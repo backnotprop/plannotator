@@ -308,7 +308,11 @@ export function createLaunchPermissions(options: {
       reply_to: latest,
       idempotency_key: key,
     });
-    if (!sent.replayed) log(`Inbox launch ${root.launch!.id}: permission question ${sent.message.id} (${event.tool_name})`);
+    if (!sent.replayed) {
+      log(`Inbox launch ${root.launch!.id}: permission question ${sent.message.id} (${event.tool_name})`);
+      // The agent is blocked on this answer, so a snoozed thread wakes at once (the owner, q-21cc8c10 A).
+      store.endSnooze(root.thread_id);
+    }
     options.onChange();
     return sent.message.id;
   };
