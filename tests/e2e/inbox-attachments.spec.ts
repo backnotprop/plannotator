@@ -540,6 +540,39 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
   }, sentenceMayWrap);
 }
 
+/**
+ * A phone's open reply box foot (approval "inbox-reply-foot-phone"): one row inside the box (the paperclip, the line
+ * naming the questions and comments, the mic), no chip, and the line's words on one line. Problems as text.
+ */
+async function phoneFootProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
+    if (!box) return ['no reply box on screen'];
+    const foot = box.querySelector<HTMLElement>('.ib-rfoot[data-reply-foot-phone]');
+    if (!foot) return ['no phone foot in the reply box'];
+    const problems: string[] = [];
+    if (box.querySelector('.ib-rfoot .ib-rchip, .ib-rfoot .ib-skipchip')) problems.push('a chip in the phone foot');
+    const outer = box.getBoundingClientRect();
+    const controls = [...foot.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+    if (!controls.some((el) => el.matches('[data-foot-summary]'))) problems.push('no line for the questions and comments');
+    const middles = controls.map((el) => {
+      const r = el.getBoundingClientRect();
+      const name = el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '?';
+      if (r.left < outer.left - 0.5 || r.right > outer.right + 0.5) problems.push(`"${name}" leaves the reply box`);
+      return { name, middle: r.top + r.height / 2 };
+    });
+    for (const m of middles) if (Math.abs(m.middle - middles[0]!.middle) > 2) problems.push(`"${m.name}" is not on the row`);
+    const text = foot.querySelector('[data-foot-summary-text]');
+    if (text) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+      if (tops.size > 1) problems.push('the line breaks across lines');
+    }
+    return problems;
+  });
+}
+
 /** Wait until the open reply box keeps its place and size for 150 ms: the layout a new window size settles on. */
 async function replyBoxSettled(page: Page): Promise<void> {
   const rect = () =>
@@ -567,7 +600,13 @@ async function replyBoxSettled(page: Page): Promise<void> {
  */
 async function annotationListProblems(page: Page, shotName?: string): Promise<string[]> {
   const chip = page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]');
-  await chip.click();
+  if (await chip.count()) await chip.click();
+  else {
+    // A phone: the foot's line, then (with questions too) its sheet's Review (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
+    const sheet = page.getByRole('dialog', { name: 'Goes with this reply' });
+    if (await sheet.count()) await sheet.getByRole('button', { name: 'Review comments' }).click();
+  }
   const list = page.getByRole('dialog', { name: /^\d+ comments?$/ });
   await expect(list).toBeVisible();
   const problems = await list.evaluate((pop) => {
@@ -593,7 +632,7 @@ async function annotationListProblems(page: Page, shotName?: string): Promise<st
   return problems;
 }
 
-test("the reply box's chips wrap inside it beside a file, stacked and on a phone; no chip breaks its own label", async () => {
+test("the reply box's chips wrap inside it beside a file and stacked, a phone's foot is one row; no chip breaks its own label", async () => {
   const page = world.page;
   // The reply box is open (picks, the skip chip, 3 annotations) from the tests above.
   await page.getByRole('button', { name: 'Open admin-view.html' }).click();
@@ -620,7 +659,8 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       // Measure the layout this size settles on, not the frame before the window's own resize reaches React
       // (the docked sidebar still beside a 134 px reply box at 390 px; the narrow-box step below proves that frame).
       await replyBoxSettled(page);
-      expect(await replyChipProblems(page, 'phone' in size), `${size.width} by ${size.height}`).toEqual([]);
+      // A phone draws one row instead of chips: the paperclip, one line, the mic (approval "inbox-reply-foot-phone").
+      expect(await ('phone' in size ? phoneFootProblems(page) : replyChipProblems(page)), `${size.width} by ${size.height}`).toEqual([]);
       expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {
         // The two-pane desktop draws the chips as before: one row, each 26 px tall.
@@ -636,11 +676,11 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       if (size.width === 390) {
         await page.locator('section.ib-pane .ib-rbox').filter({ visible: true }).scrollIntoViewIfNeeded();
         await shot('2.4e-reply-chips-phone');
-        // A reply box narrower than the skip chip's sentence and its button side by side (on CI, the frame after a
-        // resize to 390 px before the phone layout lands): the chip wraps inside itself, whatever the font's metrics.
+        // A reply box far narrower than its line (on CI, the frame after a resize to 390 px before the layout settles):
+        // the row stays one row inside the box, the line cut short rather than pushed out.
         const narrow = await page.addStyleTag({ content: 'section.ib-pane .ib-rbox { width: 134px !important; }' });
         try {
-          expect(await replyChipProblems(page, true), 'a 134 px reply box').toEqual([]);
+          expect(await phoneFootProblems(page), 'a 134 px reply box').toEqual([]);
           await shot('2.4h-reply-chips-narrow-box');
         } finally {
           await narrow.evaluate((el) => el.remove());
