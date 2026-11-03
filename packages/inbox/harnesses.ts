@@ -256,7 +256,8 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         artefacts: [{ kind: 'code', text: `dsh plugin --profile <profile> add ${DSH_PLUGIN}` }],
         note: `Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents. ${DSH_APPLIES} Your replies then come back into each DeepSeek Harness session by themselves.`,
         another: {
-          summary: 'for DSH Desktop: open it once, quit it, then run',
+          // A summary is a label: no comma (house rule, tests/e2e/inbox.spec.ts), the "… then …" of Goose's and Cline's.
+          summary: 'for DSH Desktop: open it once and quit it then run this',
           body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
         },
       };
