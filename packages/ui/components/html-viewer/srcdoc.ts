@@ -190,9 +190,10 @@ export function buildSrcdocInjection({
  * the security boundary for the annotate surface; the page's CSP was written
  * for its standalone context, so it is removed before injection.
  *
- * The package itself never adds a CSP `<meta>` to the srcdoc document (the
- * injection is one `<style>` and one `<script>`), so nothing here blocks a
- * `<script src>` on the URL path. A CSP delivered as an HTTP header on the
+ * The package adds a CSP `<meta>` to the srcdoc document only for a page its
+ * server marked (`connect-src 'none'`, {@link injectNoNetworkCsp}); that
+ * policy names no `script-src`, so nothing here blocks a `<script src>` on
+ * the URL path. A CSP delivered as an HTTP header on the
  * HOST page is inherited by the srcdoc document, and the host must allow
  * `script-src` for the origin the asset is served from.
  */
@@ -201,6 +202,46 @@ const META_CSP_RE =
 
 export function neutralizeMetaCsp(rawHtml: string): string {
   return rawHtml.replace(META_CSP_RE, "<!-- plannotator: meta CSP removed for annotation -->");
+}
+
+/**
+ * A server marks a document it opened outside its session's roots with
+ * `<meta name="plannotator-network" content="none">` (Plannotator's servers:
+ * `HTML_NO_NETWORK_MARKER` in packages/shared/html-assets.ts). Such a page gets
+ * no network in the frame: see {@link injectNoNetworkCsp}. Attribute order and
+ * quoting agnostic, and read anywhere in the text, so nothing the page puts
+ * around the tag hides it. A page that carries the tag itself only
+ * restricts itself.
+ */
+export function hasNoNetworkMarker(rawHtml: string): boolean {
+  const metas = rawHtml.match(/<meta\b[^>]*>/gi);
+  if (!metas) return false;
+  return metas.some(
+    (tag) =>
+      /\bname\s*=\s*["']?plannotator-network["']?/i.test(tag) &&
+      /\bcontent\s*=\s*["']?none["']?/i.test(tag),
+  );
+}
+
+/** The policy a marked document gets: no fetch, XHR, WebSocket, EventSource or beacon. */
+export const NO_NETWORK_CSP_META =
+  `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">`;
+
+/** A doctype at the very start, after only a BOM, whitespace and comments. */
+const LEADING_DOCTYPE_RE = /^﻿?(?:\s|<!--[\s\S]*?-->)*<!doctype\b[^>]*>/i;
+
+/**
+ * Put {@link NO_NETWORK_CSP_META} first in the document: right after the
+ * doctype (so standards mode is kept), else at the very start. A meta CSP
+ * covers only what loads after it is parsed, so it must come before any page
+ * script; the parser opens `<head>` for it and folds the page's own
+ * `<html>` attributes onto the same root. Call it on the finished srcdoc
+ * (after {@link injectIntoHead}, which removes the page's own CSP tags).
+ */
+export function injectNoNetworkCsp(html: string): string {
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
+  const at = doctype ? doctype[0].length : 0;
+  return html.slice(0, at) + NO_NETWORK_CSP_META + html.slice(at);
 }
 
 /** Splice the injection just before `</head>`, or prepend when there is none. */

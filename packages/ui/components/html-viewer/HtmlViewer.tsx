@@ -58,7 +58,9 @@ import {
   buildSrcdocInjection,
   buildThemeTokenPayload,
   hasHostThemeOptIn,
+  hasNoNetworkMarker,
   injectIntoHead,
+  injectNoNetworkCsp,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -561,7 +563,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
+      const framed = injectIntoHead(rawHtml, injection);
+      // A page its server opened outside the session's roots gets no network.
+      return hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never

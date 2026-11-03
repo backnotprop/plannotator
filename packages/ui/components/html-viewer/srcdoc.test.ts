@@ -19,8 +19,11 @@ import {
   DIFF_HIGHLIGHT_CSS,
   buildSrcdocInjection,
   buildThemeTokenPayload,
+  NO_NETWORK_CSP_META,
   hasHostThemeOptIn,
+  hasNoNetworkMarker,
   injectIntoHead,
+  injectNoNetworkCsp,
 } from "./srcdoc";
 
 const HOST_TOKENS = {
@@ -122,6 +125,56 @@ describe("hasHostThemeOptIn", () => {
     expect(hasHostThemeOptIn("<html><body><p>hi</p></body></html>")).toBe(false);
     expect(hasHostThemeOptIn('<meta name="viewport" content="host">')).toBe(false);
     expect(hasHostThemeOptIn('<meta name="plannotator-theme" content="self">')).toBe(false);
+  });
+});
+
+// A document its server opened outside the session's roots carries the
+// no-network marker (packages/shared HTML_NO_NETWORK_MARKER); the srcdoc then
+// starts with `connect-src 'none'`, ahead of every page script.
+describe("no-network documents", () => {
+  const MARKER = '<meta name="plannotator-network" content="none">';
+  const INJECTION = "<style></style><script>bridge()</script>";
+
+  test("the marker is read across attribute order and quoting, wherever the page put text around it", () => {
+    expect(hasNoNetworkMarker(`<!DOCTYPE html><html><head>${MARKER}</head></html>`)).toBe(true);
+    expect(hasNoNetworkMarker("<meta content='none' name='plannotator-network'/>")).toBe(true);
+    expect(hasNoNetworkMarker("<meta name=plannotator-network content=none>")).toBe(true);
+    // Inside a comment or a script string the page opened before it: still read.
+    expect(hasNoNetworkMarker(`<!-- ${MARKER} -->`)).toBe(true);
+    expect(hasNoNetworkMarker(`<script>var s = "${MARKER.replace(/"/g, "'")}";</script>`)).toBe(true);
+  });
+
+  test("no marker, another name or another value: no policy", () => {
+    expect(hasNoNetworkMarker("<!DOCTYPE html><html><body><p>hi</p></body></html>")).toBe(false);
+    expect(hasNoNetworkMarker('<meta name="plannotator-theme" content="none">')).toBe(false);
+    expect(hasNoNetworkMarker('<meta name="plannotator-network" content="all">')).toBe(false);
+  });
+
+  test("the policy goes right after the doctype, before any page script", () => {
+    const page = `<!DOCTYPE html><html lang="en"><head><script>fetch("/x")</script></head><body></body></html>`;
+    const out = injectNoNetworkCsp(page);
+    expect(out.startsWith(`<!DOCTYPE html>${NO_NETWORK_CSP_META}<html lang="en">`)).toBe(true);
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBeLessThan(out.indexOf("<script>"));
+    expect(NO_NETWORK_CSP_META).toContain(`content="connect-src 'none'"`);
+  });
+
+  test("comments and a BOM before the doctype stay before it; no doctype puts the policy first", () => {
+    expect(injectNoNetworkCsp("\uFEFF <!-- built --> <!doctype html><p>x</p>"))
+      .toBe(`\uFEFF <!-- built --> <!doctype html>${NO_NETWORK_CSP_META}<p>x</p>`);
+    expect(injectNoNetworkCsp("<script>fetch('/x')</script><p>x</p>"))
+      .toBe(`${NO_NETWORK_CSP_META}<script>fetch('/x')</script><p>x</p>`);
+    // A "</head>" in an early script string does not move it.
+    const tricky = `<!DOCTYPE html><html><head><script>var s = "</head>"; fetch("/x")</script></head></html>`;
+    expect(injectNoNetworkCsp(tricky).indexOf(NO_NETWORK_CSP_META)).toBe("<!DOCTYPE html>".length);
+  });
+
+  test("the page's own CSP is still removed, and the viewer's survives the head injection", () => {
+    const page = `<!DOCTYPE html><html><head>${MARKER}<meta http-equiv="Content-Security-Policy" content="default-src 'none'"></head><body></body></html>`;
+    const out = injectNoNetworkCsp(injectIntoHead(page, INJECTION));
+    expect(out).not.toContain("default-src 'none'");
+    expect(out.split("Content-Security-Policy").length - 1).toBe(1);
+    expect(out).toContain(NO_NETWORK_CSP_META);
+    expect(out).toContain(INJECTION);
   });
 });
 
@@ -4547,21 +4600,35 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
   // app itself: the whole editor rendered inside the annotated document.
   // The bridge must therefore never let this frame navigate.
   describe("link navigation", () => {
+    /** Link-clicks the bridge sent on the host's private port. */
     let capturedLinkPosts: Array<Record<string, unknown>> = [];
+    /** Link-clicks posted on the window, where the host no longer takes them. */
+    let windowLinkPosts: Array<Record<string, unknown>> = [];
     let stopCapture: (() => void) | null = null;
 
+    /** The host's side of setup: hand the bridge a port (as after its ready), listen on the other end. */
     function startCapture() {
       capturedLinkPosts = [];
-      const capture = (event: MessageEvent) => {
+      windowLinkPosts = [];
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (event) => {
         const data = bridgeMessageData(event);
         if (data && data.type === "plannotator-bridge-link-click") capturedLinkPosts.push(data);
       };
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: window, ports: [channel.port2] }));
+      const capture = (event: MessageEvent) => {
+        const data = bridgeMessageData(event);
+        if (data && data.type === "plannotator-bridge-link-click") windowLinkPosts.push(data);
+      };
       window.addEventListener("message", capture);
-      stopCapture = () => window.removeEventListener("message", capture);
+      stopCapture = () => {
+        window.removeEventListener("message", capture);
+        channel.port1.close();
+      };
     }
 
-    /** postMessage delivery is queued; one macrotask turn settles it. */
-    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    /** postMessage and port delivery are queued; a short macrotask wait settles both. */
+    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 15));
 
     /** A person's click: `isTrusted`, which only the browser sets (a page script's a.click() is untrusted). */
     function trusted<T extends Event>(event: T): T {
@@ -4599,6 +4666,45 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       // The default action is what would load the app into this frame.
       expect(event.defaultPrevented).toBe(true);
       expect(capturedLinkPosts.map((p) => p.href)).toEqual(["01-entry-point.html"]);
+    });
+
+    test("a person's click goes out on the host's port, never on the window a page script shares", async () => {
+      setUp('<a id="rel" href="next.html">Next</a>', false);
+      clickLink("#rel");
+      await flushPosts();
+      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["next.html"]);
+      expect(windowLinkPosts).toEqual([]);
+    });
+
+    test("the port message stops at the bridge: a page listener added after it never sees the port", () => {
+      setUp('<a id="rel" href="next.html">Next</a>', false);
+      const seen: unknown[] = [];
+      const listen = (event: MessageEvent) => seen.push(event.data);
+      window.addEventListener("message", listen, true);
+      window.addEventListener("message", listen);
+      const stolen = new MessageChannel();
+      try {
+        window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: window, ports: [stolen.port2] }));
+        expect(seen).toEqual([]);
+      } finally {
+        window.removeEventListener("message", listen, true);
+        window.removeEventListener("message", listen);
+        stolen.port1.close();
+      }
+    });
+
+    test("a port posted by anything but the parent is not taken", async () => {
+      setUp('<a id="rel" href="next.html">Next</a>', false);
+      const forged = new MessageChannel();
+      const forgedPosts: unknown[] = [];
+      forged.port1.onmessage = (event) => forgedPosts.push(event.data);
+      // The page posting to its own window: the event's source is not the parent.
+      window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: null, ports: [forged.port2] }));
+      clickLink("#rel");
+      await flushPosts();
+      forged.port1.close();
+      expect(forgedPosts).toEqual([]);
+      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["next.html"]);
     });
 
     test("Interact: the RAW href travels — resolution belongs to the parent", async () => {

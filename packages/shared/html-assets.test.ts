@@ -13,9 +13,12 @@ import {
   rewriteHtmlAssetReferences,
   HTML_ASSET_DOCUMENT_CONTENT_TYPE,
   HTML_ASSET_DOCUMENT_CSP,
+  HTML_NO_NETWORK_MARKER,
   INERT_HTML_BASE_HREF,
   MAX_HTML_ASSET_DOCUMENT_BYTES,
 } from "./html-assets";
+// The viewer that reads the marker (the server writes it, the frame obeys it).
+import { hasNoNetworkMarker } from "../ui/components/html-viewer/srcdoc";
 
 describe("rewriteHtmlAssetReferences", () => {
   const rewrite = (html: string) =>
@@ -150,6 +153,25 @@ describe("embedded local documents", () => {
       '<base href="https://cdn.example/">',
     );
     expect(rewriteBase('<html><head><base href="/assets/"></head></html>')).toContain('<base href="/assets/">');
+  });
+
+  // A document opened outside the session's roots: the HTML viewer turns the
+  // marker into connect-src 'none' for its srcdoc frame.
+  test("noNetwork marks the document in head, after the base, in the form the viewer reads", () => {
+    const out = rewriteHtmlAssetReferences(
+      '<!doctype html><html><head><title>x</title><script>fetch("/x")</script></head><body></body></html>',
+      () => null,
+      { baseHref: "/api/html-assets/tok/", noNetwork: true },
+    );
+    expect(out).toContain(`<head><base href="/api/html-assets/tok/">${HTML_NO_NETWORK_MARKER}<title>`);
+    expect(hasNoNetworkMarker(out)).toBe(true);
+    // A fragment has no head: the marker still lands in it.
+    expect(hasNoNetworkMarker(rewriteHtmlAssetReferences("<p>hi</p>", () => null, { noNetwork: true }))).toBe(true);
+  });
+
+  test("without noNetwork the document carries no marker", () => {
+    const out = rewriteBase('<!doctype html><html><head><title>x</title></head><body></body></html>');
+    expect(hasNoNetworkMarker(out)).toBe(false);
   });
 
   test("a rewrite with no base option is byte-identical to the unoptioned rewrite", () => {

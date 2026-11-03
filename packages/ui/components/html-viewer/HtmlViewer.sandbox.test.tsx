@@ -8,7 +8,9 @@
  * value; a non-string (`null` from a host's unset config) still gets the
  * default rather than no sandbox at all, with or without `hostNavigates`; `""`
  * stays the strictest frame and never widens to the default; and live-app
- * `src` mode stays unsandboxed whatever is passed.
+ * `src` mode stays unsandboxed whatever is passed. A page its server marked
+ * no-network starts its srcdoc with `connect-src 'none'`; an unmarked one
+ * gets no policy.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
@@ -29,7 +31,7 @@ afterEach(async () => {
 });
 
 // `sandbox` is typed `string`; `null` reaches it from plain JS or a cast.
-type MountProps = { sandbox?: string | null; hostNavigates?: boolean; src?: string };
+type MountProps = { sandbox?: string | null; hostNavigates?: boolean; src?: string; rawHtml?: string };
 
 async function frameFor(props: MountProps): Promise<HTMLIFrameElement> {
   if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
@@ -94,5 +96,21 @@ describe.if(hasDom)('HtmlViewer sandbox', () => {
   test('live-app src mode stays unsandboxed when a sandbox is passed', async () => {
     const frame = await frameFor({ src: 'about:blank', sandbox: 'allow-scripts' });
     expect(frame.hasAttribute('sandbox')).toBe(false);
+  });
+});
+
+describe.if(hasDom)('HtmlViewer no-network documents', () => {
+  const CSP = `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">`;
+
+  test('a page its server marked starts with connect-src none, ahead of its own script', async () => {
+    const frame = await frameFor({
+      rawHtml: '<!DOCTYPE html><html><head><meta name="plannotator-network" content="none"><script>fetch("/api/plan")</script></head><body><p>Target</p></body></html>',
+    });
+    expect(frame.getAttribute('srcdoc')!.startsWith(`<!DOCTYPE html>${CSP}`)).toBe(true);
+  });
+
+  test('an unmarked page gets no policy from the viewer', async () => {
+    const frame = await frameFor({});
+    expect(frame.getAttribute('srcdoc')).not.toContain('Content-Security-Policy');
   });
 });
