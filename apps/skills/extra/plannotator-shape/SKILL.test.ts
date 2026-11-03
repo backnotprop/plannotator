@@ -35,6 +35,15 @@ describe("plannotator-shape", () => {
     expect(skill).toContain("no `var(--accent)`");
   });
 
+  test("the view switch sits under the claim, out of the top-right corner", () => {
+    // In the Inbox's full screen view and in annotate, the host's own toolbar
+    // floats over the page's top-right corner. A switch there (as in the r11
+    // frame) cannot be clicked, so How it works is out of reach.
+    const header = frame.match(/(?:^|\n)header\{([^}]*)\}/)?.[1] ?? "";
+    expect(header).toMatch(/flex-direction:\s*column/);
+    expect(header).not.toMatch(/space-between/);
+  });
+
   test("the frame takes the host's page colours when they are given", () => {
     // Inside the Inbox the Shape should sit on the window's own background and
     // text colours; standalone it falls back to its own light and dark.

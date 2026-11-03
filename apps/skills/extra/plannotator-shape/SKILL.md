@@ -65,6 +65,7 @@ Build it from the **latest** messages: something cut at 16:00 may be back by 22:
 
 ## Deliver
 
-- **Inbox thread:** `send_message` with `reply_to` the thread's latest message id: two or three lines, the light screenshot in place (`![Shape](/abs/path/shape-light.png)`), and the HTML in `attachments`. It opens beside the thread, sandboxed; the person's comments on it come back in their reply. Not as an `html` fence: a phone shows a fence as code.
-- **No Inbox:** `plannotator annotate shape-<topic>.html` (or the `plannotator` tool with that target) serves it at its own local URL, where the person can comment and send feedback. Clicks pin comments there; Esc (Interact) makes the switch clickable.
-- Or give the file's path: any browser opens it.
+- **Inbox thread:** `send_message` with `reply_to` the thread's latest message id: two or three lines, the light screenshot in place (`![Shape](/abs/path/shape-light.png)`), and the HTML in `attachments`. It opens beside the thread; comments on it come back in the reply. Not as an `html` fence: a phone shows a fence as code.
+- **No Inbox:** `plannotator annotate shape-<topic>.html` (or the `plannotator` tool with that target) serves it at its own local URL, where the person can comment and send feedback.
+- In both, a click pins a comment; tell the person Esc (Interact) makes the switch work.
+- Or give the path: any browser opens it.

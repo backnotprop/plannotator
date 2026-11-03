@@ -15,7 +15,7 @@
 :root[data-theme=light]{color-scheme:light} :root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box}html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans)}
 main{max-width:1280px;margin:0 auto;padding:28px 40px 32px}
-header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
+header{display:flex;flex-direction:column;align-items:flex-start;gap:12px}
 .eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--grey)}
 h1{font-size:28px;line-height:1.15;margin:8px 0 4px;font-weight:650;letter-spacing:-.01em}
 .claim{font-size:16px;color:var(--ink2);margin:0}
@@ -23,7 +23,7 @@ h1{font-size:28px;line-height:1.15;margin:8px 0 4px;font-weight:650;letter-spaci
 .switch button{font:500 13px var(--sans);color:var(--ink2);background:none;border:0;padding:6px 12px;border-radius:6px;cursor:pointer}
 .switch button[aria-pressed=true]{background:var(--ink);color:var(--paper)}
 .board{margin:12px 0 0;position:relative}
-.board svg{display:block;width:100%;height:auto;max-height:calc(100vh - 330px);min-height:340px}
+.board svg{display:block;width:100%;height:auto;max-height:calc(100vh - 372px);min-height:340px}
 .board svg[hidden]{display:none}
 html[data-pn-embed=inline] .board svg{max-height:none}
 .note{columns:3 250px;column-gap:40px;font-size:15.5px;line-height:1.5;color:var(--ink2);margin:14px 0 0;padding-top:14px;border-top:1px solid var(--rule)}
@@ -36,7 +36,7 @@ svg .acc-fill{fill:var(--mark-soft);stroke:var(--mark)} svg .dash{stroke-dasharr
 svg .t-acc{fill:var(--mark)} svg .t-grey{fill:var(--grey)} svg .t-ink2{fill:var(--ink2)}
 svg .struck{text-decoration:line-through} svg .say{font-style:italic;fill:var(--ink2)} svg .lift{fill:var(--rule);stroke:none}
 svg *{stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-@media (max-width:760px){main{padding:18px 16px;display:flex;flex-direction:column}header{flex-direction:column;gap:12px}h1{font-size:23px}
+@media (max-width:760px){main{padding:18px 16px;display:flex;flex-direction:column}h1{font-size:23px}
   .switch{align-self:stretch}.switch button{flex:1;padding:9px 12px;font-size:14px}
   .board{overflow-x:auto;-webkit-overflow-scrolling:touch}.board svg{width:780px;max-width:none;max-height:none;min-height:0}.note{columns:1}.board::after{content:'Swipe sideways to see all of it';display:block;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--grey);margin-top:6px;position:sticky;left:0}}
 </style>
