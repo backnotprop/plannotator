@@ -2584,7 +2584,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
 
-  /** A tailnet login the allow list let in that is not this computer's owner: never starts an agent (as Ask AI's own check below). */
+  /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
   // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
