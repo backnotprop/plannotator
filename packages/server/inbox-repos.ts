@@ -14,12 +14,12 @@
  * TTL runs out.
  */
 
-import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, type InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { parseRemoteHost, parseRemoteUrl } from "@plannotator/shared/repo";
 import { runtime } from "./git";
 
-/** How long a resolved remote counts as fresh before a read refreshes it in the background. */
-export const INBOX_REPO_TTL_MS = 5 * 60_000;
+/** How long a resolved remote counts as fresh before a read refreshes it in the background (kept in core: the window reads it too). */
+export { INBOX_REPO_TTL_MS };
 /** One `git remote get-url origin` never runs longer than this. */
 export const INBOX_REPO_GIT_TIMEOUT_MS = 3_000;
 /** At most this many `git remote get-url` run at once. */
