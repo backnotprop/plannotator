@@ -253,6 +253,8 @@ export interface ReviewServerOptions {
   gitRef: string;
   /** Error message if git diff failed */
   error?: string;
+  /** The caller's `--title` (#2289): the whole tab title, in place of `<repo> · Code Review`. Absent: unchanged. */
+  title?: string;
   /** HTML content to serve for the UI */
   htmlContent: string;
   /**
@@ -2653,6 +2655,8 @@ export async function startReviewServer(
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
               ...(options.openStatePinned && { openStatePinned: true }),
+              // `--title` (#2289): session-constant, read by the page at mount.
+              ...(options.title && { title: options.title }),
               shareBaseUrl,
               repoInfo,
               isWSL: wslFlag,
