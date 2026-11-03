@@ -5235,8 +5235,9 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-st-group + .ib-st-group { border-top: 1px solid var(--ib-st-line); margin-top: 4px; }
 
 .ib-st-head { display: flex; align-items: center; gap: 7px; height: 36px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-st-mut); }
-.ib-st-lbl { color: var(--foreground); font-weight: 550; font-size: var(--ib-fs-13, 13px); }
-.ib-st-plan { display: inline-flex; align-items: center; gap: 5px; color: var(--ib-st-mut); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+/* One line, cut with an ellipsis (its title has the whole name): a long agent name never wraps the head. */
+.ib-st-lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-weight: 550; font-size: var(--ib-fs-13, 13px); }
+.ib-st-plan { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--ib-st-mut); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
 .ib-st-asof { color: var(--ib-st-mut); font-size: var(--ib-fs-12, 12px); opacity: 0.85; white-space: nowrap; }
 .ib-st-asof::before { content: "·"; margin: 0 6px 0 1px; }
 .ib-st-grow { flex: 1; }
@@ -5245,14 +5246,18 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-st-x:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .ib-sts { list-style: none; margin: 0; padding: 0; }
-.ib-st { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 430; }
+/* `.ib-st-row`, never `.ib-st`: that is the thread foot's status words (the draft note, the archived note), Settings →
+   Archived and the Open in caret, which a step's padding and hover would move. */
+.ib-st-row { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 430; }
 /* A touch leaves no hover behind: the sheet opens under the finger that opened it. */
-@media (hover: hover) { .ib-st:hover { background: var(--ib-hover); } }
+@media (hover: hover) { .ib-st-row:hover { background: var(--ib-hover); } }
 .ib-st-gl { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
 .ib-st-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
 .ib-st-m { flex: 0 1 auto; min-width: 0; max-width: 50%; margin-left: auto; padding-left: 12px; color: var(--ib-st-mut); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ib-st[data-step-status="done"] .ib-st-t, .ib-st[data-step-status="dropped"] .ib-st-t { color: var(--ib-st-mut); }
-.ib-st[data-step-status="dropped"] .ib-st-t { text-decoration: line-through; text-decoration-color: var(--ib-st-faint); }
+/* A done step's time is never cut ("2:…"): only a note gives way, and the step's text before it. */
+.ib-st-m.ib-st-time, .ib-st-m.ib-st-wait { flex: none; max-width: none; }
+.ib-st-row[data-step-status="done"] .ib-st-t, .ib-st-row[data-step-status="dropped"] .ib-st-t { color: var(--ib-st-mut); }
+.ib-st-row[data-step-status="dropped"] .ib-st-t { text-decoration: line-through; text-decoration-color: var(--ib-st-faint); }
 .ib-st-wait { color: var(--ib-st-amber); }
 .pn-inbox .ib-st-jump { flex: none; max-width: none; display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; padding: 2px 0 2px 12px; cursor: pointer; color: var(--ib-st-amber); }
 @media (hover: hover) { .ib-st-jump:hover { text-decoration: underline; text-underline-offset: 2px; } }
@@ -5288,7 +5293,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-st-head { height: 48px; padding: 0 0 0 10px; font-size: var(--ib-fs-14, 14px); }
 .ib-oq-pos[data-phone] .ib-st-lbl { font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-st-plan { font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-oq-pos[data-phone] .ib-st { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
+.ib-oq-pos[data-phone] .ib-st-row { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-st-m { font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-oq-pos[data-phone] .ib-st-jump { min-height: 44px; }
 
@@ -5300,7 +5305,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-crdp-steps .ib-sts { margin: 0 -10px; }
 .ib-crdp-steps .ib-st-group + .ib-st-group { border-top: 0; margin-top: 12px; }
 .ib-crdp-steps .ib-stg-done .k, .ib-crdp-steps .ib-stg-drop path { stroke: var(--card); }
-.ib-crdp-phone .ib-crdp-steps .ib-st { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
+.ib-crdp-phone .ib-crdp-steps .ib-st-row { min-height: 40px; font-size: var(--ib-fs-15, 15px); }
 .ib-crdp-phone .ib-crdp-steps .ib-st-jump { min-height: 44px; }
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }

@@ -657,7 +657,7 @@ test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and i
   const list = $('[data-card-panel="crd_auto"] [data-card-checklist]')!;
   expect(list.querySelector('h3.ib-st-lbl')!.textContent).toBe('Checklist');
   expect(list.querySelector('[data-steps-head]')!.textContent).toBe('Checklist1/3');
-  expect([...list.querySelectorAll<HTMLElement>('.ib-st')].map((r) => r.dataset.stepStatus)).toEqual(['done', 'waiting', 'doing']);
+  expect([...list.querySelectorAll<HTMLElement>('.ib-st-row')].map((r) => r.dataset.stepStatus)).toEqual(['done', 'waiting', 'doing']);
   // Read only: the one control is the waiting row's way to the thread.
   expect([...list.querySelectorAll('button')].map((b) => b.hasAttribute('data-steps-waiting'))).toEqual([true]);
   await act(async () => list.querySelector<HTMLButtonElement>('[data-steps-waiting]')!.click());
