@@ -229,7 +229,7 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
         if (doing === null) continue;
         const age = Math.max(0, now - Date.parse(record.updated_at));
         signal({ session: record.agent.session, host: record.agent.host, name: inboxAgentName(record.agent) }, threadId, messages, `step in progress, ${shortAge(age)}`, [
-          `Your steps here: ${done} of ${total} done; doing: ${oneLine(doing, 80)}, unchanged for ${inboxTidyAge(age)}. Update them if that changed (the steps action, thread_id ${threadId}).`,
+          `${TIDY_STEPS_LEAD}${done} of ${total} done; doing: ${oneLine(doing, 80)}, unchanged for ${inboxTidyAge(age)}. Update them if that changed (the steps action, thread_id ${threadId}).`,
         ]);
       }
     }
@@ -311,6 +311,32 @@ function cooling(store: InboxStore, session: string, now: number): boolean {
     }
   }
   return true;
+}
+
+/** How a Tidy item's steps line starts (`inboxTidyPlan`), and how the body carries it (`inboxTidyBody`). */
+const TIDY_STEPS_LEAD = "Your steps here: ";
+const TIDY_STEPS_BODY_LINE = `   - ${TIDY_STEPS_LEAD}`;
+
+/**
+ * A stored Tidy body as it is handed to an agent while the person has steps
+ * off: the body is written when the run starts, so a switch turned off before
+ * delivery would still carry the steps lines. Without them: every steps line,
+ * then every thread left with nothing listed, renumbered. Any other body is
+ * returned as it is (a body with no steps line is byte-equal).
+ */
+export function inboxTidyBodyStepsOff(body: string): string {
+  if (!body.includes(`\n${TIDY_STEPS_BODY_LINE}`)) return body;
+  let n = 0;
+  return body
+    .split("\n\n")
+    .flatMap((part) => {
+      if (!/^\d+\. /.test(part)) return [part];
+      const lines = part.split("\n").filter((line) => !line.startsWith(TIDY_STEPS_BODY_LINE));
+      if (lines.length < 2) return [];
+      n += 1;
+      return [[lines[0]!.replace(/^\d+\. /, `${n}. `), ...lines.slice(1)].join("\n")];
+    })
+    .join("\n\n");
 }
 
 /** The body of a session's Tidy notes: the instruction, what tidying can mean, then the numbered list. */

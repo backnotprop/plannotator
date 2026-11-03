@@ -134,6 +134,7 @@ import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxTidyBodyStepsOff } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
@@ -2348,6 +2349,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const replyCommand = (reply: InboxMessage, sendNow = false, session: string | null = null): InboxReplyCommand => {
     const command = replyCommandOf(reply, sendNow, session);
+    // A Tidy body is written when the run starts: with steps turned off since, it goes without its steps lines.
+    if (command.tidy && !stepsOn()) return { ...command, body: inboxTidyBodyStepsOff(command.body) };
     // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
     // the person has steps on. Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
     if (!stepsOn() || command.tidy || command.ack_of || command.handed_away) return command;

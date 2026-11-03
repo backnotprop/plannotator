@@ -645,8 +645,11 @@ test.if(hasDom)('the lane card: a checklist\'s pie, no count, named for the card
   expect($$('.ib-bc-plan')).toHaveLength(0);
 });
 
+/** The card agent's session in the live sessions read (the opened card's head reads it working, or idle). */
+const LIVE_CLAUDE = (busy: boolean) => [{ project: { id: 'prj_1', name: 'web', root: '/Users/ada/src/web' }, sessions: [{ session: 'ses_claude', host: 'claude-code', started_at: OLD, last_seen_at: NEW, busy, idle_since: busy ? null : NEW, last_thread: null }] }];
+
 test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and its rows; "Waiting on you ›" opens the list\'s thread', async () => {
-  scriptFetch();
+  scriptFetch(LIVE_CLAUDE(true));
   const threads: string[] = [];
   draw({
     model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS] } },
@@ -669,4 +672,26 @@ test.if(hasDom)('the opened card: the checklist read only, "Checklist 1/3" and i
   await settle();
   expect($('[data-card-panel="crd_auto"]')).not.toBeNull();
   expect($('[data-card-checklist]')).toBeNull();
+});
+
+// The review of #2572: a session the Board reads ended (not live) while its list's presence still says working (no
+// polling connection) showed "○ ended" over a turning mark. The opened card's checklist says what its head says.
+test.if(hasDom)('the opened card: once its head reads the agent ended, that agent\'s list reads ended too (dashed mark, "as of"); another session\'s does not', async () => {
+  const other = { ...checklist([{ step: 'Write the notes', status: 'doing' }], 'working', OLD), id: 'stp_other', agent: { kind: 'agent', host: 'codex', session: 'ses_codex', name: 'Codex' } as Extract<InboxAuthor, { kind: 'agent' }> };
+  const panel = async (sessions: unknown[]) => {
+    scriptFetch(sessions);
+    draw({ model: { serverSession: 's', cursor: 1, cards: CARDS, dropped_unseen: 0, seen_seq: LOOK, steps: { msg_auto: [AUTO_STEPS, other] } }, openCard: 'crd_auto' });
+    await settle();
+    const card = $('[data-card-panel="crd_auto"]')!;
+    const group = (session: string) => card.querySelector<HTMLElement>(`[data-card-checklist] [data-steps-group="${session}"]`)!;
+    const seen = { head: card.querySelector('[data-agent-state]')?.getAttribute('data-agent-state'), claude: group('ses_claude').dataset.presence, codex: group('ses_codex').dataset.presence, asOf: !!group('ses_claude').querySelector('.ib-st-asof') };
+    act(() => root?.unmount());
+    root = null;
+    document.body.innerHTML = '';
+    return seen;
+  };
+  // Not in the live sessions: the head says ended, and so does its own list.
+  expect(await panel([])).toEqual({ head: 'ended', claude: 'ended', codex: 'working', asOf: true });
+  // Live: the list reads as served.
+  expect(await panel(LIVE_CLAUDE(false))).toEqual({ head: 'idle', claude: 'working', codex: 'working', asOf: false });
 });

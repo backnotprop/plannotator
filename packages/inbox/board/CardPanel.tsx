@@ -30,6 +30,7 @@ import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
 import { StepsLists } from '../steps/StepsList';
+import { stepsAsCardHeadSays } from '../steps/model';
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export interface CardPanelProps {
@@ -250,7 +251,7 @@ export function CardPanel(props: CardPanelProps) {
           // only. "Waiting on you ›" opens that list's thread, where the question is (with the way back here).
           // Each list is its own named section (StepsLists), so the wrapper is not one more.
           <div className="ib-crdp-sec ib-crdp-steps" data-card-checklist="">
-            <StepsLists lists={props.steps} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
+            <StepsLists lists={stepsAsCardHeadSays(props.steps, agent?.session ?? null, props.state)} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
           </div>
         )}
         <Notes card={card} onSave={props.onNotes} text={text} />

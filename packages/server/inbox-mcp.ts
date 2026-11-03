@@ -25,6 +25,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { inboxTidyBodyStepsOff } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
@@ -349,12 +350,14 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   } catch {
     return result;
   }
-  const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${note.body}`;
+  // Written when the run started: with steps turned off since, it goes without its steps lines.
+  const body = context.stepsOn?.() ? note.body : inboxTidyBodyStepsOff(note.body);
+  const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${body}`;
   const content = [...result.content];
   const last = content.length - 1;
   if (last >= 0) content[last] = { ...content[last]!, text: `${content[last]!.text}${tidy}` };
   else content.push({ type: "text", text: tidy.trimStart() });
-  return { ...result, content, ...(result.structuredContent ? { structuredContent: { ...result.structuredContent, tidy: { id: note.id, text: note.body } } } : {}) };
+  return { ...result, content, ...(result.structuredContent ? { structuredContent: { ...result.structuredContent, tidy: { id: note.id, text: body } } } : {}) };
 }
 
 /** The send tools' last sentence for a caller whose reply arrives by itself. */

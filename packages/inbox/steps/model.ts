@@ -30,6 +30,16 @@ export function cardStepLists(threads: readonly string[], steps: Readonly<Record
   return lists.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
 }
 
+/**
+ * The opened Board card's lists, said the way its head says the session: once the head reads "ended" (the Board's
+ * rule, not live), the card agent's own lists read ended too (the grey dashed mark, "· as of 2:40 PM"), so one card
+ * never shows an ended agent beside a list still turning. Another session's list, or any other head, as served.
+ */
+export function stepsAsCardHeadSays<T extends Pick<InboxStepsWire, 'presence' | 'agent'>>(lists: readonly T[], session: string | null, state: string | null): T[] {
+  if (state !== 'ended' || !session) return [...lists];
+  return lists.map((list) => (list.agent.session === session && list.presence !== 'ended' ? { ...list, presence: 'ended' } : list));
+}
+
 /** The Board card the checklist head's Board icon opens: the first card (the Board's order) that links the thread, not a cancelled one. */
 export function threadBoardCard<T extends { threads: readonly string[]; column: string }>(cards: readonly T[], threadId: string): T | null {
   return cards.find((card) => card.column !== 'dropped' && card.threads.includes(threadId)) ?? null;
