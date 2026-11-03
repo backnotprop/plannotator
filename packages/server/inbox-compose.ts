@@ -260,15 +260,19 @@ export function createInboxCompose(options: {
     return null;
   };
 
-  /** Open threads holding unsent work, the most recently drafted first (each with the reply's first words). */
+  /**
+   * Open threads holding unsent work, the most recently drafted first (each with the reply's first words).
+   * Only the rows of threads that may hold unsent work are built (`unsentRows`), not the whole list.
+   */
   const replyDraftRows = (): InboxReplyDraftRow[] =>
     store
-      .listRows()
+      .unsentRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
       .map((row) => {
         const draft = store.replyDraft(row.thread_id);
-        // A draft holding only a long paste reads as the paste's first words.
-        const words = (draft?.body.trim() || draft?.files?.[0]?.pasted?.preview || "").replace(/\s+/g, " ").trim();
+        // A draft holding only files reads as its first: a long paste's first words, another file's name.
+        const first = draft?.files?.[0];
+        const words = (draft?.body.trim() || first?.pasted?.preview || first?.name || "").replace(/\s+/g, " ").trim();
         return { ...row, reply_preview: words ? words.slice(0, INBOX_REPLY_PREVIEW_MAX) : null };
       })
       .sort((a, b) => (b.unsent!.reply_at ?? b.last_at).localeCompare(a.unsent!.reply_at ?? a.last_at) || a.thread_id.localeCompare(b.thread_id));
@@ -277,7 +281,7 @@ export function createInboxCompose(options: {
   const sweep = () => {
     try {
       const keep = inboxDraftUploadIds(store.dir);
-      // A reply draft's long pastes (approval "inbox-paste-attachment") are kept as a compose draft's files are.
+      // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {

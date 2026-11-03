@@ -296,9 +296,12 @@ for (const phone of [{ browserName: 'webkit' as const }, { browserName: 'chromiu
       await card.getByRole('textbox', { name: 'Comment on checkout.png' }).fill(`Crop the header (${tag})`);
       await card.locator('.ib-csave').click();
       await page.goto(`${world.url}#thread=${world.threadId}`);
-      const chip = page.locator('section.ib-pane [data-annotations-chip]');
-      if (!(await chip.isVisible())) await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /Reply|Edit draft/ }).first().click();
-      await chip.click();
+      // A phone's reply box: its foot's one line, then (with questions too) the sheet's Review comments.
+      const line = page.locator('section.ib-pane .ib-rfoot [data-foot-summary]');
+      if (!(await line.isVisible())) await page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /Reply|Edit draft/ }).first().click();
+      await line.click();
+      if ((await line.getAttribute('data-foot-summary')) === 'sheet')
+        await page.getByRole('dialog', { name: 'Goes with this reply' }).getByRole('button', { name: 'Review comments' }).click();
       const sheet = page.locator('.ib-annpop');
       await expect(sheet).toBeVisible();
       await sheet.locator(`[data-annotation-row]`, { hasText: `Crop the header (${tag})` }).getByRole('button', { name: 'Edit' }).click();
