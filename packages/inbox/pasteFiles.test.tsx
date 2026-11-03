@@ -10,7 +10,7 @@
  * attachment on the message that carries the words); a reply of a pasted
  * image alone is sent as a words-only reply; a paste of text alone makes no
  * tile and is left to the browser, as is text copied from a spreadsheet with
- * the picture Chromium adds beside it; Cancel forgets the reply box's files;
+ * the picture Chromium adds beside it; Cancel keeps the reply box's files as its draft;
  * a file pasted while a Send is in flight stays for the next one; a retry
  * whose contents changed is a new reply, never the earlier one replayed; and
  * each attach by paste is said in a polite live region. On a phone (iOS
@@ -380,32 +380,44 @@ test.skipIf(!hasDom)('the reply box: two pasted images make two tiles (the secon
   expect(replyTiles()).toEqual(names);
 }, 30_000);
 
-test.skipIf(!hasDom)('the reply box: a pasted image alone is sent as a words-only reply (questions stay open); Cancel forgets pasted files', async () => {
+test.skipIf(!hasDom)('the reply box: pasted images alone are sent as a words-only reply (questions stay open); Cancel keeps a pasted file in the draft', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 1, 'the question');
   act(() => button(el, 'Reply').click());
   await until(() => replyBox(el) !== null, 'the reply box');
   expect(paste(replyBox(el)!.querySelector('textarea')!, { files: [image()] })).toBe(true);
-  await until(() => tiles(replyBox(el)!).length === 1, 'the tile');
-  // Cancel: the files go with the box.
+  await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the first upload');
+  // Cancel: the file stays, as the reply's draft (the box's files are part of it).
   act(() => button(el, 'Cancel').click());
-  act(() => button(el, 'Reply').click());
-  await until(() => replyBox(el) !== null, 'the reply box again');
-  expect(el.querySelector('[data-reply-files]')).toBeNull();
+  await until(async () => (await draftUploads()).length === 1, 'the file in the draft');
+  const kept = (await draftUploads())[0]!;
+  // The thread's foot now offers Edit draft, which brings its tile back.
+  act(() => button(el, 'Edit draft').click());
+  await until(() => replyBox(el) !== null && tiles(replyBox(el)!).length === 1, 'the reply box again, with the tile');
 
   expect(paste(replyBox(el)!, { files: [image()] })).toBe(true);
-  await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
+  await until(() => tiles(replyBox(el)!).length === 2 && tiles(replyBox(el)!).every((tile) => tile.getAttribute('data-compose-file') === 'done'), 'the upload');
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('.ib-rbox') === null, 'the Send');
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies).toHaveLength(1);
   expect(replies[0]!.body).toMatchObject({ words: '', questions: [] });
   expect(replies[0]!.body.skip).toBeUndefined();
-  expect((replies[0]!.body.uploads as string[]).length).toBe(1);
+  const uploads = replies[0]!.body.uploads as string[];
+  expect(uploads.length).toBe(2);
+  expect(uploads).toContain(kept);
   const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: (InboxMessage & { questions?: { state: string }[] })[] } };
   expect(model.thread.messages[0]!.questions!.map((q) => q.state)).toEqual(['open']);
-  expect(model.thread.messages.at(-1)!.attachments).toHaveLength(1);
+  expect(model.thread.messages.at(-1)!.attachments).toHaveLength(2);
+  // Nothing is left as a draft.
+  await until(async () => (await draftUploads()).length === 0 && JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}/draft`)).text).draft === null, 'no draft left');
 }, 30_000);
+
+/** The upload ids the thread's reply draft keeps. */
+async function draftUploads(): Promise<string[]> {
+  const { draft } = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}/draft`)).text) as { draft: { files?: { upload_id: string }[] } | null };
+  return (draft?.files ?? []).map((file) => file.upload_id);
+}
 
 test.skipIf(!hasDom)('a file pasted while a Send is in flight stays in the box for the next Send; only the files the Send carried go', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
