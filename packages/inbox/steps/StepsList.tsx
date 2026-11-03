@@ -56,6 +56,7 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
 export function StepsHead({
   list,
   label,
+  named = false,
   children,
   now,
   headingId,
@@ -63,6 +64,8 @@ export function StepsHead({
 }: {
   list: InboxStepsWire;
   label: string;
+  /** The label is an agent's name (more than one list), which can be cut. */
+  named?: boolean;
   children?: React.ReactNode;
   now?: Date;
   headingId?: string;
@@ -74,7 +77,8 @@ export function StepsHead({
   const Label = heading ? 'h3' : 'span';
   return (
     <div className="ib-st-head" data-steps-head="">
-      <Label className="ib-st-lbl" id={headingId} title={label} dir="auto">
+      {/* An agent's name (`named`) can be cut: its title has it whole. "Checklist" never is, so it has none. */}
+      <Label className="ib-st-lbl" id={headingId} title={named ? label : undefined} dir="auto">
         {label}
       </Label>
       <span className="ib-st-plan" aria-label={`${done} of ${total} done`}>
@@ -117,7 +121,7 @@ export function StepsLists({
     <>
       {lists.map((list, index) => (
         <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(labels[index]!, list)}>
-          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} now={now} heading={heading}>
+          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} named={lists.length > 1} now={now} heading={heading}>
             {index === 0 ? headExtra : null}
           </StepsHead>
           <StepsList list={list} onWaiting={onWaiting?.(list) ?? null} now={now} />
