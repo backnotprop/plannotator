@@ -173,9 +173,19 @@ export function buildThemeListenerScript(): string {
     if(appIsLight()!==wantLight){clearOverrides();return;}
     applyOverrides();
   }
+  /* An IDE theme change lands in one frame, as ThemeProvider's switches do:
+     theme.css zeroes every transition while <html> has pn-theme-switching. */
+  var holds=0;
+  function holdThemeSwitch(){
+    root.classList.add("pn-theme-switching");
+    var n=++holds;
+    var frame=window.requestAnimationFrame?function(f){window.requestAnimationFrame(f);}:function(f){setTimeout(f,16);};
+    frame(function(){frame(function(){if(n===holds)root.classList.remove("pn-theme-switching");});});
+  }
   window.addEventListener("message",function(e){
     if(!e.data||e.data.type!=="plannotator-vscode-theme")return;
     latest=e.data;
+    holdThemeSwitch();
     reconcile();
   });
   /* ThemeProvider rewrites these classes whenever the user changes theme. */

@@ -269,6 +269,13 @@ export interface InboxProjectRepo {
   host: string | null;
 }
 
+/**
+ * How long a resolved remote counts as fresh before a read refreshes it in the background
+ * (packages/server/inbox-repos.ts). The window reads an open thread again once its last read is
+ * older than this, so a changed `origin` reaches its links (packages/inbox/openThreadReads.ts).
+ */
+export const INBOX_REPO_TTL_MS = 5 * 60_000;
+
 export type InboxAuthor =
   | { kind: "person" }
   | {

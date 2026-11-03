@@ -1005,6 +1005,8 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     expect(yours(el, '[data-tour-mode="system"]')!.checked).toBe(true);
     expect(htmlClass()).toContain('theme-plannotator');
     await click(yours(el, '[data-tour-mode="dark"]'));
+    // It lands in one frame, with no colour fade (ThemeProvider's hold; theme.css sets transitions to 0 s under it).
+    expect(document.documentElement.classList.contains('pn-theme-switching')).toBe(true);
     // The count follows the half on screen.
     expect($(el, '[data-tour-more-colors]')!.textContent).toBe(`${dark} more in Settings`);
     await click(yours(el, '[data-tour-palette="catppuccin"]'));
