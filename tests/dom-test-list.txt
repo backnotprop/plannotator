@@ -102,6 +102,7 @@ packages/inbox/sidebarQuiet.test.tsx
 packages/inbox/leakedSubject.test.tsx
 packages/inbox/connectPromptRow.test.tsx
 packages/inbox/boardPage.test.tsx
+packages/inbox/cardPanelLinks.test.tsx
 packages/inbox/boardProjectFilter.test.tsx
 packages/inbox/boardSend.test.tsx
 packages/inbox/boardOff.test.tsx
@@ -153,6 +154,7 @@ packages/inbox/sentReply.test.tsx
 packages/inbox/skillHighlightSent.test.ts
 packages/inbox/threadFoot.test.tsx
 packages/inbox/replyDrafts.test.tsx
+packages/inbox/replyDraftFiles.test.tsx
 packages/inbox/skipNote.test.tsx
 packages/inbox/picksWhileComposing.test.tsx
 packages/inbox/projectMenu.test.tsx
@@ -184,6 +186,7 @@ packages/inbox/toast.test.tsx
 packages/inbox/attachmentsHeader.test.tsx
 packages/inbox/threadArtifacts.test.tsx
 packages/inbox/sentQuestionLocked.test.tsx
+packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
 packages/inbox/sidebarUpdateDot.test.tsx
 packages/inbox/sidebarSections.test.tsx

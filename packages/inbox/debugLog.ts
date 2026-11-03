@@ -269,10 +269,27 @@ export function learnDebugLog(response: Response): void {
     } else if (response.ok) {
       recorder?.stop();
       recorder = null;
+      for (const listener of [...stopListeners]) listener();
     }
   } catch {
     // No local storage: no recording.
   }
+}
+
+const stopListeners = new Set<() => void>();
+/** `listener` runs once when this window hears that debug went off (perfMarks.ts tears down its listeners). Returns the removal. */
+export function whenDebugLogStops(listener: () => void): () => void {
+  const once = () => {
+    stopListeners.delete(once);
+    listener();
+  };
+  stopListeners.add(once);
+  return () => void stopListeners.delete(once);
+}
+
+/** Whether this window is recording (the Inbox's debug log is on): the performance marks (perfMarks.ts) run only then. */
+export function debugLogOn(): boolean {
+  return recorder !== null;
 }
 
 /** A page moment worth a line (Send pressed, Send cleared). A no-op while debug is off. */

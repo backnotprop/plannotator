@@ -68,27 +68,8 @@ export function boxText(text: string): string {
   return text.replace(/\r\n?/g, '\n');
 }
 
-/**
- * Where an anchor at `at` in `before` is in `after`, for one edit between them
- * (typing, a deletion, a paste, a replace). The edit is the span between the
- * texts' common start and common end. An anchor before it stays; one after it
- * moves by the change in length; one inside a deleted or replaced span goes to
- * that span's start. An insertion exactly at the anchor goes after the pasted
- * text's place (the anchor stays), so typing on at the caret after a paste
- * keeps the paste ahead of the new words, as a plain paste would.
- */
-export function mapAnchor(before: string, after: string, at: number): number {
-  if (before === after) return at;
-  const max = Math.min(before.length, after.length);
-  let start = 0;
-  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;
-  let end = 0;
-  while (end < max - start && before.charCodeAt(before.length - 1 - end) === after.charCodeAt(after.length - 1 - end)) end++;
-  const removedEnd = before.length - end;
-  if (at <= start) return at;
-  if (at >= removedEnd) return at + (after.length - before.length);
-  return start;
-}
+/** Where a paste's place goes as the words around it change: shared with the Inbox's draft store (core). */
+export { mapAnchor } from '@plannotator/core/inbox-reply-draft';
 
 /** The box's text with `text` put back at `at` (clamped to the text), and the caret after it. */
 export function putTextBack(value: string, at: number, text: string): { value: string; caret: number } {
