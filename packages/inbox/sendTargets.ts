@@ -76,8 +76,11 @@ export function sameSession(a: InboxMessageWire, b: InboxMessageWire): boolean {
  * to the agent that wrote most recently, never to an older asker: when the
  * latest agent message's session has a reply, that reply comes last;
  * otherwise the latest agent message comes last, with nothing of its own.
+ * `wordsAt`: the message the words answer instead, when the person aimed the
+ * reply at another agent (the recipient pill, approval "inbox-reply-recipient":
+ * that agent's latest message).
  */
-export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = new Set()): SendTarget[] {
+export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = new Set(), wordsAt?: InboxMessageWire): SendTarget[] {
   const groups = new Map<string, SendTarget>();
   for (const m of thread.messages) {
     if (m.author.kind !== 'agent') continue;
@@ -103,7 +106,7 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
   }));
   const order = new Map(thread.messages.map((m, index) => [m.id, index]));
   targets.sort((a, b) => (order.get(a.message.id) ?? 0) - (order.get(b.message.id) ?? 0));
-  const latest = wordsMessage(thread);
+  const latest = wordsAt ?? wordsMessage(thread);
   const words = targets.findIndex((t) => t.message.id === latest.id || sameSession(t.message, latest));
   if (words < 0) targets.push({ message: latest, questions: [], skip: [], actions: [] });
   else targets = [...targets.slice(0, words), ...targets.slice(words + 1), targets[words]!];

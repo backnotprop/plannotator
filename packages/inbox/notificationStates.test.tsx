@@ -53,7 +53,7 @@ const settingsModel = (enabled = true) =>
     inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
     notifications: { enabled, dismissed: false, allowed_origin: null },
     phones: false,
-    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+    store_dir: '/home/u/.plannotator/inbox',
   }) as unknown as SettingsModel;
 
 function settings(options: {

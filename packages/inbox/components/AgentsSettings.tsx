@@ -336,7 +336,8 @@ function AgentGroup({
   const base = row.detected ? stateOf(row) : { text: 'Not found on this computer', tone: 'off' as const };
   const needs = row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode' ? sessionsState(row.id, sessions) : null;
   const state = needs ? { text: `${base.text} · ${needs}`, tone: 'bad' as const } : base;
-  const next = `${row.label}'s next session`;
+  // DeepSeek Harness decides once, when it starts (its plugin), never per session.
+  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
     reach.kind === 'tool' ? (

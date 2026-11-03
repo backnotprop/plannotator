@@ -172,8 +172,8 @@ describe("the row's delivery in a thread with two sessions (the session that ask
     store.sendReply(m2.id, { words: "Yes, clean them up.", idempotency_key: "k1" });
     // M1's question stays open, but with no pick the Send skips nothing: the session that asked is M2's.
     expect(store.questionsOf(m1.id)[0]!.state).toBe("open");
-    // Named as the thread's line names it: the thread's first agent (the root's), whoever it goes to.
-    expect(row(m1.id).delivery).toMatchObject({ kind: "reply", state: "queued", reason: "working", send_now: true, host: "pi" });
+    // Named for the session it goes to (M2's), not the thread's first agent (handoff "multi-agent-thread-model", A).
+    expect(row(m1.id).delivery).toMatchObject({ kind: "reply", state: "queued", reason: "working", send_now: true, host: "claude-code" });
     expect(row(m1.id).delivery!.asking).toBeUndefined();
   });
 

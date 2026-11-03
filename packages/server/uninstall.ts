@@ -162,6 +162,8 @@ const PURGE_OWNED_TOP_LEVEL = [
   "update.log.1",
   "update-notes",
   "install-flags.json",
+  "ping.json",
+  "ping.lock",
 ] as const;
 
 /**

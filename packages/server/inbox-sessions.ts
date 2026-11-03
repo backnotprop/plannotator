@@ -517,14 +517,23 @@ export function createInboxLiveSessions(options: {
     return { host: target.host, session: target.session };
   };
 
-  /** The live sessions of a thread's project: its writers first (the latest writer first), then by start. */
+  /**
+   * The live sessions of a thread's project, and those of the thread itself from any folder (its writers and
+   * the sessions tagged in it): its writers first (the latest writer first), then by start.
+   */
   const liveFor = (threadId: string): { project: InboxProject; sessions: InboxLiveSession[] } => {
     const thread = store.thread(threadId);
     if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     const project = thread.project;
     const lastWrote = new Map<string, number>();
+    /** The sessions of the thread itself: its writers and the ones tagged in it, from any folder. */
+    const inThread = new Set<string>();
     thread.messages.forEach((message, index) => {
-      if (message.author.kind === "agent" && message.author.session) lastWrote.set(message.author.session, index);
+      if (message.author.kind === "agent" && message.author.session) {
+        lastWrote.set(message.author.session, index);
+        inThread.add(message.author.session);
+      }
+      for (const tag of message.tags ?? []) inThread.add(tag.session);
     });
     let wroteInProject: Set<string> | null = null;
     // Every folder of a combined project: a session in either can take the thread.
@@ -532,16 +541,20 @@ export function createInboxLiveSessions(options: {
     const out: (InboxLiveSession & { order: number; started: number })[] = [];
     for (const [session, entry] of sessions) {
       if (!isLive(entry)) continue;
-      if (entry.root !== null) {
-        if (!roots.has(entry.root)) continue;
-      } else {
-        wroteInProject ??= new Set(
-          store
-            .threadsOf(project.id)
-            .flatMap((summary) => store.thread(summary.thread_id)?.messages ?? [])
-            .flatMap((message) => (message.author.kind === "agent" && message.author.session ? [message.author.session] : [])),
-        );
-        if (!wroteInProject.has(session)) continue;
+      // A session that wrote in the thread or was tagged in it takes it from any folder (approval
+      // "inbox-reply-recipient": the recipient pill lists it, and a reply may go to it alone).
+      if (!inThread.has(session)) {
+        if (entry.root !== null) {
+          if (!roots.has(entry.root)) continue;
+        } else {
+          wroteInProject ??= new Set(
+            store
+              .threadsOf(project.id)
+              .flatMap((summary) => store.thread(summary.thread_id)?.messages ?? [])
+              .flatMap((message) => (message.author.kind === "agent" && message.author.session ? [message.author.session] : [])),
+          );
+          if (!wroteInProject.has(session)) continue;
+        }
       }
       out.push({
         session,
@@ -797,7 +810,7 @@ export function createInboxLiveSessions(options: {
   const outdatedOf = (entry: SeenSession): InboxSessionOutdated | null => options.outdatedOf?.(entry.host, entry.plugin, entry.folder ?? entry.cwd) ?? null;
 
   /**
-   * The live sessions of the three Plannotator hosts, for Settings → Agents'
+   * The live sessions of the Plannotator hosts, for Settings → Agents'
    * "Open sessions" row: each with what it loaded and whether a restart (or
    * an update) would bring it up to date. Newest first.
    */
@@ -805,7 +818,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
