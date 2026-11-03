@@ -13,7 +13,10 @@
  *  - an archived message, a sent reply and the person's own message open
  *    nothing, as they take no comment on their words;
  *  - on a phone: a tap opens the composer inside the window, a swipe scrolls
- *    the thread, a sideways drag pans, and neither opens anything.
+ *    the thread, a sideways drag pans, and neither opens anything;
+ *  - on a phone, full screen: two fingers pinch-zoom about themselves, one or
+ *    two pan once zoomed, a double tap on empty space zooms in and back to
+ *    Fit, Fit still fits, and a single tap on a part still opens the composer.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/thread-diagram-comments/.
@@ -26,7 +29,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { finger } from './phone-touch';
+import { finger, pinch, type Point } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -118,6 +121,12 @@ async function saveComment(page: Page, words: string): Promise<void> {
   await expect(composer(page)).toHaveCount(0);
 }
 
+/** No composer, checked once a tap on empty space would have opened one (it waits 300 ms for a second tap) and the composer's frame has run. */
+async function nothingOpened(page: Page): Promise<void> {
+  await page.waitForTimeout(500);
+  await expect(composer(page)).toHaveCount(0);
+}
+
 const openReply = (page: Page) => page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
 
 test.describe.configure({ mode: 'serial' });
@@ -201,6 +210,8 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   const popout = page.locator('[data-diagram-popout]');
   await expect(popout.locator('[data-diagram-svg] svg')).toBeVisible();
   await expect(badges(popout)).toHaveCount(1);
+  await centreOf(part(popout, 'Deploy'));
+  await shot(page, '02a-desktop-popout-fit');
   // Escape on the popout's canvas closes the popout, not the thread under it.
   await expect(popout.locator('[data-diagram-canvas]')).toBeFocused();
   await page.keyboard.press('Escape');
@@ -317,7 +328,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await hand.down(start.x, start.y, 0, -SWIPE_PX);
     await hand.up();
     await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(before + SWIPE_PX / 2);
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // A sideways drag pans the diagram and opens nothing.
     await target.scrollIntoViewIfNeeded();
@@ -327,7 +338,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await hand.down(from.x, from.y, 48, 0, 8);
     await hand.up();
     await expect.poll(() => svg.evaluate((el) => (el as HTMLElement).style.transform)).not.toBe(transform);
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // Two fingers are never a tap on a part.
     const two = await centreOf(target);
@@ -335,7 +346,7 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: two.x, y: two.y, id: 0 }, { x: two.x + 40, y: two.y + 30, id: 1 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [{ x: two.x, y: two.y, id: 0 }] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await expect(composer(page)).toHaveCount(0);
+    await nothingOpened(page);
 
     // A tap on a part at the bottom of the canvas: the composer, whole, inside the window and the diagram's box.
     const insideTheCanvas = async () => {
@@ -368,6 +379,175 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await expect(page.locator('.ib-rbox')).toHaveCount(0);
     const answer = await claude.nextReply(sent.thread_id as string, 10);
     expect(answer.body).toContain('Diagram node Tests pass? (B)');
+  } finally {
+    await context.close();
+  }
+});
+
+/** A wide architecture diagram (the owner's report): at Fit on a phone its words are too small to read. */
+const ARCHITECTURE = [
+  'Where the pieces sit:',
+  '',
+  '```mermaid',
+  'flowchart TB',
+  '  subgraph ways["Ways in"]',
+  "    S[Skill / MCP for the team's agents]",
+  '    G[GitHub App: PR checks and comments]',
+  '    C[exotic CLI: open source, local]',
+  '  end',
+  '  subgraph platform["Exotic platform (Cloudflare)"]',
+  '    D[Dashboard: approve changes, rules, history, billing]',
+  '    J[Job engine: durable workflows, every step checkpointed]',
+  '    M[(Models, rules, baselines, history)]',
+  '  end',
+  '  subgraph adapters["Agent adapters (pick any)"]',
+  '    P[Pi / Pi Durable]',
+  '    A[Claude Agent SDK]',
+  '    X[Codex]',
+  '  end',
+  '  subgraph runs["Where code runs (pick per customer)"]',
+  '    L[Their laptop: CLI, free]',
+  '    H[Our hosted sandboxes: default, paid]',
+  '    R[Their runner or CI: enterprise]',
+  '  end',
+  '  S --> J',
+  '  G --> J',
+  '  C --> J',
+  '  D --- M',
+  '  J --> M',
+  '  J --> adapters',
+  '  J --> runs',
+  '```',
+].join('\n');
+
+test('on a phone, full screen: a pinch zooms about the fingers, one or two fingers pan, a double tap zooms in and back to Fit', async ({ browser }) => {
+  const { claude, project } = world;
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    const sent = await claude.send({ project_path: project, subject: 'Architecture on a phone', thread: 'architecture-phone', body: ARCHITECTURE });
+    await page.goto(`${world.url}#thread=${sent.thread_id}`);
+    const mermaid = message(page, sent.message_id as string).locator('[data-diagram-block="mermaid"]');
+    await expect(mermaid.locator('[data-diagram-svg] svg')).toBeVisible();
+    await mermaid.locator('[data-diagram-expand]').tap();
+    const popout = page.locator('[data-diagram-popout]');
+    const canvas = popout.locator('[data-diagram-canvas]');
+    const svg = popout.locator('[data-diagram-svg]');
+    await expect(svg.locator('svg')).toBeVisible();
+
+    /** The canvas's live translate and scale. */
+    const view = async () => {
+      const transform = await svg.evaluate((el) => (el as HTMLElement).style.transform);
+      const [, x, y, scale] = /translate\(([-\d.e]+)px, ([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec(transform)!;
+      return { x: Number(x), y: Number(y), scale: Number(scale) };
+    };
+    /** The view once two reads in a row agree (Fit runs on arrival and on every resize). */
+    const settledView = async () => {
+      let last = '';
+      await expect.poll(async () => {
+        const now = JSON.stringify(await view());
+        const same = now === last;
+        last = now;
+        return same;
+      }).toBe(true);
+      return view();
+    };
+    const box = (await canvas.boundingBox())!;
+    const centre: Point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    /** The diagram point (its own pixels) under a screen point. */
+    const under = (v: { x: number; y: number; scale: number }, at: Point) => ({ x: (at.x - box.x - v.x) / v.scale, y: (at.y - box.y - v.y) / v.scale });
+    const doubleTap = async (at: Point) => {
+      await page.touchscreen.tap(at.x, at.y);
+      await page.waitForTimeout(80);
+      await page.touchscreen.tap(at.x, at.y);
+    };
+    /** The spot of the canvas nearest `near` with no part of the diagram and no control under it (double tap zooms from empty space; a part opens its composer). */
+    const emptyNear = async (near: Point): Promise<Point> => {
+      const found = await page.evaluate(
+        ({ near, box }) => {
+          const layer = document.querySelector('[data-diagram-popout] [data-diagram-svg]')!;
+          const root = layer.querySelector('svg');
+          let best: { x: number; y: number } | null = null;
+          let bestDistance = Infinity;
+          for (let x = box.x + 30; x < box.x + box.width - 30; x += 10) {
+            for (let y = box.y + 30; y < box.y + box.height - 80; y += 10) {
+              const stack = document.elementsFromPoint(x, y);
+              if (stack.some((el) => (layer.contains(el) && el !== root) || el.closest('button, [data-diagram-control]'))) continue;
+              const distance = Math.hypot(x - near.x, y - near.y);
+              if (distance < bestDistance) {
+                bestDistance = distance;
+                best = { x, y };
+              }
+            }
+          }
+          return best;
+        },
+        { near, box },
+      );
+      expect(found, 'an empty spot on the canvas').not.toBeNull();
+      return found!;
+    };
+
+    const fit = await settledView();
+    await shot(page, '10-phone-popout-fit');
+
+    // Two fingers spread from 60 px to 220 px apart about the middle: the diagram grows with them, about them.
+    const spot = under(fit, centre);
+    await pinch(page, [{ x: centre.x - 30, y: centre.y }, { x: centre.x + 30, y: centre.y }], [{ x: centre.x - 110, y: centre.y }, { x: centre.x + 110, y: centre.y }]);
+    const pinched = await settledView();
+    await shot(page, '11-phone-pinched');
+    expect.soft(pinched.scale, 'a pinch zooms').toBeGreaterThan(fit.scale * 2.5);
+    const still = under(pinched, centre);
+    expect.soft(Math.hypot(still.x - spot.x, still.y - spot.y) * pinched.scale, 'the part between the fingers stays between them').toBeLessThan(6);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // One finger pans the zoomed diagram, and opens nothing.
+    const hand = await finger(page, 'chromium');
+    await hand.down(centre.x, centre.y, -90, -70);
+    await hand.up();
+    const panned = await settledView();
+    expect.soft(panned.x - pinched.x, 'one finger pans sideways').toBeCloseTo(-90, 0);
+    expect.soft(panned.y - pinched.y, 'one finger pans down').toBeCloseTo(-70, 0);
+    expect.soft(panned.scale).toBeCloseTo(pinched.scale, 3);
+
+    // Two fingers moving together pan as well, at the same scale.
+    await pinch(page, [{ x: centre.x - 50, y: centre.y }, { x: centre.x + 50, y: centre.y }], [{ x: centre.x - 50, y: centre.y + 80 }, { x: centre.x + 50, y: centre.y + 80 }]);
+    const dragged = await settledView();
+    await shot(page, '12-phone-panned');
+    expect.soft(dragged.y - panned.y, 'two fingers pan').toBeCloseTo(80, 0);
+    expect.soft(dragged.scale).toBeCloseTo(panned.scale, 3);
+    await page.waitForTimeout(500);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // A double tap on empty space away from Fit goes back to Fit; at Fit it zooms in about the finger.
+    await doubleTap(await emptyNear(centre));
+    const back = await settledView();
+    await shot(page, '13-phone-double-tap-back-to-fit');
+    expect.soft(back.scale, 'a double tap zoomed in goes back to Fit').toBeCloseTo(fit.scale, 3);
+    const tapAt = await emptyNear({ x: centre.x + 40, y: centre.y - 60 });
+    const tapSpot = under(back, tapAt);
+    await doubleTap(tapAt);
+    const zoomed = await settledView();
+    await shot(page, '14-phone-double-tap-zoomed-in');
+    expect.soft(zoomed.scale, 'a double tap at Fit zooms in').toBeCloseTo(fit.scale * 2, 3);
+    const tapStill = under(zoomed, tapAt);
+    expect.soft(Math.hypot(tapStill.x - tapSpot.x, tapStill.y - tapSpot.y) * zoomed.scale, 'about the finger').toBeLessThan(2);
+    await page.waitForTimeout(500);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // The corner control's Fit still fits.
+    await popout.getByRole('button', { name: 'Fit diagram' }).tap();
+    expect.soft((await settledView()).scale).toBeCloseTo(fit.scale, 3);
+
+    // A single tap on a part still opens the composer on it.
+    const codex = await centreOf(part(popout, 'Codex'));
+    await page.touchscreen.tap(codex.x, codex.y);
+    await expect(composer(page)).toContainText('Codex');
+    await composer(page).getByRole('button', { name: 'Cancel' }).tap();
+    await expect(composer(page)).toHaveCount(0);
+    expect(errors).toEqual([]);
   } finally {
     await context.close();
   }

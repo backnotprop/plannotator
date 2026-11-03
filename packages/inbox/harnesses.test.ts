@@ -49,6 +49,16 @@ describe('connect snippets', () => {
     expect(JSON.stringify(panel)).not.toContain('qwen mcp add');
   });
 
+  // Over MCP the Inbox cannot tell DSH sessions apart (DSH strips DSH_* from MCP servers), and a reply never wakes one.
+  test('the DeepSeek Harness panel installs Plannotator\'s plugin and never offers the MCP command', () => {
+    expect(HARNESSES.some((h) => h.id === 'dsh' && h.label === 'DeepSeek Harness')).toBe(true);
+    const panel = harnessPanel('dsh', ctx('/opt/plannotator'));
+    const text = JSON.stringify(panel);
+    expect(panel.artefacts[0]).toEqual({ kind: 'code', text: 'dsh plugin --profile <profile> add @plannotator/dsh' });
+    expect(text).not.toContain('inbox mcp');
+    expect(text).not.toContain('/opt/plannotator');
+  });
+
   test('every harness has a panel, and every JSON snippet parses', () => {
     for (const harness of HARNESSES) {
       const panel = harnessPanel(harness.id, ctx('/opt/plannotator'));

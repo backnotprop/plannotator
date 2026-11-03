@@ -98,6 +98,7 @@ import { runGuideCli } from "@plannotator/server/guide-cli";
 import { runUpdateCommand } from "./update-command";
 import { runUpdatePrepareCommand } from "@plannotator/server/update-prepare";
 import { takeUpdateHint } from "@plannotator/shared/update-check";
+import { cliDailyPingTool, scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
@@ -880,6 +881,11 @@ function registerCliSession(info: SessionInfo): void {
     ...(hostReviewId ? { reviewId: hostReviewId } : {}),
   });
   scheduleAutoUpdateCheck(getCliVersion());
+  // The daily ping (packages/shared/daily-ping.ts): one per tool per UTC day,
+  // in the background, never delaying the session. Archive and goal setup are
+  // not counted.
+  const pingTool = cliDailyPingTool(info.mode, args[0]);
+  if (pingTool) scheduleDailyPing({ version: getCliVersion(), tool: pingTool });
 }
 
 // Route fatal signals through process.exit() so "exit" handlers run — by

@@ -55,7 +55,7 @@ const settingsModel = {
   notifications: { enabled: true, dismissed: false, allowed_origin: null },
   sound: { enabled: true, volume: 60, dialog_shown_for: null },
   phones: false,
-  store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+  store_dir: '/home/u/.plannotator/inbox',
 } as unknown as SettingsModel;
 
 function fakeSound(over: Partial<InboxSound> = {}) {

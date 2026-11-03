@@ -94,6 +94,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
+  INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
   type InboxSentRecipient,
   type InboxTag,
@@ -222,6 +223,8 @@ export interface InboxSendInput {
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
   base_path?: string | null;
+  /** The sender's own project, when it sent into another project's thread (`InboxMessage.from_project`). */
+  from_project?: { name: string; root: string } | null;
   /**
    * Earlier questions of the same thread this message supersedes:
    * `<message id>` (each open question of it) or `<message id>/<key>`. A
@@ -434,6 +437,15 @@ function isAckNote(message: InboxMessage): boolean {
   return message.author.kind === "person" && typeof message.ack_of === "string" && message.ack_of !== "";
 }
 
+/**
+ * An agent message from another session than `than` (a thread's first agent, or the session a thread the
+ * person started is addressed to): a second agent in the thread, whom a reply to that message goes to.
+ */
+function otherSessionThan(message: InboxMessage | undefined, than: { host?: string | null; session?: string | null } | null): boolean {
+  if (!message || message.author.kind !== "agent" || !than) return false;
+  return (message.author.session ?? null) !== (than.session ?? null) || (message.author.host ?? null) !== (than.host ?? null);
+}
+
 /** A person's reply that tags agents (`tags`, approval "inbox-tag-agents"). */
 function hasTags(message: InboxMessage): boolean {
   return (message.tags?.length ?? 0) > 0;
@@ -466,7 +478,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
     const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
-    if (typeof session !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(session)) {
+    if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
@@ -1715,7 +1727,8 @@ export class InboxStore {
               ? taggedChecked(recipients)
               : (root.agent_checked_seq ?? 0) >= seqOf(lastReal)
                 ? (root.agent_checked_at ?? null)
-                : null,
+                : // Its recipient's own delivery or read, when the mark waits at a reply to another session.
+                  (lastReal.delivery?.at ?? null),
             wakes: this.wakesRecipient(lastReal),
             ...(recipients ? { recipients } : {}),
           }
@@ -1739,7 +1752,8 @@ export class InboxStore {
       readAt === null &&
       lastReal.author.kind === "person" &&
       seqOf(lastReal) > (archiveSeq ?? 0) &&
-      (root.agent_checked_seq ?? 0) < seqOf(lastReal);
+      (root.agent_checked_seq ?? 0) < seqOf(lastReal) &&
+      !lastReal.delivery;
     const backFromArchive =
       agentAfterArchive &&
       (messages.some((m) => m.author.kind === "agent" && seqOf(m) > archiveSeq! && seqOf(m) > seenSeq) ||
@@ -1860,8 +1874,9 @@ export class InboxStore {
       const last = lastReal;
       // A thread the person started is addressed to a session; a reply in it goes there too.
       const startedTo = root.started_by_person && root.to ? root.to : null;
-      const lastTo = last.to ?? (startedTo && last.reply_to ? startedTo : null);
       const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
+      // Not when it answers another session that wrote in it: the reply goes to that one (the thread's rule too).
+      const lastTo = last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
       const repliedTo = lastTo ? undefined : askedBy;
       const askedSession = repliedTo?.author.kind === "agent" && repliedTo.author.session ? repliedTo.author.session : null;
       const wakingSession = askedSession && repliedTo?.wakes === true ? askedSession : null;
@@ -1918,7 +1933,9 @@ export class InboxStore {
         connection,
         ...waitOf(last, replySession),
       });
-      const author = root.author.kind === "agent" ? root.author : null;
+      // Named for the session it goes to: the thread's first agent, unless it answers another one.
+      const first = root.author.kind === "agent" ? root.author : null;
+      const author = repliedTo?.author.kind === "agent" && otherSessionThan(repliedTo, first ?? startedTo) ? repliedTo.author : first;
       return {
         kind,
         state: decision.state,
@@ -2865,8 +2882,10 @@ export class InboxStore {
       ...thread,
       messages: thread.messages.map((message) => {
         let out: InboxMessageWire = message;
+        // The writer's own folder, by name only: an agent never reads another folder's absolute path.
+        if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
         if (message.ack !== undefined) {
-          const { ack, ...rest } = message;
+          const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
@@ -2955,17 +2974,114 @@ export class InboxStore {
    * unread), or a connection delivered one reply.
    * A Sent row moves to Quiet once its last reply is checked. No write when
    * there is no person reply it has not read.
+   *
+   * `reader` is the session that read (null: a read that names none). The
+   * mark settles a plain reply (no `to`, no tags), so it never moves past one
+   * still owed to another session, or to no session when a session reads:
+   * only a reply's recipient settles it (a second agent in the thread must
+   * not swallow it). A reader new to the thread counts as the recipient of a
+   * reply no connection wakes (`owedToAnother`). Undefined: every reply, for
+   * a caller that is not a read.
    */
-  markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp()): void {
+  markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), reader?: string | null): void {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) return;
+    const from = root.agent_checked_seq ?? 0;
+    // Worked out once per read, and only when a reply asks for it.
+    let newcomer: boolean | undefined;
+    const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader ?? null));
     let checked = 0;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
-      if (seq <= upToSeq && this.messages.get(id)?.author.kind === "person") checked = Math.max(checked, seq);
+      const message = this.messages.get(id);
+      if (seq > upToSeq || message?.author.kind !== "person") continue;
+      if (reader !== undefined && seq > from && this.owedToAnother(message, reader, isNewcomer)) break;
+      checked = Math.max(checked, seq);
     }
     if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
     this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
+  }
+
+  /**
+   * A person's plain reply (no `to`, no tags) still owed to a recipient other
+   * than `reader`: the session of the agent message it answers (none, for a
+   * message sent without a session), not delivered, and not a Tidy note left
+   * to its wake. A 👍's note is not a reply: any agent's read sees it, as
+   * `markAcksSeen` does.
+   *
+   * Not owed to another when no connection wakes its recipient and `reader`
+   * is new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
+   * `ses_` id each time the client restarts, and a script may name a session
+   * on send but none on read, so that read is the recipient's own as far as
+   * the Inbox can tell. Without it the reply would wait for a session that
+   * never comes back, with no ended state to offer the route choice. A
+   * waking recipient stays strict (its connection takes the reply, and the
+   * route choice opens when it ended), and so does any reader that wrote,
+   * owns a message or was tagged in the thread.
+   */
+  private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
+    if (message.to || hasTags(message) || message.delivery || isAckNote(message)) return false;
+    if (message.tidy && !message.tidy.wake) return false;
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (asked?.author.kind !== "agent") return false;
+    if ((asked.author.session ?? null) === reader) return false;
+    return asked.wakes === true || !isNewcomer();
+  }
+
+  /**
+   * Whether `reader`'s read of the thread settles this person's message as
+   * far as the agent-read mark goes: the rule `markAgentChecked` applies
+   * (read_thread's `unread` for that reader follows it).
+   */
+  readSettles(message: InboxMessage, reader: string | null): boolean {
+    return !this.owedToAnother(message, reader);
+  }
+
+  /**
+   * After `markAgentChecked` for a read: each plain reply the read showed
+   * (`shown`; all without it) that this read settles but the mark could not
+   * reach, because an earlier reply still owed to another session holds it
+   * (a waking session that has not taken its reply yet, or ended), records
+   * its delivery to the session it answers. So a restarted raw MCP client's
+   * read, or a read that names no session, settles its reply in a shared
+   * thread too, and read_thread's `unread` (`readSettles`) says what the read
+   * did. A reply the reader owns is `recordOwnRead`'s. No write when nothing
+   * is left.
+   */
+  settleReadPast(threadId: string, reader: string | null, shown?: ReadonlySet<string>): void {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) return;
+    let newcomer: boolean | undefined;
+    const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader));
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind !== "person" || message.delivery || isInboxNote(message) || isAckNote(message) || message.tidy) continue;
+      if (message.to || hasTags(message) || (shown && !shown.has(message.id))) continue;
+      if ((this.messageSeq.get(message.id) ?? 0) <= (this.messages.get(threadId)?.agent_checked_seq ?? 0)) continue;
+      const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+      if (asked?.author.kind !== "agent") continue;
+      if (reader !== null && asked.author.session === reader) continue;
+      if (this.owedToAnother(message, reader, isNewcomer)) continue;
+      const at = this.stamp();
+      // A session it answers when it had one; else the reader's (a message and a read that both name none: "").
+      const session = asked.author.session ?? reader ?? "";
+      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at } }, at);
+    }
+  }
+
+  /**
+   * Whether `reader` is new to the thread: it never wrote there (null: no
+   * agent message sent without a session), owns none of the person's
+   * messages and is tagged in none.
+   */
+  private newcomerTo(threadId: string, reader: string | null): boolean {
+    for (const message of this.threadMessages(threadId)) {
+      if (message.author.kind === "agent") {
+        if ((message.author.session ?? null) === reader) return false;
+        continue;
+      }
+      if (reader !== null && (this.isOwner(message, reader) || tagOf(message, reader))) return false;
+    }
+    return true;
   }
 
   /**
@@ -3312,6 +3428,10 @@ export class InboxStore {
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
+      // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.
+      ...(input.from_project && input.from_project.root !== this.projectsById.get(projectId)?.root && !this.projectGroup(projectId).some((id) => this.projectsById.get(id)?.root === input.from_project!.root)
+        ? { from_project: { name: input.from_project.name, root: input.from_project.root } }
+        : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
@@ -4807,7 +4927,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -4831,7 +4951,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after);
+      return this.writeReplyDraft(threadId, existing, body, after, given);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -4863,11 +4983,14 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files);
+    return this.writeReplyDraft(threadId, existing, body, files, given);
   }
 
-  /** Write a thread's draft whole, its `updated_at` strictly later than the last one's. */
-  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[]): InboxReplyDraft {
+  /**
+   * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
+   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own.
+   */
+  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
@@ -4879,6 +5002,8 @@ export class InboxStore {
       updated_at: updatedAt,
       ...(files.length > 0 ? { files: [...files] } : {}),
     };
+    const aimed = recipients ?? existing?.recipients ?? [];
+    if (aimed.length > 0) draft.recipients = [...aimed];
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.noteReplyDraftRemovals(threadId, existing, draft);
@@ -4918,7 +5043,8 @@ export class InboxStore {
     const after = settleReplyDraftAfterSend(existing, { clearDraft: updatedAt, words, uploads });
     if (after.kind === "unchanged") return false;
     if (after.kind === "delete") return this.deleteReplyDraft(threadId);
-    this.writeReplyDraft(threadId, existing, "", after.files);
+    // The words went to whom they were aimed at: the files left behind are aimed at no one yet.
+    this.writeReplyDraft(threadId, existing, "", after.files, []);
     return true;
   }
 
@@ -5213,7 +5339,8 @@ export class InboxStore {
     const at = this.stamp();
     const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
-    this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at);
+    // Up to it, but never past a reply still owed to another session.
+    this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);
     // A 👍 that reached the agent was seen.
     if (isAckNote(reply) && reply.ack_of) this.markAckSeen(reply.ack_of, at);
     return delivered;
@@ -5247,7 +5374,10 @@ export class InboxStore {
       if (!this.pendingFor(message, session, {})) continue;
       const host = tag ? tag.host : this.recipientOf(message)?.host;
       const wakes = tag ? true : this.wakesRecipient(message);
-      if (wakes && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
+      // A plain reply it owns that the read mark could not cover (a reply still owed to another
+      // session comes before it): its read settles it, as the mark does, so the wake never repeats it.
+      const plain = !tag && !message.to && !hasTags(message);
+      if (wakes && !plain && !INBOX_MCP_WAKING_HOSTS.includes(host ?? "")) continue;
       this.recordDelivery(message.id, { host: host ?? "agent", session });
     }
   }

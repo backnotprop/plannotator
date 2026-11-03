@@ -1,0 +1,19 @@
+# Bun reads only the bunfig.toml in the directory `bun test` runs from, so the
+# root preloads are mirrored here for runs from this package directory. Keep in
+# step with the root bunfig.toml [test] section (guarded by
+# tests/package-bunfig.test.ts).
+[test]
+preload = ["../../tests/setup/gh-tripwire.ts", "../../tests/setup/feedback-archive-off.ts", "../../packages/ui/test-setup/happy-dom.ts"]
+
+# Load image and video assets as files, never as JavaScript. Bun 1.3 loses the
+# file treatment of an extension it has no loader for once the file importing it
+# is past 50 KiB and served from the runtime transpiler cache, then parses the
+# asset as JS ("Expected ;" in tater-sidebar.webp, #2154). Bun 1.4.4 does not;
+# the explicit loader still states the intent and covers an older Bun.
+# tests/package-bunfig.test.ts keeps this list in step with the assets the
+# source imports, and every package bunfig in step with this one.
+[loader]
+".webp" = "file"
+".png" = "file"
+".webm" = "file"
+".mp4" = "file"
