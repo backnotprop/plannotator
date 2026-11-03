@@ -277,12 +277,44 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
     expect((await local(port, "/api/host/status", { headers: bearer })).status).toBe(200);
   }, 30_000);
 
-  unix("a tagged machine has no owner: Ask this session stays on this computer, the ready line says so", async () => {
+  unix("a tagged machine with no inboxTailscaleAllow has no owner: Ask this session stays on this computer, the ready line says so", async () => {
     const { port, ready } = await start(["--tailscale"], { mode: "tagged" });
     expect(ready.tailnet).toEqual({ ask: false });
     expect(await providerIds(await local(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).not.toContain("session-bridge");
   });
+
+  unix("a tagged machine with inboxTailscaleAllow: the listed login is the owner and asks; anyone else does not", async () => {
+    const config = join(root, "data", "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: [OWNER] }));
+    try {
+      const { port, ready } = await start(["--tailscale"], { mode: "tagged" });
+      expect(ready.tailnet).toEqual({ ask: true });
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
+      const created = await throughServe(port, "/api/ai/session", { method: "POST", headers: ownerPage(port), body: SESSION_BODY });
+      expect(created.status).toBe(200);
+      for (const login of ["guest@example.com", null]) {
+        expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login }))).not.toContain("session-bridge");
+        const refused = await throughServe(port, "/api/ai/session", { method: "POST", login, headers: ownerPage(port), body: SESSION_BODY });
+        expect(refused.status).toBe(503);
+      }
+    } finally {
+      rmSync(config, { force: true });
+    }
+  }, 30_000);
+
+  unix("a machine with an owner ignores inboxTailscaleAllow: a listed login that is not the owner does not ask", async () => {
+    const config = join(root, "data", "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: ["friend@example.com"] }));
+    try {
+      const { port, ready } = await start(["--tailscale"]);
+      expect(ready.tailnet).toEqual({ ask: true });
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
+      expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login: "friend@example.com" }))).not.toContain("session-bridge");
+    } finally {
+      rmSync(config, { force: true });
+    }
+  }, 30_000);
 
   unix("SIGTERM takes the serve mapping down", async () => {
     const { port } = await start(["--tailscale"]);
@@ -329,13 +361,48 @@ describe("nothing changes without --tailscale or without a bridge", () => {
     }
   });
 
-  unix("--tailscale with no bridge (a person at a shell): Tailscale is asked nothing more, the ready line says ask: false", async () => {
-    rmSync(join(root, "calls.txt"), { force: true });
+  unix("--tailscale with no bridge (a person at a shell): no Ask this session, the ready line says ask: false", async () => {
     const { port, ready } = await start(["--tailscale"], { bridge: false });
     expect(ready.tailnet).toEqual({ ask: false });
-    const calls = readFileSync(join(root, "calls.txt"), "utf8").trim().split("\n");
-    expect(calls.some((line) => line.startsWith("status"))).toBe(false);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).not.toContain("session-bridge");
+  });
+});
+
+// Hover cards (ref-cards.ts) answer the owner's tab in every --tailscale
+// session, so the CLI reads the owner without a bridge too. The failure
+// guarded: the owner's own tab gets `404 ref_cards_disabled` because no host
+// handed the CLI a bridge, or a guest gets cards. The link asked for is not a
+// forge link, so an allowed tab gets 422 and nothing (no gh, no glab) runs.
+describe("--tailscale hover cards follow the owner rule, with or without a bridge", () => {
+  const refCard = async (port: number, login: string | null) => {
+    const response = await throughServe(port, `/api/ref?url=${encodeURIComponent("https://example.com/not-a-ref")}`, { login });
+    const body = (await response.json()) as Json;
+    return response.status === 404 ? body.code : response.status;
+  };
+
+  unix("no bridge, a machine with an owner: the owner's tab gets cards, a guest and a tagged peer do not", async () => {
+    const { port } = await start(["--tailscale"], { bridge: false });
+    expect(await refCard(port, OWNER)).toBe(422);
+    expect(await refCard(port, "guest@example.com")).toBe("ref_cards_disabled");
+    expect(await refCard(port, null)).toBe("ref_cards_disabled");
+    expect((await local(port, `/api/ref?url=${encodeURIComponent("https://example.com/not-a-ref")}`)).status).toBe(422);
+  });
+
+  unix("no bridge, a tagged machine: the inboxTailscaleAllow login gets cards, anyone else does not", async () => {
+    const config = join(root, "data", "config.json");
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: [OWNER] }));
+    try {
+      const { port } = await start(["--tailscale"], { bridge: false, mode: "tagged" });
+      expect(await refCard(port, OWNER)).toBe(422);
+      expect(await refCard(port, "guest@example.com")).toBe("ref_cards_disabled");
+    } finally {
+      rmSync(config, { force: true });
+    }
+  });
+
+  unix("no bridge, a tagged machine with no allowlist: nobody over the tailnet gets cards", async () => {
+    const { port } = await start(["--tailscale"], { bridge: false, mode: "tagged" });
+    expect(await refCard(port, OWNER)).toBe("ref_cards_disabled");
   });
 });
 
