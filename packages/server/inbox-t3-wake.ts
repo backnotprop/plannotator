@@ -116,7 +116,7 @@ export type T3Connect = (endpoint: URL, token: () => string | undefined) => Prom
 
 /** The line for a thread the grant's mode does not cover, found before any send. */
 export function t3NotCoveredLine(thread: string, grantMode: string, threadMode: string | null, endpoint: string): string {
-  return `The saved T3 grant (${grantMode}) cannot send into thread ${thread}${threadMode ? ` (it runs ${threadMode})` : ""}, so the Inbox does not wake it: its replies wait for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
+  return `The saved T3 grant (${grantMode === "below-full-access" ? "below Full access" : grantMode}) cannot send into thread ${thread}${threadMode ? ` (it runs ${threadMode})` : ""}, so the Inbox does not wake it: its replies wait for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
 }
 
 interface Link {

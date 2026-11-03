@@ -363,6 +363,7 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     await w.reply(sent.message_id, "The edge one.", "k1");
     await w.server.t3Wake.sweep();
     expect(w.t3.sendCalls).toBe(0);
+    expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("grant (below Full access) cannot send into thread");
     expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("(it runs full-access)");
     // A thread the sign-in covers still wakes.
     const other = await w.send("And the TTL?", OTHER);
