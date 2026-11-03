@@ -308,6 +308,16 @@ test.skipIf(!hasDom)('Send to an agent that ended opens the list once; pressed a
   expect(replies()[0]!.body.to).toBeUndefined();
 });
 
+test.skipIf(!hasDom)('the only live agent is on an older Plannotator (it can\'t be tagged, but it takes a reply): Send to the ended agent still opens the list first', async () => {
+  taggable = taggable.map((t) => (t.session === 'ses_claude' ? { ...t, taggable: false } : t));
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, GONE, 45)));
+  await write(el, 'Are you there?');
+  await send(el);
+  expect(replies()).toEqual([]);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  expect(nameRow(el, 'ses_claude').disabled).toBe(false);
+});
+
 /** The person's reply that tagged Codex (`ses_gone`): Codex is in the thread, but never wrote in it. */
 const TAGGED_GONE = (): InboxMessageWire => ({
   ...agentMessage(M2, { kind: 'person' } as InboxMessageWire['author'], 43, { wakes: undefined }),

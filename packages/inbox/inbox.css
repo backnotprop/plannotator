@@ -7142,8 +7142,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   }
 }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* The Draft line on its own line above Send's row, at the right, once something is saved. */
-  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; }
+  /* The Draft line on its own line above Send's row, at the right. Its place is kept while the box is open, empty
+     until something is saved, so the first save never moves the box (and the mic) up under the finger. */
+  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; min-height: 24px; }
+  .ib-replyrow > .ib-footstatus:empty { display: flex; }
   /* Discard's 44 px tap area never takes a tap meant for Send, Cancel or the box: the buttons sit over it, and the
      line keeps the box's margin plus 4 px above it, so its area ends where the box's margin begins. */
   .ib-replyrow > .ib-footbtns { position: relative; z-index: 1; }

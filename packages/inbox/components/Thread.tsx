@@ -3736,7 +3736,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       // Only when the pill's agents get something: the words (or files, comments), or their own questions' answers.
       // Picks on a live agent's question alone go to it, whoever the pill names.
       const reaches = sendCarries || rcptChosen.some((r) => sendEnded.has(r.session));
-      if (gone && reaches && rcptAgents.some((r) => r.state === 'live') && !rcptAsked.current) {
+      // A live agent to pick: one the reply's `to` reaches, an older Plannotator's session too (it can't be tagged, but it takes a reply).
+      if (gone && reaches && rcptAgents.some((r) => r.state === 'live' || r.state === 'old') && !rcptAsked.current) {
         const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
         if (empty) {
           setError('Write a reply or pick an answer first.');
@@ -5933,7 +5934,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {error && errorLine}
               {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
                   Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
-                  the Draft line takes its own line above the buttons (wrap-reverse), only once something is saved. */}
+                  the Draft line takes its own line above the buttons (wrap-reverse), its place kept from the start so the
+                  first save does not move the box. */}
               <div className="ib-acts ib-footrow ib-replyrow" data-reply-row="">
                 <div className="ib-footbtns">
                   <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
