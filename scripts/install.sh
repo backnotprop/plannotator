@@ -128,7 +128,8 @@ Options:
                          enabled by PLANNOTATOR_INSTALL_CALLDIFF=1 or
                          { "installCallFlow": true } in config.json.
   --extras               Install the extra skills (compound, setup-goal,
-                         visual-explainer) via `npx skills add` without asking.
+                         visual-explainer, shape) via `npx skills add`
+                         without asking.
   --with-t3              Install the optional T3 Code Claude Bash hook into
                          ${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json.
                          Off by default. Authorize T3 separately with
@@ -2072,7 +2073,7 @@ fi
 # CI runs without a terminal never prompt. CLI flags win over everything.
 PREFS_FILE="$_config_dir/install-prefs"
 CORE_SKILL_NAMES="plannotator-review plannotator-annotate plannotator-last"
-EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer"
+EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer plannotator-shape"
 
 saved_extras=""
 saved_invocable=""
@@ -2228,7 +2229,7 @@ if [ "$run_wizard" -eq 1 ]; then
         # Flag already answered this question — don't ask and then ignore.
         extras_choice="$EXTRAS_FLAG"
     else
-        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer)?" "${saved_extras:-no}") || wizard_timed_out=1
+        extras_choice=$(ask_yes_no "Install the extra skills (compound planning, setup-goal, visual explainer, shape)?" "${saved_extras:-no}") || wizard_timed_out=1
     fi
     invocable_list="$CORE_SKILL_NAMES"
     if [ "$extras_choice" = "yes" ]; then
@@ -3293,7 +3294,7 @@ fi
 
 if [ "$skip_skills" -eq 0 ] && [ "$extras_choice" != "yes" ]; then
     echo ""
-    echo "Optional skills (compound planning, setup-goal, visual explainer):"
+    echo "Optional skills (compound planning, setup-goal, visual explainer, shape):"
     echo "  npx skills add backnotprop/plannotator/apps/skills/extra --global"
 fi
 

@@ -265,7 +265,7 @@ describe("install.sh", () => {
   });
 
   test("suggests installing extras via npx skills add", () => {
-    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer, shape):");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
@@ -687,7 +687,7 @@ describe("install.ps1", () => {
   });
 
   test("suggests installing extras via npx skills add", () => {
-    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer):");
+    expect(script).toContain("Optional skills (compound planning, setup-goal, visual explainer, shape):");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
@@ -1274,8 +1274,8 @@ describe("Core Plannotator skills", () => {
         checked++;
       }
     }
-    // 3 core + 3 extra + 2 kiro — bump when adding skills, never below.
-    expect(checked).toBeGreaterThanOrEqual(8);
+    // 3 core + 4 extra + 2 kiro — bump when adding skills, never below.
+    expect(checked).toBeGreaterThanOrEqual(9);
     expect(invocableSeen).toBe(1);
   });
 

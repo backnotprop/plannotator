@@ -1426,7 +1426,7 @@ if (-not (Test-Path $extrasMigration)) {
 # redirected/CI runs never prompt. Flags win over everything.
 $prefsFile = Join-Path $configDir "install-prefs"
 $coreSkillNames = @("plannotator-review", "plannotator-annotate", "plannotator-last")
-$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")
+$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer", "plannotator-shape")
 
 $savedExtras = ""
 $savedInvocable = ""
@@ -1564,7 +1564,7 @@ if ($runWizard) {
         $extrasChoice = if ($Extras) { "yes" } else { "no" }
     } else {
         $defaultExtras = if ($savedExtras) { $savedExtras } else { "no" }
-        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer)?" $defaultExtras
+        $extrasChoice = Read-YesNo "Install the extra skills (compound planning, setup-goal, visual explainer, shape)?" $defaultExtras
     }
     $invocableList = $coreSkillNames
     if ($extrasChoice -eq "yes") { $invocableList = $coreSkillNames + $extraSkillNames }
@@ -2563,7 +2563,7 @@ if ($skipSkillsResolved) {
 
 if ((-not $skipSkillsResolved) -and ($extrasChoice -ne "yes")) {
     Write-Host ""
-    Write-Host "Optional skills (compound planning, setup-goal, visual explainer):"
+    Write-Host "Optional skills (compound planning, setup-goal, visual explainer, shape):"
     Write-Host "  npx skills add backnotprop/plannotator/apps/skills/extra --global"
 }
 
