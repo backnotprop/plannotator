@@ -83,6 +83,7 @@ import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } f
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
+import { ReplyFootPhone } from './ReplyFootPhone';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -1138,7 +1139,7 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
  * human-only notice (its text stays selectable).
  */
 const REPLY_BOX_CONTROLS =
-  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
+  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file], [data-foot-sheet]';
 
 /** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
 function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
@@ -5504,38 +5505,59 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
               {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
               {/* The box's toolbar: the paperclip first (any file; a phone's picker offers the photo library too, and
-                  names what it hands over as a paste is), then the picks, skip and annotations chips. */}
-              <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
-                <AttachFilesButton
-                  className="ib-rclip"
-                  iconSize={phone ? 19 : 16}
-                  phone={phone}
-                  inputData="data-reply-attach"
-                  onFiles={(list) => {
-                    (phone ? replyFiles.attach : replyFiles.add)(list);
-                    setError(null);
-                  }}
+                  names what it hands over as a paste is), then the picks, skip and annotations chips. A phone draws
+                  one row instead: the paperclip, one line for the questions and comments, the mic (ReplyFootPhone). */}
+              {phone ? (
+                <ReplyFootPhone
+                  clip={
+                    <AttachFilesButton
+                      className="ib-rclip"
+                      iconSize={19}
+                      phone
+                      inputData="data-reply-attach"
+                      onFiles={(list) => {
+                        replyFiles.attach(list);
+                        setError(null);
+                      }}
+                    />
+                  }
+                  skip={{ count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen }}
+                  dropped={dropped.length}
+                  comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
+                  voice={voice}
                 />
-                {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
-                {draftAnswers.length > 0 && (
-                  <span className="ib-rchip" data-picks-chip="">
-                    <Icon name="check" size={13} />
-                    {plural(draftAnswers.length, 'pick')}
-                  </span>
-                )}
-                <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                {dropped.length > 0 && (
-                  <Tip content="Replaced; this pick won't be sent">
-                    <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
-                      {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+              ) : (
+                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
+                  <AttachFilesButton
+                    className="ib-rclip"
+                    iconSize={16}
+                    inputData="data-reply-attach"
+                    onFiles={(list) => {
+                      replyFiles.add(list);
+                      setError(null);
+                    }}
+                  />
+                  {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
+                  {draftAnswers.length > 0 && (
+                    <span className="ib-rchip" data-picks-chip="">
+                      <Icon name="check" size={13} />
+                      {plural(draftAnswers.length, 'pick')}
                     </span>
-                  </Tip>
-                )}
-                {takesAnnotations && (
-                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
-                )}
-                <VoiceFoot voice={voice} phone={phone} />
-              </div>
+                  )}
+                  <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
+                  {dropped.length > 0 && (
+                    <Tip content="Replaced; this pick won't be sent">
+                      <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
+                        {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+                      </span>
+                    </Tip>
+                  )}
+                  {takesAnnotations && (
+                    <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
+                  )}
+                  <VoiceFoot voice={voice} phone={false} />
+                </div>
+              )}
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
                   <Icon name="clip" size={18} />

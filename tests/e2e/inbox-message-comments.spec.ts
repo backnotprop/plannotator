@@ -288,7 +288,8 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
     await expect(page.locator(`[data-message-id="${id}"] mark.annotation-highlight`)).toHaveText('dead-letter queue');
     await page.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
     await shot(page, '08-phone-highlighted');
-    await page.locator('[data-annotations-chip]').click();
+    // A phone's reply box names its comments in one line, which opens their list (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
     await expect(page.locator('.ib-annpop [data-annotation-row]')).toContainText('"dead-letter queue"');
     await shot(page, '09-phone-chip');
     await page.locator('.ib-annpop').getByRole('button', { name: 'Close the list' }).click();

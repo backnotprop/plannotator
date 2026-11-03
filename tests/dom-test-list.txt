@@ -76,6 +76,7 @@ packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
+packages/inbox/replyFootPhone.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
@@ -120,6 +121,7 @@ packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
 packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
+packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
