@@ -59,6 +59,17 @@ describe('mapAnchor: the paste goes back where it was, whatever is typed around 
   test('deleting before it moves it back', () => {
     expect(mapAnchor(box, box.slice(5), at)).toBe(at - 5);
   });
+
+  test('words added at both ends at once (one save spanning two edits) leave it where it was among the old words', () => {
+    expect(mapAnchor('Hello world', 'Oh. Hello world!', 6)).toBe(10);
+  });
+
+  test('never between the two halves of an emoji', () => {
+    // A paste between two emoji, both replaced by one that shares their first half.
+    expect(mapAnchor('\u{1F600}\u{1F600}', '\u{1F601}', 2)).toBe(0);
+    // An emoji changed right before the paste: it stays after the emoji.
+    expect(mapAnchor('a\u{1F600}b', 'a\u{1F601}b', 3)).toBe(3);
+  });
 });
 
 test('putTextBack: the exact words at the place, the words around untouched, the caret after them', () => {

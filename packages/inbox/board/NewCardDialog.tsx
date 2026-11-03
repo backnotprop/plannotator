@@ -14,24 +14,30 @@ export type NewCardMode = 'backlog' | 'send';
 export interface NewCardInput {
   title: string;
   notes: string | null;
-  /** Issue or PR links, as typed (each `owner/repo#123` or a URL). */
+  /** Links, as typed (each `owner/repo#123` or a URL). */
   refs: string[];
   mode: NewCardMode;
   project: string | null;
   to: ComposeTarget | null;
 }
 
-/** The first word in a links field that is not one: none means every word is a link the server may read. */
+/**
+ * The links in a links field, split on spaces and commas. A URL keeps the
+ * commas inside it (a map's `@37.7,-122.4`, a filter's `a,b`); only a comma
+ * that ends it, or one right before another `http(s)://` (`url1,url2` from a
+ * spreadsheet cell), is a separator.
+ */
 export function splitRefs(text: string): string[] {
   return text
-    .split(/[\s,]+/)
+    .split(/\s+|,(?=https?:\/\/)/i)
+    .flatMap((word) => (/^https?:\/\//i.test(word) ? [word.replace(/,+$/, '')] : word.split(',')))
     .map((word) => word.trim())
     .filter(Boolean);
 }
 
 /**
  * New card, as mocked (approval "inbox-board", step 2): a title, notes, the
- * project (or the agent, when sent), links to issues or PRs, and two plain
+ * project (or the agent, when sent), links (issues, PRs, any web page), and two plain
  * buttons for where it goes: Backlog (the default, sent to no agent) or Send
  * to an agent (compose's live-session picker; the notes are the message; the
  * card lands in Todo). The main button names the action: "Add to Backlog",
@@ -181,10 +187,11 @@ export function NewCardDialog({
           {fixed === null && (
           <label className="ib-ncd-links">
             <Icon name="link" size={15} />
-            <span className="ib-sr">Link an issue or PR</span>
+            <span className="ib-sr">Links</span>
             <input
               type="text"
-              placeholder={phone ? 'Link a GitHub, GitLab or Jira URL' : 'Link an issue or PR (owner/repo#123, or a GitHub, GitLab or Jira URL)'}
+              // Any web link, or GitHub's owner/repo#123; a phone's narrow field keeps the short form whole.
+              placeholder={phone ? 'Paste links' : 'Paste links, or owner/repo#123'}
               value={links}
               onChange={(event) => setLinks(event.target.value)}
               data-new-card-links=""

@@ -50,7 +50,8 @@ export interface ListThread {
   count: number;
 }
 
-export async function startWorld(): Promise<ListWorld> {
+/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one). */
+export async function startWorld(options: { agentName?: string } = {}): Promise<ListWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-comments-list-');
   const dataDir = join(root, 'data');
@@ -73,7 +74,7 @@ export async function startWorld(): Promise<ListWorld> {
   mkdirSync(join(project, 'docs'));
   writeFileSync(join(project, 'docs', 'retry-plan.md'), PLAN);
   writeFileSync(join(project, 'docs', 'admin-view.html'), PAGE);
-  return { url: started.stdout.trim(), agent: await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' }), project };
+  return { url: started.stdout.trim(), agent: await SimAgent.connect({ binary, env, name: options.agentName ?? 'Claude Code', host: 'claude-code' }), project };
 }
 
 export async function stopWorld(world: ListWorld | undefined): Promise<void> {
