@@ -1005,14 +1005,16 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const withSteps = (input as { steps?: unknown }).steps;
         if (withSteps !== undefined) {
           if (!context.stepsOn?.()) throw new InboxError("steps_off", INBOX_STEPS_OFF_TEXT.replace(/^steps_off: /, ""));
-          checkStepsInput(withSteps);
+          checkStepsInput(withSteps, stepsAgent(input));
         }
         const project = await sendProject(context, input);
         const wakes = await senderWakes(context, ctx, input);
         const { steps: _steps, ...message } = input as typeof input & { steps?: unknown };
         const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
+        // since (the steps action) is never put back to this older one.
         const stepsLine =
-          withSteps === undefined
+          withSteps === undefined || sent.replayed
             ? ""
             : (() => {
                 const { record } = store.setThreadSteps({ thread_id: String(sent.structured.thread_id), agent: stepsAgent(input), steps: withSteps });

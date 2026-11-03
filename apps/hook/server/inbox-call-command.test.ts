@@ -151,6 +151,16 @@ describe("what a script gets", () => {
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
   });
 
+  // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
+  // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
+  test("an unknown action's list never names steps; steps itself is an action", () => {
+    const unknown = parseCallCommand(["blorp"]);
+    expect(unknown).toMatchObject({ ok: false, code: "unknown_action" });
+    expect((unknown as { error: string }).error).toContain("send_message");
+    expect((unknown as { error: string }).error).not.toMatch(/\bsteps\b/);
+    expect(parseCallCommand(["steps", "{}"])).toMatchObject({ ok: true, action: "steps" });
+  });
+
   test("bad JSON, a non-object, an unknown action, wait_for_reply and a named identity are usage errors, sent nowhere", async () => {
     const box = sandbox();
     for (const [args, code] of [
