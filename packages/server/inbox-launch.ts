@@ -132,7 +132,9 @@ interface Memo {
   /**
    * The replies still waiting when the person pressed Stop (read once its deliveries settled): none starts the
    * session again (that would undo the Stop); the person's next reply does, and takes them along. Kept in the
-   * launch's folder (`held.json`), so an Inbox restart holds them too.
+   * launch's folder (`held.json`), so an Inbox restart holds them too. An empty list: the Stop with nothing
+   * waiting, kept the same way, so after a restart a tailnet guest's reply still never undoes it (`deliver`).
+   * Null: no Stop holds anything.
    */
   held: string[] | null;
 }
@@ -343,12 +345,11 @@ export function createInboxLaunch(options: {
 
   const launchDir = (id: string) => join(store.dir, "launch", id);
   const heldFile = (id: string) => join(launchDir(id), "held.json");
-  /** The replies a Stop held, as the launch's folder keeps them (null: none, or unreadable). */
+  /** The replies a Stop held, as the launch's folder keeps them (empty: the Stop alone; null: no Stop, or unreadable). */
   const readHeld = (id: string): string[] | null => {
     try {
       const replies = (JSON.parse(readFileSync(heldFile(id), "utf8")) as { replies?: unknown }).replies;
-      const ids = Array.isArray(replies) ? replies.filter((reply): reply is string => typeof reply === "string") : [];
-      return ids.length > 0 ? ids : null;
+      return Array.isArray(replies) ? replies.filter((reply): reply is string => typeof reply === "string") : null;
     } catch {
       return null;
     }
@@ -462,15 +463,14 @@ export function createInboxLaunch(options: {
     }
     return memo;
   };
-  /** A Stop's held replies (`Memo.held`): set, or released (null) by a start, a restart or the person's next reply. */
+  /** A Stop's held replies (`Memo.held`, empty for the Stop alone): set, or released (null) by a start, a restart or the person's next reply. */
   const setHeld = (launchId: string, memo: Memo, held: string[] | null) => {
-    const next = held && held.length > 0 ? held : null;
-    if (!next && !memo.held) return;
-    memo.held = next;
+    if (!held && !memo.held) return;
+    memo.held = held;
     try {
-      if (next) {
+      if (held) {
         mkdirSync(launchDir(launchId), { recursive: true, mode: 0o700 });
-        writeFileSync(heldFile(launchId), `${JSON.stringify({ replies: next })}\n`, { mode: 0o600 });
+        writeFileSync(heldFile(launchId), `${JSON.stringify({ replies: held })}\n`, { mode: 0o600 });
       } else rmSync(heldFile(launchId), { force: true });
     } catch {
       // Kept in memory: a restart then holds nothing.
@@ -808,7 +808,7 @@ export function createInboxLaunch(options: {
         try {
           await settleDeliveries(launch.id);
           // What waits once its deliveries settled was written before the Stop: it stays for the person's next reply.
-          setHeld(launch.id, memo, root.to ? store.pendingReplies(root.to.session, { tags: true }).map((reply) => reply.id) : null);
+          setHeld(launch.id, memo, root.to ? store.pendingReplies(root.to.session, { tags: true }).map((reply) => reply.id) : []);
           result = await host.stop(launch.session_ref);
         } finally {
           stopping.delete(launch.id);

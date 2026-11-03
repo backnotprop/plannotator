@@ -675,6 +675,29 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     expect(w.codex.rpc("turn/start")).toHaveLength(1);
   });
 
+  test("the owner's Stop with nothing waiting outlives an Inbox restart: a guest's reply to the idle thread starts no turn; the owner's does", async () => {
+    const w = world();
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    await w.post(root.launch!.id, "stop");
+    // The Inbox restarts: the thread stays loaded and idle in the daemon, and the new engine knows nothing of the Stop
+    // but what the launch's folder kept.
+    const again = w.restart();
+    // Its first look finds the thread loaded and idle: live, as far as the new engine can tell.
+    const reads = w.codex.rpc("thread/read").length;
+    again.launch.sweep(true);
+    await until(() => w.codex.rpc("thread/read").length > reads);
+    await Bun.sleep(50);
+    again.store.sendReply(root.id, { words: "Use 8080.", idempotency_key: "reply-guest", by_guest: true });
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "Use 8080."))).toBe("hold");
+    expect(w.codex.rpc("turn/start")).toEqual([]);
+    // The owner's reply starts it, and takes the guest's along.
+    again.store.sendReply(root.id, { words: "Go on.", idempotency_key: "reply-owner" });
+    expect(await again.launch.deliver("codex", threadId, wake(root.id, "Go on."))).toBe("delivered");
+    expect(w.codex.rpc("turn/start")).toHaveLength(1);
+  });
+
   test("a tailnet guest's reply after a Stop with nothing waiting, or with the daemon down, starts nothing; the owner's does", async () => {
     const w = world();
     const root = await w.send("Fix it.", "send-1");
