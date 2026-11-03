@@ -123,7 +123,7 @@
   - a session whose connection polls, or one the Inbox wakes itself: `working` while a turn runs, `idle` between turns (a connection that does not say: `working` while heard within 10 min, then `idle`);
   - `ended` only on evidence (`endedOf` in `inbox-sessions.ts`): the session polled in this run and no longer does, or the Inbox knows its woken thread is gone (`wakeOnlyStatus` `dead`);
   - any other session, whatever host it names (an MCP-only client, OpenCode 1, Claude Code with the mod off, Pi or OpenCode 2 without the wake): `working` while heard within 10 min, `idle` up to 2 h (`INBOX_TIDY_OPEN_ITEM_MS`), then `ended`. Such an agent may read the thread at any time, as "Replying when the asking session has ended" in `inbox-compose.md` says.
-- A thread deleted takes its steps lines with it; a linked machine's threads show no steps (the read is not forwarded).
+- A thread deleted takes its steps lines with it; a linked machine's threads show no steps (the read is not forwarded), and its steps lines stop in `dispatchInboxFrame` (`api.ts`): they never ring or re-read the open thread (`sharedEvents.test.ts`).
 - Tests: `packages/shared/inbox/store-steps.test.ts` (silence against the list and pending replies, replace, kept times, no-op calls, two sessions, the limits, restart, delete, the seq floor, a malformed stored list), `packages/server/inbox-steps.test.ts` (the switch on a real Inbox, the event line and `event: capabilities`, presence: the real tracker's `endedOf`, and OpenCode 1, Claude Code with the mod off and Pi without the wake reading `working`).
 
 **Agent connections and the knob.**

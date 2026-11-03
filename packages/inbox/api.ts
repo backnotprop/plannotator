@@ -1714,6 +1714,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
+          // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
+          // neither rings nor makes the open thread read again.
+          if ((data.record as { kind?: unknown } | undefined)?.kind === 'steps') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
         }
