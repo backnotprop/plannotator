@@ -31,8 +31,8 @@ export class T3Delivery {
   async send(text: string, requestId: string): Promise<T3SentMessage> {
     const epoch = this.credentials.read()?.epoch;
     if (!epoch) throw new Error("Sign in to T3 before sending.");
-    const path = join(this.directory, `${createHash("sha256").update(requestId).digest("hex")}.json`);
-    const previous = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Delivery : undefined;
+    const path = this.pathOf(requestId);
+    const previous = this.recorded(requestId);
     if (previous && (previous.thread !== this.thread.id || previous.requestId !== requestId || previous.text !== text)) throw new T3DeliveryRefused("A T3 delivery retry changed its scope or content.");
     if (previous?.receipt) return previous.receipt;
     // A new OAuth grant changes T3's retry namespace. Never replay an uncertain send under it.
@@ -42,6 +42,24 @@ export class T3Delivery {
     const receipt = await this.thread.send(text, requestId);
     privateWrite(path, { ...delivery, receipt });
     return receipt;
+  }
+
+  /**
+   * Like `send`, but a retry re-sends the text recorded on the first try:
+   * for words that can drift between tries (an Inbox wake names the thread as
+   * it is now), so the request stays one T3 turn.
+   */
+  sendFirst(text: string, requestId: string): Promise<T3SentMessage> {
+    return this.send(this.recorded(requestId)?.text ?? text, requestId);
+  }
+
+  private pathOf(requestId: string): string {
+    return join(this.directory, `${createHash("sha256").update(requestId).digest("hex")}.json`);
+  }
+
+  private recorded(requestId: string): Delivery | undefined {
+    const path = this.pathOf(requestId);
+    return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as Delivery : undefined;
   }
 
 }
