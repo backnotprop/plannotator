@@ -74,6 +74,7 @@ import {
   othersLive,
   redirectedName,
   routeRace,
+  useEndedSessions,
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
@@ -130,7 +131,7 @@ import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/gu
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, type SendTarget, type SentContents } from '../sendTargets';
+import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -280,6 +281,39 @@ function lastSkipOrPick(thread: InboxThread, skip: ReadonlySet<string>): InboxMe
     if ((m.questions ?? []).some((q) => q.state === 'picked' || (q.state === 'open' && skip.has(`${m.id}/${q.key}`)))) found = m;
   }
   return found;
+}
+
+/**
+ * The other sessions a Send reaches besides the words' (`words`, askingSessionOf): a pick, a skip, an action item
+ * or a comment on another session's message rides a reply to that session (sendTargetsOf, routeSendAnnotations).
+ * Only those whose message came through a waking connection, which can end (askerCanEnd); each once.
+ */
+function otherSendSessions(
+  thread: InboxThread,
+  options: { skip: ReadonlySet<string>; carries: boolean; records: readonly InboxAnnotationRecord[] },
+  words: AskingSession | null,
+): AskingSession[] {
+  const plain = sendTargetsOf(thread, options.skip).filter(
+    (t, index, all) => t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0 || (options.carries && index === all.length - 1),
+  );
+  const out: AskingSession[] = [];
+  for (const { message } of routeSendAnnotations(thread, plain, options.records).targets) {
+    if (message.author.kind !== 'agent' || !message.author.session || message.wakes !== true) continue;
+    const session = message.author.session;
+    if (session === words?.session || out.some((s) => s.session === session)) continue;
+    out.push({ message, session, host: message.author.host ?? '', name: agentName(message.author) });
+  }
+  return out;
+}
+
+/**
+ * A second agent in a thread (handoff "multi-agent-thread-model", option A): an agent message from another
+ * session than the thread's first agent (`first`: the root's author, or the session a thread the person started
+ * is addressed to). A reply to it goes to that session, so the window names it, not the first agent.
+ */
+export function isOtherAgent(message: InboxMessageWire | null | undefined, first: { host?: string | null; session?: string | null } | null): boolean {
+  if (message?.author.kind !== 'agent' || !first) return false;
+  return (message.author.session ?? null) !== (first.session ?? null) || (message.author.host ?? null) !== (first.host ?? null);
 }
 
 /** The key a reply of a Send keeps across retries: one per session (a message with no session is its own). */
@@ -1302,6 +1336,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const liveMessage = (message: InboxMessageWire) => !archived || afterArchive(message);
   const cameBack = archived && thread.messages.some((m) => m.author.kind === 'agent' && afterArchive(m));
   const resolved = archived && !cameBack;
+  // Whom a reply to `message` goes to, named: a second agent by its own name, the thread's first agent as `asker`
+  // (so a thread with one agent reads as it always did). Handoff "multi-agent-thread-model", option A.
+  const firstAgent = startedTo ?? (root.author.kind === 'agent' ? root.author : null);
+  const recipientName = (message: InboxMessageWire | null | undefined) => (isOtherAgent(message, firstAgent) ? agentName(message!.author) : asker);
   const agentMessages = thread.messages.filter((m) => m.author.kind === 'agent');
   const lastAgent = agentMessages[agentMessages.length - 1] ?? root;
   // 👍 Looks good (design record "inbox-acknowledge"): on the agent's latest
@@ -1914,14 +1952,26 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const keepOpen = skipIds.size === 0;
   const toggleKeepOpen = () => setSkipArmed(keepOpen ? new Set(unanswered.map((u) => u.id)) : null);
   const skipping = !keepOpen;
-  const asking = askingSessionOf(thread, { skip: skipIds, carries: hasWords || records.length > 0 || replyUploads.length > 0 || draftPastes > 0 });
-  const askerToWatch = asking && askerCanEnd(asking) ? asking.session : null;
+  const sendCarries = hasWords || records.length > 0 || replyUploads.length > 0 || draftPastes > 0;
+  const wordsAsking = askingSessionOf(thread, { skip: skipIds, carries: sendCarries });
+  const askerToWatch = wordsAsking && askerCanEnd(wordsAsking) ? wordsAsking.session : null;
   // New message (record 5.x): the project's live sessions, and what the button opened.
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
-  const askerEnded = !resolved && askerHasEnded(asking, live);
+  // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
+  // on an ended session's question, while the words go to a live one, opens the choice for that answer.
+  const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking);
+  const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
+  const endedOthers = otherEnded.ended;
+  const wordsEnded = !resolved && askerHasEnded(wordsAsking, live);
+  const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
+  /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
+  const asking = endedOther ?? wordsAsking;
+  const askerEnded = wordsEnded || endedOther !== null;
+  /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
+  const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open.
   const taggable = useTaggable(thread.thread_id, (box.open || !!file) && !resolved);
-  const tagOwner = asking?.session ?? taggable?.owner?.session ?? null;
+  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
@@ -1954,6 +2004,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A thread handed to another session: its replies go there.
   const handedOff = activeHandoff(thread);
   const replyName = handingTo ? handingTo.label : handedOff ? handoffName(handedOff) : null;
+  /** Whom the box's words go to: the hand-off's agent, else the session of the message they answer (wordsMessage). */
+  const replyTo = replyName ?? recipientName(wordsMessage(thread));
+  // The agent that wrote last after the archive (the archived came-back note): named as a reply to it would be.
+  const cameBackName = cameBack ? recipientName(thread.messages.filter((m) => m.author.kind === 'agent' && afterArchive(m)).at(-1)) : asker;
   // The same agents in a file comment's composer (markdown, text and HTML files): a tag there sends the
   // whole reply to that agent, and the composer says so under the field.
   const commentMentions = useMemo<MentionSource | undefined>(
@@ -1978,6 +2032,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;
   // The choice at Send, when the session that asked has ended.
   const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
+  /** A Send waits for the read of a session it reaches (useEndedSessions' `check`): a second press meanwhile does nothing. */
+  const checkingEnded = useRef(false);
+  /** Counts the Sends that started posting: a Send that waited for the ended check goes only if none started meanwhile. */
+  const sendStarts = useRef(0);
+  /** The newest render's `send`: a Send that waited for the ended check goes on with the state of now, not of the press. */
+  const latestSend = useRef<(options?: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> }) => Promise<void>>(async () => {});
   /** What the route choice is for: a reply, or a Re-ask (the same choice, its own words). */
   const [routeFor, setRouteFor] = useState<'reply' | 'reask'>('reply');
   const reaskRef = useRef<HTMLButtonElement>(null);
@@ -3497,12 +3557,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * the person must read in the thread first (a replaced pick's guard, where an ended session's reply goes)
    * takes them there, on the device's route.
    */
-  const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean } = {}) => {
+  const send = async (options: { despiteReplaced?: boolean; routed?: boolean; stayFull?: boolean; endedChecked?: ReadonlySet<string> } = {}): Promise<void> => {
     // Whether this Send came from the ⌘Enter key (it draws no focus ring on the head it focuses): read at once.
     const byChord = sentByChord.current;
     sentByChord.current = false;
     // Dictation still running, in this box: the words are not in it yet (Mod+Enter reaches here with Send off).
-    if (sending || voice.busy) return;
+    // A Send waiting for the ended check (below) holds every other press: else both would post the replies.
+    if (sending || voice.busy || checkingEnded.current) return;
     // A pick was replaced while the person was answering: nothing goes until they have read that.
     if (staleQuestions.length > 0 && !options.despiteReplaced) {
       setGuard(true);
@@ -3514,16 +3575,47 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       setError('Wait for the files to finish uploading.');
       return;
     }
+    // Another session this Send reaches, not read yet (the list just changed with a pick): wait for its read,
+    // so "not read yet" never sends to an ended session without the choice (handoff "multi-agent-thread-model").
+    let gateEnded = askerEnded;
+    let gateAsking = asking;
+    if (!options.routed && !askerEnded && !resolved && !options.endedChecked && otherEnded.unchecked) {
+      checkingEnded.current = true;
+      const starts = sendStarts.current;
+      const startedOn = thread.thread_id;
+      let ended: ReadonlySet<string>;
+      try {
+        ended = await otherEnded.check();
+      } finally {
+        checkingEnded.current = false;
+      }
+      // Another Send went while this one waited: this one's replies went with it. The person opened another
+      // thread meanwhile (the pane stays mounted): nothing of this thread goes to that thread's agent.
+      if (sendStarts.current !== starts || threadRef.current.thread_id !== startedOn) return;
+      // What the press saw is stale now (words typed, picks made during the read): the newest Send goes, with
+      // what the read found, and does not wait again.
+      sentByChord.current = byChord;
+      return latestSend.current({ ...options, endedChecked: ended });
+    }
+    if (!options.routed && !askerEnded && !resolved && options.endedChecked) {
+      const found = options.endedChecked;
+      const other = otherSessions.filter((s) => found.has(s.session) || endedOthers.has(s.session)).at(-1) ?? null;
+      if (other) {
+        gateEnded = true;
+        gateAsking = other;
+      }
+    }
+    const gateOtherLive = gateAsking !== null && othersLive(gateAsking, live).length > 0;
     // The session that asked has ended and another is live: Send asks where
     // the reply goes first (the choice), and sends nothing yet.
-    if (askerEnded && anyOtherLive && asking && !options.routed) {
+    if (gateEnded && gateOtherLive && gateAsking && !options.routed) {
       const empty = picksCount === 0 && records.length === 0 && boxWords() === '' && replyUploads.length === 0 && draftPastes === 0 && !skipping;
       if (empty) {
         setError('Write a reply or pick an answer first.');
         return;
       }
       setError(null);
-      setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, asking, live));
+      setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, gateAsking, live));
       if (options.stayFull) fileToThread();
       return;
     }
@@ -3535,6 +3627,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         : null;
     const to = chosen ? { host: chosen.host, session: chosen.session } : undefined;
     sendingFromComposer.current = options.stayFull === true;
+    sendStarts.current += 1;
     setSending(true);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
@@ -3700,9 +3793,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
-          // Only a message the ended session asked goes to the session picked;
-          // an answer to another session's message still goes to that session.
-          ...(to && target.message.author.kind === 'agent' && target.message.author.session === asking?.session ? { to } : {}),
+          // Only a message an ended session of this Send asked goes to the session picked;
+          // an answer to a live session's message still goes to that session.
+          ...(to && target.message.author.kind === 'agent' && !!target.message.author.session && endedSends.has(target.message.author.session) ? { to } : {}),
         } });
       }
       // The tiles this Send carries, by the uploads its requests carry: a file pasted while it is in flight stays.
@@ -3723,7 +3816,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       focusSent.current = !options.stayFull;
       if (options.stayFull) {
         setComposerSentAt(Date.now());
-        announce(`Sent to ${replyName ?? asker}.`);
+        announce(`Sent to ${replyTo}.`);
       }
       finishSent(sentUploads, sendClears);
       if (handedReply) {
@@ -3843,6 +3936,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       }
     }
   };
+  latestSend.current = send;
 
   const resolve = async (next: boolean) => {
     setError(null);
@@ -3870,8 +3964,9 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const toName = (message: InboxMessageWire, to: { host: string; session: string }) =>
     isRedirected(message) ? redirectedName(to, askedBy(message)) : hostName(to.host);
   // Where the person's last message is addressed: its own `to`, or, for a reply in a thread the
-  // person started, the thread's (the server hands it to that session).
-  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to ? startedTo : null)) : null;
+  // person started, the thread's (the server hands it to that session), unless it answers another
+  // session that wrote in it (that session takes it, as any plain reply).
+  const lastTo = last.author.kind === 'person' && !isInboxNote(last) ? (last.to ?? (startedTo && last.reply_to && !isOtherAgent(askedBy(last), startedTo) ? startedTo : null)) : null;
   // The session the person's last reply goes to, when its connection wakes it: a message addressed to a
   // session (`lastTo`), or a reply to an agent message sent through a waking connection (`wakes`).
   const repliedTo = last.author.kind === 'person' && !lastTo ? askedBy(last) : undefined;
@@ -3925,14 +4020,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
-            name: asker,
+            name: recipientName(repliedTo),
             // A reply that tags agents: the owner's own delivery, never another recipient's.
             deliveredAt: lastTags.length > 0 ? (last.delivery?.at ?? sent?.recipients?.find((r) => r.owner)?.delivered_at ?? null) : (sent?.checked_at ?? null),
             time: whenTime,
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
-            askerEnded: askerEnded && asking ? { name: asking.name } : null,
+            askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
@@ -3956,7 +4051,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     ? last.to
       ? toName(last, last.to)
       : hostName(lastTo.host)
-    : asker;
+    : recipientName(repliedTo);
   const [sendNowState, setSendNowState] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
   const sendNow = async () => {
     setSendNowState({ id: last.id, busy: true, error: null });
@@ -4242,7 +4337,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           threadId: thread.thread_id,
           phone,
           reply: {
-            to: replyName ?? asker,
+            to: replyTo,
             value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
             onSend: () => void send({ stayFull: true }),
@@ -5045,7 +5140,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           const ownerOfSent = message.to ?? (askedBy(message)?.author.kind === 'agent' ? askedBy(message)!.author : null);
           const toWords = (
             <>
-              to {isAgent ? 'you' : message.to ? toName(message, message.to) : asker}
+              to {isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message))}
               {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
               {sentTags.length > 0 && (
                 <span data-tagged-names="">
@@ -5371,7 +5466,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         </div>
         {cameBack && (
           <div className="ib-acts ib-archnote" data-came-back="">
-            <span className="ib-st">Archived · {asker} wrote after you archived it. Your reply goes to it; the thread stays archived.</span>
+            <span className="ib-st">
+              Archived · {cameBackName} wrote after you archived it. Your reply goes to {replyTo === cameBackName ? 'it' : replyTo}; the thread stays
+              archived.
+            </span>
             <button type="button" className="ib-btn" onClick={() => void resolve(false)}>
               Unarchive
             </button>
@@ -5420,9 +5518,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         ) : box.open ? (
           <>
             <DraftHead
-              label={replyName ? `Reply to ${replyName}` : `Reply to ${asker} in ${thread.project.name}`}
+              label={replyName ? `Reply to ${replyName}` : `Reply to ${replyTo} in ${thread.project.name}`}
               savedAt={boxHasWords || replyDraft.draft?.files?.length ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
+              failed={replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
               conflict={
                 replyDraft.conflict !== null
                   ? {
@@ -5468,7 +5567,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 replyText={replyText}
                 textareaRef={textRef}
                 voice={voice}
-                ariaLabel={`Reply to ${replyName ?? asker}`}
+                ariaLabel={`Reply to ${replyTo}`}
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
                 destination="your reply"
@@ -5710,6 +5809,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             thread={thread}
             asker={asker}
             askerHost={root.author.kind === 'agent' ? root.author.host : null}
+            replyTo={replyTo}
             live={live}
             mode={newMessage}
             onPick={(target) => setNewMessage({ kind: 'compose', target })}

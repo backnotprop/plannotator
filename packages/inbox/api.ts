@@ -69,7 +69,7 @@ import type {
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -1361,12 +1361,14 @@ export const inboxApi = {
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
-  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = []) => {
+  /** `timeoutMs`: given up after it (InboxReadTimeout), for a read a Send waits on. */
+  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = [], timeoutMs?: number) => {
     const query = [
       ...(asker ? [`asker=${encodeURIComponent(asker)}`] : []),
       ...(recipients.length > 0 ? [`recipients=${recipients.map(encodeURIComponent).join(',')}`] : []),
     ].join('&');
-    return get<LiveSessionsModel>(threadUrl(threadId, `/sessions`, query));
+    const url = threadUrl(threadId, `/sessions`, query);
+    return timeoutMs === undefined ? get<LiveSessionsModel>(url) : getWithin<LiveSessionsModel>(url, timeoutMs);
   },
   /** Who the person can tag with `@` in this thread (approval "inbox-tag-agents"). */
   taggable: (threadId: string) => get<TaggableModel>(threadUrl(threadId, `/taggable`)),

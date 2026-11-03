@@ -333,12 +333,13 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   // Threads the Inbox's Grok Build runner wrote (0.28.34 to 0.28.36; removed) keep their author's name.
   grok: "Grok Build",
   qwen: "Qwen Code",
+  dsh: "DeepSeek Harness",
 };
 
 /**
  * The agent hosts a person's reply wakes as a new turn by itself: Claude Code,
- * Pi and OpenCode 2 through Plannotator's own connection (OpenCode 1 has the
- * tool but no wake), and Codex through MCP alone, where the Inbox puts the
+ * Pi, OpenCode 2 and DeepSeek Harness through Plannotator's own connection
+ * (OpenCode 1 has the tool but no wake), and Codex through MCP alone, where the Inbox puts the
  * reply into the Codex thread with `codex queue` (Codex CLI
  * INBOX_CODEX_QUEUE_MIN_VERSION or later; packages/server/inbox-codex-wake.ts),
  * and Qwen Code through MCP alone, where the Inbox sends the reply into the
@@ -347,7 +348,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * packages/server/inbox-qwen-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "codex", "qwen"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "codex", "qwen"] as const;
 
 /** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex and Qwen Code. */
 export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen"];
@@ -1728,6 +1729,7 @@ export type InboxAgentId =
   | "kiro"
   | "pi"
   | "opencode"
+  | "dsh"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -1742,6 +1744,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "kiro",
   "pi",
   "opencode",
+  "dsh",
   "claude-app",
 ];
 
@@ -1757,6 +1760,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   kiro: "Kiro",
   pi: "Pi",
   opencode: "OpenCode",
+  dsh: "DeepSeek Harness",
   "claude-app": "Claude app",
 };
 
@@ -1968,8 +1972,8 @@ export interface InboxAgentsModel {
   sessions?: Partial<Record<InboxToolHostId, InboxHostSessions>>;
 }
 
-/** The three hosts that connect through Plannotator's own plugin or extension. */
-export type InboxToolHostId = "claude-code" | "pi" | "opencode";
+/** The hosts that connect through Plannotator's own plugin or extension. */
+export type InboxToolHostId = "claude-code" | "pi" | "opencode" | "dsh";
 
 /**
  * The runtime a polling session runs in, as the window names its fix: Claude
@@ -2055,7 +2059,7 @@ export interface InboxHostSessions {
 }
 
 /** The hosts whose every request carries the `plannotator_inbox` tool in full once it is on (Claude Code defers it behind tool search). */
-export type InboxToolCostHost = "pi" | "opencode";
+export type InboxToolCostHost = "pi" | "opencode" | "dsh";
 
 /**
  * What turning the Inbox tool on adds to every request on Pi and OpenCode 2,
@@ -2197,6 +2201,9 @@ export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as cons
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
+  // DeepSeek Harness sends the same JSON Schema with every request; not measured on a real DSH (tests never run
+  // it), so Pi's measurement stands in until one is.
+  dsh: INBOX_TOOL_COST_NOW,
 };
 
 /** "about 9 KB, roughly 2,500 tokens" for a host's measured cost. */

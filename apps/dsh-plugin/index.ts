@@ -1,6 +1,8 @@
 /**
  * Plannotator for DeepSeek Harness (DSH): a Host plugin that opens DSH's plan
- * review (`exit_plan_mode`) in Plannotator. See plan-review.ts.
+ * review (`exit_plan_mode`) in Plannotator (plan-review.ts), and connects DSH
+ * sessions to the Plannotator Inbox (inbox.ts): the `plannotator_inbox` tool,
+ * and the person's replies going back into the session as a turn.
  *
  * Code review, annotate and annotate-last need no plugin: Plannotator's shared
  * skills in ~/.agents/skills run `plannotator review|annotate|last` from a DSH
@@ -8,20 +10,16 @@
  *
  * Exports the Cordis plugin object shape (`name` + `apply`); nothing else is
  * exported here, because the loader reads this module's exports as the plugin.
+ * The body is plugin.ts.
  */
 
-import { createPlanReviewListener, resolveConfig, type DshContext } from "./plan-review";
+import type { DshInboxContext } from "./inbox";
+import type { DshContext } from "./plan-review";
+import { applyPlannotator } from "./plugin";
 
 export const name = "plannotator";
 
-export function apply(ctx: DshContext, config?: unknown): void {
-  const resolved = resolveConfig(config);
-  if (!resolved.planReview) return;
-  // Unloading the plugin closes a review that is still open: Cordis removes
-  // the listener but does not abort a waterfall that is already running.
-  const unload = new AbortController();
-  ctx.effect?.(() => () => unload.abort(new Error("@plannotator/dsh was unloaded")));
-  // Prepended: DSH's own Web answerer registers per client stream, and
-  // listeners run in registration order.
-  ctx.on("user-questions/request", createPlanReviewListener(ctx, resolved, { unloadSignal: unload.signal }), { prepend: true });
+/** Plan review at once; the Inbox connection once DSH's agents and tools are active (plugin.ts). Never rejects. */
+export function apply(ctx: DshContext & Partial<Pick<DshInboxContext, "inject">>, config?: unknown): Promise<void> {
+  return applyPlannotator(ctx, config);
 }

@@ -791,7 +791,7 @@ export function createInboxLiveSessions(options: {
   const outdatedOf = (entry: SeenSession): InboxSessionOutdated | null => options.outdatedOf?.(entry.host, entry.plugin, entry.folder ?? entry.cwd) ?? null;
 
   /**
-   * The live sessions of the three Plannotator hosts, for Settings → Agents'
+   * The live sessions of the Plannotator hosts, for Settings → Agents'
    * "Open sessions" row: each with what it loaded and whether a restart (or
    * an update) would bring it up to date. Newest first.
    */
@@ -799,7 +799,7 @@ export function createInboxLiveSessions(options: {
     extra: (host: InboxToolHostId) => { installed: string | null; update_command: string | null },
   ): Partial<Record<InboxToolHostId, InboxHostSessions>> => {
     const out: Partial<Record<InboxToolHostId, InboxHostSessions>> = {};
-    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode"];
+    const hosts: readonly InboxToolHostId[] = ["claude-code", "pi", "opencode", "dsh"];
     for (const [session, entry] of [...sessions].sort((a, b) => b[1].startedAt - a[1].startedAt)) {
       if (!isLive(entry) || !(hosts as readonly string[]).includes(entry.host)) continue;
       const host = entry.host as InboxToolHostId;
