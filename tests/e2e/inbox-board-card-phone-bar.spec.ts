@@ -87,9 +87,22 @@ test.beforeAll(async () => {
     ((await claude.card({ op: 'create', project_path: project, title, column: 'in_progress', say: 'Option 3 of 6 rendered', ...fields })).card as { id: string }).id;
   world.create = await make('Hero scene timers, easing');
   world.open = await make('Checkout drawer redesign', { thread_id: sent.thread_id });
-  // Sent from the window (compose's Send links the thread it started): the card waits in Todo, "· sent" on its pill.
-  world.sent = await make('Promo field on the cart', { column: 'todo', thread_id: sent.thread_id });
-  await post(`cards/${world.sent}`, { op: 'send', thread_id: sent.thread_id });
+  // Sent from the window: the person starts a thread to the live session (compose's Send) and the card is sent in it,
+  // so it waits in Todo, "· sent" on its pill.
+  world.sent = await make('Promo field on the cart', { column: 'todo' });
+  let personThread = '';
+  await expect
+    .poll(async () => {
+      const res = await fetch(new URL('/api/inbox/messages', url), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: { host: 'claude-code', session: 'ses-card-bar' }, body: 'Promo field on the cart', idempotency_key: 'card-bar-sent' }),
+      });
+      if (res.ok) personThread = ((await res.json()) as { thread_id: string }).thread_id;
+      return res.status;
+    })
+    .toBe(200);
+  await post(`cards/${world.sent}`, { op: 'send', thread_id: personThread });
 });
 
 test.afterAll(async () => {
