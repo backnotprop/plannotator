@@ -6,7 +6,7 @@ import { basenameFromPath } from '@plannotator/core/source-save';
 import { PopoutDialog } from './PopoutDialog';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
-import { useTheme } from './ThemeProvider';
+import { extendThemeSwitch, useTheme } from './ThemeProvider';
 import { CommentPopover } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
@@ -390,6 +390,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   useEffect(() => {
     requestAnimationFrame(() => {
       const c = getThemeColors();
+      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
+      extendThemeSwitch();
       setPierreTheme({
         type: mode,
         css: buildPierreCSS(mode, c.bg, c.fg),

@@ -1976,6 +1976,32 @@ export class InboxStore {
   }
 
   /**
+   * The rows of the threads that may hold unsent work, for the Drafts read:
+   * the rows `listRows()` gives whose `unsent` is set, and maybe a few more
+   * (the caller filters on `unsent` as before). Only these rows are built, not
+   * the whole list. A row's `unsent` comes from four places (`listRow`): its
+   * reply draft, its comments waiting for a Send, a picked question, and an
+   * action item whose result waits in the draft. A question counts here when
+   * it holds an answer or an action result not sent yet, which every picked
+   * question and every action item in the draft does.
+   */
+  unsentRows(): InboxListRow[] {
+    const threads = new Set<string>([...this.replyDrafts.keys(), ...this.unsentAnnotations.keys()]);
+    for (const record of this.questions.values()) {
+      if (record.answer === null && record.action_result == null) continue;
+      if (record.revision > 0 && record.sent_revision === record.revision) continue;
+      const threadId = this.messages.get(record.message_id)?.thread_id;
+      if (threadId) threads.add(threadId);
+    }
+    const out: InboxListRow[] = [];
+    for (const threadId of threads) {
+      const row = this.listRow(threadId);
+      if (row) out.push(row);
+    }
+    return out;
+  }
+
+  /**
    * Decision mode's projection (approval "inbox-decision-mode", brief §10):
    * every question and action item that waits on the person (core's
    * `inboxQuestionWaitsOnPerson`) in a live agent message, across threads, in

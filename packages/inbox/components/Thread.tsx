@@ -83,6 +83,7 @@ import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } f
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
+import { ReplyFootPhone } from './ReplyFootPhone';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -936,6 +937,8 @@ export interface ThreadPaneProps {
   onChanged: () => Promise<void>;
   /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
   draftChanged?: number;
+  /** Raised each time records needed only this thread's files read again, not the thread (openThreadReads.ts). */
+  filesChanged?: number;
   onClose: () => void;
   /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
   file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
@@ -1093,8 +1096,8 @@ export interface ThreadPaneProps {
   decide?: OpenQuestionsDecide | null;
 }
 
-/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
-function useThreadAttachments(threadId: string, revision: unknown) {
+/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh (read again when `revision` or `again` changes). */
+function useThreadAttachments(threadId: string, revision: unknown, again: number) {
   const [model, setModel] = useState<AttachmentsModel | null>(null);
   const load = useCallback(async () => {
     try {
@@ -1109,7 +1112,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   }, [threadId]);
   useEffect(() => {
     void load();
-  }, [load, revision]);
+  }, [load, revision, again]);
   // A file edited on disk shows as changed when the person comes back to the window.
   useEffect(() => {
     const onFocus = () => void load();
@@ -1138,7 +1141,7 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
  * human-only notice (its text stays selectable).
  */
 const REPLY_BOX_CONTROLS =
-  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
+  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file], [data-foot-sheet]';
 
 /** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
 function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
@@ -1282,7 +1285,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1880,7 +1883,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A saved pick moves neither: only a real read of the thread reads them again.
   const filesRevision = useRef(thread);
   if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current);
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -3255,6 +3258,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // The person's own sent replies are drawn in their words, with the answers they carried as a
   // short list read from the questions (sentReply.ts): never the agent-facing answers section.
+  // Its times read "8:22 PM" today and "Nov 1, 8:22 PM" after midnight: a new day builds it again.
+  const day = new Date().toDateString();
   const sentAnswersByReply = useMemo(() => {
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
@@ -3263,7 +3268,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       if (groups.length > 0) out.set(m.id, groups);
     }
     return out;
-  }, [thread.messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is the key, not an input.
+  }, [thread.messages, day]);
 
   const openBox = () => {
     setNewMessage(null);
@@ -5504,38 +5510,59 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
               {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
               {/* The box's toolbar: the paperclip first (any file; a phone's picker offers the photo library too, and
-                  names what it hands over as a paste is), then the picks, skip and annotations chips. */}
-              <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
-                <AttachFilesButton
-                  className="ib-rclip"
-                  iconSize={phone ? 19 : 16}
-                  phone={phone}
-                  inputData="data-reply-attach"
-                  onFiles={(list) => {
-                    (phone ? replyFiles.attach : replyFiles.add)(list);
-                    setError(null);
-                  }}
+                  names what it hands over as a paste is), then the picks, skip and annotations chips. A phone draws
+                  one row instead: the paperclip, one line for the questions and comments, the mic (ReplyFootPhone). */}
+              {phone ? (
+                <ReplyFootPhone
+                  clip={
+                    <AttachFilesButton
+                      className="ib-rclip"
+                      iconSize={19}
+                      phone
+                      inputData="data-reply-attach"
+                      onFiles={(list) => {
+                        replyFiles.attach(list);
+                        setError(null);
+                      }}
+                    />
+                  }
+                  skip={{ count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen }}
+                  dropped={dropped.length}
+                  comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
+                  voice={voice}
                 />
-                {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
-                {draftAnswers.length > 0 && (
-                  <span className="ib-rchip" data-picks-chip="">
-                    <Icon name="check" size={13} />
-                    {plural(draftAnswers.length, 'pick')}
-                  </span>
-                )}
-                <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                {dropped.length > 0 && (
-                  <Tip content="Replaced; this pick won't be sent">
-                    <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
-                      {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+              ) : (
+                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
+                  <AttachFilesButton
+                    className="ib-rclip"
+                    iconSize={16}
+                    inputData="data-reply-attach"
+                    onFiles={(list) => {
+                      replyFiles.add(list);
+                      setError(null);
+                    }}
+                  />
+                  {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
+                  {draftAnswers.length > 0 && (
+                    <span className="ib-rchip" data-picks-chip="">
+                      <Icon name="check" size={13} />
+                      {plural(draftAnswers.length, 'pick')}
                     </span>
-                  </Tip>
-                )}
-                {takesAnnotations && (
-                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
-                )}
-                <VoiceFoot voice={voice} phone={phone} />
-              </div>
+                  )}
+                  <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
+                  {dropped.length > 0 && (
+                    <Tip content="Replaced; this pick won't be sent">
+                      <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
+                        {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+                      </span>
+                    </Tip>
+                  )}
+                  {takesAnnotations && (
+                    <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
+                  )}
+                  <VoiceFoot voice={voice} phone={false} />
+                </div>
+              )}
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
                   <Icon name="clip" size={18} />
