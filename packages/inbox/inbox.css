@@ -1182,10 +1182,10 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-rx-body {
   position: absolute; inset: 0; border-radius: 999px; display: grid; place-items: center; transform-origin: 25% 85%;
   background: linear-gradient(180deg, var(--ib-rx-top), var(--ib-rx-bot));
-  box-shadow: inset 0 0 0 0.5px var(--ib-rx-edge), inset 0 1px 0 var(--ib-rx-lift), 0 0 0 2px var(--ib-rx-cut),
-    0 2.5px 1.5px -0.5px var(--ib-rx-sh1), 0 5px 9px -3px var(--ib-rx-sh2);
+  box-shadow: inset 0 0 0 0.5px var(--ib-rx-edge), inset 0 1px 0 var(--ib-rx-lift), 0 0 0 2px var(--ib-rx-cut), 0 2.5px 1.5px -0.5px var(--ib-rx-sh1), 0 5px 9px -3px var(--ib-rx-sh2);
 }
-.ib-rx-e { grid-area: 1 / 1; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-size: 13px; line-height: 1; display: block; transform-origin: 50% 60%; opacity: 0; }
+/* The emoji stays 13 px at every text size: the badge around it is a fixed 22 px (placement D), not part of the type scale. */
+.ib-rx-e { grid-area: 1 / 1; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-size: 13px !important; line-height: 1; display: block; transform-origin: 50% 60%; opacity: 0; }
 .ib-rx-e[data-on] { opacity: 1; }
 .ib-rx-dots { grid-area: 1 / 1; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; }
 .ib-rx-dots[data-on] { opacity: 1; }

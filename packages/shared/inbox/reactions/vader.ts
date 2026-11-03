@@ -177,7 +177,6 @@ function punctuationEmphasis(text: string): number {
 /** Python's `round(x, 4)` close enough for a score that is compared with thresholds. */
 const round4 = (x: number) => Math.round(x * 10000) / 10000;
 
-/** VADER's `polarity_scores(text)["compound"]`, in -1..1. */
 /**
  * Python's `sum()` of floats (3.12 and later): Neumaier's compensated sum, the
  * compensation added at the end when it is finite. vaderSentiment sums the
@@ -198,6 +197,7 @@ export function pythonSum(values: readonly number[]): number {
   return total;
 }
 
+/** VADER's `polarity_scores(text)["compound"]`, in -1..1. */
 export function vaderCompound(input: string): number {
   // Emoji become their descriptions.
   let noEmoji = "";

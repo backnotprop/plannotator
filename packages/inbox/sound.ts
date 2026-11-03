@@ -204,12 +204,6 @@ function endRingHold(): void {
   }
 }
 
-/**
- * Take the ring lock for RING_LOCK_MS (or until the burst ends) and run
- * `ring` if this tab got it; resolves whether it did. A Web Lock where there
- * is one; else a timestamp in localStorage (the same origin as the channel),
- * which is close enough for a doorbell.
- */
 /** How long a tab holds a reaction it played, so another tab showing the same thread does not play it too. */
 const REACTION_CLAIM_MS = 10_000;
 const REACTION_CLAIM_KEY = `${SOUND_CHANNEL}-reaction`;
@@ -251,6 +245,12 @@ async function claimReaction(key: string, play: () => void): Promise<boolean> {
   return true;
 }
 
+/**
+ * Take the ring lock for RING_LOCK_MS (or until the burst ends) and run
+ * `ring` if this tab got it; resolves whether it did. A Web Lock where there
+ * is one; else a timestamp in localStorage (the same origin as the channel),
+ * which is close enough for a doorbell.
+ */
 async function withRingLock(ring: () => void): Promise<boolean> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (locks?.request) {
