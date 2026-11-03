@@ -21,6 +21,7 @@ import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
+import { codexRolloutDayFolders } from "@plannotator/server/inbox-codex-wake";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -706,43 +707,53 @@ describe("a Codex thread's script and the reply wake (#2573)", () => {
    * The thread never called the Inbox tool: only `plannotator inbox call` from
    * its shell (CODEX_THREAD_ID), as an agent that did not find the MCP tools.
    */
-  async function codexWorld(rollout: { source: unknown; originator: string } | null) {
+  type Rollout = { source: unknown; originator: string };
+  /** The thread's rollout, in the day folder its UUIDv7 id names (`created`), or a later one (a thread resumed months on). */
+  function writeRollout(codexHome: string, rollout: Rollout, where: "created" | "later" = "created") {
+    const day = join(codexHome, "sessions", where === "created" ? codexRolloutDayFolders(CODEX_THREAD)[0]! : join("2026", "11", "03"));
+    mkdirSync(day, { recursive: true });
+    const meta = { timestamp: "2026-11-03T10:00:00.000Z", type: "session_meta", payload: { id: CODEX_THREAD, timestamp: "2026-11-03T10:00:00.000Z", cwd: "/tmp", cli_version: "0.166.0", ...rollout } };
+    writeFileSync(join(day, `rollout-2026-11-03T10-00-00-${CODEX_THREAD}.jsonl`), `${JSON.stringify(meta)}\n`);
+  }
+  async function codexWorld(rollout: Rollout | null, options: { where?: "created" | "later"; env?: (root: string) => Record<string, string>; now?: () => number } = {}) {
     const box = sandbox();
     const fake = createFakeAgents("plannotator-inbox-call-codex-");
     fakes.push(fake);
     fake.install("codex");
-    if (rollout) {
-      const day = join(fake.env.CODEX_HOME!, "sessions", "2026", "11", "03");
-      mkdirSync(day, { recursive: true });
-      const meta = { timestamp: "2026-11-03T10:00:00.000Z", type: "session_meta", payload: { id: CODEX_THREAD, timestamp: "2026-11-03T10:00:00.000Z", cwd: box.project, cli_version: "0.166.0", ...rollout } };
-      writeFileSync(join(day, `rollout-2026-11-03T10-00-00-${CODEX_THREAD}.jsonl`), `${JSON.stringify(meta)}\n`);
-    }
+    if (rollout) writeRollout(fake.env.CODEX_HOME!, rollout, options.where);
     const server = await startInboxServer({
       dataDir: box.dataDir,
       binaryPath: null,
-      agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: fake.env }),
-      codexWake: { extraClis: [] },
+      agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, ...options.env?.(fake.root) } }),
+      codexWake: { extraClis: [], ...(options.now ? { now: options.now } : {}) },
     });
     servers.push(server);
     return { ...box, fake, server };
   }
+  type CodexWorld = Awaited<ReturnType<typeof codexWorld>>;
   const queues = (fake: FakeAgents) => fake.calls().filter((call) => call.name === "codex" && call.args[0] === "queue");
+  /** A send from the thread's shell, and whether the message it stored wakes. */
+  async function scriptSends(w: CodexWorld, body: string) {
+    const sent = await cli(w, ["send_message", JSON.stringify({ body })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
+    expect(sent.code).toBe(0);
+    const { message_id, thread_id } = JSON.parse(sent.stdout) as { message_id: string; thread_id: string };
+    const message = (await threadOf(w.server, thread_id)).messages.find((m) => m.id === message_id)!;
+    return { message_id, thread_id, message, wakes: message.wakes === true };
+  }
+  const answer = (w: CodexWorld, messageId: string, words: string) => post(w.server, `/api/inbox/messages/${messageId}/reply`, { idempotency_key: `k-${messageId}`, words });
 
-  const interactive: [string, { source: unknown; originator: string }][] = [
-    ["the TUI", { source: "cli", originator: "codex-tui" }],
-    ["the Codex app", { source: "vscode", originator: "Codex Desktop" }],
+  const interactive: [string, Rollout, "created" | "later"][] = [
+    ["the TUI", { source: "cli", originator: "codex-tui" }, "created"],
+    ["the Codex app, resumed months after it was made", { source: "vscode", originator: "Codex Desktop" }, "later"],
   ];
-  for (const [name, rollout] of interactive) {
+  for (const [name, rollout, where] of interactive) {
     test(`a thread of ${name}: its script's message wakes, and the person's reply goes in through codex queue`, async () => {
-      const w = await codexWorld(rollout);
-      const sent = await cli(w, ["send_message", JSON.stringify({ body: "Ship the worker today?" })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
-      expect(sent.code).toBe(0);
-      const { message_id, thread_id } = JSON.parse(sent.stdout) as { message_id: string; thread_id: string };
-      const asked = (await threadOf(w.server, thread_id)).messages[0]!;
-      expect(asked.author).toMatchObject({ kind: "agent", host: "codex", session: CODEX_THREAD });
-      expect(asked.wakes).toBe(true);
+      const w = await codexWorld(rollout, { where });
+      const sent = await scriptSends(w, "Ship the worker today?");
+      expect(sent.message.author).toMatchObject({ kind: "agent", host: "codex", session: CODEX_THREAD });
+      expect(sent.wakes).toBe(true);
 
-      expect((await post(w.server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Yes, ship it." })).status).toBe(200);
+      expect((await answer(w, sent.message_id, "Yes, ship it.")).status).toBe(200);
       await w.server.codexWake.sweep();
       const calls = queues(w.fake);
       expect(calls).toHaveLength(1);
@@ -751,21 +762,52 @@ describe("a Codex thread's script and the reply wake (#2573)", () => {
     });
   }
 
-  const never: [string, { source: unknown; originator: string } | null][] = [
+  const never: [string, Rollout | null][] = [
     ["a codex exec run", { source: "exec", originator: "codex_exec" }],
+    ["a codex exec run whose source reads cli", { source: "cli", originator: "codex_exec" }],
     ["a subagent", { source: { subagent: "review" }, originator: "codex-tui" }],
     ["a thread with no rollout", null],
   ];
   for (const [name, rollout] of never) {
     test(`${name} is never woken from its script: nothing is queued for the reply`, async () => {
       const w = await codexWorld(rollout);
-      const sent = await cli(w, ["send_message", JSON.stringify({ body: "One turn only." })], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
-      expect(sent.code).toBe(0);
-      const { message_id, thread_id } = JSON.parse(sent.stdout) as { message_id: string; thread_id: string };
-      expect((await threadOf(w.server, thread_id)).messages[0]!.wakes).toBeUndefined();
-      expect((await post(w.server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: "k1", words: "Yes." })).status).toBe(200);
+      const sent = await scriptSends(w, "One turn only.");
+      expect(sent.wakes).toBe(false);
+      expect((await answer(w, sent.message_id, "Yes.")).status).toBe(200);
       await w.server.codexWake.sweep();
       expect(queues(w.fake)).toEqual([]);
     });
   }
+
+  test("a rollout not found is not looked for on every send; one written since is found once that wait is over", async () => {
+    const clock = { ahead: 0 };
+    const w = await codexWorld(null, { now: () => Date.now() + clock.ahead });
+    expect((await scriptSends(w, "Before Codex wrote its rollout.")).wakes).toBe(false);
+    writeRollout(w.fake.env.CODEX_HOME!, { source: "cli", originator: "codex-tui" });
+    expect((await scriptSends(w, "Within the minute.")).wakes).toBe(false);
+    clock.ahead = 61_000;
+    const later = await scriptSends(w, "A minute on.");
+    expect(later.wakes).toBe(true);
+    expect((await answer(w, later.message_id, "Got it.")).status).toBe(200);
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake).map((call) => call.args[2])).toEqual([expect.stringContaining("Got it.")]);
+  });
+
+  test("a thread codex queue said it does not know: its script no longer wakes it, whatever its rollout says", async () => {
+    const w = await codexWorld({ source: "cli", originator: "codex-tui" }, { env: (root) => ({ FAKE_CODEX_UNKNOWN_FILE: join(root, "unknown") }) });
+    writeFileSync(join(w.fake.root, "unknown"), CODEX_THREAD);
+    const first = await scriptSends(w, "Ship it?");
+    expect(first.wakes).toBe(true);
+    expect((await answer(w, first.message_id, "Yes.")).status).toBe(200);
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake)).toHaveLength(1);
+    expect(w.server.codexWake.status(CODEX_THREAD)).toBe("dead");
+
+    // Its shell's call says it is there (off `dead`), not that Codex knows it again: still no wake.
+    const again = await scriptSends(w, "Still there?");
+    expect(again.wakes).toBe(false);
+    expect((await answer(w, again.message_id, "Yes, still.")).status).toBe(200);
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake).some((call) => call.args[2]!.includes("Yes, still."))).toBe(false);
+  });
 });
