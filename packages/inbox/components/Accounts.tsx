@@ -295,7 +295,8 @@ function SwitchConfirm({ title, sub, onCancel, onSwitch }: { title: string; sub:
     <div className="ib-acct-confirm" role="dialog" aria-label={title} data-accounts-confirm="">
       <div>
         <b>{title}</b>
-        <p>{sub}</p>
+        {/* With no account in use and nothing shared, there is nothing to add: no empty line. */}
+        {sub && <p>{sub}</p>}
       </div>
       <div className="ib-acct-confirm-acts">
         <button type="button" className="ib-btn ib-ghost ib-sm" ref={cancel} onClick={onCancel} data-accounts-cancel="">
@@ -309,10 +310,31 @@ function SwitchConfirm({ title, sub, onCancel, onSwitch }: { title: string; sub:
   );
 }
 
-/** The row whose confirm is open: one at a time on the page. */
+/**
+ * The login whose confirm is open: one at a time on the page. Held by the
+ * login, not the row's number, so a read after a `cswap swap` in a terminal
+ * never moves it to another login; when the login is gone, it closes.
+ */
 interface Confirming {
   machine: string;
-  number: number;
+  login: Login;
+}
+
+/** A login apart from `cswap`'s number for it: the address, organization and alias the row showed. */
+interface Login {
+  email: string | null;
+  organizationName: string | null;
+  alias: string | null;
+}
+
+const loginOfRow = (account: InboxAccount): Login => ({ email: account.email ?? null, organizationName: account.organizationName ?? null, alias: account.alias ?? null });
+const isLogin = (account: InboxAccount, login: Login) =>
+  (account.email ?? null) === login.email && (account.organizationName ?? null) === login.organizationName && (account.alias ?? null) === login.alias;
+
+/** The one row not in use that has `login`, or null: none, or two it can't tell apart (API keys with no alias). */
+function rowOfLogin(accounts: InboxAccount[], login: Login): InboxAccount | null {
+  const rows = accounts.filter((account) => !account.active && isLogin(account, login));
+  return rows.length === 1 ? rows[0]! : null;
 }
 
 /** What this machine is called until the Inbox knows its name. */
@@ -377,6 +399,12 @@ function ToolList({
     }
     wasGoing.current = going;
   }, [going, change]);
+
+  // A read that no longer has the login under its confirm (renumbered, removed, now in use, or no list): it closes.
+  const confirmGone = confirming?.machine === machine.key && !(machine.read?.state === 'accounts' && rowOfLogin(machine.read.accounts, confirming.login));
+  useEffect(() => {
+    if (confirmGone) onConfirm(null);
+  }, [confirmGone, onConfirm]);
 
   const { read } = machine;
   let body: ReactNode = null;
@@ -479,7 +507,7 @@ function ToolList({
               ...(on.length > 0 ? [`on ${names(on)}`] : []),
               ...(account === best ? ['most room'] : []),
             ];
-            const open = !active && confirming?.machine === machine.key && confirming.number === account.number;
+            const open = !active && confirming?.machine === machine.key && rowOfLogin(accounts, confirming.login) === account;
             const note = noteUnderRow === account ? noteHere : null;
             return (
               <AccountRow
@@ -493,11 +521,11 @@ function ToolList({
                 busy={going}
                 state={{ confirming: open, going: going && target === account, note }}
                 phone={phone}
-                onPick={() => onConfirm(open ? null : { machine: machine.key, number: account.number })}
+                onPick={() => onConfirm(open ? null : { machine: machine.key, login: loginOfRow(account) })}
                 below={
                   <>
                     {open && confirmFor(account)}
-                    {note && <SwitchNote change={note} tool={tool} onRetry={() => onConfirm({ machine: machine.key, number: account.number })} />}
+                    {note && <SwitchNote change={note} tool={tool} onRetry={() => onConfirm({ machine: machine.key, login: loginOfRow(account) })} />}
                   </>
                 }
               />
