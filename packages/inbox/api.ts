@@ -43,6 +43,7 @@ import type {
 } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
+import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
@@ -117,7 +118,7 @@ export interface CardsModel {
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
-export type DraftFileInput = string | { upload_id: string; pasted: InboxDraftPasted };
+export type DraftFileInput = string | { upload_id: string; pasted?: InboxDraftPasted };
 
 /**
  * A machine as the merged list and its `machines` frames name it (linked machines,
@@ -764,6 +765,13 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
   };
 }
 
+/** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
+export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps): Record<string, unknown> {
+  // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
+  // a save without them is an older page's, which names long pastes only.
+  return { body, base, ...(baseBody !== null ? { base_body: baseBody } : {}), files_add: files.add, files_remove: files.remove, files_place: files.place };
+}
+
 /** The serverSession every POST carries; set from the first list read. */
 let pageSession: string | null = null;
 
@@ -1320,24 +1328,12 @@ export const inboxApi = {
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
-   * `files`: the long pastes kept beside the words (approval "inbox-paste-attachment"); `baseFiles`: the upload
-   * ids this window saved last, which `base_body`'s shortcut must also match.
+   * `files`: the box's file changes since it last held the draft's files (`files_add`, `files_remove`,
+   * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
+   * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (
-    threadId: string,
-    body: string,
-    base: string | null,
-    baseBody: string | null = null,
-    files: readonly DraftFileInput[] = [],
-    baseFiles: readonly string[] | null = null,
-  ) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), {
-      body,
-      base,
-      ...(baseBody !== null ? { base_body: baseBody } : {}),
-      ...(files.length > 0 ? { files } : {}),
-      ...(baseBody !== null && baseFiles !== null ? { base_files: baseFiles } : {}),
-    }),
+  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS) =>
+    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),

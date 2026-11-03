@@ -125,15 +125,17 @@ import {
   readInboxVideoTime,
   type InboxAnnotationRecord,
   type InboxAttachment,
+  type InboxDraftFile,
   type InboxInlineImage,
 } from "@plannotator/core/inbox-types";
+import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
-import { checkInboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
+import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
 import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
@@ -619,6 +621,13 @@ export class InboxStore {
    */
   private readonly replyDrafts = new Map<string, InboxReplyDraft>();
   /**
+   * Per thread, the files its reply draft lost and has not taken back since, each with the `updated_at` of the
+   * draft that dropped it. A page's save sent against an older version does not add one again (`saveReplyDraft`):
+   * it is that page sending again a change whose answer it never read, after another window took the file out.
+   * Kept in memory: after a restart such a file comes back at worst (never one lost).
+   */
+  private readonly replyDraftRemovals = new Map<string, Map<string, string>>();
+  /**
    * The threads pinned to the window's sidebar, in pin order (pins.ts,
    * approval "inbox-pinned-threads"): a file outside the event log, read at
    * load. Read by nothing that routes, lists or answers an agent.
@@ -672,6 +681,7 @@ export class InboxStore {
     }
     this.seq = Math.max(this.seq, this.readSeqFloor());
     this.replyDrafts.clear();
+    this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) {
@@ -4765,17 +4775,47 @@ export class InboxStore {
    * body (whitespace only) deletes the draft and answers null. Never a line in
    * the event log: agents, the MCP and search never see it.
    */
-  saveReplyDraft(threadId: string, input: { body?: unknown; base?: unknown; base_body?: unknown; files?: unknown; base_files?: unknown }): InboxReplyDraft | null {
+  saveReplyDraft(
+    threadId: string,
+    input: InboxReplyDraftInput,
+  ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files, baseFiles } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
+    if (ops) {
+      // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
+      // Only the words are compared: a file change elsewhere never refuses this save.
+      const ownWords = baseBody !== null && existing !== null && existing.body === baseBody;
+      if ((existing?.updated_at ?? null) !== base && !ownWords) {
+        throw new InboxError(
+          "draft_conflict",
+          existing ? "This reply changed in another window since you opened it." : "This reply's draft was discarded or sent in another window.",
+          { draft: existing },
+        );
+      }
+      // A save a step behind (its own words, `base_body`) adds no file the draft lost since the version it names:
+      // another window took it out after this page's earlier save of it landed (its answer lost), so the add is
+      // that save's, sent again, not a new one.
+      const removals = existing && existing.updated_at !== base ? this.replyDraftRemovals.get(threadId) : undefined;
+      const add = removals ? ops.add.filter((file) => !((removals.get(file.upload_id) ?? "") > (base ?? ""))) : ops.add;
+      // Words changed: another window's long paste this save does not place moves with them.
+      const after = applyReplyDraftFileOps(existing?.files ?? [], { ...ops, add }, existing ? { from: existing.body, to: body } : undefined);
+      if (body.trim() === "" && after.length === 0) {
+        this.deleteReplyDraft(threadId);
+        return null;
+      }
+      return this.writeReplyDraft(threadId, existing, body, after);
+    }
+    // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
+    // is never dropped by it).
+    const files = replyDraftFilesAfterSave(existing?.files ?? [], incoming, allFiles);
     // `base_body`: the words this window wrote last. A save sent as the page goes may carry a base read
     // before that write's answer came back; the draft still holding those words is the window's own.
-    // With `base_files` (the long pastes it wrote last), the draft must hold those too: the compare covers both.
-    // A paste a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
+    // With `base_files` (the files it wrote last), the draft must hold those too: the compare covers both.
+    // A file a Send carried since is no upload any more and left every draft (`dropSentUploadsFromReplyDrafts`):
     // the window that still names it is not told apart by it.
-    const existingIds = inboxReplyDraftFileIds(existing);
+    const existingIds = replyDraftFileIdsSeenBy(existing?.files ?? [], allFiles);
     const ownWords =
       baseBody !== null &&
       existing !== null &&
@@ -4792,11 +4832,16 @@ export class InboxStore {
         { draft: existing },
       );
     }
-    // Nothing left: no words and no long paste kept beside them.
+    // Nothing left: no words and no file kept beside them.
     if (body.trim() === "" && files.length === 0) {
       this.deleteReplyDraft(threadId);
       return null;
     }
+    return this.writeReplyDraft(threadId, existing, body, files);
+  }
+
+  /** Write a thread's draft whole, its `updated_at` strictly later than the last one's. */
+  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[]): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
@@ -4806,32 +4851,49 @@ export class InboxStore {
       body,
       created_at: existing?.created_at ?? at,
       updated_at: updatedAt,
-      ...(files.length > 0 ? { files } : {}),
+      ...(files.length > 0 ? { files: [...files] } : {}),
     };
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
+    this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
     return draft;
   }
 
+  /** The files `existing` held that `draft` (its next version) does not: dropped at its `updated_at`; one back is not. */
+  private noteReplyDraftRemovals(threadId: string, existing: InboxReplyDraft | null, draft: InboxReplyDraft): void {
+    const kept = new Set((draft.files ?? []).map((file) => file.upload_id));
+    let removals = this.replyDraftRemovals.get(threadId);
+    for (const id of kept) removals?.delete(id);
+    for (const file of existing?.files ?? []) {
+      if (kept.has(file.upload_id)) continue;
+      if (!removals) this.replyDraftRemovals.set(threadId, (removals = new Map()));
+      removals.set(file.upload_id, draft.updated_at);
+    }
+    if (removals?.size === 0) this.replyDraftRemovals.delete(threadId);
+  }
+
   /**
-   * The Send that carried the reply box's words: drop the draft while it is
-   * still the one those words were saved as (`updated_at`), or while it holds
-   * exactly what the Send carried (the window may not know the `updated_at` of
-   * a save whose answer it never read): those `words`, and only long pastes
-   * among the Send's `uploads`. A paste alone counts when the words are empty.
-   * A newer, different draft another window saved meanwhile (other words, or a
-   * paste this Send did not carry) stays. True when it went.
+   * The Send that carried the reply box's draft (`clear_draft`), settled by
+   * `settleReplyDraftAfterSend` (@plannotator/core/inbox-reply-draft):
+   *  - still the draft those words were saved as (`updated_at`): the words go,
+   *    and so do the files the Send carried; a file it did not carry (a phone
+   *    or an older page that sent the words alone) stays, as a draft of files only;
+   *  - an older `updated_at` (the window may not know the one of a save whose
+   *    answer it never read): it goes only while it holds exactly the sent
+   *    `words` and only files among the Send's `uploads` (a file alone counts
+   *    when the words are empty). A newer, different draft another window
+   *    saved meanwhile (other words, or a file this Send did not carry) stays.
+   * True when the draft changed.
    */
   clearSentReplyDraft(threadId: string, updatedAt: string, words?: string, uploads: readonly string[] = []): boolean {
     const existing = this.replyDrafts.get(threadId);
     if (!existing) return false;
-    if (existing.updated_at === updatedAt) return this.deleteReplyDraft(threadId);
-    const fileIds = inboxReplyDraftFileIds(existing);
-    const sent = new Set(uploads);
-    const sameWords = words !== undefined && existing.body.trim() === words.trim() && (words.trim() !== "" || fileIds.length > 0);
-    if (!sameWords || !fileIds.every((id) => sent.has(id))) return false;
-    return this.deleteReplyDraft(threadId);
+    const after = settleReplyDraftAfterSend(existing, { clearDraft: updatedAt, words, uploads });
+    if (after.kind === "unchanged") return false;
+    if (after.kind === "delete") return this.deleteReplyDraft(threadId);
+    this.writeReplyDraft(threadId, existing, "", after.files);
+    return true;
   }
 
   /**
@@ -4854,26 +4916,22 @@ export class InboxStore {
         this.deleteReplyDraft(draft.thread_id);
         continue;
       }
-      const at = this.stamp();
-      const updatedAt = at <= draft.updated_at ? new Date(Date.parse(draft.updated_at) + 1).toISOString() : at;
-      const { files: _files, ...rest } = draft;
-      const next: InboxReplyDraft = { ...rest, updated_at: updatedAt, ...(kept.length > 0 ? { files: kept } : {}) };
-      writeInboxReplyDraft(this.dir, next);
-      this.replyDrafts.set(draft.thread_id, next);
-      this.replyDraftChanged(draft.thread_id);
+      this.writeReplyDraft(draft.thread_id, draft, draft.body, kept);
     }
     return changed;
   }
 
   /** Drop a thread's reply draft (Discard); true when there was one. */
   deleteReplyDraft(threadId: string): boolean {
+    // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
+    this.replyDraftRemovals.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
   }
 
-  /** The uploads every reply draft keeps (its long pastes): the upload sweep keeps them. */
+  /** The uploads every reply draft keeps (each file beside its words): the upload sweep keeps them, at any age. */
   replyDraftUploadIds(): Set<string> {
     const out = new Set<string>();
     for (const draft of this.replyDrafts.values()) for (const id of inboxReplyDraftFileIds(draft)) out.add(id);
@@ -4988,6 +5046,7 @@ export class InboxStore {
       if (this.messages.get(threadId)?.thread_id === threadId) continue;
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
+      this.replyDraftRemovals.delete(threadId);
     }
     // So does its Ask AI conversation.
     pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
@@ -5834,11 +5893,13 @@ export class InboxStore {
    * The references `prs` (each a PR: the card action's `pr`) and `refs` (any
    * source: an issue, a PR, …) name, through the source registry
    * (card-refs.ts), added to `known` each once: by URL, or by `ref` for a
-   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira)
-   * is the same only by URL: its `ref` is a bare key, and DEMO-1 on two
-   * Jira sites are two issues.
+   * forge (`owner/repo#12` as an issue and as a PR). A link-only ref (Jira,
+   * YouTrack, a web link) is the same only by URL: its `ref` is a bare key or
+   * a label, and DEMO-1 on two Jira sites are two issues. A link the person
+   * gives is marked `by: "person"`, also when an agent linked it first (only
+   * such a link's favicon is ever fetched); an agent's link is left unmarked.
    */
-  private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[]): InboxCardRef[] {
+  private cardRefs(known: readonly InboxCardRef[], prs: readonly unknown[], refs: readonly unknown[], by: InboxAuthor): InboxCardRef[] {
     const out = [...known];
     const add = (value: unknown, hint: "pr" | "any") => {
       const ref = parseInboxCardRef(value, hint);
@@ -5847,12 +5908,17 @@ export class InboxStore {
         const help = hint === "pr" ? INBOX_CARD_PR_HINT : INBOX_CARD_REF_HINT;
         throw new InboxError("validation_error", `${help} Not one: ${JSON.stringify(String(value).slice(0, 200))}.`, { field });
       }
-      const linked = { ...ref, via: hint === "pr" ? ("pr" as const) : ("ref" as const) };
+      const person = by.kind === "person";
+      const linked: InboxCardRef = { ...ref, via: hint === "pr" ? "pr" : "ref", ...(person ? { by: "person" as const } : {}) };
       const same = (k: InboxCardRef) => k.url === ref.url || (k.ref === ref.ref && !inboxCardRefIsLinkOnly(k) && !inboxCardRefIsLinkOnly(ref));
       const at = out.findIndex(same);
       if (at < 0) out.push(linked);
-      // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
-      else if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
+      else {
+        // A PR first linked as context, then given as the card's own `pr`: it is the card's PR now (inboxCardShipPrs in core).
+        if (hint === "pr" && out[at]!.via !== "pr") out[at] = { ...out[at]!, via: "pr" };
+        // The person linking what an agent linked makes it theirs.
+        if (person && out[at]!.by !== "person") out[at] = { ...out[at]!, by: "person" };
+      }
     };
     for (const value of prs) add(value, "pr");
     for (const value of refs) add(value, "any");
@@ -5946,7 +6012,7 @@ export class InboxStore {
     const you: string | null = input.you === undefined || input.you === null ? null : this.cardText(input.you, "you", INBOX_CARD_LINE_MAX);
     if (you !== null && !isInboxCardPersonColumn(column)) throw this.youRefusal();
     if (byAgent && isInboxCardPersonColumn(column) && you === null) throw this.youRequired(column);
-    const refs = this.cardRefs([], input.prs ?? [], input.refs ?? []);
+    const refs = this.cardRefs([], input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();
@@ -6071,7 +6137,7 @@ export class InboxStore {
     const title = given(input.title) ? this.cardText(input.title, "title", INBOX_CARD_TITLE_MAX) : card.title;
     const threads = [...card.threads];
     for (const thread of this.cardThreads(input.threads ?? [], card.project_id)) if (!threads.includes(thread)) threads.push(thread);
-    const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? []);
+    const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
     const at = this.stamp();

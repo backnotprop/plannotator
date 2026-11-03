@@ -1,4 +1,5 @@
-import { inboxUrl } from '../inboxUrl';
+import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { inboxUrl, machineOf } from '../inboxUrl';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
@@ -12,7 +13,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
@@ -52,7 +53,7 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { useReplyDraft } from '../replyDraft';
+import { landInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote } from './DraftLabel';
@@ -86,6 +87,7 @@ import { reaskedIn, reaskNoteAgent, reaskOffered, reaskTargets, reaskTooltip } f
 import { ChangedNotice, ReplacedQuestionCard, ReplacesLine, StaleGuard, replacedBy, replacementOf, type JumpTarget } from './ReplacedQuestion';
 import { InboxComposerField, type InboxComposerFieldProps } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
+import { ReplyFootPhone } from './ReplyFootPhone';
 import { useVoiceSession } from '../voice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
@@ -1156,7 +1158,7 @@ export type AckPillState = 'pending' | 'queued' | 'sending' | 'saved' | 'deliver
  * human-only notice (its text stays selectable).
  */
 const REPLY_BOX_CONTROLS =
-  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file]';
+  'button, a[href], input, select, textarea, label, summary, [role="button"], [role="dialog"], [role="menu"], [role="listbox"], [role="option"], [data-skill-menu], [data-skill-human-only-notice], [data-compose-file], [data-foot-sheet]';
 
 /** The reply box's field: it alone reads the words (replyText.ts), so a key typed re-renders it and nothing else. */
 function ReplyTextField({ replyText, ...props }: Omit<InboxComposerFieldProps, 'value'> & { replyText: ReplyText }) {
@@ -1422,13 +1424,20 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
    * The reply box's words, kept per thread as a server draft (approval
    * "inbox-reply-drafts"): saved while typing, back when the thread opens.
    */
-  const replyDraft = useReplyDraft(thread.thread_id);
+  /** A save of this window's landed: the box takes the draft's files (set below, once the tiles exist). */
+  const takeMergedFiles = useRef<(threadId: string, draft: InboxReplyDraft, wanted: readonly string[]) => void>(() => {});
+  /** Only another window changed the words: the box takes them (set below, once the tiles exist); what it did. */
+  const takeTheirWords = useRef<(threadId: string, draft: InboxReplyDraft, was: string) => ReplyBoxTook>(() => 'differs');
+  const replyDraft = useReplyDraft(thread.thread_id, {
+    onFiles: (threadId, draft, wanted) => takeMergedFiles.current(threadId, draft, wanted),
+    onWords: (threadId, draft, was) => takeTheirWords.current(threadId, draft, was),
+  });
   const keptWords = (replyDraft.conflict ?? replyDraft.draft?.body)?.trim() ?? '';
   /** Whether a Send carries words: the box's, or (the box closed) those kept as its draft. */
   const hasWords = box.open ? boxHasWords : keptWords !== '';
   /** The words a Send carries, as they are now: the box's, or (the box closed) those kept as its draft. */
   const boxWords = () => (box.open ? replyText.get().trim() : keptWords);
-  /** The box closed: the long pastes its draft keeps (approval "inbox-paste-attachment"), which a Send carries too. */
+  /** The box closed: the files its draft keeps (attached, dropped, pasted, long pastes), which a Send carries too. */
   const draftPastes = box.open || replyDraft.conflict !== null ? 0 : (replyDraft.draft?.files?.length ?? 0);
   /** A draft put back in the box opens it without taking focus (the thread's keys and the page keep working). */
   const restoringRef = useRef(false);
@@ -1439,8 +1448,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   /**
    * Files pasted, dropped or picked with the paperclip into the reply box (the
    * owner: "paste in images … if I'm focused in a reply"; approval
-   * "inbox-reply-attach"): compose's tiles and upload path. They live with the
-   * box: Cancel, Escape, a Send and another thread forget them.
+   * "inbox-reply-attach"): compose's tiles and upload path. They are part of
+   * the reply draft, beside its words (the owner, 2026-11-02: "ideally it just
+   * syncs"): Cancel, Escape, another thread, a reload, another window and the
+   * phone all keep them, and whichever device sends carries them. A file still
+   * uploading when the box closes or the thread changes lands in that thread's
+   * draft when its upload is in (`landInReplyDraft`). Another machine's thread
+   * keeps no draft: its files live with the box, as before.
    */
   // A paste is said in the thread's polite live region ("Attached pasted-image-….png").
   // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), anchored in the box's
@@ -1455,19 +1469,88 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       },
       set: (text) => changeReply(text, true),
     },
+    // The thread pane goes while files upload (a phone's Back): they land in the draft all the same.
+    onUnmountUploads: machine ? undefined : (uploads) => landLater(threadRef.current.thread_id, uploads),
   });
   const replyUploads = replyFiles.uploaded.map((upload) => upload.upload_id);
   /**
-   * The long pastes the draft was last given (approval "inbox-paste-attachment"): a reply draft keeps them beside
-   * the words, so a reload or another window brings the tiles back and Put back still works. A tile that finishes
-   * uploading or is removed saves the draft; one a draft brought back does not save it again.
+   * The files the draft was last given: a reply draft keeps them beside the words, so a reload, another window or
+   * the phone brings the tiles back (Put back still works for a long paste). A tile that finishes uploading or is
+   * removed saves the draft; one a draft brought back does not save it again.
    */
-  const pastedSaved = useRef('');
-  const takeDraftPastes = (files: readonly InboxDraftFile[], words: string) => {
-    replyFiles.restorePasted(files, words);
-    pastedSaved.current = pastedSignature(files.filter((file) => file.pasted));
+  const filesSaved = useRef('');
+  const takeDraftFiles = (files: readonly InboxDraftFile[], words: string, mode: 'replace' | 'add' = 'replace', alsoKeep: readonly string[] = []) => {
+    replyFiles.restoreDraft(files, words, mode, alsoKeep);
+    // What the draft holds is saved already; tiles the person attached before it was read (`add`) are saved with it:
+    // the box's next save names what changed from the draft's files.
+    const held = mode === 'add' ? files : replyFiles.draftFiles();
+    filesSaved.current = pastedSignature(held);
+    replyDraft.boxTook(threadRef.current.thread_id, held.map((file) => file.upload_id));
   };
-  const pastedNow = pastedSignature(replyFiles.pastedDraft());
+  /** Every upload this pane's box finished: a file whose save has not landed comes back as a tile when the box opens again. */
+  const uploadsSeen = useRef(new Map<string, InboxUpload>());
+  for (const upload of replyFiles.uploaded) uploadsSeen.current.set(upload.upload_id, upload);
+  /**
+   * The draft's files with this window's changes not saved yet (`withMyChanges`), as tiles. A file added here whose
+   * upload this pane no longer knows is left out: it still goes with the next save, and the box takes it from that.
+   */
+  const draftFilesWithMine = (files: readonly InboxDraftFile[]): InboxDraftFile[] =>
+    replyDraft.withMyChanges<InboxDraftFile | { upload_id: string; pasted?: InboxDraftFile['pasted'] }>(files).flatMap((file) => {
+      if ('name' in file) return [file];
+      const upload = uploadsSeen.current.get(file.upload_id);
+      return upload ? [{ ...upload, ...(file.pasted ? { pasted: file.pasted } : {}) }] : [];
+    });
+  const filesNow = pastedSignature(replyFiles.draftFiles());
+  /** Files that leave the box still uploading go on, and join this thread's draft once in (not another machine's thread). */
+  const landLater = (threadId: string, uploads: readonly Promise<InboxUpload | null>[]) => {
+    for (const upload of uploads) void landInReplyDraft(threadId, upload);
+  };
+  takeTheirWords.current = (threadId, draft, was) => {
+    // Closed, or showing another thread: no words here to keep (Edit draft and the thread's next visit read the draft).
+    if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return 'hidden';
+    // The box's live words (`replyText.get()`, through `liveBox`): changed since, the person's words win (a conflict).
+    if (boxRef.current.text !== was) return 'differs';
+    // The box still holds the words this window last knew: it takes the other window's, with its files and this
+    // window's file changes not saved yet. A tile finished since the box's last save is in no save yet: it stays, and
+    // its own save adds it.
+    const files = draftFilesWithMine(draft.files ?? []);
+    const listed = new Set(files.map((file) => file.upload_id));
+    const held = new Set(replyDraft.heldOf(threadId));
+    const fresh = replyFiles.draftFiles().map((file) => file.upload_id).filter((id) => !held.has(id) && !listed.has(id));
+    // Through `setBox` only (never `changeReply`: that would save again, and `follow` would move the tiles' anchors).
+    setBox({ open: true, text: draft.body });
+    takeDraftFiles(files, draft.body, 'replace', fresh);
+    if (fresh.length > 0) {
+      const saved = replyFiles.draftFiles().filter((file) => !fresh.includes(file.upload_id));
+      filesSaved.current = pastedSignature(saved);
+      replyDraft.boxTook(threadId, saved.map((file) => file.upload_id));
+    }
+    announce('This reply changed in another window.');
+    return 'took';
+  };
+  takeMergedFiles.current = (threadId, draft, wanted) => {
+    if (threadId !== threadRef.current.thread_id || !boxRef.current.open) return;
+    // A save of this window's landed: the box holds the draft's files (another window's included, one it removed
+    // gone) with this window's changes still on their way (`wanted`). Unchanged: nothing moves (an undo stays armed).
+    const text = boxRef.current.text;
+    const want = new Set(wanted);
+    // A tile that finished uploading since the box's last save is in no save yet: it stays, and its own save adds it.
+    const held = new Set(replyDraft.heldOf(threadId));
+    const all = replyFiles.draftFiles(text).map((file) => file.upload_id);
+    const fresh = all.filter((id) => !held.has(id) && !want.has(id));
+    const now = all.filter((id) => !fresh.includes(id));
+    if (now.length !== want.size || now.some((id) => !want.has(id))) {
+      const inDraft = new Set((draft.files ?? []).map((file) => file.upload_id));
+      // A long paste leaving the box takes words with it: said in the thread's live region.
+      const pastesGone = replyFiles.draftFiles(text).filter((file) => file.pasted && !want.has(file.upload_id) && !fresh.includes(file.upload_id)).length;
+      if (pastesGone > 0) announce(pastesGone === 1 ? 'A pasted text was sent or removed on another device.' : `${pastesGone} pasted texts were sent or removed on another device.`);
+      takeDraftFiles((draft.files ?? []).filter((file) => want.has(file.upload_id)), text, 'replace', [...wanted.filter((id) => !inDraft.has(id)), ...fresh]);
+    }
+    const saved = replyFiles.draftFiles().filter((file) => !fresh.includes(file.upload_id));
+    // Counted as saved without the fresh tiles, so the box's files effect still saves them.
+    if (fresh.length > 0) filesSaved.current = pastedSignature(saved);
+    replyDraft.boxTook(threadId, saved.map((file) => file.upload_id));
+  };
   // The sessions the reply box's text tags with `@` (approval "inbox-tag-agents"), as the field reports them.
   const [taggedIds, setTaggedIds] = useState<readonly string[]>([]);
   // What Send does with the agents tagged in the words (approval "inbox-tag-handoff", A2): an Ask until a link says otherwise.
@@ -1476,14 +1559,17 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     setTaggedIds(ids);
     if (ids.length === 0) setTagMode('ask');
   }, []);
-  const closeBox = () => {
+  /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
+  const closeBox = (discarded = false) => {
     // A Send waiting to be confirmed: read back now, so a reply that went leaves no stale "Draft" foot.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier) forgetUnconfirmed(earlier, 'closed');
-    // Cancel and Escape keep the words as a draft (saved now); Discard drops them.
+    // Cancel and Escape keep the words and files as a draft (saved now; a file still uploading joins it once in);
+    // Discard drops them.
     replyDraft.flush();
     setBox({ open: false, text: '' });
     setTaggedIds([]);
+    if (!discarded && !machine) landLater(thread.thread_id, replyFiles.detach());
     replyFiles.reset();
   };
   /**
@@ -1657,6 +1743,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     return found?.getAttribute('data-message-article') ?? null;
   };
   const expandAll = () => {
+    perfInteraction('expand-all', thread.messages.length);
     const id = topVisible();
     anchorRef.current = { id, top: id ? (articleOf(id)?.getBoundingClientRect().top ?? 0) : 0, focus: null, folding: false };
     if (allOpen) {
@@ -2256,8 +2343,14 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     });
   };
 
+  /** The thread the reply box's files belong to (a file still uploading as the thread changes joins its draft). */
+  const filesFor = useRef(thread.thread_id);
   useEffect(() => {
-    // Another thread: nothing of the last one carries over.
+    // Another thread: nothing of the last one carries over. Its files are in its draft already; one still
+    // uploading joins it once in (another machine's thread keeps no draft: it stops).
+    const previous = filesFor.current;
+    filesFor.current = thread.thread_id;
+    if (previous !== thread.thread_id && !machineOf(previous)) landLater(previous, replyFiles.detach());
     setPending(new Map());
     setBox({ open: false, text: '' });
     replyFiles.reset();
@@ -2849,16 +2942,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // The box's words as the answer comes (a restore or typing may change them meanwhile): edits there
     // win, and the next save is refused if the draft moved.
     void reloadDraft(() =>
-      boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.pastedDraft(boxRef.current.text) } : null,
+      boxRef.current.open ? { text: boxRef.current.text, files: replyFiles.draftFiles(boxRef.current.text) } : null,
     ).then((answer) => {
       if (!answer?.replaceBox) return;
       if (answer.draft) {
         setBox({ open: true, text: answer.draft.body });
-        takeDraftPastes(answer.draft.files ?? [], answer.draft.body);
+        takeDraftFiles(answer.draft.files ?? [], answer.draft.body);
         announce('This reply changed in another window.');
       } else {
-        // Sent or discarded elsewhere: nothing of it is left to show (other pasted files keep the box open).
-        takeDraftPastes([], '');
+        // Sent or discarded elsewhere: nothing of it is left to show (a file still uploading here keeps the box open).
+        takeDraftFiles([], '');
         const others = replyFiles.current().length > 0;
         setBox({ open: others, text: '' });
         if (!others) setTaggedIds([]);
@@ -2868,16 +2961,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftChanged, reloadDraft]);
 
-  // A long paste finished uploading, or a tile was removed: the draft keeps the tiles as they are now (the words
+  // A file finished uploading, or a tile was removed (its ×): the draft keeps the tiles as they are now (the words
   // unchanged). A Send on its way, a closed box (Cancel kept the draft as it was) and a draft's own tiles save nothing.
   useEffect(() => {
-    if (pastedNow === pastedSaved.current) return;
-    pastedSaved.current = pastedNow;
+    if (filesNow === filesSaved.current) return;
+    filesSaved.current = filesNow;
     const current = boxRef.current;
     if (!current.open || sending) return;
-    replyDraft.save(current.text, replyFiles.pastedDraft(current.text));
+    replyDraft.save(current.text, replyFiles.draftFiles(current.text));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pastedNow]);
+  }, [filesNow]);
 
   // A conflict appears (both windows hold words): said once in the thread's live region.
   const conflictShown = replyDraft.conflict !== null;
@@ -2899,8 +2992,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     if (current.open && current.text.trim()) return;
     if (!current.open) restoringRef.current = true;
     setBox({ open: true, text: kept });
-    // Its long pastes come back as tiles that Put back still returns (words a conflict left here have none).
-    if (replyDraft.conflict === null) takeDraftPastes(replyDraft.draft?.files ?? [], kept);
+    // Its files come back as tiles (a long paste's Put back still works), beside any the person attached before the
+    // draft was read. With words a conflict left here too: this window's files waiting on the choice show, so Keep
+    // mine keeps them.
+    takeDraftFiles(draftFilesWithMine(replyDraft.draft?.files ?? []), kept, 'add');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyDraft.loadedFor, replyDraft.draft, replyDraft.conflict, thread.thread_id]);
 
@@ -2933,16 +3028,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // The update control's restart guard: an unsent reply is the one thing a
   // restart (a page reload) would lose.
-  // Words are kept as a draft (and sent as the page goes); only files pasted into the box are not.
-  // The restart guard asks while files pasted into the box, or words not saved yet (a save waiting or on
-  // its way, words a conflict left unsaved: replyDraftUnsaved, read when the guard asks), would be lost.
+  // Words and files are kept as a draft (words also sent as the page goes). The restart guard asks while a file
+  // the draft does not hold yet, or words not saved yet (a save waiting or on its way, words a conflict left
+  // unsaved, a file landing in a closed box's draft: replyDraftUnsaved, read when the guard asks), would be lost.
   const unsentSubject = thread.subject ?? 'this thread';
-  // A long paste the reply draft holds on the server (approval "inbox-paste-attachment") is not lost by a restart. One
-  // still uploading, waiting for its save, refused (its upload gone), or on another machine's thread (whose drafts are
-  // not saved) would be: the guard asks.
-  const heldPastes = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
+  // A file the reply draft holds on the server is not lost by a restart. One still uploading, waiting for its save,
+  // refused (its upload gone), or on another machine's thread (whose drafts are not saved) would be: the guard asks.
+  const heldFiles = new Set((replyDraft.draft?.files ?? []).map((file) => file.upload_id));
   const unsentFiles =
-    box.open && replyFiles.files.some((file) => !(file.pasted && file.state === 'done' && file.upload && !machine && heldPastes.has(file.upload.upload_id)));
+    box.open && replyFiles.files.some((file) => !(file.state === 'done' && file.upload && !machine && heldFiles.has(file.upload.upload_id)));
 
   // Files dropped on the reply box attach there (a dashed "Drop to attach"; approval "inbox-reply-attach").
   const boxDrop = useFileDrop((list) => {
@@ -2963,7 +3057,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   reloadFlush.current = async () => {
     const current = boxRef.current;
     const text = current.open ? current.text : null;
-    const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.pastedDraft(text)), pickQueue.settled()]);
+    const [reply, answers] = await Promise.all([replyDraft.settle(text, text === null ? undefined : replyFiles.draftFiles(text)), pickQueue.settled()]);
     const awayWords = !!machine && text !== null && text.trim() !== '';
     return reply && answers && !unsentFiles && !awayWords;
   };
@@ -3235,7 +3329,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     const kept = replyDraft.conflict ?? replyDraft.draft?.body ?? '';
     const text = kept.trim() ? kept : '';
     setBox({ open: true, text });
-    if (replyDraft.conflict === null && replyDraft.draft?.files?.length) takeDraftPastes(replyDraft.draft.files, text);
+    // Its files come back as tiles (Cancel, another thread or a reload took them out of the box, never the draft), with
+    // this window's changes not saved yet; the box's next save counts from them. With a conflict too: a file whose save
+    // waits on the person's choice shows, so Keep mine keeps it (an empty box would send its removal).
+    const files = draftFilesWithMine(replyDraft.draft?.files ?? []);
+    if (files.length > 0) takeDraftFiles(files, text);
+    else replyDraft.boxTook(thread.thread_id, replyFiles.draftFiles(text).map((file) => file.upload_id));
     setError(null);
   };
 
@@ -3290,6 +3389,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const changeReply = (text: string, behind = false) => {
     // Read-only while a Send is on its way: the words it carries are the words in the box.
     if (sending) return;
+    // A key typed (not a restore): pn:keystroke when the next frame comes 50 ms or more after the key.
+    if (!behind) perfKeystroke();
     // The words changed (or emptied): a Send waiting to be confirmed no longer matches them.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier && text.trim() !== earlier.words) forgetUnconfirmed(earlier, text.trim() === '' ? 'emptied' : 'edited');
@@ -3299,10 +3400,10 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     boxRef.current = liveBox(true);
     // A long paste's tile keeps its place in the words, edit by edit (this pane does not render for a key).
     replyFiles.follow();
-    // The long pastes beside the words go in the draft too, each placed in these words (approval "inbox-paste-attachment").
-    const pastes = replyFiles.pastedDraft(text);
-    pastedSaved.current = pastedSignature(pastes);
-    replyDraft.save(text, pastes);
+    // The files beside the words go in the draft too, a long paste placed in these words (approval "inbox-paste-attachment").
+    const files = replyFiles.draftFiles(text);
+    filesSaved.current = pastedSignature(files);
+    replyDraft.save(text, files);
   };
 
   /** The reply box opens behind full screen, without taking focus (full screen's composer writes into it). */
@@ -3557,12 +3658,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       }
       let words = boxWords();
       let draftSavedAs: string | null = null;
-      /** The long pastes a closed box's draft keeps (approval "inbox-paste-attachment"): they go with its words. */
+      /** The files a closed box's draft keeps (attached on any device, long pastes too): they go with its words. */
       let draftUploads: string[] = [];
       const savedAs = await replyDraft.claim();
       claimed = true;
       if (box.open) {
-        if (words !== '' || replyFiles.pastedDraft().length > 0) draftSavedAs = savedAs;
+        if (words !== '' || replyFiles.draftFiles().length > 0) draftSavedAs = savedAs;
       } else if (replyDraft.conflict !== null) {
         // Words another window's change left unsaved here: they go, and the newer draft stays.
         words = replyDraft.conflict.trim();
@@ -3575,7 +3676,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         draftUploads = (kept?.files ?? []).map((file) => file.upload_id);
       }
       sendWords = words;
-      sendClears = words !== '' || draftUploads.length > 0 || (box.open && replyFiles.pastedDraft().length > 0);
+      sendClears = words !== '' || draftUploads.length > 0 || (box.open && replyFiles.draftFiles().length > 0);
       // Only the questions the person chose to skip, and only while still open (sendTargetsOf reads the
       // thread as it is now): a pick saved meanwhile is sent instead, a question that landed is left open.
       const skip = skipArmed ?? new Set<string>();
@@ -3776,8 +3877,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         } else {
           replyDraft.release();
           const text = textRef.current?.value ?? '';
-          const pastes = replyFiles.pastedDraft(text);
-          if (text.trim() !== '' || pastes.length > 0) replyDraft.save(text, pastes);
+          const files = replyFiles.draftFiles(text);
+          if (text.trim() !== '' || files.length > 0) replyDraft.save(text, files);
         }
       }
       releasePicks?.();
@@ -5477,7 +5578,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ? `Reply to ${replyName}`
                     : `Reply to ${asker} in ${thread.project.name}`
               }
-              savedAt={boxHasWords ? (replyDraft.draft?.updated_at ?? null) : null}
+              savedAt={boxHasWords || replyDraft.draft?.files?.length ? (replyDraft.draft?.updated_at ?? null) : null}
               tooLong={replyDraft.tooLong}
               conflict={
                 replyDraft.conflict !== null
@@ -5486,14 +5587,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                       text: conflictText(conflictSentElsewhere),
                       onKeepMine: () => {
                         const mine = replyText.get();
-                        replyDraft.keepMine(mine, replyFiles.pastedDraft(mine));
+                        replyDraft.keepMine(mine, replyFiles.draftFiles(mine));
                         announce('Your words are saved.');
                         requestAnimationFrame(() => textRef.current?.focus());
                       },
                       onDiscard: () => {
-                        // Only this window's words go: the other window's draft stays and comes into the box.
-                        const theirs = replyDraft.takeTheirs();
+                        // Only this window's words and file changes go: the other window's draft stays and comes into the box.
+                        const draft = replyDraft.takeTheirs();
+                        const theirs = draft?.body ?? '';
                         setBox({ open: true, text: theirs });
+                        takeDraftFiles(draft?.files ?? [], theirs);
                         announce(theirs.trim() ? 'Your words were discarded; the other window’s are in the box.' : 'Your words were discarded.');
                         requestAnimationFrame(() => textRef.current?.focus());
                       },
@@ -5502,7 +5605,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               }
               onDiscard={() => {
                 replyDraft.discard();
-                closeBox();
+                closeBox(true);
                 announce('Draft discarded.');
               }}
             />
@@ -5564,38 +5667,59 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
               {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
               {/* The box's toolbar: the paperclip first (any file; a phone's picker offers the photo library too, and
-                  names what it hands over as a paste is), then the picks, skip and annotations chips. */}
-              <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
-                <AttachFilesButton
-                  className="ib-rclip"
-                  iconSize={phone ? 19 : 16}
-                  phone={phone}
-                  inputData="data-reply-attach"
-                  onFiles={(list) => {
-                    (phone ? replyFiles.attach : replyFiles.add)(list);
-                    setError(null);
-                  }}
+                  names what it hands over as a paste is), then the picks, skip and annotations chips. A phone draws
+                  one row instead: the paperclip, one line for the questions and comments, the mic (ReplyFootPhone). */}
+              {phone ? (
+                <ReplyFootPhone
+                  clip={
+                    <AttachFilesButton
+                      className="ib-rclip"
+                      iconSize={19}
+                      phone
+                      inputData="data-reply-attach"
+                      onFiles={(list) => {
+                        replyFiles.attach(list);
+                        setError(null);
+                      }}
+                    />
+                  }
+                  skip={{ count: keepOpen ? unanswered.length : skipIds.size, keepOpen, onToggle: toggleKeepOpen }}
+                  dropped={dropped.length}
+                  comments={takesAnnotations ? { props: commentsListProps, list: commentsList, onList: setCommentsList } : null}
+                  voice={voice}
                 />
-                {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
-                {draftAnswers.length > 0 && (
-                  <span className="ib-rchip" data-picks-chip="">
-                    <Icon name="check" size={13} />
-                    {plural(draftAnswers.length, 'pick')}
-                  </span>
-                )}
-                <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
-                {dropped.length > 0 && (
-                  <Tip content="Replaced; this pick won't be sent">
-                    <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
-                      {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+              ) : (
+                <div className={`ib-rfoot${keepOpen ? ' ib-keep' : ''}`}>
+                  <AttachFilesButton
+                    className="ib-rclip"
+                    iconSize={16}
+                    inputData="data-reply-attach"
+                    onFiles={(list) => {
+                      replyFiles.add(list);
+                      setError(null);
+                    }}
+                  />
+                  {/* The answers the list above shows, a pick still being saved included, so the two numbers agree. */}
+                  {draftAnswers.length > 0 && (
+                    <span className="ib-rchip" data-picks-chip="">
+                      <Icon name="check" size={13} />
+                      {plural(draftAnswers.length, 'pick')}
                     </span>
-                  </Tip>
-                )}
-                {takesAnnotations && (
-                  <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
-                )}
-                <VoiceFoot voice={voice} phone={phone} />
-              </div>
+                  )}
+                  <SkipChip count={keepOpen ? unanswered.length : skipIds.size} keepOpen={keepOpen} onToggle={toggleKeepOpen} />
+                  {dropped.length > 0 && (
+                    <Tip content="Replaced; this pick won't be sent">
+                      <span className="ib-rchip ib-dropped" data-dropped-picks-chip="">
+                        {dropped.length} {dropped.length === 1 ? 'pick' : 'picks'} on a replaced question
+                      </span>
+                    </Tip>
+                  )}
+                  {takesAnnotations && (
+                    <AnnotationsChip {...commentsListProps} list={commentsList?.card ? null : commentsList} onList={setCommentsList} />
+                  )}
+                  <VoiceFoot voice={voice} phone={false} />
+                </div>
+              )}
               {boxDrop.over && (
                 <div className="ib-rdrop" aria-hidden="true" data-box-drop="">
                   <Icon name="clip" size={18} />
@@ -5616,7 +5740,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   <Icon name="send" size={15} />
                   Send
                 </button>
-                <button type="button" className="ib-btn ib-ghost" onClick={closeBox}>
+                <button type="button" className="ib-btn ib-ghost" onClick={() => closeBox()}>
                   Cancel
                 </button>
                 <span className="ib-sp" />
