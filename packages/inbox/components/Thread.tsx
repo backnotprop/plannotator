@@ -939,6 +939,8 @@ export interface ThreadPaneProps {
   onChanged: () => Promise<void>;
   /** Raised each time the Inbox says this thread's reply draft changed (`event: drafts`): the draft is read again. */
   draftChanged?: number;
+  /** Raised each time records needed only this thread's files read again, not the thread (openThreadReads.ts). */
+  filesChanged?: number;
   onClose: () => void;
   /** The attachment open beside the thread (`#…&file=att_…`), its version, and an annotation to show. */
   file: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
@@ -1103,8 +1105,8 @@ export interface ThreadPaneProps {
   onRunChanged?: () => void;
 }
 
-/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh. */
-function useThreadAttachments(threadId: string, revision: unknown) {
+/** The thread's attachments as they are now and the annotations waiting for a Send, kept fresh (read again when `revision` or `again` changes). */
+function useThreadAttachments(threadId: string, revision: unknown, again: number) {
   const [model, setModel] = useState<AttachmentsModel | null>(null);
   const load = useCallback(async () => {
     try {
@@ -1119,7 +1121,7 @@ function useThreadAttachments(threadId: string, revision: unknown) {
   }, [threadId]);
   useEffect(() => {
     void load();
-  }, [load, revision]);
+  }, [load, revision, again]);
   // A file edited on disk shows as changed when the person comes back to the window.
   useEffect(() => {
     const onFocus = () => void load();
@@ -1292,7 +1294,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, onRunChanged }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, onRunChanged }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1921,7 +1923,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A saved pick moves neither: only a real read of the thread reads them again.
   const filesRevision = useRef(thread);
   if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
-  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current);
+  const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged);
   const attachments: InboxAttachmentState[] = files?.attachments ?? [];
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.
   const inlineImages: InboxAttachmentState[] = useMemo(() => files?.inline_images ?? [], [files]);
@@ -3298,6 +3300,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
 
   // The person's own sent replies are drawn in their words, with the answers they carried as a
   // short list read from the questions (sentReply.ts): never the agent-facing answers section.
+  // Its times read "8:22 PM" today and "Nov 1, 8:22 PM" after midnight: a new day builds it again.
+  const day = new Date().toDateString();
   const sentAnswersByReply = useMemo(() => {
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
@@ -3306,7 +3310,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
       if (groups.length > 0) out.set(m.id, groups);
     }
     return out;
-  }, [thread.messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is the key, not an input.
+  }, [thread.messages, day]);
 
   const openBox = () => {
     setNewMessage(null);

@@ -1514,7 +1514,8 @@ export type InboxEvent =
   | { seq: number; kind: 'project'; id: string; project: InboxProject }
   /** `first`: the message's first line, not a later rewrite of it (a look, an archive, an Unarchive). Absent from an older Inbox. */
   | { seq: number; kind: 'message'; id: string; first?: boolean; message: InboxMessage }
-  | { seq: number; kind: 'question'; id: string; question: InboxQuestion }
+  /** `thread_id`: its message's thread (null when that message is gone); absent from an older Inbox. */
+  | { seq: number; kind: 'question'; id: string; thread_id?: string | null; question: InboxQuestion }
   | { seq: number; kind: 'annotation'; id: string; annotation: InboxAnnotationRecord }
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
   | { seq: number; kind: 'card'; id: string; card: InboxCardWire };
