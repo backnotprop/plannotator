@@ -126,7 +126,7 @@ A `--bg` session has no one at its terminal, so a prompt at startup is a hang: t
 
 ### Window routes
 
-Same origin and `serverSession`, like every window write (`serverSession` required for Trust folder and a Send with `to.launch.trust`, `403 window_only`). Open and the settings route are refused over the tailnet; Trust folder takes the owner there, never a guest.
+Same origin and `serverSession`, like every window write (`serverSession` required for Trust folder and a Send with `to.launch.trust`, `403 window_only`). Open and the settings route are refused over the tailnet; Trust folder takes the owner there, never a guest. Starting an agent is the owner's: a Send with `to.launch` and Try again answer a tailnet login from `inboxTailscaleAllow` `403 owner_only` (as Ask AI does), and the owner over the tailnet as on the computer (`inbox-tailnet-owner.test.ts`, "starting an agent is the owner's").
 
 - `POST /api/inbox/launch/:id/stop`: `claude stop`.
 - `POST /api/inbox/launch/:id/open`: macOS Terminal through `osascript`, running `claude attach <short>` in the folder (plain `claude` in an untrusted folder, so its trust prompt shows).
