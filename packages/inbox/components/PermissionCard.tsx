@@ -37,13 +37,14 @@ import { inboxAgentName, type InboxMessageWire, type InboxQuestion, type InboxRu
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxApiError, inboxApi } from '../api';
 import { AuthorMark, Icon } from '../icons';
+import { newUuid } from '../uuid';
 import { useMinuteClock } from './Undelivered';
 
 /** How long the answers ignore activation after the card appears or takes focus (not from a pointer). */
 export const ARM_MS = 600;
 
 type Outcome = 'once' | 'session' | 'auto' | 'full' | 'deny' | 'terminal' | 'withdrawn' | 'closed';
-/** The thread's ways to the session in a terminal (its ⋯ menu's): Open in Terminal on a computer, Copy everywhere. */
+/** The thread's ways to the session in a terminal: Open in Terminal on a computer, Copy everywhere. */
 export type PermissionTerminal = { open: (() => void) | null; copyAttach: (() => void) | null };
 type Kind = 'bash' | 'file' | 'fetch' | 'search' | 'other';
 
@@ -355,7 +356,7 @@ export function PermissionCard({
   arrived: boolean;
   /** The follow-up that withdrew it ("Answered in Terminal."), or null. */
   followUp: string | null;
-  /** Open in Terminal and Copy attach command, as the thread's ⋯ menu has them (Approve in Terminal opens it); null outside a launch. */
+  /** Open in Terminal, as the run line has it (Approve in Terminal opens it), and ⋯'s Copy attach command; null outside a launch. */
   terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
@@ -433,7 +434,7 @@ export function PermissionCard({
     try {
       const saved = await inboxApi.pick(message.id, q.key, q.revision, picked, { unsentOnly: true, confirmFull });
       const revision = saved.questions.find((x) => x.key === q.key)?.revision ?? q.revision;
-      await inboxApi.reply(message.id, { idempotency_key: crypto.randomUUID(), words: '', questions: [{ key: q.key, revision }] });
+      await inboxApi.reply(message.id, { idempotency_key: newUuid(), words: '', questions: [{ key: q.key, revision }] });
       await onChanged();
       return true;
     } catch (cause) {

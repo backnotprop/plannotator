@@ -23,7 +23,8 @@
  *                            refuseAuto (commander's refusal of `auto`, exit 1),
  *                            slow (sleeps 40 s); else (after `bgDelayMs`) prints
  *                            "backgrounded · <8 hex> · N (idle — send a prompt to start)"
- *                            and starts the session process.
+ *                            and starts the session process, unless a server in
+ *                            the folder's .mcp.json waits on approval.
  *  agents --json [--all] [--cwd D]  without --all, done and stopped sessions are left out
  *  stop <id> / respawn <id> / rm <id> / purge [--dry-run | --yes] <folder> / attach <id>
  *
@@ -34,6 +35,14 @@
  * `workMs` (and while `hold` or `waiting` is set) it answers through the
  * Inbox's MCP `send_message` with `reply_to`, and goes idle. `waiting` makes
  * the host list it as waiting on a permission prompt meanwhile.
+ *
+ * Project MCP servers, as Claude Code 2.1.316 sorts them: a name in
+ * `disabledMcpjsonServers` (the --settings file, or the folder's
+ * .claude/settings.json and .claude/settings.local.json) is rejected, whatever
+ * else says; `enableAllProjectMcpServers` or `enabledMcpjsonServers` approves it;
+ * any other is pending, and "New MCP server found in this project" holds the
+ * hidden session: `--bg` and `respawn` still print, but no session process runs,
+ * so no command is ever taken and no hook fires.
  *
  * Permission modes, as Claude Code 2.1.314 runs a background session: with no
  * --permission-mode, the flag settings' then the user's `permissions.defaultMode`
@@ -113,16 +122,41 @@ const updateAgent = (sessionId, patch) => {
   if (current) saveAgent({ ...current, ...patch });
 };
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** `.mcp.json` in `folder`, sorted as the header says. */
+const mcpServersIn = (folder, flagSettings) => {
+  const sources = [flagSettings, readJson(path.join(folder, ".claude", "settings.json"), null), readJson(path.join(folder, ".claude", "settings.local.json"), null)].map((s) => s || {});
+  const names = Object.keys((readJson(path.join(folder, ".mcp.json"), {}) || {}).mcpServers || {});
+  const listed = (name, list) => sources.some((s) => (s[list] || []).includes(name));
+  const rejected = names.filter((name) => listed(name, "disabledMcpjsonServers"));
+  const others = names.filter((name) => !rejected.includes(name));
+  const all = sources.some((s) => s.enableAllProjectMcpServers === true);
+  const running = others.filter((name) => all || listed(name, "enabledMcpjsonServers"));
+  return { running, rejected, pending: others.filter((name) => !running.includes(name)) };
+};
+/** Claude's global config: `$CLAUDE_CONFIG_DIR/.claude.json`, else HOME's. */
+const globalConfigPath = () => path.join(process.env.CLAUDE_CONFIG_DIR || process.env.HOME || "", ".claude.json");
+/** A linked worktree's main checkout (its `.git` file names `<checkout>/.git/worktrees/<name>`), else the folder. */
+const checkoutOf = (root) => {
+  try {
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(path.join(root, ".git"), "utf8"));
+    const common = gitdir && /^(.+)\/\.git\/worktrees\/[^/]+$/.exec(gitdir[1].trim());
+    return common ? common[1] : root;
+  } catch {
+    return root;
+  }
+};
 /**
- * Claude's folder trust (`trustCheck`), keyed as Claude keys it: HOME's ~/.claude.json accepts the folder or a
- * folder above it, but a git repository's root (a `.git` there) counts only through its own entry: a parent's
- * trust never covers a nested repository (the real-CLI smoke and code.claude.com's workspace-trust docs).
+ * Claude's folder trust (`trustCheck`), keyed as Claude keys it: the physical path. The config accepts the folder or
+ * a folder above it, but a git repository's root (a `.git` there) counts only through its own entry, or for a linked
+ * worktree its main checkout's: a parent's trust never covers a nested repository (the real-CLI smoke,
+ * code.claude.com's workspace-trust docs and the 2.1.316 binary).
  */
 const trusted = (folder) => {
-  const projects = (readJson(path.join(process.env.HOME || "", ".claude.json"), {}) || {}).projects || {};
-  for (let dir = folder; ; dir = path.dirname(dir)) {
-    if (projects[dir] && projects[dir].hasTrustDialogAccepted === true) return true;
-    if (fs.existsSync(path.join(dir, ".git"))) return false;
+  const projects = (readJson(globalConfigPath(), {}) || {}).projects || {};
+  const accepted = (dir) => Boolean(projects[dir] && projects[dir].hasTrustDialogAccepted === true);
+  for (let dir = fs.realpathSync(folder); ; dir = path.dirname(dir)) {
+    if (accepted(dir)) return true;
+    if (fs.existsSync(path.join(dir, ".git"))) return accepted(checkoutOf(dir));
     if (path.dirname(dir) === dir) return false;
   }
 };
@@ -198,7 +232,8 @@ function main() {
       mode = fs.statSync(settingsPath).mode & 0o777;
     } catch {}
     const env = (settings && settings.env) || {};
-    record({ settingsPath, settings, settingsMode: mode, threadExisted: threadWritten(env.PLANNOTATOR_DATA_DIR, env.PLANNOTATOR_LAUNCH) });
+    const mcp = mcpServersIn(process.cwd(), settings);
+    record({ settingsPath, settings, settingsMode: mode, threadExisted: threadWritten(env.PLANNOTATOR_DATA_DIR, env.PLANNOTATOR_LAUNCH), mcp });
     if (cfg.fault === "untrusted" || (cfg.trustCheck && !trusted(process.cwd()))) untrustedExit(process.cwd());
     if (cfg.fault === "slow") {
       setTimeout(() => process.exit(1), 40_000);
@@ -212,7 +247,7 @@ function main() {
     // The person's own recorded consent and default mode (never the --settings file's consent).
     const home = process.env.HOME || "";
     const user = readJson(path.join(home, ".claude", "settings.json"), {}) || {};
-    const global = readJson(path.join(home, ".claude.json"), {}) || {};
+    const global = readJson(globalConfigPath(), {}) || {};
     const consent = user.skipDangerousModePermissionPrompt === true || global.bypassPermissionsModeAccepted === true;
     let permissionMode = flag("--permission-mode") || ((settings && settings.permissions) || {}).defaultMode || (user.permissions || {}).defaultMode || "default";
     const bypassAvailable = consent && (args.includes("--allow-dangerously-skip-permissions") || permissionMode === "bypassPermissions");
@@ -222,7 +257,7 @@ function main() {
       const id = sessionId.replace(/-/g, "").slice(0, 8);
       const name = flag("--name") || "session";
       saveAgent({ id, sessionId, cwd: process.cwd(), name, kind: "background", startedAt: Date.now(), status: "idle", state: "running", settingsPath, permissionMode, bypassAvailable });
-      startSession(sessionId);
+      if (mcp.pending.length === 0) startSession(sessionId);
       process.stdout.write(`Starting background service…\nbackgrounded · ${id} · ${name} (idle — send a prompt to start)\n`);
     };
     // A busy supervisor: the session exists only once --bg answers (Delete may land meanwhile).
@@ -269,7 +304,7 @@ function main() {
     // Claude checks trust before it restarts a background session too.
     if (cfg.trustCheck && !trusted(agent.cwd)) untrustedExit(agent.cwd);
     updateAgent(agent.sessionId, { state: "running", status: "idle" });
-    startSession(agent.sessionId);
+    if (mcpServersIn(agent.cwd, readJson(agent.settingsPath, null)).pending.length === 0) startSession(agent.sessionId);
     process.stdout.write(`respawned ${agent.id}\n`);
     return;
   }

@@ -186,6 +186,23 @@ function userText(message: { content?: unknown } | undefined): string {
 		.join("");
 }
 
+/**
+ * PLANNOTATOR_SESSION_PROJECT (apps/hook/server/inbox-mcp-shim.ts,
+ * `inboxSessionProjectFromEnv`): `pi:<session id>:<ctx.cwd>`, the folder this
+ * session's `plannotator_inbox` tool files under. Pi gives each bash call this
+ * process's environment plus PI_SESSION_ID, so a `cd sub && plannotator inbox
+ * call …` or `plannotator card …` lands in the tool's project too. Set before
+ * every bash call, so a new or resumed session's id is the one named. A stale
+ * ctx names nothing new.
+ */
+export function exportPiSessionProject(env: Record<string, string | undefined>, ctx: Pick<ExtensionContext, "cwd" | "sessionManager">): void {
+	try {
+		env.PLANNOTATOR_SESSION_PROJECT = `${PI_INBOX_HOST}:${ctx.sessionManager.getSessionId()}:${ctx.cwd}`;
+	} catch {
+		// A stale ctx: the last value stands, and it names its own session.
+	}
+}
+
 function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options: PiInboxOptions & { reminder: string | null }): void {
 	const spec = inboxAgentTool(connection.tools);
 	const ohMyPi = detectPiHost(pi) === "oh-my-pi";
@@ -323,6 +340,11 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			}
 		},
 	};
+
+	// Before each bash call: the session's project for the commands it runs (exportPiSessionProject).
+	pi.on("tool_call", (event: { toolName?: unknown } | undefined, callCtx: ExtensionContext) => {
+		if (event?.toolName === "bash") exportPiSessionProject(process.env, callCtx);
+	});
 
 	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
 		ctx = startCtx;

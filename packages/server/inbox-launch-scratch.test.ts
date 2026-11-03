@@ -215,7 +215,7 @@ describe("claudeTrustsFolder", () => {
   });
 
   test("a git repository under a trusted folder is not covered: only its own entry counts (a scratch folder the agent made a repository)", () => {
-    const home = mkdtempSync(join(tmpdir(), "plannotator-trust-repo-"));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-trust-repo-")));
     restore.push(() => rmSync(home, { recursive: true, force: true }));
     const root = join(home, "scratch");
     const repo = join(root, "notes");

@@ -123,6 +123,8 @@ const OWN_FAKES = new Set([
   "inbox-launch-opencode.spec.ts",
   "inbox-launch-permission.spec.ts",
   "inbox-launch-scratch.spec.ts",
+  "inbox-launch-trust.spec.ts",
+  "inbox-launch-trust-compose.spec.ts",
 ]);
 
 describe("an e2e spec that builds its own PATH", () => {

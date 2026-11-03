@@ -366,9 +366,9 @@ test('allow once: the question in the launch thread, the waiting line and the fo
   await expect(record(page, 'once')).toContainText('bun run --cwd apps/inbox build');
   await expect(p.locator('article.ib-message[data-author="person"]')).toHaveCount(1);
   await shot(page, 'permission-answered');
-  // At rest there is no line, and ⋯ still has Copy attach command (a phone has no Open in Terminal).
+  // At rest there is no line, and ⋯ still has Copy attach command.
   await p.locator('[data-thread-more]').click();
-  await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Open in Terminal', 'Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
+  await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
   await page.keyboard.press('Escape');
   // The answer went to the permission identity (the hook's call recorded it), never to the session's poll.
   const after = await readThread(page, threadId);
