@@ -188,6 +188,23 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
     );
   }
 
+  test("print requests run only for messages from the parent", () => {
+    const originalPrint = window.print;
+    let prints = 0;
+    window.print = () => { prints += 1; };
+    try {
+      window.dispatchEvent(new MessageEvent("message", {
+        data: { type: "plannotator-bridge-print" },
+        source: null,
+      }));
+      expect(prints).toBe(0);
+      postBridge({ type: "plannotator-bridge-print" });
+      expect(prints).toBe(1);
+    } finally {
+      window.print = originalPrint;
+    }
+  });
+
   /** find-and-mark renders through the rAF-coalesced overlay scheduler (a
    * batch restore renders once instead of once per annotation); happy-dom's
    * requestAnimationFrame is setImmediate-backed, so yielding one macrotask

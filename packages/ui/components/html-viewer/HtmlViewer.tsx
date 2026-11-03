@@ -481,6 +481,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Increment on every bridge-ready event so srcdoc navigations re-send
     // state even though the iframe element and its WindowProxy are reused.
     const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const [printReady, setPrintReady] = useState(false);
     const [iframeFocused, setIframeFocused] = useState(false);
     const [vimBridgePhase, setVimBridgePhase] =
       useState<VimSelectionHudContext>("inactive");
@@ -563,6 +564,10 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       });
       return injectIntoHead(rawHtml, injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+
+    useLayoutEffect(() => {
+      setPrintReady(false);
+    }, [srcdoc]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -827,6 +832,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             );
           }
           setIframeReadyVersion((version) => version + 1);
+          setPrintReady(true);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
           setVimHelpOpen(false);
@@ -1187,6 +1193,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
+      print: !liveMode && printReady ? () => postToBridge({ type: `${PREFIX}print` }) : undefined,
       // Shared/draft restores respect the live page filter too.
       applySharedAnnotations: (anns: Annotation[]) =>
         hook.applyAnnotations(forCurrentPage(anns)),
@@ -1274,6 +1281,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     return (
       <>
         <div
+          data-print-html={liveMode ? undefined : ""}
           className={`relative w-full${fullViewport ? " h-full flex flex-col" : ""}`}
           style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
@@ -1355,6 +1363,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
                 colorScheme: "auto",
