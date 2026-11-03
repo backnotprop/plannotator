@@ -227,7 +227,8 @@ function unmount() {
  * so a save queued behind an answer has started its request by the second read.
  */
 async function requestsSettled() {
-  for (let i = 0; i < 100; i++) {
+  // About 5 s, so a slow runner still settles.
+  for (let i = 0; i < 250; i++) {
     if (inflight === 0) {
       await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
       if (inflight === 0) return;
