@@ -120,6 +120,7 @@ packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
 packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
+packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
