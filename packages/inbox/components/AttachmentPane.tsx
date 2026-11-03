@@ -60,7 +60,7 @@ import { showsContents, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
-import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { FullViewBar, toolsCornerFromLocation, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
 import { useHtmlPageComment } from './HtmlPageComment';
@@ -132,6 +132,8 @@ export function fileFootRow(section: ParentNode): HTMLElement | null {
 
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
+/** What floats over a file in full screen and gathers into the corner control with the toolbar (inbox.css). */
+const GATHERED = '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open';
 
 /**
  * Composers that close on Escape and would drop what was typed: a comment
@@ -459,9 +461,36 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const full = props.full;
   /** Full screen's composer: an image, a film and an HTML page draw it (the comment row of the first two goes inside it). */
   const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'html');
-  /** The toolbar: showing (pinned), tucked into its corner handle, or out for a moment (revealed). Every opening of full screen starts showing. */
+  /**
+   * The tools: showing (pinned), or gathered into the corner control (tucked) by » or the composer's ⌄. Every opening
+   * of full screen starts showing.
+   */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
   const barRef = useRef<FullViewBarHandle>(null);
+  /** The bottom corner the tools gather into (`?variant=corner-left` to compare; right by default). */
+  const [toolsCorner] = useState(toolsCornerFromLocation);
+  /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
+  const gatheredFrom = useRef<'bar' | 'composer'>('bar');
+  /**
+   * Before the tools gather: how far each floating control is from the corner control, and how small it must get to
+   * match it (`--ib-gx`, `--ib-gy`, `--ib-gs`, read by inbox.css). Measured while they still sit where they rest.
+   */
+  const measureGather = () => {
+    const section = sectionRef.current;
+    const target = section?.querySelector<HTMLElement>('[data-full-view-handle]');
+    if (!section || !target) return;
+    const to = target.getBoundingClientRect();
+    const tx = to.left + to.width / 2;
+    const ty = to.top + to.height / 2;
+    const size = Math.max(target.offsetWidth, 32);
+    for (const el of section.querySelectorAll<HTMLElement>(GATHERED)) {
+      const at = el.getBoundingClientRect();
+      if (!at.width || !at.height) continue;
+      el.style.setProperty('--ib-gx', `${Math.round(tx - (at.left + at.width / 2))}px`);
+      el.style.setProperty('--ib-gy', `${Math.round(ty - (at.top + at.height / 2))}px`);
+      el.style.setProperty('--ib-gs', Math.min(0.6, Math.max(0.05, size / at.width)).toFixed(3));
+    }
+  };
   /** ⋯ is open (a popover of the toolbar: it does not tuck while open). */
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
@@ -836,7 +865,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // The comment row kept hidden in full screen's composer (the card on Reply, or minimized): the card
     // comes back on its Comment tab, and focus goes to the words once it is drawn.
     const threadId = props.composer?.threadId;
-    if (threadId && area.closest('[data-fcomp-comment-slot][hidden]')) {
+    // Gathered into the corner, the card is inert: the tools come back first (the words are where they were).
+    const gathered = area.closest('[inert]') !== null && area.closest('[data-fcomp]') !== null;
+    if (gathered) setToolbar('pinned');
+    if (threadId && (gathered || area.closest('[data-fcomp-comment-slot][hidden]'))) {
       pickComposerMode(threadId, 'comment');
       setComposerMinimized(threadId, false);
       requestAnimationFrame(() => {
@@ -1548,12 +1580,23 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   useEffect(() => {
     if (phoneHtml) return releaseWindowZoom;
   }, [phoneHtml, attachment.id]);
+  /** The composer's ⌄: the same gather as », and back from the corner focus returns to the card's field. */
+  const gatherFromComposer = useCallback(() => {
+    gatheredFrom.current = 'composer';
+    barRef.current?.hide();
+  }, []);
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    // A phone's Show tools brings the toolbar out (revealed) and the reply back with it; only Hide tucks the reply.
-    // A computer's revealed toolbar is a peek from the corner: the reply waits for the pin.
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: phone ? shownToolbar === 'tucked' : toolbar !== 'pinned' } : null),
-    [hasComposer, props.composer, toolbar, shownToolbar, phone],
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', onGather: gatherFromComposer } : null),
+    [hasComposer, props.composer, shownToolbar, gatherFromComposer],
   );
+  /** Back from the corner: focus where the person gathered from. The card's field, when it was the card's ⌄. */
+  const restoreTarget = () => {
+    const from = gatheredFrom.current;
+    gatheredFrom.current = 'bar';
+    if (from !== 'composer') return null;
+    const card = sectionRef.current?.querySelector<HTMLElement>('[data-fcomp]');
+    return card?.querySelector<HTMLElement>('.ib-fcomp-row > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
+  };
 
   const remove = async (id: string) => {
     viewerRef.current?.removeHighlight(id);
@@ -1750,7 +1793,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
       data-full-view={full ? '' : undefined}
-      // Hide (») hides what else floats over the file with the toolbar (inbox.css): the size chip, the composer.
+      // Hide (») or the composer's ⌄ gathers what floats over the file into the corner control (inbox.css).
       data-tools={full ? shownToolbar : undefined}
     >
       <FullScreenComposerContext.Provider value={composerValue}>
@@ -1760,10 +1803,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           phone={phone}
           state={shownToolbar}
           onState={(next) => {
-            // Over a pinch's tuck: only the handle's tap comes here, and the person's own state stays what it was.
+            // Each control flies from where it rests: measured before the state changes.
+            if (next === 'tucked' && shownToolbar !== 'tucked') measureGather();
+            // Over a pinch's tuck: only the corner control's tap comes here, and the person's own state stays what it was.
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
+          corner={toolsCorner}
+          draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
+          restoreTarget={restoreTarget}
           announce={announce}
           armed={armed}
           // A linked page takes no comments: no pen while it is shown.

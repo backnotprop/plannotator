@@ -1995,18 +1995,23 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-fullview .ib-sheet-h .ib-sp { flex: 1; }
 .ib-fullview [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
-/* The dock: the toolbar, its tucked handle, and the corner where a pointer brings it back. A 0 × 0 box at the page's
-   top right (left of an open drawer); everything in it is placed from that corner. */
-.ib-fvdock { position: absolute; top: 0; right: 0; z-index: 8; width: 0; height: 0; }
+/* Gather (FullViewBar.tsx): Hide (») or the composer's ⌄ sends every floating control of full screen into one small
+   control in a bottom corner, each flying from where it sits (`--ib-gx`/`--ib-gy`, measured by AttachmentPane) and
+   shrinking to the control's size (`--ib-gs`) as it fades; the corner control lands as they arrive. One press on it
+   sends them back the same way. Going: ease-in-out (they travel to a place). Coming back: a strong ease-out. */
+.ib-view.ib-fullview {
+  --ib-gather-go: transform 340ms cubic-bezier(0.65, 0, 0.35, 1), opacity 200ms ease-in 140ms, visibility 0s linear 340ms;
+  --ib-gather-back: transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out, visibility 0s linear 0s;
+}
+/* The dock: the toolbar and the corner control the tools gather into. It covers the page (left of an open drawer) and
+   takes no presses itself; the toolbar is placed from its top right, the corner control from a bottom corner. */
+.ib-fvdock { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
 .ib-fvdock.ib-shift { right: 320px; }
-.ib-fvzone { position: absolute; top: 0; right: 0; width: 96px; height: 64px; pointer-events: none; }
-.ib-fvdock[data-bar="tucked"] .ib-fvzone, .ib-fvdock[data-bar="revealed"] .ib-fvzone { pointer-events: auto; }
-/* A touch screen has no pointer to rest in the corner: the box would only swallow taps on the page (the handle is tapped instead). */
-@media (hover: none) { .ib-fvdock .ib-fvzone, .ib-fvdock[data-bar] .ib-fvzone { pointer-events: none; } }
-.ib-fvbar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; white-space: nowrap; background: color-mix(in oklch, var(--popover) 94%, transparent); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1), opacity 160ms ease; }
+.ib-fvbar { pointer-events: auto; }
+.ib-fvbar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; white-space: nowrap; background: color-mix(in oklch, var(--popover) 94%, transparent); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: var(--ib-gather-back); }
 :root.light .ib-fvbar { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); }
-/* Tucked: the toolbar slides off to the right (it is inert, so nothing in it takes focus). */
-.ib-fvdock[data-bar="tucked"] .ib-fvbar { transform: translateX(calc(100% + 24px)); opacity: 0; pointer-events: none; }
+/* Gathered: the toolbar flies into the corner control (it is inert, so nothing in it takes focus). */
+.ib-fvdock[data-bar="tucked"] .ib-fvbar { transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); opacity: 0; visibility: hidden; pointer-events: none; transition: var(--ib-gather-go); }
 .pn-inbox .ib-fvb { position: relative; height: 30px; min-width: 30px; padding: 0 7px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; font-variant-numeric: tabular-nums; border: 1px solid transparent; }
 .pn-inbox .ib-fvb:hover { background: var(--muted); color: var(--foreground); }
 .pn-inbox .ib-fvb.ib-on { border-color: color-mix(in oklch, var(--primary) 60%, transparent); background: color-mix(in oklch, var(--primary) 15%, transparent); color: var(--primary); }
@@ -2020,17 +2025,31 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-fvpos { display: inline-flex; }
 /* The peek from the toolbar's N/M: under it, at its right edge. */
 .ib-fvpeek { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; white-space: normal; }
-/* The handle: what is left of the toolbar when it is tucked, flush with the corner. */
-.pn-inbox .ib-fvhandle { position: absolute; top: 12px; right: env(safe-area-inset-right); height: 34px; min-width: 34px; padding: 0 8px 0 9px; display: inline-flex; align-items: center; gap: 5px; border-radius: 10px 0 0 10px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); border-right: 0; background: color-mix(in oklch, var(--popover) 94%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; transition: opacity 160ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+/* The corner control: all that is left while the tools are gathered. Small and quiet: the double chevron, "Draft" while a
+   reply draft waits, the comment count, an amber dot when the file changed since it was sent. Bottom right, or bottom
+   left with `?variant=corner-left`; above a foot that stays (an image's comment row without the composer). */
+.pn-inbox .ib-fvhandle { position: absolute; bottom: calc(16px + var(--ib-fvfoot, 0px)); right: calc(16px + env(safe-area-inset-right)); height: 32px; min-width: 32px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 94%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: var(--muted-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: auto; transition: opacity 180ms ease-out 220ms, transform 300ms cubic-bezier(0.22, 1, 0.36, 1) 200ms, visibility 0s linear 0s; }
+.pn-inbox .ib-fvdock.ib-corner-left .ib-fvhandle { right: auto; left: calc(16px + env(safe-area-inset-left)); }
+.pn-inbox .ib-view.ib-fullview:has(:is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-fvhandle { bottom: calc(16px + env(safe-area-inset-bottom)); }
 :root.light .ib-fvhandle { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
-.pn-inbox .ib-fvhandle:hover { background: var(--popover); }
-.ib-fvdock:not([data-bar="tucked"]) .ib-fvhandle { opacity: 0; transform: translateX(100%); pointer-events: none; }
-.ib-fvhandle-n { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-11, 11px); line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-fvhandle:hover { background: var(--popover); color: var(--foreground); }
+.pn-inbox .ib-fvhandle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Tools showing: the control waits in its corner, small and invisible, and leaves at once as they fly out. */
+.ib-fvdock:not([data-bar="tucked"]) .ib-fvhandle { opacity: 0; visibility: hidden; transform: scale(0.6); pointer-events: none; transition: opacity 100ms ease-out, transform 160ms ease-out, visibility 0s linear 160ms; }
+.ib-fvhandle-w { color: var(--foreground); }
+.ib-fvhandle-n { display: inline-flex; align-items: center; gap: 3px; }
 .ib-fvhandle-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); flex: none; }
 /* A comment saved while the drawer is closed: the count bumps once. */
 .ib-bump { display: inline-block; animation: ib-bump 380ms cubic-bezier(0.23, 1, 0.32, 1); }
 @keyframes ib-bump { 0% { transform: scale(1); } 35% { transform: scale(1.18); } 100% { transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .ib-fvbar, .ib-fvhandle { transition: none; } .ib-bump { animation: none; } }
+/* Reduced motion: nothing travels or grows; the tools and the corner control only cross-fade. */
+@media (prefers-reduced-motion: reduce) {
+  .ib-view.ib-fullview { --ib-gather-go: opacity 160ms ease, visibility 0s linear 160ms; --ib-gather-back: opacity 160ms ease, visibility 0s linear 0s; }
+  .ib-fvdock[data-bar="tucked"] .ib-fvbar { transform: none; }
+  .pn-inbox .ib-fvhandle, .ib-fvdock:not([data-bar="tucked"]) .ib-fvhandle { transform: none; transition: opacity 160ms ease, visibility 0s linear 0s; }
+  .ib-fvdock:not([data-bar="tucked"]) .ib-fvhandle { transition: opacity 160ms ease, visibility 0s linear 160ms; }
+  .ib-bump { animation: none; }
+}
 
 .ib-fvchip { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px; height: 38px; max-width: calc(100% - 32px); padding: 0 8px 0 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 150ms ease, visibility 0s linear 150ms; }
 .ib-fvchip.ib-on { opacity: 1; visibility: visible; transition: opacity 150ms ease; }
@@ -2058,10 +2077,11 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   [data-full-view-menu] [role="menuitem"] { min-height: 44px; font-size: var(--ib-fs-14, 14px); }
 }
-.ib-fvdock.ib-fvdock-phone { top: auto; bottom: 0; right: 0; }
 .ib-fvdock-phone .ib-fvbar { top: auto; right: calc(12px + env(safe-area-inset-right)); bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); padding: 4px; border-radius: 14px; }
 .pn-inbox .ib-fvdock-phone .ib-fvb { height: 44px; min-width: 44px; border-radius: 10px; font-size: var(--ib-fs-14, 14px); padding: 0 8px; }
-.pn-inbox .ib-fvdock-phone .ib-fvhandle { top: auto; bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); height: 52px; min-width: 44px; padding: 0 10px 0 12px; border-radius: 14px 0 0 14px; }
+.pn-inbox .ib-fvdock-phone .ib-fvhandle { bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); right: calc(12px + env(safe-area-inset-right)); height: 44px; min-width: 44px; padding: 0 12px; border-radius: 14px; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-fvdock-phone.ib-corner-left .ib-fvhandle { right: auto; left: calc(12px + env(safe-area-inset-left)); }
+.pn-inbox .ib-view.ib-fullview:has(:is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-fvdock-phone .ib-fvhandle { bottom: calc(14px + env(safe-area-inset-bottom)); }
 .ib-view.ib-fullview.ib-phone.ib-panel-open .ib-fvdock { visibility: hidden; }
 .ib-view.ib-fullview.ib-phone .ib-fvchip { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }
 /* A phone's position: the `4/9 ⌄` pill opens every file of the thread in one tap (fileSwipe.ts steps by a swipe). */
@@ -2137,9 +2157,9 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(640px, calc(100% - 32px)); height: var(--ib-optcap-h); padding: 0 6px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; transition: opacity 180ms ease 180ms; }
 :root.light .ib-optcap { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
 .ib-view.ib-fullview.ib-phone .ib-optcap { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); max-width: calc(100% - 56px); padding: 0 14px; }
-.ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview.ib-phone[data-tools="tucked"] .ib-optcap,
 .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
-.ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+.ib-view.ib-fullview:not(.ib-phone)[data-tools="tucked"] .ib-optcap,
 .ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { opacity: 0; visibility: hidden; transition: opacity 180ms ease, visibility 0s linear 180ms; }
 /* Minimizing the comment box shrinks the foot first: a fade would show the card hopping down, so it goes at once. Coming back it waits (the base delay) for the picture to finish easing. */
 .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
@@ -2164,9 +2184,9 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-optcap-rec { flex: none; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); }
 @media (prefers-reduced-motion: reduce) {
   .ib-optcap,
-  .ib-view.ib-fullview.ib-phone:is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview.ib-phone[data-tools="tucked"] .ib-optcap,
   .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-pillwrap) .ib-optcap,
-  .ib-view.ib-fullview:not(.ib-phone):is([data-tools="tucked"], [data-tools="revealed"]) .ib-optcap,
+  .ib-view.ib-fullview:not(.ib-phone)[data-tools="tucked"] .ib-optcap,
   .ib-view.ib-fullview:not(.ib-phone):has(.ib-fcomp-pillwrap) .ib-optcap { transition: none; }
 }
 /* the image's size bar moves out from under the toolbar */
@@ -6511,7 +6531,7 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   border: 1px solid var(--fc-line);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 24px -6px rgba(0, 0, 0, 0.45), 0 28px 60px -18px rgba(0, 0, 0, 0.55);
   -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
-  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 0s;
+  transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s);
 }
 :root.light .ib-fcomp { --fc-line: color-mix(in oklch, var(--foreground) 9%, transparent); background: color-mix(in oklch, var(--popover) 94%, transparent); box-shadow: 0 1px 2px rgba(20, 20, 30, 0.06), 0 8px 20px -6px rgba(20, 20, 30, 0.12), 0 24px 52px -20px rgba(20, 20, 30, 0.2); }
 .ib-fcomp.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
@@ -6566,7 +6586,7 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .pn-inbox .ib-fcomp-link:hover { color: var(--foreground); }
 
 /* Minimized: a quiet 30 px pill at the foot, centred, in the card's material. The words say a draft waits; no dot, no motion. */
-.ib-fcomp-pillwrap { position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 0s; }
+.ib-fcomp-pillwrap { position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9; transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s); }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
 :root.light .pn-inbox .ib-fcomp-pill { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
 .pn-inbox .ib-fcomp-pill.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
@@ -6583,19 +6603,17 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-view.ib-fullview .ib-imgview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) { grid-template-rows: minmax(0, 1fr); }
 /* A film keeps its own controls clear: the stage ends above the card or the pill (not once Hide took them away). */
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-vidview:has(> :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone))) .ib-vidstage,
-.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 0; }
+.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 60px; }
 
-/* Hide (») hides what floats with the toolbar: the size chip, the composer or its pill (inert as well: FullScreenComposer.tsx).
-   A phone's Show tools (revealed) brings the composer and its pill back with the toolbar; the size chip stays away. */
-.ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) .ib-imgbar,
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
-.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 180ms ease, transform 220ms cubic-bezier(0.23, 1, 0.32, 1), visibility 0s linear 180ms; }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap),
-.ib-view.ib-fullview[data-tools="revealed"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(-50%, 16px); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp.ib-phone, .ib-fcomp-pillwrap.ib-phone) { transform: translateY(16px); }
+/* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
+   its pill, the image's size bar, a text file's toolstrip and Contents button (inert as well, or hidden: nothing
+   invisible takes focus). Each comes back the same way. The changed chip stays: it is a fact about the file. */
+.ib-view.ib-fullview :is(.ib-imgbar, .ib-toolstrip, .ib-contents-open) { transition: var(--ib-gather-back); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
 @media (prefers-reduced-motion: reduce) {
-  .ib-fcomp, .ib-fcomp-pillwrap, .ib-view.ib-fullview:is([data-tools="tucked"], [data-tools="revealed"]) :is(.ib-imgbar, .ib-fcomp, .ib-fcomp-pillwrap) { transition: none; }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open) { transform: none; }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
 }
 
 /* Phone: the card spans the width above the home bar and the toolbar sits above it (the pane measures the card as the

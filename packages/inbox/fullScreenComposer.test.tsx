@@ -8,8 +8,9 @@
  * Proves: the tabs switch between the image's own comment row and the
  * thread's reply; the reply is the thread's one draft (typed in the card it
  * is saved and the thread's box holds it; typed in the box the card shows
- * it); minimize and restore move focus and are kept for the thread across
- * files; Hide (») makes the card inert; an HTML page is Reply only; Send from
+ * it); the card's minimize gathers it with the toolbar into the corner control,
+ * as Hide (») does, kept across files, and one press brings both back with
+ * focus where it was; an HTML page is Reply only; Send from
  * the card refuses as the thread's Send does (nothing to send, the server
  * refusing) and keeps the words, and a Send that goes clears them and the
  * draft while full screen stays. Files: the Reply tab's paperclip (the reply
@@ -332,31 +333,44 @@ test.skipIf(!hasDom)('the card’s reply is the thread’s one draft: typed in t
   await until(async () => (await draftOnServer()) === 'Keep the footer, pad the form by 96 px.', 'the box’s words saved');
 });
 
-test.skipIf(!hasDom)('minimize leaves the pill with focus on it, kept for the thread across files; the pill gives the card back with focus in its field', async () => {
-  await renderFull('shot.png');
+const corner = () => host!.querySelector<HTMLButtonElement>('[data-full-view-handle]');
+const toolsState = () => host!.querySelector('[data-attachment-pane]')!.getAttribute('data-tools');
+
+test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and toolbar gather into the corner control (focus on it), across files; one press brings both back with focus in the card’s field', async () => {
+  await renderFull('page.html');
+  expect(card()!.querySelector('[data-fcomp-minimize]')!.getAttribute('aria-label')).toBe('Hide tools');
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-  expect(card()).toBeNull();
-  expect(document.activeElement).toBe(pill());
-  expect(pill()!.textContent).toContain('Comment on this image');
-  expect(pill()!.getAttribute('aria-label')).toBe('Show the composer: Comment on this image');
+  // One gather: the card and the toolbar both go (inert), no pill of its own.
+  expect(toolsState()).toBe('tucked');
+  expect(card()!.inert).toBe(true);
+  expect(host!.querySelector<HTMLElement>('[data-full-view-bar]')!.inert).toBe(true);
+  expect(pill()).toBeNull();
+  expect(document.activeElement).toBe(corner());
+  expect(corner()!.inert).toBe(false);
 
-  // Another file of the thread: still minimized (HTML is Reply only, so its pill names the reply).
-  await openFull('page.html');
-  await until(() => pill() !== null, 'the pill on the page');
-  expect(card()).toBeNull();
-  expect(pill()!.textContent).toMatch(/^Reply to /);
-
-  await click(pill()!);
-  expect(card()).not.toBeNull();
+  // One press on the corner control: everything is back, focus where the person left (the card's field).
+  await click(corner()!);
+  expect(toolsState()).toBe('pinned');
+  expect(card()!.inert).toBe(false);
+  expect(host!.querySelector<HTMLElement>('[data-full-view-bar]')!.inert).toBe(false);
   expect(document.activeElement).toBe(replyField());
 
-  // Words waiting: the pill says "Reply draft".
+  // Words waiting: the corner control says so (words, no dot).
   type(replyField()!, 'A draft.');
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-  expect(pill()!.textContent).toContain('Reply draft');
+  expect(corner()!.textContent).toContain('Draft');
+  expect(corner()!.getAttribute('aria-label')).toContain('reply draft');
+
+  // Another file of the thread keeps the tools gathered; the corner control still brings them back.
+  await openFull('shot.png');
+  await until(() => card() !== null, 'the card on the image');
+  expect(toolsState()).toBe('tucked');
+  expect(card()!.inert).toBe(true);
+  await click(corner()!);
+  expect(card()!.inert).toBe(false);
 });
 
-test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until the tools show again; an HTML page is Reply only', async () => {
+test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until one press on the corner control; an HTML page is Reply only', async () => {
   await renderFull('page.html');
   // HTML: no tabs, the reply field.
   expect(card()!.querySelector('[role="radiogroup"]')).toBeNull();
@@ -368,9 +382,10 @@ test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until
   expect(host!.querySelector('[data-attachment-pane]')!.getAttribute('data-tools')).toBe('tucked');
   expect(card()!.inert).toBe(true);
   await click(host!.querySelector<HTMLButtonElement>('[data-full-view-handle]')!);
-  await click(host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!);
-  await until(() => host!.querySelector('[data-full-view-dock]')?.getAttribute('data-bar') === 'pinned', 'the tools pinned');
+  await until(() => host!.querySelector('[data-full-view-dock]')?.getAttribute('data-bar') === 'pinned', 'the tools back');
   expect(card()!.inert).toBe(false);
+  // Back from », focus lands on » again.
+  expect(document.activeElement).toBe(host!.querySelector('[data-full-view-hide]'));
 });
 
 test.skipIf(!hasDom)('Send from the card refuses as the thread’s Send does: nothing to send, or the server refusing; the words stay, full screen stays', async () => {
@@ -504,9 +519,9 @@ test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on t
   expect(tiles(threadFiles())).toHaveLength(1);
   expect(document.activeElement).toBe(replyField());
 
-  // Files and no words: minimized, the pill still says a reply waits.
+  // Files and no words: gathered, the corner control still says a reply waits.
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-  expect(pill()!.textContent).toContain('Reply draft');
+  expect(host!.querySelector('[data-full-view-handle]')!.textContent).toContain('Draft');
 });
 
 test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in both places; Undo in the card puts it back in the card’s words, caret after it', async () => {
@@ -541,14 +556,14 @@ test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in bot
   expect(threadBox()!.value).toBe(`${before}${log}${after}`);
 });
 
-for (const away of ['the Reply tab', 'minimized'] as const) {
+for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
   test.skipIf(!hasDom)(`an image comment not saved yet is kept on ${away}: → asks first, and Keep writing brings the Comment tab back with focus in its words`, async () => {
     await renderFull('shot.png');
     type(commentField()!, 'Too much padding.');
     if (away === 'the Reply tab') await click(radio('reply'));
     else await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
-    // Out of sight, still there.
-    expect(commentField()!.closest('[hidden]')).not.toBeNull();
+    // Out of sight (hidden, or inert in the corner), still there.
+    expect(commentField()!.closest(away === 'the Reply tab' ? '[hidden]' : '[inert]')).not.toBeNull();
     expect(commentField()!.value).toBe('Too much padding.');
     await act(async () => (document.activeElement as HTMLElement | null)?.blur());
     await stepNext();
