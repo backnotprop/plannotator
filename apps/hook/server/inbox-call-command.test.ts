@@ -383,30 +383,41 @@ describe("who is calling", () => {
     expect(parseCallCommand(["--session ses_x", "card"])).toMatchObject({ ok: false, code: "usage", error: expect.stringContaining("separate words") });
   });
 
-  test("a read with no session settles nothing for the thread's owner; one that names a session, or a raw MCP client's, still does", async () => {
+  test("a read with no session settles nothing for the thread's owner; one that names the owner's session does; a raw MCP client's settles only its own", async () => {
     const box = await world();
     const { client, server, project } = box;
     await poll(server, "ses-a", project);
-    const replied = async (subject: string) => {
-      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
-      const words = (await (await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } };
-      return { thread: asked.thread_id as string, reply: words.reply.id };
+    const answer = async (messageId: string, subject: string) =>
+      ((await (await post(server, `/api/inbox/messages/${messageId}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } }).reply.id;
+    const replied = async (subject: string, session: string | null = "ses-a") => {
+      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, ...(session ? { agent_session: session, agent_host: "claude-code" } : {}) });
+      return { thread: asked.thread_id as string, reply: await answer(asked.message_id, subject) };
     };
     const scripted = await replied("Scripted");
     const raw = await replied("Raw");
     const named = await replied("Named");
+    // A raw MCP client that names no session, sending and reading: the reply to it is its own to settle.
+    const own = await replied("Own", null);
+    const checked = async (thread: string) => (await threadOf(server, thread)).messages[0]!.agent_checked_seq ?? null;
 
     for (const json of [{ thread_id: scripted.thread }, { thread_id: scripted.thread, format: "full" }]) {
       const read = await cli(box, ["read_thread", JSON.stringify(json)]);
       expect(read.code).toBe(0);
       expect(read.stdout).toContain("Scripted yes.");
     }
+    // A script's read with no session is a peek, even of a reply to a message sent with none.
+    expect((await cli(box, ["read_thread", JSON.stringify({ thread_id: own.thread, format: "full" })])).code).toBe(0);
+    expect(await checked(own.thread)).toBeNull();
+    // A raw MCP client's read with no session is not a peek: it settles the reply to its own message...
+    await tool(client, "read_thread", { thread_id: own.thread });
+    expect(await checked(own.thread)).not.toBeNull();
+    // ...but not one owed to ses-a, whose connection takes it (only a reply's recipient settles it).
     await tool(client, "read_thread", { thread_id: raw.thread });
     expect((await cli(box, ["--session", "claude-code:ses-a", "read_thread", JSON.stringify({ thread_id: named.thread })])).code).toBe(0);
 
     const handedOut = (await poll(server, "ses-a", project)).map((command) => command.id);
     expect(handedOut).toContain(scripted.reply);
-    expect(handedOut).not.toContain(raw.reply);
+    expect(handedOut).toContain(raw.reply);
     expect(handedOut).not.toContain(named.reply);
   });
 
