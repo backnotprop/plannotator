@@ -166,6 +166,23 @@ export function useRevealMoment(input: RevealMomentInput) {
   return { stage, target, close: () => setStage('shown') };
 }
 
+/** What a load arms, read once from settings: the reveal that is next, and whether that is Snooze's announcement. */
+export interface RevealArmed {
+  next: 'snooze' | 'board' | 'steps' | null;
+  /** Snooze's own `due`, armed only while it is next. */
+  snoozeDue: boolean;
+}
+
+/**
+ * The load's latch (App): only `reveal.next` is armed. An older Inbox reports no queue (no `reveal`): its Snooze rule
+ * alone, and never the Board.
+ */
+export function revealArmed(settings: { reveal?: { next: RevealArmed['next'] }; snooze_intro?: { due: boolean } }): RevealArmed {
+  const snoozeDue = settings.snooze_intro?.due === true;
+  const next = settings.reveal ? settings.reveal.next : snoozeDue ? 'snooze' : null;
+  return { next, snoozeDue: snoozeDue && next === 'snooze' };
+}
+
 /** The Board reveal's need: the list holds this many rows or more (the approval: "the list has 5 rows or more"). */
 export const BOARD_REVEAL_MIN_ROWS = 5;
 
@@ -221,7 +238,8 @@ export function useBoardReveal(input: BoardRevealInput) {
     holds: () => true,
     claim: async () => {
       const answer = await inboxApi.claimReveal('board');
-      if (answer.show) latest.current.onBoardOn();
+      // Granted here, or by another tab or device first: the Board is on either way, so its row shows now.
+      if (answer.show || answer.board?.on) latest.current.onBoardOn();
       return answer.show;
     },
   });

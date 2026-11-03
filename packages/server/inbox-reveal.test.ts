@@ -235,6 +235,40 @@ describe("the Board reveal at day 4", () => {
     expect(await (await world({ threads: 4 })).next()).toBeNull();
     expect(await (await world({ threads: 5 })).next()).toBe("board");
   });
+
+  test("an upgrade: Snooze and voice shown an hour ago by an Inbox before the reveals (no inboxReveals key): nothing is due", async () => {
+    const hourAgo = new Date(Date.now() - HOUR).toISOString();
+    const w = await world({
+      config: {
+        inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString(), shownAt: hourAgo },
+        inboxVoiceIntro: { dueAt: new Date(Date.now() - 2 * DAY).toISOString(), shownAt: hourAgo },
+      },
+    });
+    expect(w.saved().inboxReveals).toBeUndefined();
+    expect(await w.next()).toBeNull();
+    expect((await w.claim()).show).toBe(false);
+    expect(w.saved().inboxBoard).toBeUndefined();
+  });
+
+  test("a fresh install's list options and voice marks (shownAt with no dueAt: never shown) do not hold it back", async () => {
+    const hourAgo = new Date(Date.now() - HOUR).toISOString();
+    const w = await world({ config: { inboxListIntro: { shownAt: hourAgo }, inboxVoiceIntro: { shownAt: hourAgo } } });
+    expect(await w.next()).toBe("board");
+  });
+
+  test("someone who already saw the Board's first-visit dialog (before the Board was a switch) never sees it again", async () => {
+    const w = await world({ config: { inboxBoardIntro: { shownAt: new Date(Date.now() - 20 * DAY).toISOString() } } });
+    expect(await w.next()).toBeNull();
+    expect((await w.claim()).show).toBe(false);
+    expect(w.saved().inboxBoard).toBeUndefined();
+  });
+
+  test("a dev build's list options claim does not stamp the spacing clock", async () => {
+    const w = await world({ version: "0.0.0-dev", config: { inboxListIntro: { dueAt: new Date(Date.now() - DAY).toISOString() } } });
+    expect(((await (await w.post("/api/inbox/list-intro")).json()) as Json).show).toBe(true);
+    expect(w.saved().inboxListIntro.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxReveals).toBeUndefined();
+  });
 });
 
 describe("over the tailnet", () => {

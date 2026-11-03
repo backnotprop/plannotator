@@ -8,9 +8,11 @@
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
  *    enough threads, its own conditions) while the spacing holds.
  *  - Spacing: never two reveals within `REVEAL_SPACING_MS` (48 h) on one machine. Every one-time announcement stamps
- *    `inboxReveals.lastShownAt` when it is claimed (list options, voice, Snooze, the Board), so it counts.
+ *    `inboxReveals.lastShownAt` when it is claimed (list options, voice, Snooze, the Board), and the clock also reads
+ *    the announcements' own `shownAt` stamps from before that key existed (`revealLastShown`), so each counts.
  *  - Patience: an entry that has been next for `REVEAL_PATIENCE_MS` (3 days) without its moment lets the next entry
- *    that qualifies go first. It stays in line and is next again once nothing after it qualifies.
+ *    that qualifies go first. It stays in line: when every qualifying entry has waited that long, the one that has
+ *    waited longest is next.
  *  - No active-days counter.
  */
 
@@ -79,19 +81,34 @@ export function revealQualifies(entry: RevealEntry, state: RevealState, now: Dat
   return state.threads >= entry.minThreads;
 }
 
-/** The reveal a page may arm now, or null. */
+/**
+ * The reveal a page may arm now, or null: the first qualifying entry that has not waited out its patience. When every
+ * qualifying entry has (none found its moment in 3 days), the one that has waited longest goes, so a stuck entry never
+ * replaces the one it passed for good.
+ */
 export function revealNext(state: RevealState, now: Date): RevealId | null {
   if (!revealSpaced(state.lastShownAt, now)) return null;
-  const qualified = INBOX_REVEALS.filter((entry) => revealQualifies(entry, state, now));
-  for (let i = 0; i < qualified.length; i++) {
-    const entry = qualified[i]!;
+  let longest: { id: RevealId; since: number } | null = null;
+  for (const entry of INBOX_REVEALS) {
+    if (!revealQualifies(entry, state, now)) continue;
     const since = time(state.waitingSince?.[entry.id]);
-    const stuck = since !== null && now.getTime() - since >= REVEAL_PATIENCE_MS;
-    // Passed over only when another entry can go instead; it stays in line.
-    if (stuck && i < qualified.length - 1) continue;
-    return entry.id;
+    if (since === null || now.getTime() - since < REVEAL_PATIENCE_MS) return entry.id;
+    if (!longest || since < longest.since) longest = { id: entry.id, since };
   }
-  return null;
+  return longest?.id ?? null;
+}
+
+/**
+ * The spacing clock: the latest of the stamps given (the reveals' own `lastShownAt` and every one-time announcement's
+ * `shownAt` from before it existed). Null when none is a time.
+ */
+export function revealLastShown(stamps: readonly (string | null | undefined)[]): string | null {
+  let latest: number | null = null;
+  for (const stamp of stamps) {
+    const at = time(stamp);
+    if (at !== null && (latest === null || at > latest)) latest = at;
+  }
+  return latest === null ? null : new Date(latest).toISOString();
 }
 
 /** A claim for `id` may be spent now: it is still next. A page that armed something else gets no. */

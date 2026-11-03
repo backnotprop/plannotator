@@ -5,7 +5,7 @@
  * change) or its 5 threads moving; a dev build, a feature the person decided, or the steps placeholder being revealed.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealMayClaim, revealNext, type RevealState } from "./inbox-reveals";
+import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./inbox-reveals";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -69,6 +69,11 @@ describe("the spacing", () => {
     // A claim checks it too.
     expect(revealMayClaim("snooze", state({ lastShownAt: ago(HOUR) }), NOW)).toBe(false);
   });
+
+  test("the clock is the latest stamp of any announcement, whatever key it is in", () => {
+    expect(revealLastShown([undefined, ago(3 * DAY), ago(HOUR), null, ago(2 * DAY)])).toBe(ago(HOUR));
+    expect(revealLastShown([undefined, null, "not a time"])).toBeNull();
+  });
 });
 
 describe("the patience", () => {
@@ -78,6 +83,11 @@ describe("the patience", () => {
     expect(revealNext(state({ waitingSince: { snooze: ago(3 * DAY) } }), NOW)).toBe("board");
     // The Board shown (no longer open) and spaced: Snooze is still in line, and nothing is behind it.
     expect(revealNext(state({ waitingSince: { snooze: ago(6 * DAY) }, open: { snooze: true, board: false }, lastShownAt: ago(48 * HOUR) }), NOW)).toBe("snooze");
+  });
+
+  test("both past patience: the one that has waited longest goes, so the Board never replaces Snooze for good", () => {
+    expect(revealNext(state({ waitingSince: { snooze: ago(10 * DAY), board: ago(7 * DAY) } }), NOW)).toBe("snooze");
+    expect(revealNext(state({ waitingSince: { snooze: ago(7 * DAY), board: ago(10 * DAY) } }), NOW)).toBe("board");
   });
 
   test("passed over only for an entry that qualifies: a stuck Snooze with under 5 threads stays next", () => {

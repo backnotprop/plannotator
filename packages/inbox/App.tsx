@@ -110,7 +110,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { useBoardReveal } from './reveal';
+import { revealArmed, useBoardReveal } from './reveal';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -3901,9 +3901,9 @@ function Inbox() {
   // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
-    // An older Inbox reports no queue: its Snooze rule alone.
-    const next = settings.reveal ? settings.reveal.next : settings.snooze_intro?.due === true ? 'snooze' : null;
-    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true && next === 'snooze', next };
+    // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
+    const armed = revealArmed(settings);
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
   const revealBlocked = snoozeIntroBlockedBy({

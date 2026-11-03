@@ -199,7 +199,7 @@ import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
-import { revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/core/inbox-reveals";
+import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/core/inbox-reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -1795,8 +1795,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const claimListIntro = (via: RequestVia): boolean => {
     if (via !== "local" || !listIntroState().due) return false;
     const at = new Date().toISOString();
-    // A one-time announcement: it counts toward the reveals' 48 h spacing (inbox-reveals.ts).
-    saveConfig({ inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at }, inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } });
+    // A one-time announcement: it counts toward the reveals' 48 h spacing (inbox-reveals.ts). A dev build never stamps
+    // that clock.
+    saveConfig({
+      inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at },
+      ...(normalizeStableVersion(version) !== null ? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } } : {}),
+    });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxListIntro?.shownAt === at;
   };
@@ -1929,16 +1933,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   const revealState = (now: Date): RevealState => {
     const snooze = snoozeIntroSaved();
-    const reveals = loadConfig().inboxReveals;
+    const config = loadConfig();
+    const reveals = config.inboxReveals;
+    // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
+    const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
     return {
       release: snoozeIntroRelease,
       firstUseAt: snooze?.firstUseAt ?? null,
-      lastShownAt: reveals?.lastShownAt ?? null,
+      // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
+      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
       threads: store.threadIds().length,
       open: {
         snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
-        board: boardUndecided() && !reveals?.board?.shownAt,
+        // Someone who already saw the Board's first-visit dialog (from before the Board was a switch) met the Board:
+        // the reveal is that dialog, and it never shows twice. The switch stays in Settings → Capabilities.
+        board: boardUndecided() && !reveals?.board?.shownAt && !config.inboxBoardIntro?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
     };

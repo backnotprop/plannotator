@@ -279,8 +279,12 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     if (!(await checkIntroAudience())) return false;
     if (!introDue() || options.otherDialogDue()) return false;
     const at = new Date().toISOString();
-    // A one-time announcement: it counts toward the reveals' 48 h spacing (packages/core/inbox-reveals.ts).
-    saveConfig({ inboxVoiceIntro: { ...loadConfig().inboxVoiceIntro, shownAt: at }, inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } });
+    // A one-time announcement: it counts toward the reveals' 48 h spacing (packages/core/inbox-reveals.ts). A dev build
+    // never stamps that clock.
+    saveConfig({
+      inboxVoiceIntro: { ...loadConfig().inboxVoiceIntro, shownAt: at },
+      ...(options.decidesIntro ? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } } : {}),
+    });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxVoiceIntro?.shownAt === at;
   };

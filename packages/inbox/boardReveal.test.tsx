@@ -29,6 +29,8 @@ let posts: { path: string; body: unknown }[] = [];
 let stamped = false;
 /** Whether the Inbox grants the claim at all (false: another tab won, or it is no longer next). */
 let grants = true;
+/** Another tab or device already turned the Board on: a refused claim's answer says `board.on`. */
+let onElsewhere = false;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -38,13 +40,14 @@ beforeEach(() => {
   posts = [];
   stamped = false;
   grants = true;
+  onElsewhere = false;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace(/^https?:\/\/[^/]+/, '');
     if ((init?.method ?? 'GET') === 'POST') posts.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
     if (path.endsWith('/api/inbox/reveal')) {
       const show = grants && !stamped;
       stamped = true;
-      return new Response(JSON.stringify({ show, reveal: { next: null }, board: { on: show } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ show, reveal: { next: null }, board: { on: show || onElsewhere } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return new Response(JSON.stringify({ error: 'not in this test' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -210,13 +213,39 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     });
   }
 
-  test('a claim the Inbox refuses (another tab won): nothing drawn, the Board left as it was', async () => {
+  test('a claim the Inbox refuses (no longer next): nothing drawn, the Board left as it was', async () => {
     grants = false;
     await leave();
     await until(() => claims().length === 1);
     await wait(150);
     expect(dialog()).toBeNull();
     expect(boardOn).toBe(false);
+  });
+
+  test('another tab or device won the claim: no dialog here, but the Board row shows now (the answer says it is on)', async () => {
+    grants = false;
+    onElsewhere = true;
+    await leave();
+    await until(() => claims().length === 1);
+    await until(() => boardOn);
+    await wait(150);
+    expect(dialog()).toBeNull();
+  });
+});
+
+describe('the load latch (App: revealArmed)', () => {
+  test('only reveal.next is armed; Snooze only while it is next', async () => {
+    const { revealArmed } = await import('./reveal');
+    expect(revealArmed({ reveal: { next: 'board' }, snooze_intro: { due: true } })).toEqual({ next: 'board', snoozeDue: false });
+    expect(revealArmed({ reveal: { next: 'snooze' }, snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true });
+    expect(revealArmed({ reveal: { next: null }, snooze_intro: { due: true } })).toEqual({ next: null, snoozeDue: false });
+  });
+
+  test('an older Inbox (no reveal in settings): its Snooze rule alone, never the Board', async () => {
+    const { revealArmed } = await import('./reveal');
+    expect(revealArmed({ snooze_intro: { due: true } })).toEqual({ next: 'snooze', snoozeDue: true });
+    expect(revealArmed({ snooze_intro: { due: false } })).toEqual({ next: null, snoozeDue: false });
+    expect(revealArmed({})).toEqual({ next: null, snoozeDue: false });
   });
 });
 
