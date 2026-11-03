@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
-import { useTheme } from '@plannotator/ui/components/ThemeProvider';
+import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useConfigValue } from '@plannotator/ui/config';
 import { buildPierreFontCSS } from '../utils/pierreFontCss';
 
@@ -245,6 +245,8 @@ export function usePierreTheme(options?: {
 
       const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
 
+      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
+      extendThemeSwitch();
       setPierreTheme({
         type: resolvedMode,
         syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode),
