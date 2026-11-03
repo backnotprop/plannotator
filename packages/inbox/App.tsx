@@ -98,6 +98,7 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
+import { createStepsBus } from './steps/useThreadSteps';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
@@ -678,8 +679,11 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
-  /** Told the thread whose steps changed (a `steps` record): the open thread's steps button reads them again. */
-  const stepsListeners = useRef(new Set<(threadId: string) => void>());
+  /**
+   * Thread steps' changes (approval "inbox-thread-steps"): a `steps` record names its thread; presence moving
+   * (`event: deliveries`), a reconnect and a catch-up name every thread. The open thread's steps read again.
+   */
+  const [stepsBus] = useState(createStepsBus);
   /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
   const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
@@ -1682,7 +1686,7 @@ function Inbox() {
           }
           // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread read.
           if (event?.kind === 'steps') {
-            for (const listener of stepsListeners.current) listener(event.thread_id);
+            stepsBus.emit(event.thread_id);
             return;
           }
           const now = routeRef.current;
@@ -1730,6 +1734,12 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        // A capability switch saved here or in another window (approval "inbox-thread-steps"): every window follows.
+        onCapabilities: (capabilities) => {
+          const steps = capabilities.steps;
+          if (steps) setSettings((current) => (current ? { ...current, steps } : current));
+          else void refreshSettings();
+        },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
@@ -1743,6 +1753,8 @@ function Inbox() {
         onDeliveries: () => {
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
+          // So does each steps list's presence (the in-progress mark turns only while its session works).
+          stepsBus.emit('*');
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
@@ -1751,6 +1763,7 @@ function Inbox() {
         onConnect: () => {
           reportWindow();
           emitAskChange(null);
+          stepsBus.emit('*');
           // The Inbox may have restarted onto a newer release while this page stayed open.
           stalePageRef.current.recheck();
         },
@@ -1763,6 +1776,8 @@ function Inbox() {
           const open = routeRef.current.thread;
           if (open) void refreshThread(open);
           void refreshDrafts();
+          // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
+          stepsBus.emit('*');
           // A card record reads the Board: while it is open, it is read again too.
           if (routeRef.current.page === 'board') void refreshCards();
           // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
@@ -3640,6 +3655,19 @@ function Inbox() {
     }
   };
 
+  // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
+  const toggleSteps = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, steps: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveSteps(next);
+      setSettings((current) => (current ? { ...current, steps: saved.steps } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -4717,6 +4745,7 @@ function Inbox() {
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
+        onToggleSteps={(next) => void toggleSteps(next)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5045,6 +5074,7 @@ function Inbox() {
               </>
             }
             thread={thread}
+            threadSteps={settings?.steps ? { on: settings.steps.on, subscribe: stepsBus.subscribe } : null}
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
             drawn={drawnSection(shown, thread.thread_id)}

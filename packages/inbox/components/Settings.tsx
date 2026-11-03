@@ -73,6 +73,8 @@ export interface SettingsPageProps {
   landOnExperimental?: boolean;
   /** Settings → Capabilities → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
   onToggleBoard?: (next: boolean) => void;
+  /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
+  onToggleSteps?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -458,35 +460,59 @@ function GeneralSection({
 function CapabilitiesSection({
   board,
   onToggleBoard,
+  steps,
+  onToggleSteps,
   experimental,
   onToggleExperimental,
   experimentalHeading,
 }: {
   board: { on: boolean } | null;
   onToggleBoard?: (next: boolean) => void;
+  /** The checklist (thread steps, approval "inbox-thread-steps"), null on an Inbox without it. */
+  steps: { on: boolean } | null;
+  onToggleSteps?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
+  const boardRow = board && onToggleBoard;
+  const stepsRow = steps && onToggleSteps;
   return (
     <>
-      {board && onToggleBoard && (
+      {(boardRow || stepsRow) && (
         <section className="ib-sgroup" data-settings-board="" aria-label="Capabilities">
           <div className="ib-card">
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l" id="ib-board-label">
-                  Board
+            {boardRow && (
+              <div className="ib-prow">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-board-label">
+                    Board
+                  </span>
+                  <span className="ib-desc">
+                    A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                  </span>
                 </span>
-                <span className="ib-desc">
-                  A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                <span className="ib-ctl">
+                  <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
                 </span>
-              </span>
-              <span className="ib-ctl">
-                <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
-              </span>
-            </div>
+              </div>
+            )}
+            {stepsRow && (
+              <div className="ib-prow" data-settings-steps="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-steps-label">
+                    Checklist
+                  </span>
+                  <span className="ib-desc">
+                    Your agents' plan for the work in a thread as a checklist, one step per line, under a button at the thread's foot. Off, agents are not offered a checklist and none shows; every checklist is kept. Agents pick this up in their next session.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={steps.on} labelledBy="ib-steps-label" onClick={() => onToggleSteps(!steps.on)} />
+                </span>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -816,13 +842,14 @@ export function SettingsPage(props: SettingsPageProps) {
   // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
+  const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -891,7 +918,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }
@@ -997,10 +1024,12 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || experimental ? (
+          (board && props.onToggleBoard) || steps || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
+              steps={steps}
+              onToggleSteps={props.onToggleSteps}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}

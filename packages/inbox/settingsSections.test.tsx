@@ -405,6 +405,33 @@ test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switc
   }
 });
 
+// The checklist (approval "inbox-thread-steps"): off by default, under the Board, saving config.json `inboxSteps`.
+test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under the Board, saves inboxSteps to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxSteps?: boolean }).inboxSteps;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  const group = el.querySelector('[data-settings-board]')!;
+  const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
+  expect(rows).toEqual(['Board', 'Checklist']);
+  expect(switchNamed(el, 'Checklist')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === true, 'config.json inboxSteps true');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === false, 'config.json inboxSteps false');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
 test.skipIf(!hasDom)('#settings/experimental (an old link) becomes Capabilities, focused on its Experimental group; decision mode saves to config.json, both ways', async () => {
   const config = () => {
     try {
