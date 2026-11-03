@@ -165,7 +165,8 @@ export async function startPlanReviewServer(options: {
 	approvalNotesSupported?: boolean;
 }): Promise<PlanServerResult> {
 	// The daily ping (server/daily-ping.ts): in the background, never awaited.
-	schedulePiDailyPing("plan");
+	// The archive browser is not plan review: it sends nothing, as in the CLI.
+	if (options.mode !== "archive") schedulePiDailyPing("plan");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());

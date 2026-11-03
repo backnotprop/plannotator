@@ -74,6 +74,8 @@ test("a new release shows in the Inbox within seconds of a start, through a stal
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
+      // A release version from source: never the live daily ping (packages/shared/daily-ping.ts).
+      NO_ANON_PING: "1",
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER,
       PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",

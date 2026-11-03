@@ -94,6 +94,19 @@ describe("the daily ping on the Pi servers", () => {
 		});
 	}
 
+	test("the archive browser is not plan review: no request, as in the CLI", async () => {
+		setPiPingVersionForTests({ version: "0.28.46" });
+		used();
+		const server = await startPlanReviewServer({ plan: "", origin: "pi", mode: "archive", htmlContent: MINIMAL_HTML });
+		try {
+			await Bun.sleep(300);
+			expect(bodies).toEqual([]);
+			expect(sent()).toEqual([]);
+		} finally {
+			server.stop();
+		}
+	});
+
 	test("a Pi run from this checkout is a dev build: no request", async () => {
 		expect(piPingVersion()).toBeUndefined();
 		used();

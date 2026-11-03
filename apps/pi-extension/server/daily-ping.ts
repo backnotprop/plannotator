@@ -35,7 +35,9 @@ export function piPingVersion(): string | undefined {
 
 export function schedulePiDailyPing(tool: DailyPingTool): void {
 	try {
-		scheduleDailyPing({ version: piPingVersion(), tool });
+		const version = piPingVersion();
+		// Installed from npm (not run from this repository): a release.
+		scheduleDailyPing({ version, release: version !== undefined, tool });
 	} catch {
 		// Never the session's problem.
 	}

@@ -15,9 +15,13 @@ Nothing else: no IP address, no header, no `request.cf` field (country, city, ne
 
 ## Routes
 
-- `POST /ping`: a body over 160 bytes gets `413`; a body that is not exactly those four keys (`version` X.Y.Z, `age_week` 1-4, `tool` one of the five, `first` 0 or 1) gets `400`; otherwise the upserts and `204`.
-- `GET /totals`: `{"days":[{"day","users","age_week":{"1":..},"versions":{"0.28.46":..},"tools":{"plan":..}}]}` for the last 400 days, public (`access-control-allow-origin: *`, cached 5 minutes). `users`, `age_week` and `versions` count computers (from `daily_total`); `tools` counts computers per tool (from `daily`).
+- `POST /ping`: a body over 160 bytes gets `413`, by its Content-Length before any byte is read, or once the read passes 160 bytes; a body that is not exactly those four keys (`version` X.Y.Z, `age_week` 1-4, `tool` one of the five, `first` 0 or 1) gets `400`; otherwise the upserts and `204`.
+- `GET /totals`: `{"days":[{"day","users","age_week":{"1":..},"versions":{"0.28.46":..},"tools":{"plan":..}}]}` for the last 90 days, public (`access-control-allow-origin: *`). Served from the Cache API (`caches.default`) for 5 minutes, so repeated GETs do not read D1. `users`, `age_week` and `versions` count computers (from `daily_total`); `tools` counts computers per tool (from `daily`).
 - Anything else: `404`; a wrong method: `405`.
+
+## Abuse
+
+The Worker keeps no per-isolate rate limit: isolates are many and short-lived, so a counter in one would bound nothing. If counts are ever inflated on purpose, add a Cloudflare rate-limiting rule for `/ping` at the zone; it stores nothing in this app.
 
 ## Deploy (owner only, never from CI)
 

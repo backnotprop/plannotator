@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { handleRequest, MAX_BODY_BYTES, type PingDb, TOOL_TOTALS_SQL, TOOL_UPSERT_SQL, TOTAL_UPSERT_SQL, USER_TOTALS_SQL } from "../src/handler";
+import { handleRequest, MAX_BODY_BYTES, type PingDb, TOOL_TOTALS_SQL, TOOL_UPSERT_SQL, TOTAL_UPSERT_SQL, TOTALS_DAYS, type TotalsCache, USER_TOTALS_SQL } from "../src/handler";
 
 const NOW = Date.parse("2026-11-03T12:34:56Z");
 
@@ -124,6 +124,37 @@ describe("POST /ping", () => {
     expect(calls).toEqual([]);
   });
 
+  test("a large body is refused unread: by its Content-Length, or once it passes the cap", async () => {
+    const { db, calls } = fakeDb();
+    // A declared size over the cap: refused before any byte is read.
+    let pulled = 0;
+    // highWaterMark 0: a chunk is made only when the Worker reads.
+    const endless = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pulled++;
+          controller.enqueue(new Uint8Array(64 * 1024));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const declared = new Request("https://ping.plannotator.ai/ping", { method: "POST", body: endless, headers: { "content-length": String(10 * 1024 * 1024) }, duplex: "half" } as RequestInit);
+    expect((await handleRequest(declared, { DB: db }, NOW)).status).toBe(413);
+    expect(pulled).toBe(0);
+    // No length, or a false one: read only until it passes the cap.
+    const lying = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(100));
+      },
+    });
+    pulled = 0;
+    const undeclared = new Request("https://ping.plannotator.ai/ping", { method: "POST", body: lying, duplex: "half" } as RequestInit);
+    expect((await handleRequest(undeclared, { DB: db }, NOW)).status).toBe(413);
+    expect(pulled).toBeLessThanOrEqual(3);
+    expect(calls).toEqual([]);
+  });
+
   test("stores no IP, header or request.cf field: only the day, version, age_week and tool reach D1", async () => {
     const { db, calls } = fakeDb();
     await handleRequest(ping(body("0.28.46", 3, "annotate", 1)), { DB: db }, NOW);
@@ -143,11 +174,49 @@ describe("POST /ping", () => {
       ["daily_total", ["day", "version", "age_week", "n"]],
     ]);
     const source = readFileSync(join(import.meta.dir, "..", "src", "handler.ts"), "utf-8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-    expect(source).not.toMatch(/req\.headers|\.cf\b|console\./);
+    // The one header it reads is Content-Length, to refuse a large body unread.
+    expect([...source.matchAll(/req\.headers[^;]*/g)].map((m) => m[0])).toEqual(['req.headers.get("content-length") ?? "0")']);
+    expect(source).not.toMatch(/\.cf\b|console\./);
   });
 });
 
+function fakeCache() {
+  const store = new Map<string, Response>();
+  const cache: TotalsCache = {
+    async match(key) {
+      return store.get(key.url)?.clone();
+    },
+    async put(key, res) {
+      store.set(key.url, res);
+    },
+  };
+  return { cache, store };
+}
+
 describe("GET /totals", () => {
+  test("answered from the cache after the first read: repeat GETs, with any query string, never touch D1", async () => {
+    const { db, calls } = fakeDb();
+    const { cache } = fakeCache();
+    await handleRequest(ping(body("0.28.46", 1, "plan", 1)), { DB: db }, NOW);
+    const first = await handleRequest(new Request("https://ping.plannotator.ai/totals"), { DB: db }, NOW, cache);
+    const reads = () => calls.filter((c) => c.sql === TOOL_TOTALS_SQL || c.sql === USER_TOTALS_SQL).length;
+    expect(reads()).toBe(2);
+    expect(first.headers.get("cache-control")).toBe("public, max-age=300");
+    for (const url of ["https://ping.plannotator.ai/totals", "https://ping.plannotator.ai/totals?x=1"]) {
+      const again = await handleRequest(new Request(url), { DB: db }, NOW, cache);
+      expect(again.status).toBe(200);
+      expect(await again.json()).toEqual(await first.clone().json());
+    }
+    expect(reads()).toBe(2);
+  });
+
+  test("reads only the last 90 days", async () => {
+    const { db, calls } = fakeDb();
+    await handleRequest(new Request("https://ping.plannotator.ai/totals"), { DB: db }, NOW);
+    expect(TOTALS_DAYS).toBe(90);
+    expect(calls.map((c) => c.values)).toEqual([["2026-08-06"], ["2026-08-06"]]);
+  });
+
   test("public JSON of daily sums: users, per age bucket, per version, per tool", async () => {
     const { db } = fakeDb();
     const send = (b: string, at = NOW) => handleRequest(ping(b), { DB: db }, at);

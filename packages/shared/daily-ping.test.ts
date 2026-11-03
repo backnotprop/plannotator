@@ -6,7 +6,7 @@
  * bytes; a failed send tries again at the next check.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TELEMETRY_CI_VARS } from "./config";
@@ -122,10 +122,23 @@ describe("the request", () => {
     expect(dailyPingAge(monday, "2027-04-19")).toBe(4);
   });
 
-  test("the first check sends at once (no notice, no wait), records this week's Monday, and says age_week 1", async () => {
+  test("the first check sends at once (no notice, no wait); a new data folder is this week, age_week 1", async () => {
     expect(await check("review")).toBe("sent");
     expect(readDailyPingState(dataDir).firstWeek).toBe("2026-11-02");
     expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":1,"tool":"review","first":1}');
+  });
+
+  test("an existing user's first ping counts from first use: the oldest time in the data folder, never later than today", async () => {
+    // Plannotator was used here 10 weeks before the ping arrived (a file it wrote then).
+    const ten = (NOW - 70 * DAY) / 1000;
+    mkdirSync(join(dataDir, "history"));
+    writeFileSync(join(dataDir, "config.json"), "{}");
+    utimesSync(join(dataDir, "config.json"), ten, ten);
+    expect(await check("plan")).toBe("sent");
+    expect(readDailyPingState(dataDir).firstWeek).toBe("2026-08-24");
+    expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"plan","first":1}');
+    // ping.json only holds the week: nothing else about the folder.
+    expect(Object.keys(JSON.parse(readFileSync(join(dataDir, "ping.json"), "utf8")))).toEqual(["firstWeek", "day", "sent"]);
   });
 });
 
@@ -165,7 +178,14 @@ describe("off means no request", () => {
     expect(dailyPingEndpoint(VERSION, { NODE_ENV: "test" })).toBeNull();
     expect(dailyPingEndpoint(VERSION, { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TELEMETRY_URL: "https://ping.plannotator.ai" })).toBeNull();
     expect(dailyPingEndpoint(VERSION, { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TELEMETRY_URL: "http://example.com" })).toBeNull();
-    expect(dailyPingEndpoint(VERSION, { PLANNOTATOR_TELEMETRY_URL: "http://127.0.0.1:9" })).toBe(DAILY_PING_URL);
+  });
+
+  test("outside the sandbox only a build release CI marked reaches the live host; the URL override is ignored", () => {
+    // A test that spawns the CLI with a release __CLI_VERSION__ and a replaced env: no mark, nowhere to send.
+    expect(dailyPingEndpoint(VERSION, {})).toBeNull();
+    expect(dailyPingEndpoint(VERSION, { PLANNOTATOR_TELEMETRY_URL: "http://127.0.0.1:9" })).toBeNull();
+    expect(dailyPingEndpoint(VERSION, {}, true)).toBe(DAILY_PING_URL);
+    expect(dailyPingEndpoint(VERSION, { PLANNOTATOR_TELEMETRY_URL: "http://127.0.0.1:9" }, true)).toBe(DAILY_PING_URL);
   });
 });
 
@@ -202,6 +222,20 @@ describe("failures and the lock", () => {
     expect(await check("plan")).toBe("sent");
     expect(received).toHaveLength(1);
   }, 15_000);
+
+  test("a process whose lock was taken over mid-send writes nothing and leaves the other's lock alone", async () => {
+    const lock = join(dataDir, "ping.lock");
+    // While this process's POST is out it sleeps past the stale minute: another process takes the lock over.
+    answer = () => {
+      writeFileSync(lock, "the-other-process");
+      return 204;
+    };
+    expect(await check("plan")).toBe("failed");
+    expect(received).toHaveLength(1);
+    // Its state stays the other process's to write, and its lock is still there.
+    expect(readDailyPingState(dataDir).sent).toBeUndefined();
+    expect(readFileSync(lock, "utf8")).toBe("the-other-process");
+  });
 
   function spawnChecks(tools: DailyPingTool[]) {
     const module = join(import.meta.dir, "daily-ping.ts");

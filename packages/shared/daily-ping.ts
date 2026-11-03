@@ -20,17 +20,24 @@
  * adds 1 to that day's totals and keeps nothing else (apps/telemetry).
  *
  * When a check sends (every gate, in order):
- *  - a release build: `version` is X.Y.Z (a source run, a dev or test build
- *    sends nothing). Under the test sandbox (PLANNOTATOR_TEST_SANDBOX, or
- *    NODE_ENV=test) it only ever sends to a loopback PLANNOTATOR_TELEMETRY_URL,
- *    never to the real host;
+ *  - a release build: `version` is X.Y.Z, and the build says it is a release.
+ *    Only release CI says so: it defines `__PLANNOTATOR_RELEASE__=true` when it
+ *    compiles the binaries (release.yml), Pi counts as one only when it does
+ *    not run from this repository, and OpenCode only when release CI wrote
+ *    `dist/release.json`. Every other run (a source run, a local build, a test
+ *    that spawns the CLI with any `__CLI_VERSION__` and any environment) is a
+ *    dev build and never reaches the real host. Under the test sandbox
+ *    (PLANNOTATOR_TEST_SANDBOX, or NODE_ENV=test) it only ever sends to a
+ *    loopback PLANNOTATOR_TELEMETRY_URL;
  *  - not turned off by the environment: NO_ANON_PING, the do-not-track
  *    convention, CI (config.ts parseTelemetryEnvOff). There is no config key
  *    and no Settings switch;
  *  - this tool has not sent yet today (`sent` for today's `day`);
  *  - this process holds `ping.lock` (O_EXCL, waited for up to a few seconds,
- *    stale after a minute), so processes sharing a data dir send each tool's
- *    ping once and only one ping a day carries `first: 1`.
+ *    stale after a minute; it holds a random token), so processes sharing a
+ *    data dir send each tool's ping once and only one ping a day carries
+ *    `first: 1`. A process whose lock was taken over (it slept past a minute)
+ *    sends nothing more, writes nothing and leaves the other's lock alone.
  * On by default with no in-app notice (owner decision): people are told by the
  * release notes, the privacy page and the Inbox's Settings > About.
  * The POST runs in the background with a 3 s timeout. Only a 2xx records the
@@ -38,13 +45,16 @@
  *
  * The file, `${dataDir}/ping.json` (0600, written whole):
  *   {"firstWeek":"2026-11-02","day":"2026-11-03","sent":["plan","review"]}
- * `firstWeek` is the Monday (UTC) of the week this computer first checked
- * with the ping on; `day` and `sent` are the tools already sent that UTC day.
+ * `firstWeek` is the Monday (UTC) of the week this computer first used
+ * Plannotator: when the file is new, the oldest time on the data folder or
+ * anything directly in it (Plannotator wrote them), else this week. `day` and
+ * `sent` are the tools already sent that UTC day.
  * Nothing else is kept. Nothing is written while the ping is off.
  *
  * Only the local Plannotator process sends, never a browser page.
  */
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parseTelemetryEnvOff, type TelemetryEnvOff } from "./config";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -74,6 +84,12 @@ export interface DailyPingState {
 export interface DailyPingDeps {
   /** This build's version (`__CLI_VERSION__`, the Pi or OpenCode package's); undefined for a source run. */
   version: string | undefined;
+  /**
+   * Whether this is a build release CI made. Default: the compiled-in mark
+   * (`__PLANNOTATOR_RELEASE__`, only release.yml defines it). Pi and OpenCode
+   * pass their own answer.
+   */
+  release?: boolean;
   tool: DailyPingTool;
   dataDir?: string;
   env?: NodeJS.ProcessEnv;
@@ -105,6 +121,13 @@ export function dailyPingAge(firstWeek: string, today: string): 1 | 2 | 3 | 4 {
   if (weeks <= 3) return 2;
   if (weeks <= 23) return 3;
   return 4;
+}
+
+declare const __PLANNOTATOR_RELEASE__: boolean | undefined;
+
+/** True only in a binary release CI compiled (`--define __PLANNOTATOR_RELEASE__=true`, release.yml). */
+export function isMarkedReleaseBuild(): boolean {
+  return typeof __PLANNOTATOR_RELEASE__ !== "undefined" && __PLANNOTATOR_RELEASE__ === true;
 }
 
 export function isReleaseVersion(version: string | undefined): version is string {
@@ -147,21 +170,21 @@ function loopbackUrl(value: string | undefined): string | null {
 }
 
 /**
- * Where this process may send, or null for nowhere. Only a release build
- * sends. Under the test sandbox only a loopback PLANNOTATOR_TELEMETRY_URL
- * counts, so a test never reaches the real host; outside it the variable is
+ * Where this process may send, or null for nowhere. Under the test sandbox
+ * only a loopback PLANNOTATOR_TELEMETRY_URL counts. Outside it, only a build
+ * release CI made (`release`) reaches the real host, and the variable is
  * ignored, so nothing can redirect real pings.
  */
-export function dailyPingEndpoint(version: string | undefined, env: NodeJS.ProcessEnv = process.env): string | null {
+export function dailyPingEndpoint(version: string | undefined, env: NodeJS.ProcessEnv = process.env, release: boolean = isMarkedReleaseBuild()): string | null {
   if (!isReleaseVersion(version)) return null;
   if (env.PLANNOTATOR_TEST_SANDBOX || env.NODE_ENV === "test") return loopbackUrl(env.PLANNOTATOR_TELEMETRY_URL);
-  return DAILY_PING_URL;
+  return release ? DAILY_PING_URL : null;
 }
 
 /** Why the ping is off for this process, or null when it is on. */
-export function dailyPingOff(deps: Pick<DailyPingDeps, "version" | "env">): DailyPingOff | null {
+export function dailyPingOff(deps: Pick<DailyPingDeps, "version" | "env" | "release">): DailyPingOff | null {
   const env = deps.env ?? process.env;
-  if (!dailyPingEndpoint(deps.version, env)) return "dev";
+  if (!dailyPingEndpoint(deps.version, env, deps.release)) return "dev";
   return parseTelemetryEnvOff(env) ?? null;
 }
 
@@ -201,6 +224,31 @@ function writeDailyPingState(dataDir: string, state: DailyPingState): void {
   renameSync(tmp, path);
 }
 
+/**
+ * The week this computer first used Plannotator, for a ping.json that has no
+ * `firstWeek` yet: the oldest birth or change time of the data folder and of
+ * what is directly in it (Plannotator made them), never later than today.
+ * Only the week is kept.
+ */
+export function firstUseWeek(dataDir: string, today: string): string {
+  let oldest = Date.parse(`${today}T00:00:00Z`);
+  const consider = (path: string) => {
+    try {
+      const st = statSync(path);
+      for (const t of [st.birthtimeMs, st.mtimeMs]) if (t > 0 && t < oldest) oldest = t;
+    } catch {
+      // Gone, or not ours to read.
+    }
+  };
+  consider(dataDir);
+  try {
+    for (const name of readdirSync(dataDir)) if (name !== DAILY_PING_FILE && name !== DAILY_PING_LOCK) consider(join(dataDir, name));
+  } catch {
+    // No data folder yet: this week.
+  }
+  return utcWeekStart(utcDay(oldest));
+}
+
 /** The tools already sent today, from the file. */
 function sentToday(state: DailyPingState, today: string): DailyPingTool[] {
   return state.day === today ? (state.sent ?? []) : [];
@@ -208,9 +256,15 @@ function sentToday(state: DailyPingState, today: string): DailyPingTool[] {
 
 // ── The lock ──
 
-function tryLock(path: string): boolean {
+/** Create the lock holding `token`; false when another process holds it. */
+function tryLock(path: string, token: string): boolean {
   try {
-    closeSync(openSync(path, "wx", 0o600));
+    const fd = openSync(path, "wx", 0o600);
+    try {
+      writeSync(fd, token);
+    } finally {
+      closeSync(fd);
+    }
     return true;
   } catch {
     try {
@@ -222,20 +276,39 @@ function tryLock(path: string): boolean {
   }
 }
 
+interface HeldLock {
+  /** Whether `ping.lock` still holds this process's token (not taken over as stale). */
+  held(): boolean;
+  /** Remove the lock, only while it is still this process's. */
+  release(): void;
+}
+
 /** Wait (asynchronously) for `ping.lock`; null when another process held it for too long. */
-async function takeLock(dataDir: string): Promise<(() => void) | null> {
+async function takeLock(dataDir: string): Promise<HeldLock | null> {
   const path = join(dataDir, DAILY_PING_LOCK);
+  const token = randomBytes(16).toString("hex");
   const end = Date.now() + DAILY_PING_LOCK_WAIT_MS;
-  while (!tryLock(path)) {
+  while (!tryLock(path, token)) {
     if (Date.now() >= end) return null;
     await new Promise((resolve) => setTimeout(resolve, 50 + Math.floor(Math.random() * 50)));
   }
-  return () => {
+  const held = () => {
     try {
-      unlinkSync(path);
+      return readFileSync(path, "utf-8") === token;
     } catch {
-      // Taken over as stale.
+      return false;
     }
+  };
+  return {
+    held,
+    release() {
+      if (!held()) return;
+      try {
+        unlinkSync(path);
+      } catch {
+        // Gone in between.
+      }
+    },
   };
 }
 
@@ -249,20 +322,22 @@ export async function checkDailyPing(deps: DailyPingDeps): Promise<DailyPingResu
   try {
     const env = deps.env ?? process.env;
     if (!DAILY_PING_TOOLS.includes(deps.tool)) return "failed";
-    const off = dailyPingOff({ version: deps.version, env });
+    const off = dailyPingOff({ version: deps.version, env, release: deps.release });
     if (off) return off;
-    const endpoint = dailyPingEndpoint(deps.version, env)!;
+    const endpoint = dailyPingEndpoint(deps.version, env, deps.release)!;
     const dataDir = deps.dataDir ?? getPlannotatorDataDir();
     const today = utcDay(deps.now ?? Date.now());
     if (sentToday(readDailyPingState(dataDir), today).includes(deps.tool)) return "sent-today";
+    // Before the lock is made: the data folder's own times say when Plannotator was first used.
+    const firstUse = firstUseWeek(dataDir, today);
     mkdirSync(dataDir, { recursive: true });
-    const release = await takeLock(dataDir);
-    if (!release) return "busy";
+    const lock = await takeLock(dataDir);
+    if (!lock) return "busy";
     try {
       // Read again under the lock: another process may have sent in between.
       const state = readDailyPingState(dataDir);
       if (!state.firstWeek) {
-        state.firstWeek = utcWeekStart(today);
+        state.firstWeek = firstUse;
         writeDailyPingState(dataDir, state);
       }
       const sent = sentToday(state, today);
@@ -275,10 +350,13 @@ export async function checkDailyPing(deps: DailyPingDeps): Promise<DailyPingResu
         signal: AbortSignal.timeout(DAILY_PING_TIMEOUT_MS),
       });
       if (!response.ok) return "failed";
+      // Taken over while sending (this process slept past the stale minute): the other
+      // process owns the file now. Writing would drop what it recorded.
+      if (!lock.held()) return "failed";
       writeDailyPingState(dataDir, { ...state, day: today, sent: DAILY_PING_TOOLS.filter((t) => t === deps.tool || sent.includes(t)) });
       return "sent";
     } finally {
-      release();
+      lock.release();
     }
   } catch {
     return "failed";

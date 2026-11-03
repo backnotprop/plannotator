@@ -6,11 +6,20 @@
  *                   version, age bucket and tool, and, when `first` is 1 (the
  *                   computer's first ping of the day), to the day's user
  *                   total. 204, no body. Anything else: 400 / 413 / 405.
- *  - GET  /totals   read-only JSON of the daily sums, for a public page.
+ *                   A body over MAX_BODY_BYTES is refused before it is read
+ *                   (its Content-Length) and never read past that size.
+ *  - GET  /totals   read-only JSON of the last TOTALS_DAYS days' sums, for a
+ *                   public page. Served from the Cache API for 5 minutes, so
+ *                   repeated GETs do not read D1.
  *
  * It stores no IP, no header, no `request.cf` field, no time finer than the
- * UTC day, and no row per request. It never reads a request header and never
- * logs. The client is packages/shared/daily-ping.ts.
+ * UTC day, and no row per request. The only header it reads is
+ * Content-Length (to refuse a large body unread), and it never logs. The
+ * client is packages/shared/daily-ping.ts.
+ *
+ * No per-isolate rate limit: isolates are many and short-lived, so a counter
+ * in one would not bound anything. If counts are ever inflated on purpose, add
+ * a Cloudflare rate-limiting rule on /ping at the zone (it stores nothing here).
  */
 
 /** The part of D1 this Worker uses (D1Database fits; tests pass a fake). */
@@ -27,11 +36,22 @@ export interface Env {
   DB: PingDb;
 }
 
+/** The part of the Cache API GET /totals uses (`caches.default` fits; tests pass a fake). */
+export interface TotalsCache {
+  match(key: Request): Promise<Response | undefined>;
+  put(key: Request, res: Response): Promise<void>;
+}
+
+/** How long a /totals answer is served from the cache. */
+export const TOTALS_CACHE_SECONDS = 300;
+/** The one cache key every /totals request shares (no query string can split it). */
+const TOTALS_CACHE_KEY = "https://ping.plannotator.ai/totals";
+
 export const MAX_BODY_BYTES = 160;
 export const AGE_WEEKS = [1, 2, 3, 4] as const;
 export const TOOLS = ["inbox", "plan", "review", "annotate", "last"] as const;
 /** How many days GET /totals answers, newest last. */
-export const TOTALS_DAYS = 400;
+export const TOTALS_DAYS = 90;
 
 const VERSION_RE = /^\d{1,4}\.\d{1,4}\.\d{1,4}$/;
 const DAY_MS = 86_400_000;
@@ -116,12 +136,39 @@ export function sumDays(users: UserRow[], tools: ToolRow[]): DayTotals[] {
   return [...days.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 }
 
-export async function handleRequest(req: Request, env: Env, now: number = Date.now()): Promise<Response> {
+/** The body, read up to `max` bytes; null when it is larger (the rest is never read). */
+async function readCapped(req: Request, max: number): Promise<Uint8Array | null> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
+export async function handleRequest(req: Request, env: Env, now: number = Date.now(), cache?: TotalsCache): Promise<Response> {
   const path = new URL(req.url).pathname;
   if (path === "/ping") {
     if (req.method !== "POST") return empty(405);
-    const bytes = await req.arrayBuffer();
-    if (bytes.byteLength > MAX_BODY_BYTES) return empty(413);
+    const declared = Number(req.headers.get("content-length") ?? "0");
+    if (!(declared <= MAX_BODY_BYTES)) return empty(413);
+    const bytes = await readCapped(req, MAX_BODY_BYTES);
+    if (!bytes) return empty(413);
     const ping = parsePing(new TextDecoder().decode(bytes));
     if (!ping) return empty(400);
     const day = utcDay(now);
@@ -131,17 +178,22 @@ export async function handleRequest(req: Request, env: Env, now: number = Date.n
   }
   if (path === "/totals") {
     if (req.method !== "GET") return empty(405);
+    const key = new Request(TOTALS_CACHE_KEY);
+    const hit = await cache?.match(key);
+    if (hit) return hit;
     const from = utcDay(now - (TOTALS_DAYS - 1) * DAY_MS);
     const users = await env.DB.prepare(USER_TOTALS_SQL).bind(from).all<UserRow>();
     const tools = await env.DB.prepare(TOOL_TOTALS_SQL).bind(from).all<ToolRow>();
-    return new Response(JSON.stringify({ days: sumDays(users.results, tools.results) }), {
+    const res = new Response(JSON.stringify({ days: sumDays(users.results, tools.results) }), {
       status: 200,
       headers: {
         "content-type": "application/json",
-        "cache-control": "public, max-age=300",
+        "cache-control": `public, max-age=${TOTALS_CACHE_SECONDS}`,
         "access-control-allow-origin": "*",
       },
     });
+    await cache?.put(key, res.clone());
+    return res;
   }
   return empty(404);
 }
