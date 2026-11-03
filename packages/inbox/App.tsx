@@ -110,6 +110,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
+import { revealArmed, useBoardReveal } from './reveal';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -144,6 +145,7 @@ import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { BoardOff } from './board/BoardOff';
+import { BoardIntro } from './board/BoardIntro';
 import { CardChip } from './board/CardChip';
 import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -855,8 +857,11 @@ function Inbox() {
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   const voiceIntroDueAtLoad = useRef(false);
-  /** The one-time Snooze announcement (snoozeIntro.ts): due for this page, read once per load. */
-  const snoozeIntroLatch = useRef<{ due: boolean } | null>(null);
+  /**
+   * The reveals for returning users (reveal.ts; approval "inbox-feature-reveal"): the one this page may arm, read once
+   * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed: one per load.
+   */
+  const snoozeIntroLatch = useRef<{ due: boolean; next: 'snooze' | 'board' | 'steps' | null } | null>(null);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -3896,32 +3901,51 @@ function Inbox() {
   // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
-    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true };
+    // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
+    const armed = revealArmed(settings);
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
+  const revealBlocked = snoozeIntroBlockedBy({
+    tour: tourThisLoad.current,
+    updating: updatingThisLoad.current,
+    sound: soundDialog,
+    agentNote,
+    listIntroWant,
+    listIntro,
+    voiceWanted: voiceIntro.wanted,
+    voiceStage: voiceIntro.stage,
+    board: oneTimeDialogShownThisLoad(),
+  });
+  // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
+  const revealHeldBack = () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null;
   const snoozeIntro = useSnoozeIntro({
     due: snoozeIntroLatch.current?.due ?? false,
     listLoaded: snoozeIntroLatch.current !== null,
     firstRun,
-    blocked: snoozeIntroBlockedBy({
-      tour: tourThisLoad.current,
-      updating: updatingThisLoad.current,
-      sound: soundDialog,
-      agentNote,
-      listIntroWant,
-      listIntro,
-      voiceWanted: voiceIntro.wanted,
-      voiceStage: voiceIntro.stage,
-      board: oneTimeDialogShownThisLoad(),
-    }),
+    blocked: revealBlocked,
     snoozedHere: snoozedThisLoad.current,
     rows: snoozeIntroRows,
     toast: toast !== null,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
-    // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
-    heldBack: () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null,
+    heldBack: revealHeldBack,
+  });
+  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim turns the Board on, so its
+  // sidebar row appears with the Board's own first-visit dialog (BoardIntro). No new dialog.
+  const boardReveal = useBoardReveal({
+    due: snoozeIntroLatch.current?.next === 'board',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
@@ -3959,7 +3983,9 @@ function Inbox() {
     voiceIntro.stage !== 'open' &&
     voiceIntro.stage !== 'claimed' &&
     snoozeIntro.stage !== 'open' &&
-    snoozeIntro.stage !== 'claimed';
+    snoozeIntro.stage !== 'claimed' &&
+    boardReveal.stage !== 'open' &&
+    boardReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5354,6 +5380,7 @@ function Inbox() {
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
+      {boardReveal.stage === 'open' && <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}
