@@ -133,6 +133,19 @@ export function isInboxStepsRecord(value: unknown): value is InboxSteps {
     record.agent?.kind === "agent" &&
     typeof record.agent.session === "string" &&
     Array.isArray(record.steps) &&
+    // Every entry a step as the store writes them: one malformed entry would break the session's later calls.
+    record.steps.every(isStoredStep) &&
     typeof record.updated_at === "string"
+  );
+}
+
+function isStoredStep(value: unknown): value is InboxStep {
+  if (!value || typeof value !== "object") return false;
+  const step = value as Partial<InboxStep>;
+  return (
+    typeof step.step === "string" &&
+    (INBOX_STEP_STATUSES as readonly unknown[]).includes(step.status) &&
+    (step.note === null || typeof step.note === "string") &&
+    typeof step.at === "string"
   );
 }

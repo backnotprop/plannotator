@@ -9,11 +9,11 @@
  * restart, and a deleted thread whose steps survive it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_STEPS_MAX, INBOX_STEP_TEXT_MAX, inboxStepsProgress, type InboxAuthor, type InboxLine } from "@plannotator/core/inbox-types";
-import { InboxError, STEPS_FILE } from "./schema";
+import { InboxError, SEQ_FLOOR_FILE, STEPS_FILE } from "./schema";
 import { InboxStore } from "./store";
 
 const roots: string[] = [];
@@ -148,5 +148,27 @@ describe("thread steps", () => {
     expect(readFileSync(file, "utf8")).toBe("");
     // The deleted line's seq is never handed out again.
     expect(w.open().cursor()).toBeGreaterThanOrEqual(w.store.cursor());
+  });
+
+  // Review of #2565, finding 9: an older Inbox never reads steps.jsonl, so only the floor keeps it from handing a
+  // steps line's seq out again. Checked right after the write, before anything else could write the floor.
+  test("a steps write raises the seq floor to its own seq", () => {
+    const { store, thread, dir } = world();
+    store.setThreadSteps({ thread_id: thread, agent: AGENT, steps: PLAN });
+    expect(JSON.parse(readFileSync(join(dir, "inbox", SEQ_FLOOR_FILE), "utf8"))).toEqual({ seq: store.cursor() });
+  });
+
+  // Review of #2565, finding 8: a stored list with a malformed entry (a hand edit, a torn write) is skipped on
+  // load, so the session's next list is taken instead of failing on it for good; and a clear that finds nothing
+  // names no made-up record.
+  test("a malformed stored list never breaks the session's next call; a clear with nothing to clear names no record", () => {
+    const w = world();
+    const written = w.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: PLAN }).record!;
+    const file = join(w.dir, "inbox", "projects", w.project.key, STEPS_FILE);
+    const line = JSON.parse(readFileSync(file, "utf8").trim()) as InboxLine;
+    writeFileSync(file, `${JSON.stringify({ ...line, seq: w.store.cursor() + 1, record: { ...written, steps: [null] } })}\n`, { flag: "a" });
+    const reopened = w.open();
+    expect(reopened.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: PLAN.slice(0, 2) }).changed).toBe(true);
+    expect(reopened.setThreadSteps({ thread_id: w.thread, agent: { ...AGENT, session: "ses_never" }, steps: [] })).toEqual({ record: null, changed: false });
   });
 });

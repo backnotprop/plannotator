@@ -658,6 +658,8 @@ export class InboxStore {
    */
   private readonly stepsById = new Map<string, InboxSteps>();
   private readonly stepsIdOf = new Map<string, string>();
+  /** Each thread's steps record ids (a thread's read never scans every list). */
+  private readonly stepsIdsByThread = new Map<string, Set<string>>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -829,6 +831,9 @@ export class InboxStore {
         if (isInboxStepsRecord(line.record)) {
           this.stepsById.set(line.record.id, line.record);
           this.stepsIdOf.set(`${line.record.thread_id}\0${line.record.agent.session}`, line.record.id);
+          let ids = this.stepsIdsByThread.get(line.record.thread_id);
+          if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
+          ids.add(line.record.id);
         }
         break;
     }
@@ -5147,6 +5152,7 @@ export class InboxStore {
     this.cardHeardSeq.clear();
     this.stepsById.clear();
     this.stepsIdOf.clear();
+    this.stepsIdsByThread.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -5891,7 +5897,10 @@ export class InboxStore {
   threadSteps(threadId: string): InboxSteps[] {
     const root = this.messages.get(threadId)?.thread_id ?? threadId;
     const out: InboxSteps[] = [];
-    for (const record of this.stepsById.values()) if (record.thread_id === root && record.steps.length > 0) out.push(record);
+    for (const id of this.stepsIdsByThread.get(root) ?? []) {
+      const record = this.stepsById.get(id);
+      if (record && record.steps.length > 0) out.push(record);
+    }
     return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
   }
 
@@ -5909,9 +5918,11 @@ export class InboxStore {
    * empty one clears it). Refused with a validation_error, nothing written,
    * when the list does not read (inboxSteps limits) or the caller has no
    * session; thread_not_found for an unknown thread. A list that reads the
-   * same as the last one writes nothing (`changed` false).
+   * same as the last one writes nothing (`changed` false). `record` is the
+   * session's record after the call: null only when it never sent a list and
+   * this one is empty (there is no record to name).
    */
-  setThreadSteps(input: { thread_id: string; agent: InboxAuthor; steps: unknown }): { record: InboxSteps; changed: boolean } {
+  setThreadSteps(input: { thread_id: string; agent: InboxAuthor; steps: unknown }): { record: InboxSteps | null; changed: boolean } {
     const agent = input.agent;
     if (agent.kind !== "agent" || !agent.session?.trim()) {
       throw new InboxError("validation_error", "agent_session: steps belong to an agent session (the connection fills it).", { field: "agent_session" });
@@ -5926,7 +5937,7 @@ export class InboxStore {
     const checked = normalizeInboxSteps(input.steps, previous?.steps ?? [], at);
     if ("error" in checked) throw new InboxError("validation_error", checked.error, { field: checked.field });
     if (previous ? sameInboxSteps(previous.steps, checked.steps) : checked.steps.length === 0) {
-      return { record: previous ?? { id: "", project_id: root.project_id, thread_id: root.id, agent: { ...agent, session }, steps: [], updated_at: at }, changed: false };
+      return { record: previous, changed: false };
     }
     const record: InboxSteps = {
       id: previous?.id ?? inboxId("stp"),
