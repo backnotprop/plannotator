@@ -1335,3 +1335,31 @@ test.skipIf(!hasDom)("a later read answers the switch's line: Refresh clears \"S
   await until(() => switchNote(el) === null, 'the line answered');
   expect(inUseName(el)).toBe('personal');
 });
+
+test.skipIf(!hasDom)('an open confirm holds its login: a read after `cswap swap` in a terminal keeps it on that login under its new number, and a login gone closes it', async () => {
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'personal' }, { alias: 'side' }) });
+  const el = await open('accounts');
+  act(() => row(el, 2).click());
+  expect(confirmOf(el)!.getAttribute('aria-label')).toContain('to personal?');
+  // Meanwhile, in a terminal: `cswap swap 2 3`. Same logins, new numbers.
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side', email: 'user3@fake.test' }, { alias: 'personal', email: 'user2@fake.test' }) });
+  act(() => refresh(el).click());
+  await until(() => row(el, 3) !== null && nameOf(row(el, 3)) === 'personal', 'the renumbered list');
+  expect(row(el, 3).nextElementSibling).toBe(confirmOf(el));
+  expect(confirmOf(el)!.getAttribute('aria-label')).toContain('to personal?');
+  expect(row(el, 2).getAttribute('aria-expanded')).toBe('false');
+  // `cswap remove` of that login: its confirm closes, and no other login's opens in its place.
+  answer({ stdout: listOf({ alias: 'work', active: true }, { alias: 'side', email: 'user3@fake.test' }) });
+  act(() => refresh(el).click());
+  await until(() => order(el).length === 2, 'the list without it');
+  await until(() => confirmOf(el) === null, 'the confirm closed');
+  expect(switches).toEqual([]);
+});
+
+test.skipIf(!hasDom)('with no account in use and nothing shared, the confirm is its question alone: no empty line', async () => {
+  answer({ stdout: listOf({ alias: 'work' }, { alias: 'personal' }) });
+  const el = await open('accounts');
+  act(() => row(el, 1).click());
+  expect(confirmOf(el)!.querySelector('b')?.textContent).toContain('to work?');
+  expect(shown(confirmOf(el)!.querySelector('p'))).toBeNull();
+});

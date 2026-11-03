@@ -684,15 +684,29 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
   // A flood that outlived the cap would run to the wait, so the wait is short: this fails on the answer and the time, not on the machine's memory.
   // What the door writes is no measure of what this side read: loopback buffers take megabytes the reader never drains, more on a Linux
   // runner than on a Mac. How much the read itself draws is pinned exactly in inbox-peer-link.test.ts (readCapped).
+  // The flood has a bound, 64 times the cap, and yields between chunks: on a Bun before 1.4 a cancel never reaches the door and a
+  // synchronous pull buffers without limit, so an unbounded flood ate the machine there instead of failing by name. Where the cancel
+  // reaches the door (CI's Bun), it must come before the bound: a read that went on to the end fails here.
+  const FLOOD_MAX = 64 * INBOX_MACHINE_ACCOUNTS_MAX_BYTES;
+  const cancelReachesDoor = Bun.semver.satisfies(Bun.version, ">=1.4.0");
   for (const status of [200, 401]) {
     test(`a far answer past the cap is a failed read, a ${status} too: read no further, so it ends at once and its door's stream stops`, async () => {
       let sent = 0;
       let stopped = false;
+      let ended = false;
       const chunk = new Uint8Array(64 * 1024).fill(32);
       const flood = () =>
         new Response(
           new ReadableStream({
-            pull(controller) {
+            async pull(controller) {
+              await new Promise((done) => setTimeout(done, 0));
+              // A pull already waiting when the read cancelled sends nothing more.
+              if (stopped) return;
+              if (sent >= FLOOD_MAX) {
+                ended = true;
+                controller.close();
+                return;
+              }
               sent += chunk.length;
               controller.enqueue(chunk);
             },
@@ -708,7 +722,10 @@ describe.skipIf(process.platform === "win32")("a linked machine's accounts, thro
       expect(await near.readOf(FAR)).toEqual({ state: "failed", reason: "bad_output" });
       // Ended by the cap, not the clock: a read that went on would have run to the wait.
       expect(Date.now() - started).toBeLessThan(1_500);
-      await waitFor("the door's stream to stop", () => stopped);
+      if (cancelReachesDoor) {
+        await waitFor("the door's stream to stop", () => stopped);
+        expect(ended).toBe(false);
+      } else await waitFor("the door's stream to stop", () => stopped || ended, 20_000);
       const atStop = sent;
       await Bun.sleep(200);
       expect(sent).toBe(atStop);
