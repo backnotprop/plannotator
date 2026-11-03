@@ -1365,12 +1365,14 @@ export const inboxApi = {
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
-  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = []) => {
+  /** `timeoutMs`: given up after it (InboxReadTimeout), for a read a Send waits on. */
+  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = [], timeoutMs?: number) => {
     const query = [
       ...(asker ? [`asker=${encodeURIComponent(asker)}`] : []),
       ...(recipients.length > 0 ? [`recipients=${recipients.map(encodeURIComponent).join(',')}`] : []),
     ].join('&');
-    return get<LiveSessionsModel>(threadUrl(threadId, `/sessions`, query));
+    const url = threadUrl(threadId, `/sessions`, query);
+    return timeoutMs === undefined ? get<LiveSessionsModel>(url) : getWithin<LiveSessionsModel>(url, timeoutMs);
   },
   /** Who the person can tag with `@` in this thread (approval "inbox-tag-agents"). */
   taggable: (threadId: string) => get<TaggableModel>(threadUrl(threadId, `/taggable`)),
@@ -1495,7 +1497,8 @@ export type InboxEvent =
   | { seq: number; kind: 'project'; id: string; project: InboxProject }
   /** `first`: the message's first line, not a later rewrite of it (a look, an archive, an Unarchive). Absent from an older Inbox. */
   | { seq: number; kind: 'message'; id: string; first?: boolean; message: InboxMessage }
-  | { seq: number; kind: 'question'; id: string; question: InboxQuestion }
+  /** `thread_id`: its message's thread (null when that message is gone); absent from an older Inbox. */
+  | { seq: number; kind: 'question'; id: string; thread_id?: string | null; question: InboxQuestion }
   | { seq: number; kind: 'annotation'; id: string; annotation: InboxAnnotationRecord }
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
   | { seq: number; kind: 'card'; id: string; card: InboxCardWire };

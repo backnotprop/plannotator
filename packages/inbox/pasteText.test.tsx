@@ -59,6 +59,8 @@ let posted: { path: string; body: Record<string, unknown> }[] = [];
 let refuseDraft: { code: string; error: string; field?: string } | null = null;
 /** The window's uploads, as they start (their paths). */
 let uploadsStarted: string[] = [];
+/** This test's fetch calls not answered yet: afterEach waits for none before the real fetch is back. */
+let inflight = 0;
 
 function loopback(path: string, method = 'GET', body?: string | Buffer, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -152,19 +154,25 @@ beforeEach(() => {
   if (!hasDom) return;
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
+  inflight = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input);
-    const method = init?.method ?? 'GET';
-    const body = init?.body ? String(init.body) : undefined;
-    if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
-    // A refusal the test asks for, once: the reply draft's next save.
-    if (refuseDraft && method === 'POST' && path.endsWith('/draft')) {
-      const refusal = refuseDraft;
-      refuseDraft = null;
-      return new Response(JSON.stringify(refusal), { status: 422, headers: { 'Content-Type': 'application/json' } });
+    inflight += 1;
+    try {
+      const path = String(input);
+      const method = init?.method ?? 'GET';
+      const body = init?.body ? String(init.body) : undefined;
+      if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
+      // A refusal the test asks for, once: the reply draft's next save.
+      if (refuseDraft && method === 'POST' && path.endsWith('/draft')) {
+        const refusal = refuseDraft;
+        refuseDraft = null;
+        return new Response(JSON.stringify(refusal), { status: 422, headers: { 'Content-Type': 'application/json' } });
+      }
+      const answer = await loopback(path, method, body);
+      return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
+    } finally {
+      inflight -= 1;
     }
-    const answer = await loopback(path, method, body);
-    return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
@@ -179,16 +187,36 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // Leaving the thread saves what waits at once: that save (and its read-back) is answered by this test's Inbox
+  // before the real fetch is back. On the real fetch it fails (a relative URL), and a save that did not land
+  // marks its thread "not saved" in module state, so the next test would start with the restart guard asking.
+  await requestsSettled();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
   (globalThis as Record<string, unknown>).XMLHttpRequest = savedXhr;
 });
+
+/**
+ * No request of this test is in flight, on two reads a macrotask apart: the draft's saves chain on microtasks,
+ * so a save queued behind an answer has started its request by the second read.
+ */
+async function requestsSettled() {
+  // About 5 s, so a slow runner still settles.
+  for (let i = 0; i < 250; i++) {
+    if (inflight === 0) {
+      await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+      if (inflight === 0) return;
+    }
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+  }
+  throw new Error(`timed out waiting for the requests of the test to settle (${inflight} in flight)`);
+}
 
 async function until(check: () => boolean | Promise<boolean>, what: string) {
   for (let i = 0; i < 100; i++) {

@@ -35,6 +35,7 @@ import {
   subscribeInboxEvents,
   tailnetGuest,
   type AgentToolHost,
+  type InboxEvent,
   type ListModel,
   type MachineView,
   type OutboxView,
@@ -42,6 +43,7 @@ import {
   type UpdateDetails,
   type WhatsNewModel,
 } from './api';
+import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
@@ -745,6 +747,8 @@ function Inbox() {
   const threadReadApplied = useRef(0);
   /** The open thread as last read, for the open effect when another read (the event stream's) landed first. */
   const threadLoaded = useRef<InboxThread | null>(null);
+  /** When `threadLoaded` landed (Date.now()): an old read is read again on the next record (openThreadReads.ts). */
+  const threadLoadedAt = useRef(0);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
   /**
@@ -899,6 +903,8 @@ function Inbox() {
   const [replyDrafts, setReplyDrafts] = useState<InboxReplyDraftRow[]>([]);
   /** Raised when the open thread's reply draft changed (`event: drafts`): the thread reads it again. */
   const [draftChanged, setDraftChanged] = useState(0);
+  /** Raised when records needed only the open thread's files read again, not the thread (openThreadReads.ts). */
+  const [filesChanged, setFilesChanged] = useState(0);
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
@@ -1300,6 +1306,7 @@ function Inbox() {
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
         threadLoaded.current = next.thread;
+        threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
         setThread(next.thread);
@@ -1573,24 +1580,50 @@ function Inbox() {
     let machinesSet = '';
     let machinesAdopt = false;
     let cancelled = false;
-    const readAfterRecord = () => {
+    /** The records since the last read: the open thread is read again only when they can change it (openThreadReads.ts). */
+    let batch = newRecordBatch();
+    const readAfterRecord = (event: InboxEvent | null) => {
+      noteRecord(batch, event);
       if (timer) clearTimeout(timer);
       // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
       const heard = perfStart();
       timer = setTimeout(() => {
-        const listRead = refreshList(false).then((next) => {
-          if (next) flushNotifications(next);
-        });
+        const records = batch;
+        batch = newRecordBatch();
+        const listRead = refreshList(false);
+        void listRead.then((next) => next && flushNotifications(next));
         void refreshDecisions();
         const open = routeRef.current.thread;
-        const threadRead = open ? refreshThread(open) : Promise.resolve(null);
+        let threadRead: Promise<unknown> = Promise.resolve(null);
+        if (open) {
+          const load = threadLoadRef.current;
+          const read = openThreadRead(records, {
+            threadId: open,
+            remote: machineOf(open) !== null,
+            loaded: threadLoaded.current,
+            loadedAt: threadLoadedAt.current,
+            now: Date.now(),
+            settled: load === null || load.threadId !== open,
+            listed: listsThread(latestRef.current, open),
+          });
+          if (read === 'thread') threadRead = refreshThread(open);
+          else {
+            // What a read that brought nothing new did besides: the thread's files are read again.
+            setFilesChanged((n) => n + 1);
+            // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
+            void listRead.then((next) => {
+              if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
+            });
+          }
+        }
         // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
         if (heard !== null) void Promise.allSettled([listRead, threadRead]).then(() => perfUntilNextFrame('record-refresh', heard));
         // Picks and comments are unsent work too: the Drafts row follows them.
         void refreshDrafts();
       }, 80);
     };
-    pickSaves.current.read = readAfterRecord;
+    // The window's own pick saves owe a read with no record of their own: everything is read, the open thread too.
+    pickSaves.current.read = () => readAfterRecord(null);
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
     void (async () => {
@@ -1628,7 +1661,7 @@ function Inbox() {
             pickSaves.current.owed = true;
             return;
           }
-          readAfterRecord();
+          readAfterRecord(event);
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
@@ -4986,6 +5019,7 @@ function Inbox() {
             onDismissOutbox={dismissOutbox}
             replyRequest={replyFor}
             draftChanged={draftChanged}
+            filesChanged={filesChanged}
             onReplyOpened={() => setReplyFor(null)}
             askButton={ask.button}
             askFileButton={ask.fileButton}
