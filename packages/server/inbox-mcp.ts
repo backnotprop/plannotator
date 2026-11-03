@@ -1016,7 +1016,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             ? ""
             : (() => {
                 const { record } = store.setThreadSteps({ thread_id: String(sent.structured.thread_id), agent: stepsAgent(input), steps: withSteps });
-                return record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
+                return record && record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
               })();
         // Named a thread (reply_to, or a thread name) this session has not looked at for hours (or ever):
         // one line naming its subject. Not for a message routed to the session's own thread by default,

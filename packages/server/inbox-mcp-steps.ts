@@ -124,13 +124,16 @@ export function registerInboxStepsTool(server: McpServer, context: InboxStepsMcp
         // Turned off after this session listed the tool: refused, nothing written.
         if (!context.stepsOn?.()) throw new InboxError("steps_off", INBOX_STEPS_OFF_TEXT.replace(/^steps_off: /, ""));
         const { record, changed } = context.store.setThreadSteps({ thread_id: input.thread_id, agent: stepsAgent(input), steps: input.steps });
-        const verb = record.steps.length === 0 ? (changed ? "Cleared your steps" : "No steps to clear") : changed ? "Steps saved" : "Steps unchanged";
-        const progress = record.steps.length > 0 ? `: ${stepsProgressText(record)}` : "";
-        return okComplete(`${verb} in thread ${record.thread_id}${progress}. Nothing was sent to the person.`, {
-          thread_id: record.thread_id,
+        // No record: an empty list from a session that never had one here; nothing written.
+        const steps = record?.steps ?? [];
+        const threadId = record?.thread_id ?? context.store.message(input.thread_id)?.thread_id ?? input.thread_id;
+        const verb = steps.length === 0 ? (changed ? "Cleared your steps" : "No steps to clear") : changed ? "Steps saved" : "Steps unchanged";
+        const progress = steps.length > 0 ? `: ${stepsProgressText({ steps })}` : "";
+        return okComplete(`${verb} in thread ${threadId}${progress}. Nothing was sent to the person.`, {
+          thread_id: threadId,
           changed,
-          ...inboxStepsProgress(record.steps),
-          steps: record.steps,
+          ...inboxStepsProgress(steps),
+          steps,
         });
       }),
   );

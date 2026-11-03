@@ -24,6 +24,9 @@ import { join } from "node:path";
 import type { InboxAuthor, InboxSteps } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_STEPS_IDLE_MS, INBOX_STEPS_WORKING_MS, inboxStepsPresenceOf, type InboxStepsLive } from "./inbox-steps";
+import { createInboxLiveSessions } from "./inbox-sessions";
+import { INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
+import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -84,6 +87,15 @@ function listen(response: Response) {
   return { frames, stop: async () => (await reader.cancel().catch(() => {}), await done) };
 }
 
+/** Waits until `ready` holds, failing after a deadline (never a fixed sleep). */
+async function until(ready: () => boolean, deadline = 5_000): Promise<void> {
+  const end = Date.now() + deadline;
+  while (!ready()) {
+    if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+    await Bun.sleep(5);
+  }
+}
+
 describe("the steps switch", () => {
   test("off by default: no steps shown though the store keeps them; on shows them; off again deletes nothing", async () => {
     const w = await world();
@@ -128,14 +140,17 @@ describe("the event stream", () => {
 
     const windowStream = listen(await fetch(`${w.base}/api/inbox/events?window=window-one`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
     const agentStream = listen(await fetch(`${w.base}/api/inbox/events`));
-    await Bun.sleep(100);
+    // Both streams are open (each says hello) before anything is saved.
+    await until(() => windowStream.frames.some((f) => f.event === "hello") && agentStream.frames.some((f) => f.event === "hello"));
     await w.setSteps(true);
-    await Bun.sleep(100);
-    // Saving the same state again says nothing more.
+    await until(() => windowStream.frames.some((frame) => frame.event === "capabilities"));
+    // Saving the same state again says nothing more; then a change that does, so the stream has caught up past it.
     await w.setSteps(true);
-    await Bun.sleep(100);
+    await w.setSteps(false);
+    await until(() => windowStream.frames.filter((frame) => frame.event === "capabilities").length >= 2);
     const told = windowStream.frames.filter((frame) => frame.event === "capabilities");
-    expect(told.map((frame) => JSON.parse(frame.data))).toEqual([{ steps: { on: true } }]);
+    expect(told.map((frame) => JSON.parse(frame.data))).toEqual([{ steps: { on: true } }, { steps: { on: false } }]);
+    // The agent's stream, open all along, never gets one.
     expect(agentStream.frames.some((frame) => frame.event === "capabilities")).toBe(false);
     await Promise.all([windowStream.stop(), agentStream.stop()]);
   });
@@ -151,25 +166,59 @@ describe("presence", () => {
     updated_at: new Date(updatedAt).toISOString(),
   });
   const now = Date.parse("2026-11-03T15:00:00.000Z");
-  const live = (connection: { busy: boolean | null } | null, heard: number | null = null, idle: number | null = null): InboxStepsLive => ({
+  const live = (connection: { busy: boolean | null } | null, heard: number | null = null, ended = false): InboxStepsLive => ({
     deliveryConnectionOf: () => connection,
     lastHeardOf: () => heard,
-    lastIdleOf: () => idle,
+    endedOf: () => ended,
   });
-  const bridged = (host: string | null) => host === "claude-code";
 
   test("a polling session: working while a turn runs, idle between turns, ended once it stops polling", () => {
     const old = now - 5 * 60 * 60_000;
-    expect(inboxStepsPresenceOf(record("claude-code", old), live({ busy: true }), bridged, now).presence).toBe("working");
-    expect(inboxStepsPresenceOf(record("claude-code", now), live({ busy: false }, now, now - 1000), bridged, now)).toEqual({ presence: "idle", since: now - 1000 });
+    expect(inboxStepsPresenceOf(record("claude-code", old), live({ busy: true }), now)).toBe("working");
+    expect(inboxStepsPresenceOf(record("claude-code", now), live({ busy: false }, now), now)).toBe("idle");
     // A list written a moment ago does not make an ended session look alive.
-    expect(inboxStepsPresenceOf(record("claude-code", now), live(null, now - 60_000), bridged, now).presence).toBe("ended");
+    expect(inboxStepsPresenceOf(record("claude-code", now), live(null, now - 60_000, true), now)).toBe("ended");
   });
 
   test("a session with no connection that says: working only while heard of lately, ended after the idle bar", () => {
-    expect(inboxStepsPresenceOf(record("codex", now - 60_000), live(null), bridged, now).presence).toBe("working");
-    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_WORKING_MS - 1), live(null), bridged, now).presence).toBe("idle");
-    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live(null), bridged, now).presence).toBe("ended");
-    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live({ busy: null }, now - 1000), bridged, now).presence).toBe("working");
+    expect(inboxStepsPresenceOf(record("codex", now - 60_000), live(null), now)).toBe("working");
+    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_WORKING_MS - 1), live(null), now)).toBe("idle");
+    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live(null), now)).toBe("ended");
+    expect(inboxStepsPresenceOf(record("codex", now - INBOX_STEPS_IDLE_MS - 1), live({ busy: null }, now - 1000), now)).toBe("working");
+  });
+
+  // Review of #2565, finding 1: a session never seen polling is never ended for its host's name (inbox-compose.md,
+  // "Replying when the asking session has ended"): OpenCode 1, Claude Code with the mod off, Pi without the wake.
+  test("on a real Inbox, sessions of polling hosts that never polled read working, not ended", async () => {
+    const w = await world();
+    await w.setSteps(true);
+    const sessions = [
+      { host: "opencode", session: "ses_opencode1", name: "OpenCode" },
+      { host: "claude-code", session: "ses_mod_off", name: "Claude Code" },
+      { host: "pi", session: "ses_pi_no_wake", name: "Pi" },
+    ];
+    for (const who of sessions) w.server.store.setThreadSteps({ thread_id: w.thread, agent: { kind: "agent", ...who }, steps: PLAN });
+    const read = await w.read();
+    expect(Object.fromEntries(read.steps.map((list) => [list.agent.session, list.presence]))).toEqual({ ses_opencode1: "working", ses_mod_off: "working", ses_pi_no_wake: "working" });
+  });
+
+  test("the live sessions say ended only for a session seen polling that stopped, or a woken thread known gone", async () => {
+    let t = 1_000_000;
+    let codex: "alive" | "dead" | null = null;
+    const tracker = createInboxLiveSessions({ store: {} as InboxStore, serverSession: "s", resolveRoot: async (path) => path, now: () => t, wakeOnlyStatus: (session) => (session === "thr-codex" ? codex : null) });
+    const done = await tracker.pollStarted("ses-polled", "claude-code", {});
+    done();
+    tracker.seenOverMcp("ses-mcp-only");
+    t += INBOX_SESSION_LIVE_MS + 1;
+    expect(tracker.endedOf("ses-polled")).toBe(true);
+    expect(tracker.endedOf("ses-mcp-only")).toBe(false);
+    expect(tracker.endedOf("ses-never-heard")).toBe(false);
+    codex = "alive";
+    expect(tracker.endedOf("thr-codex")).toBe(false);
+    codex = "dead";
+    expect(tracker.endedOf("thr-codex")).toBe(true);
+    // Polling again: no longer ended.
+    await tracker.pollStarted("ses-polled", "claude-code", {});
+    expect(tracker.endedOf("ses-polled")).toBe(false);
   });
 });
