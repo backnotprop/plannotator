@@ -79,8 +79,12 @@ let themeSwitchHold = 0;
  * Hold THEME_SWITCHING_CLASS for the next two frames. Called again (by the
  * swap, then by the commit that follows it), it restarts the two frames, so
  * the hold always outlasts the React commit that redraws the new theme.
+ *
+ * ThemeProvider calls it on every switch. A host that swaps the theme classes
+ * on <html> itself calls it just before its swap, for the same instant switch.
  */
-function holdThemeSwitch(): void {
+export function holdThemeSwitch(): void {
+  if (typeof document === 'undefined') return;
   const el = document.documentElement;
   el.classList.add(THEME_SWITCHING_CLASS);
   const hold = ++themeSwitchHold;
