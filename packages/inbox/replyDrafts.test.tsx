@@ -148,12 +148,16 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
   root = null;
   host = null;
+  // Leaving the thread saves what waits at once: let that save reach this test's Inbox before the real fetch is back.
+  // On the real fetch it fails (a relative URL), and a save that did not land marks its thread "not saved" in module
+  // state, so the next test would start with the restart guard asking.
+  await settle();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });

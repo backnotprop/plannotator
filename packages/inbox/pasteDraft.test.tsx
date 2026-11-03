@@ -186,10 +186,14 @@ beforeEach(() => {
   window.location.hash = '';
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (!hasDom) return;
   heldUploads?.release();
   unmount();
+  // Leaving the thread saves what waits at once: let that save reach this test's Inbox before the real fetch is back.
+  // On the real fetch it fails (a relative URL), and a save that did not land marks its thread "not saved" in module
+  // state, so the next test would start with the restart guard asking.
+  for (let i = 0; i < 6; i++) await act(async () => void (await new Promise((r) => setTimeout(r, 40))));
   globalThis.fetch = savedFetch;
   failTextReads = false;
   gate = null;
