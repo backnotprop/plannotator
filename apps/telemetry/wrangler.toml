@@ -29,5 +29,5 @@ invocation_logs = false
 [[d1_databases]]
 binding = "DB"
 database_name = "plannotator-ping"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "d7a35e79-f903-4a0b-8ae8-7c21c7b14574"
 migrations_dir = "migrations"
