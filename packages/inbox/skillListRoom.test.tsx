@@ -188,10 +188,11 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
   test('is drawn outside the reply foot, so the foot scrolling in its own box (iOS, keyboard up) cannot cut it', async () => {
     const field = await drawThread();
     await type(field, '/');
-    expect(menu()).not.toBeNull();
+    // Booleans, never elements: a failing match on a happy-dom element hangs bun's diff printer.
+    expect(menu() !== null).toBe(true);
     // The owner's picture: inside `.ib-pfoot` (overflow-y: auto under the keyboard) the list above the box was cut at the foot's top.
-    expect(menu()!.closest('.ib-pfoot')).toBeNull();
-    expect(menu()!.closest('.pn-inbox')).not.toBeNull();
+    expect(menu()!.closest('.ib-pfoot') === null).toBe(true);
+    expect(menu()!.closest('.pn-inbox') !== null).toBe(true);
   });
 
   test('opening above, it stops under the thread header, never under or over it', async () => {
@@ -209,10 +210,10 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
   });
 
   test('with the keyboard up, it fits in the visual viewport, not the layout viewport (innerHeight keeps the full height)', async () => {
-    // iOS: the keyboard covers 400 of 800; innerHeight still reads 800. The box sits high, just under the header.
-    setViewport(800, { top: 0, bottom: 400 });
+    // iOS: the keyboard covers 440 of 800; innerHeight still reads 800. The box sits high, just under the header.
+    setViewport(800, { top: 0, bottom: 360 });
     layout.field = { top: 70, bottom: 130 };
-    layout.foot = { top: 60, bottom: 400 };
+    layout.foot = { top: 60, bottom: 360 };
     const field = await drawThread();
     await type(field, '/');
     stubListHeight();
@@ -220,7 +221,7 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
     const box = menuBox();
     expect(box.side).toBe('below');
     expect(box.top).toBeGreaterThanOrEqual(layout.field.bottom);
-    expect(box.bottom).toBeLessThanOrEqual(400);
+    expect(box.bottom).toBeLessThanOrEqual(360);
   });
 
   test('the keyboard opening after the list is open moves and shrinks it to what is left', async () => {
@@ -254,7 +255,7 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
     stubListHeight();
     await settle();
     const box = menuBox();
-    expect(document.querySelectorAll('[data-skill-item]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-skill-item]').length).toBe(1);
     expect(box.bottom - box.top).toBe(ROW);
     expect(box.top).toBeGreaterThanOrEqual(layout.header.bottom);
     expect(box.bottom).toBeLessThanOrEqual(420);
