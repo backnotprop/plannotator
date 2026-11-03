@@ -40,6 +40,14 @@ describe("T3 OAuth and durable sends", () => {
     expect((statSync(store.path).mode & 0o777)).toBe(0o600);
     expect((statSync(store.directory).mode & 0o777)).toBe(0o700);
     await expect(new T3Delivery(thread, store).send("Changed reply", "reply-1")).rejects.toThrow("changed its scope or content");
+    // A wake's words can drift between tries (a renamed thread): its retry re-sends the first words under the same request.
+    networkLost = true;
+    const sent: unknown[] = [];
+    const wake = new T3Thread({ call: (name, args) => (sent.push(args.message), rpc.call(name, args)) }, "thread-a");
+    await expect(new T3Delivery(wake, store).sendFirst("Wake as first worded", "wake-1")).rejects.toThrow("Lost response");
+    await new T3Delivery(wake, store).sendFirst("Wake under a new thread name", "wake-1");
+    expect(sent).toEqual(["Wake as first worded", "Wake as first worded"]);
+    expect(inserted).toBe(2);
   });
   test("a new OAuth grant refuses to replay an uncertain old delivery", async () => {
     const store = credentials(); store.save({ endpoint: store.endpoint.href, epoch: "old", tokens: { access_token: "test", token_type: "Bearer" } });
