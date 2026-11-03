@@ -116,6 +116,7 @@ import {
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
+import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
@@ -268,6 +269,8 @@ const SSE_HEARTBEAT_MS = 15_000;
  */
 export const INBOX_WINDOW_HEARTBEAT_MS = 10_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
+/** How often a running Inbox checks the daily ping (it sends at most once a UTC day). */
+const DAILY_PING_CHECK_MS = 60 * 60 * 1000;
 /** How often the sidebar's "Reload Claude Code N" is checked against the live sessions (a session restarted or went away). */
 const INBOX_RESTART_WATCH_MS = 5_000;
 /** How often the live sessions' delivery signature is compared while a window listens (`event: deliveries`). */
@@ -875,11 +878,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
     version,
     binaryPath,
     healthTickMs: options.healthTickMs ?? DEFAULT_HEALTH_TICK_MS,
+    // The daily ping (packages/shared/daily-ping.ts): checked when the Inbox
+    // starts, then at most once an hour on the update timer; in the background.
+    onTick: () => {
+      const at = Date.now();
+      if (at - lastDailyPingCheck < DAILY_PING_CHECK_MS) return;
+      lastDailyPingCheck = at;
+      scheduleDailyPing({ version, dataDir, tool: "inbox" });
+    },
     ...options.updates,
     onChange: () => {
       for (const listener of statusListeners) listener();

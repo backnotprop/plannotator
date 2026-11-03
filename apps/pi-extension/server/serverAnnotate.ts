@@ -1,4 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { annotateDocumentRenderKind } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -346,6 +347,8 @@ export async function startAnnotateServer(options: {
 		annotationCss: string;
 	};
 }): Promise<AnnotateServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	schedulePiDailyPing(options.mode === "annotate-last" ? "last" : "annotate");
 	// Remote hard-off, defense in depth behind the command-side check: a live
 	// proxy relays the user's authenticated dev app, so it must never coexist
 	// with a beyond-loopback annotate bind. No override env var exists on

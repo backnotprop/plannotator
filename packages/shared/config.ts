@@ -1299,6 +1299,31 @@ export function resolveUpdateCheck(
   return coerceConfigBoolean(config.updateCheck, true);
 }
 
+/** What in the environment turns the daily ping off (it can only turn it off). */
+export type TelemetryEnvOff = "DO_NOT_TRACK" | "NO_ANON_PING" | "CI";
+
+/** The CI variables that turn the daily ping off when set (CI itself: unless "0" or "false"). */
+export const TELEMETRY_CI_VARS = ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL", "TF_BUILD", "CODEBUILD_BUILD_ID"] as const;
+
+/**
+ * The environment's hard off for the daily ping, or undefined. In order:
+ * DO_NOT_TRACK set to anything but empty, 0, false, no or off (donottrack.sh);
+ * NO_ANON_PING set to any non-empty value other than "0" (the NO_COLOR
+ * convention); a CI variable. No value turns the ping on.
+ */
+export function parseTelemetryEnvOff(env: NodeJS.ProcessEnv = process.env): TelemetryEnvOff | undefined {
+  // DO_NOT_TRACK is the shared developer convention (donottrack.sh): honoured quietly, never named to users.
+  const dnt = env.DO_NOT_TRACK?.trim().toLowerCase();
+  if (dnt && !["0", "false", "no", "off"].includes(dnt)) return "DO_NOT_TRACK";
+  const noPing = env.NO_ANON_PING;
+  if (noPing !== undefined && noPing !== "" && noPing.trim() !== "0") return "NO_ANON_PING";
+  for (const name of TELEMETRY_CI_VARS) {
+    const v = env[name]?.trim().toLowerCase();
+    if (v && v !== "0" && v !== "false") return "CI";
+  }
+  return undefined;
+}
+
 /** The PLANNOTATOR_UPDATE_CHECK override, or undefined when it does not decide. */
 export function parseUpdateCheckEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
   const v = env.PLANNOTATOR_UPDATE_CHECK?.trim().toLowerCase();
