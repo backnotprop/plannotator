@@ -6898,6 +6898,39 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .ib-vo-picture .ib-rbox { margin: 0; }
 .ib-vo-text { padding: 10px 12px 6px; min-height: 52px; line-height: 1.55; }
 .ib-lo-text p.ib-vo-route { margin-top: 10px; color: var(--foreground); }
+/* The one-time Snooze announcement (approval "inbox-snooze-announce", B "The real menu"; components/SnoozeIntro.tsx):
+   the list intro's shell, 520 px. Its picture is static and in the person's own mode (no light scope): two real rows
+   in a card, the real "Snooze until" menu (`.ib-pm`) over the target row's right edge with a pointer on Tomorrow, and
+   the real toast (`.ib-toast`) at rest under them. Nothing in it moves: the menu's and the toast's entrances are off.
+   A phone: the ⋯ sheet's times (`.ib-pm-pos[data-phone]`'s own sizes), in the sheet's place at the top. */
+dialog.ib-dlg.ib-lo.ib-zx { width: min(520px, calc(100vw - 32px)); }
+.ib-lo.ib-zx .ib-lo-art { padding: 22px 22px 17px; }
+.ib-zx-scene { position: relative; height: 264px; }
+dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibility: visible; width: 300px; max-width: 100%; height: auto; border: 0; border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; }
+.ib-zx-list .ib-lbody { overflow: hidden; padding-bottom: 10px; }
+.ib-zx-list .ib-lbody > .ib-group > .ib-rw { content-visibility: visible; }
+.ib-zx-list :is(.ib-nrow .ib-l2 > .ib-title, .ib-nrow .ib-l3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-pm.ib-zx-menu { position: absolute; left: 248px; top: 19px; width: 210px; animation: none; text-align: left; }
+.ib-zx-menu .ib-pmi { position: relative; }
+.ib-zx-pointer { position: absolute; left: 76px; top: 7px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
+.ib-toast.ib-zx-toast { position: absolute; left: 0; top: 224px; bottom: auto; transform: none; z-index: auto; animation: none; max-width: 300px; text-align: left; }
+/* "New" above the title: quiet accent text, no fill or border. */
+.ib-zx-new { margin: 0 0 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--primary); }
+.ib-lo-text .ib-zx-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--foreground); }
+.ib-zx-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); }
+.ib-zx-pos[data-phone] { position: static !important; transform: none !important; width: auto !important; }
+.ib-zx-pos .ib-pm.ib-zx-menu { position: static; width: auto; animation: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The bottom sheet's width (the shared phone rule loses to the 520 px width above, which comes later). */
+  dialog.ib-dlg.ib-lo.ib-zx.ib-lo-phone { width: calc(100vw - 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-zx .ib-lo-art { padding: 14px 14px 12px; }
+  /* A picture of the sheet, not the sheet: flat, its rows drawn compact (the real sheet's are 48 px touch rows). */
+  .ib-zx-pos[data-phone] .ib-pm { box-shadow: none; }
+  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; padding: 0 6px; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 22px 0; }
+  .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
+}
 /* Settings → Voice. */
 .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }
