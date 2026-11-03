@@ -67,6 +67,8 @@ import {
   INBOX_CODEX_HOST,
   INBOX_QWEN_HOST,
   isQwenSessionId,
+  INBOX_T3_HOST,
+  isT3ThreadId,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_WAKING_HOSTS,
   INBOX_HOST_NAMES,
@@ -178,6 +180,7 @@ import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
+import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
 import {
   claudePluginBehindInbox,
   claudeRestartCommand,
@@ -456,6 +459,8 @@ export interface InboxServerOptions {
   accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
+  /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
+  t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
 }
 
 /**
@@ -493,6 +498,7 @@ export interface InboxServer {
   codexWake: InboxCodexWake;
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
+  t3Wake: InboxT3Wake;
   stop: () => void;
 }
 
@@ -1018,7 +1024,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         sessionWakes: async (host, session, meta) =>
           (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
           (await codexWake.wakes(host, session, meta)) ||
-          qwenWake.wakes(host, session, meta),
+          (await qwenWake.wakes(host, session, meta)) ||
+          (await t3Wake.wakes(host, session)),
         bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
@@ -2525,6 +2532,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (await codexWake.wakes(INBOX_CODEX_HOST, thread, meta)) {
             await live.seenWakeOnly(thread, INBOX_CODEX_HOST, args?.project_path);
           }
+        } else if (session && args?.agent_host === INBOX_T3_HOST && isT3ThreadId(session)) {
+          // A T3 Code thread (inbox-t3-wake.ts; the shim names it from T3CODE_THREAD_ID): it is there, and while
+          // a saved T3 grant reaches it, it is live for New message, compose and tags.
+          t3Wake.noteToolCall(session);
+          if (await t3Wake.wakes(INBOX_T3_HOST, session)) await live.seenWakeOnly(session, INBOX_T3_HOST, args?.project_path);
         } else if (session && args?.agent_host === INBOX_CODEX_HOST && isCodexThreadId(session)) {
           codexWake.noteToolCall(session, null);
         } else if (session && args?.agent_host === INBOX_QWEN_HOST && isQwenSessionId(session)) {
@@ -2570,8 +2582,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session),
-    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session)],
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
+    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
   });
 
   /** The launch engine exists (the Codex wake is made before it, and its first sweep may already run). */
@@ -2597,6 +2609,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
     ...options.qwenWake,
+  });
+
+  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn through T3's MCP API, under the
+  // grant `plannotator t3 login` saved (inbox-t3-wake.ts).
+  const t3Wake = createInboxT3Wake({
+    store,
+    dataDir,
+    commandOf: (item, session) => replyCommand(item, false, session),
+    ...options.t3Wake,
   });
 
   // A reply that waited 5 minutes on a busy session goes into its running turn by itself, as if the person
@@ -2643,7 +2664,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
-    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId),
+    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
   });
@@ -4245,6 +4266,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
+    t3Wake.stop();
     voice.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
@@ -4261,7 +4283,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */
