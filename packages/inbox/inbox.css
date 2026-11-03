@@ -658,8 +658,6 @@ button.ib-mut { border-radius: 6px; }
 .ib-cpill-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pn-inbox .ib-cpill svg.ib-ic { flex: none; margin-right: -3px; color: var(--muted-foreground); transition: none; }
 .ib-cpill[data-connect-prompt="copied"] svg.ib-ic { color: var(--success); }
-/* Under reduced motion a theme switch lands in one frame (theme.ts holds this class for two frames). */
-html.ib-theme-instant, html.ib-theme-instant *, html.ib-theme-instant *::before, html.ib-theme-instant *::after { transition: none !important; }
 /* Settings → Appearance: Light, Dark, Match system, as one segmented control of native radios. */
 .ib-seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--ib-r10-s, 8px); background: var(--ib-seg-bg-s, var(--muted)); border: 1px solid var(--ib-seg-line-s, var(--border)); }
 .ib-seg-o { --ib-seg-fg-s: var(--ib-soft-segmented) color-mix(in oklch, var(--ib-raise-mfg) 70%, var(--foreground)); position: relative; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: var(--ib-r8-s, 6px); font-size: var(--ib-fs-13, 13px); color: var(--ib-seg-fg-s, var(--muted-foreground)); cursor: pointer; white-space: nowrap; }
