@@ -173,8 +173,16 @@ afterEach(() => {
   window.matchMedia = savedMatchMedia;
 });
 
+/**
+ * An element as a short string, for `expect`: a failed expect that has to print a rendered
+ * happy-dom element crashes Bun (exit 133, the file's report lost), so expect on this instead.
+ */
+const shown = (node: Element | null | undefined) => (node ? node.outerHTML.slice(0, 300) : null);
+
+/** Waits up to 3 s: well under Bun's 5 s test limit, so a wait that never ends fails by its name, with nothing left running. */
 async function until(check: () => boolean, what: string) {
-  for (let i = 0; i < 120; i++) {
+  const end = Date.now() + 3000;
+  while (Date.now() < end) {
     if (check()) return;
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
@@ -249,7 +257,7 @@ test.skipIf(!hasDom)('Machines comes first and says which account this machine i
   expect(group.compareDocumentPosition(el.querySelector('[data-settings-accounts]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(group.querySelector('[data-accounts-switch]')?.getAttribute('aria-label')).toBe(`Claude Code account on ${machineName(el)}: b`);
   // Closed until asked: no menu on the page.
-  expect(document.querySelector('[data-accounts-menu]')).toBeNull();
+  expect(shown(document.querySelector('[data-accounts-menu]'))).toBeNull();
 });
 
 test.skipIf(!hasDom)('Machines shows only with an account in use: not when none is active, not when the first read failed', async () => {
@@ -910,7 +918,7 @@ test.skipIf(!hasDom)('Machines lists this machine first, then each linked one an
   expect(machineRows(el)[1]![0]).toBe('Mini');
   const [selfRow, mini] = [...el.querySelectorAll('[data-accounts-machine]')];
   expect([...selfRow!.querySelectorAll('button')].map((button) => button.hasAttribute('data-accounts-switch'))).toEqual([true]);
-  expect(mini!.querySelector('button, a, input')).toBeNull();
+  expect(shown(mini!.querySelector('button, a, input'))).toBeNull();
   expect(el.querySelector('[data-accounts-machines]')!.compareDocumentPosition(el.querySelector('[data-settings-accounts]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
@@ -1280,6 +1288,8 @@ const switchMenu = () => document.querySelector('[data-accounts-menu]') as HTMLE
 const pick = (number: number) => switchMenu()!.querySelector(`[data-accounts-pick="${number}"]`) as HTMLElement;
 const confirmDialog = () => document.querySelector('[data-dialog="accounts-switch"]') as HTMLElement | null;
 const switchFailed = (el: ParentNode) => el.querySelector('[data-accounts-switch-failed]');
+/** The switch line's words, or null (see `shown`). */
+const lineText = (el: ParentNode) => switchFailed(el)?.textContent ?? null;
 const switchRuns = () => fakeCswapCalls(bin).filter((call) => call.startsWith('switch'));
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -1326,7 +1336,7 @@ test.skipIf(!hasDom)("the switch menu lists this machine's accounts as the list 
   await act(async () => {
     await new Promise((r) => setTimeout(r, 50));
   });
-  expect(confirmDialog()).toBeNull();
+  expect(shown(confirmDialog())).toBeNull();
   expect(switches).toEqual([]);
 });
 
@@ -1341,7 +1351,7 @@ test.skipIf(!hasDom)('a switch asks first and Cancel switches nothing; Switch sa
   expect(confirmDialog()!.querySelector('h2')!.textContent).toBe(`Switch ${machineName(el)} to personal?`);
   expect(confirmDialog()!.textContent).not.toContain('Billed per token');
   await act(async () => ([...confirmDialog()!.querySelectorAll('button')].find((button) => button.textContent === 'Cancel') as HTMLButtonElement).click());
-  expect(confirmDialog()).toBeNull();
+  expect(shown(confirmDialog())).toBeNull();
   expect(switches).toEqual([]);
 
   await switchTo(el, 1);
@@ -1351,7 +1361,7 @@ test.skipIf(!hasDom)('a switch asks first and Cancel switches nothing; Switch sa
   expect(switches).toHaveLength(1);
   expect(switches[0]).toMatchObject({ number: 1, email: 'a@fake.test', organizationName: 'Fake a@fake.test' });
   expect(switchRuns()).toEqual(['switch 1 --json']);
-  expect(switchFailed(el)).toBeNull();
+  expect(lineText(el)).toBeNull();
   // The menu agrees with the control.
   await press(switchControl(el)!);
   await until(() => switchMenu() !== null, 'the switch menu');
@@ -1385,7 +1395,7 @@ test.skipIf(!hasDom)("a failed switch says so above the machines in the page's w
   writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
   await switchTo(el, 1);
   await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
-  expect(switchFailed(el)).toBeNull();
+  expect(lineText(el)).toBeNull();
 });
 
 test.skipIf(!hasDom)('a switch that outlasts the wait: the read after it has the last word', async () => {
@@ -1399,7 +1409,7 @@ test.skipIf(!hasDom)('a switch that outlasts the wait: the read after it has the
   };
   await switchTo(el, 1);
   await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
-  expect(switchFailed(el)).toBeNull();
+  expect(lineText(el)).toBeNull();
 
   // It ended, and not there: it did not switch.
   switchRoute = async () => json({ state: 'failed', reason: 'timed_out' });
@@ -1448,8 +1458,8 @@ test.skipIf(!hasDom)('a list renumbered since the page read it switches nothing 
 test.skipIf(!hasDom)('a tailnet guest is offered no switch; a switch the server refuses says Owner only', async () => {
   accountsRoute = async () => json({ error: 'refused', code: 'owner_only' }, 403);
   const guest = await open('owner_only');
-  expect(switchControl(guest)).toBeNull();
-  expect(guest.querySelector('[data-accounts-machines]')).toBeNull();
+  expect(shown(switchControl(guest))).toBeNull();
+  expect(shown(guest.querySelector('[data-accounts-machines]'))).toBeNull();
   act(() => root?.unmount());
   host?.remove();
 
@@ -1472,7 +1482,7 @@ test.skipIf(!hasDom)('the peek stays read-only: no switch in it, before or after
   window.location.hash = '';
   const inbox = await openInbox();
   await openPeek(inbox);
-  expect(peek()!.querySelector('[data-accounts-switch], [data-accounts-menu], [role="menu"]')).toBeNull();
+  expect(shown(peek()!.querySelector('[data-accounts-switch], [data-accounts-menu], [role="menu"]'))).toBeNull();
   expect(peek()!.textContent).not.toContain('Switch');
   expect(peek()!.textContent).toContain('personal');
 });
@@ -1489,7 +1499,7 @@ test.skipIf(!hasDom)("a later read answers the switch's line: Refresh clears \"S
   answer({ stdout: LIST_AFTER });
   act(() => refresh(el).click());
   await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
-  expect(switchFailed(el)).toBeNull();
+  expect(lineText(el)).toBeNull();
 
   switchRoute = async () => json({ state: 'failed', reason: 'run_failed' });
   await switchTo(el, 2);

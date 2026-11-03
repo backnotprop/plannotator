@@ -14,7 +14,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxAccounts, createInboxAccountsFor, INBOX_ACCOUNTS_TIMEOUT_MS, INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS } from "./inbox-accounts";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
 import { PEER_LINK_TIMINGS } from "./inbox-peer-link";
-import { fakeCswapCalls, fakeCswapFinished, fakeCswapSwitched, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer, type FakeCswapSwitch } from "../../tests/helpers/fake-cswap";
+import { fakeCswapCalls, fakeCswapEvents, fakeCswapFinished, fakeCswapSwitched, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer, type FakeCswapSwitch } from "../../tests/helpers/fake-cswap";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
 const FIXTURES = resolve(import.meta.dir, "../../tests/fixtures/cswap");
@@ -965,18 +965,28 @@ describe.skipIf(process.platform === "win32")("switch", () => {
 
   test("a list run going when a switch starts ends first, and never serves as the read after it", async () => {
     // The run is slow; the kept answer is still fresh when a Refresh elsewhere (another window, a phone, a linked machine) starts another.
-    const w = await world({ cswap: { stdout: LIST, delay: 0.4 }, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 500 });
+    const w = await world({ cswap: { stdout: LIST, delay: 0.6 }, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 1_000 });
     expect(inUse(await w.read())).toBe(2);
-    await Bun.sleep(150);
+    await Bun.sleep(600);
     const elsewhere = w.read("?fresh=1");
-    await waitFor("the other read's run to start", () => fakeCswapCalls(w.bin).length === 2);
+    await waitFor("the other read's run to start", () => fakeCswapEvents(w.bin).length === 3);
+    // That run holds the list as it was when it started. Runs from here are quick, so it ends last unless the switch waits for it.
+    writeFakeCswap(w.bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
     const switched = await (await w.switchTo(PERSONAL)).json();
     expect(switched).toEqual({ state: "switched", number: 1 });
+    expect(inUse(await w.read())).toBe(1);
+    // A read from before the switch answers what it read then; once it ends, it is not kept.
     expect(inUse(await elsewhere)).toBe(2);
-    // Its run ended before the switch's own list, and neither overlapped the switch.
-    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "list --json", "list --json", "switch 1 --json"]);
     expect(inUse(await w.read())).toBe(1);
-    expect(inUse(await w.read())).toBe(1);
+    // No list ran alongside the switch: the one going ended before the switch's own list, and that before the switch.
+    const events = fakeCswapEvents(w.bin);
+    const switchStart = events.indexOf("start switch 1 --json");
+    expect(events.slice(0, switchStart + 2)).toEqual([
+      "start list --json", "end list --json",
+      "start list --json", "end list --json",
+      "start list --json", "end list --json",
+      "start switch 1 --json", "end switch 1 --json",
+    ]);
   });
 
   test.each([

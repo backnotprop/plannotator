@@ -6,9 +6,12 @@
  * every program it runs by absolute path. Node-safe (the e2e spec runs under
  * node). POSIX only, like the specs.
  *
- * Each run appends its arguments to `calls.log` in the folder. The answer can
+ * Each run appends its arguments to `calls.log` in the folder, and `start <args>`
+ * and `end <args>` to `events.log`, in the order they happen. The answer can
  * change between reads: call `writeFakeCswap` again. Its files are replaced by
- * rename, so a run never reads one half-written.
+ * rename, so a run never reads one half-written. A run takes its answer when it
+ * starts, as the real tool reads its state, and holds it through any `delay`: a
+ * slow run started before a switch prints the list as it was then.
  *
  * `switch` (`cswap switch <n> --json`) answers `FakeCswapSwitch` when one is
  * given, else the same as any run. A switch that exits 0 with `listAfter`
@@ -43,17 +46,21 @@ function replaceFile(file: string, content: string, mode: number) {
   renameSync(temp, file);
 }
 
-/** One answer's lines, its files named after `name` in `dir`. */
+/** One answer's lines, its files named after `name` in `dir`: read at the start, printed after any wait. */
 function answerLines(dir: string, name: string, answer: FakeCswapAnswer): string[] {
   replaceFile(join(dir, name), answer.stdout ?? '', 0o644);
   replaceFile(join(dir, `${name}.err`), answer.stderr ?? '', 0o644);
   return [
+    `out=$(/bin/cat ${quoted(join(dir, name))})`,
+    `err=$(/bin/cat ${quoted(join(dir, `${name}.err`))})`,
     ...(answer.hang ? [`while :; do printf . >> ${quoted(join(dir, 'ticks'))}; /bin/sleep 0.05; done`] : []),
     ...(answer.delay ? [`/bin/sleep ${answer.delay}`] : []),
-    `/bin/cat ${quoted(join(dir, name))}`,
-    `/bin/cat ${quoted(join(dir, `${name}.err`))} >&2`,
+    `printf '%s' "$out"`,
+    `printf '%s' "$err" >&2`,
   ];
 }
+
+const ended = (dir: string) => `printf 'end %s\\n' "$*" >> ${quoted(join(dir, 'events.log'))}`;
 
 /** The lines a switch runs, when the test gave it its own answer. */
 function switchLines(dir: string, answer: FakeCswapSwitch): string[] {
@@ -65,6 +72,7 @@ function switchLines(dir: string, answer: FakeCswapSwitch): string[] {
     ...answerLines(dir, 'switch', answer),
     ...(after ? [`/bin/cp ${quoted(join(dir, 'list-after'))} ${quoted(`${stdout}.next`)} && /bin/mv ${quoted(`${stdout}.next`)} ${quoted(stdout)}`] : []),
     `printf . >> ${quoted(join(dir, 'switched'))}`,
+    ended(dir),
     `exit ${answer.exit ?? 0}`,
     'fi',
   ];
@@ -78,9 +86,11 @@ export function writeFakeCswap(dir: string, answer: FakeCswapAnswer, switchAnswe
     [
       '#!/bin/sh',
       `printf '%s\\n' "$*" >> ${quoted(join(dir, 'calls.log'))}`,
+      `printf 'start %s\\n' "$*" >> ${quoted(join(dir, 'events.log'))}`,
       ...(switchAnswer ? switchLines(dir, switchAnswer) : []),
       ...answerLines(dir, 'stdout', answer),
       `printf . >> ${quoted(join(dir, 'finished'))}`,
+      ended(dir),
       `exit ${answer.exit ?? 0}`,
       '',
     ].join('\n'),
@@ -97,6 +107,12 @@ export function removeFakeCswap(dir: string): void {
 /** Each run's arguments, oldest first. */
 export function fakeCswapCalls(dir: string): string[] {
   const file = join(dir, 'calls.log');
+  return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
+}
+
+/** Each run's start and end, `start <args>` or `end <args>`, in the order they happened. */
+export function fakeCswapEvents(dir: string): string[] {
+  const file = join(dir, 'events.log');
   return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
 }
 
