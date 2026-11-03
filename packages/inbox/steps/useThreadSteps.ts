@@ -10,8 +10,12 @@ import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { shownStepLists } from './model';
 
-/** What a steps change names: a thread, or every thread (presence moved, a catch-up). */
-export type StepsChange = string | '*';
+/**
+ * What a steps change names: a thread, every thread (a reconnect, a catch-up: a steps line may have come
+ * meanwhile), or `presence` (the live sessions moved: only a list on screen can change, so a thread showing none
+ * does not read again).
+ */
+export type StepsChange = string | '*' | 'presence';
 export type StepsSubscribe = (listener: (change: StepsChange) => void) => () => void;
 
 /** How often a shown list is read again with no event (presence crosses its 10 min and 2 h bars by time alone). */
@@ -41,6 +45,8 @@ export function useThreadSteps(threadId: string, on: boolean, subscribe: StepsSu
     let live = true;
     let seq = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    /** Whether the last read showed a list: presence moving reads again only then. */
+    let showing = false;
     const load = () => {
       const mine = ++seq;
       read(threadId)
@@ -48,6 +54,7 @@ export function useThreadSteps(threadId: string, on: boolean, subscribe: StepsSu
           // Only the newest read lands: an older one answering late never puts back an old list.
           if (!live || mine !== seq) return;
           const shown = answer.on ? shownStepLists(answer.steps) : [];
+          showing = shown.length > 0;
           setLists({ thread: threadId, lists: shown });
           if (timer) clearTimeout(timer);
           timer = shown.length > 0 ? setTimeout(load, STEPS_REFRESH_MS) : null;
@@ -61,7 +68,7 @@ export function useThreadSteps(threadId: string, on: boolean, subscribe: StepsSu
     };
     load();
     const unsubscribe = subscribe?.((change) => {
-      if (change === '*' || change === threadId) load();
+      if (change === 'presence' ? showing : change === '*' || change === threadId) load();
     });
     return () => {
       live = false;

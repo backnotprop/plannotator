@@ -1753,8 +1753,9 @@ function Inbox() {
         onDeliveries: () => {
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
-          // So does each steps list's presence (the in-progress mark turns only while its session works).
-          stepsBus.emit('*');
+          // So does each steps list's presence (the in-progress mark turns only while its session works): read
+          // again only where a list shows.
+          stepsBus.emit('presence');
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
