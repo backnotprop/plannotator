@@ -2588,6 +2588,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
 
+  /** A tailnet login the allow list let in that is not this computer's owner: never starts an agent (as Ask AI's own check below). */
+  const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
   // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
@@ -2615,6 +2617,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
     selfCommand,
+    isGuest,
   });
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
@@ -2629,6 +2632,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     boardOn,
     launch,
+    isGuest,
     machine: () => machines.selfId,
   });
   compose.sweep();
@@ -3297,7 +3301,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const launched = await launch.route(req, path, via);
       if (launched) return launched;
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
-      const composed = await compose.route(req, url);
+      const composed = await compose.route(req, url, via);
       if (composed) return composed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);

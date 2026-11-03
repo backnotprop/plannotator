@@ -71,6 +71,8 @@ export function createInboxCompose(options: {
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
   launch?: Pick<InboxLaunch, "target" | "prepare" | "begin" | "composeBlock">;
+  /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
+  isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
@@ -132,7 +134,7 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, guest: boolean): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
@@ -151,6 +153,8 @@ export function createInboxCompose(options: {
     // Launch: the folder and the agent are checked first; nothing is written when either fails.
     const launchTarget = options.launch?.target(body.to) ?? null;
     if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
+    // Starting an agent runs code on this computer: its owner's, never a login the tailnet allow list let in.
+    if (launchTarget && guest) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
     const prepared = launchTarget ? await options.launch!.prepare(launchTarget) : null;
     const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
@@ -211,7 +215,7 @@ export function createInboxCompose(options: {
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, via: "local" | "tailnet" = "local"): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -229,7 +233,7 @@ export function createInboxCompose(options: {
     if (path === "/api/inbox/messages") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
-      return staleTab(body) ?? (await startThread(body));
+      return staleTab(body) ?? (await startThread(body, options.isGuest?.(req, via) ?? false));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {
