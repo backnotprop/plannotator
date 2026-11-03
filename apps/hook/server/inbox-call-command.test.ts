@@ -30,6 +30,7 @@ const entry = resolve(import.meta.dir, "index.ts");
 const HOUR = 60 * 60_000;
 const CODEX_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const QWEN_SESSION = "11111111-2222-4333-8444-555555555555";
+const T3_THREAD = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
 
 let stubs: string[] = [];
 const roots: string[] = [];
@@ -267,6 +268,8 @@ describe("who is calling", () => {
     { name: "Qwen Code", host: "qwen", session: QWEN_SESSION, agentName: "Qwen Code", env: { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" } },
     // DeepSeek Harness sets DSH_SESSION_ID (and DSH_SHELL) in every model shell.
     { name: "DeepSeek Harness", host: "dsh", session: "session-0b9c8e4e", agentName: "DeepSeek Harness", env: { DSH_SHELL: "1", DSH_SESSION_ID: "session-0b9c8e4e" } },
+    // T3 Code runs Claude through the Agent SDK (the mod is off there): the thread, beside Claude's own marker.
+    { name: "T3 Code", host: "t3", session: T3_THREAD, agentName: "T3 Code", env: { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } },
     // OpenCode names no session in its shell: only the value its Tidy gives it says who it is.
     { name: "OpenCode", host: "opencode", session: "ses_opencode1", agentName: "OpenCode", env: { OPENCODE: "1" }, flag: "opencode:ses_opencode1" },
   ];
@@ -384,6 +387,29 @@ describe("who is calling", () => {
     expect(mismatch.ok ? null : mismatch.message).not.toContain("from DSH_SESSION_ID");
     const plain = inboxCallerOf("dsh:session-mine", { DSH_SHELL: "1", DSH_SESSION_ID: "session-child" });
     expect(plain.ok ? null : plain.message).toContain("from DSH_SESSION_ID");
+    // T3 Code: its thread beside Claude's own CLAUDECODE is the thread (T3 runs Claude, and the mod is off there).
+    const t3 = { host: "t3", session: T3_THREAD, name: "T3 Code" };
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1" })).toEqual(t3);
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD })).toEqual(t3);
+    // Anything else beside it is ambiguous: a Codex started in a T3 shell is the caller, not the thread; a tag can be
+    // inherited from a Claude Code that started T3; a DSH model shell or another agent is its own.
+    for (const other of [
+      { CODEX_THREAD_ID: CODEX_THREAD },
+      { PLANNOTATOR_SESSION_TAG: "claude-code:s" },
+      { DSH_SHELL: "1" },
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" },
+      { GEMINI_CLI: "1" },
+    ]) {
+      expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CLAUDECODE: "1", ...other })).toBe("session_ambiguous");
+    }
+    expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toBe("session_ambiguous");
+    // The wake's own value settles it.
+    expect(caller(`t3:${T3_THREAD}`, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual(t3);
+    // A thread T3 made through MCP, a delegated or a forked one is not a UUID: no T3 session, never a guess.
+    for (const id of [`mcp:${T3_THREAD}`, "thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
+      expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toBeNull();
+    }
+    expect(caller("t3:not-a-uuid", {})).toBe("invalid_session");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.

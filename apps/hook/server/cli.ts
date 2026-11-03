@@ -170,10 +170,11 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-    "  plannotator inbox mcp",
+    "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+    "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
@@ -183,6 +184,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "Run 'plannotator <command> --help' for command-specific usage.",
     "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
     "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
+    "Using T3 Code? Run 'plannotator t3 --help'.",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
@@ -200,12 +202,11 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
- * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook), and
- * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
- * hidden until the Board page ships.
+ * `t3` (the T3 Code connection) was the last one to launch. Today:
+ * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
+ * runs.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -329,7 +330,7 @@ export const INBOX_CALL_USAGE = [
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
   "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-  "  plannotator inbox mcp",
+  "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
@@ -356,6 +357,8 @@ export const INBOX_COMMAND_USAGE = [
   "                                  an Inbox already running, asks it to publish.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
+  "                                  --t3: for T3 Code (plannotator t3 --help); lists",
+  "                                  its tools only inside a T3 Code thread.",
   "  plannotator inbox status        Whether the Inbox runs: URL, pid, version, data dir.",
   "                                  Exit 0 running, 1 not running, 2 not answering.",
   "                                  --json prints the same as one JSON object.",
