@@ -228,6 +228,10 @@ test('the wake line names the hosts a reply wakes, and what other agents do inst
   expect(mcpWakingHostsHere(SCENARIOS.none())).toEqual([]);
   expect(mcpWakingHostsHere(agentsModel({ 'claude-code': ready() }))).toEqual([]);
   expect(wakeLine(mcpWakingHostsHere(agentsModel({ 'claude-code': ready() })))).toBe(WAKE_LINE);
+  // T3 Code wakes through MCP but has no agent row: the first-run lines never name it, here or not.
+  expect(mcpWakingHostsHere(SCENARIOS.typical())).not.toContain('t3');
+  expect(WAKE_LINE).not.toContain('T3');
+  expect(MCP_WAKE_LINE).not.toContain('T3');
 });
 
 test('a Connect step for an MCP agent says it is not woken (Codex 0.149+ is: the Inbox queues the reply into its thread)', () => {
