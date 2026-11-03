@@ -7091,7 +7091,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
    Nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and in a thread with
    more than one agent the pill after it names who gets the reply ("to [tile] Claude Code (plannotator) ⌄"). On a phone
-   the pill sits after Cancel (the folder alone), and the Draft line takes its own line above the buttons once saved. */
+   the pill sits after Cancel (the folder alone), and the Draft line takes its own line above the buttons, its place
+   kept from the start (empty until something is saved), so the first save never moves the box. */
 .ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-replyrow > .ib-footstatus:empty { display: none; }
