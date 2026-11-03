@@ -443,7 +443,7 @@ export interface PlannotatorConfig {
   /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
   inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
   /**
-   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in core inbox-snooze-intro.ts). Written
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in packages/server/inbox-snooze-intro.ts). Written
    * only by a release build. `firstUseAt`: the oldest record of the event log, rebuilt once at the first release start
    * that knows this key (and filled in later when the log was empty then). `snoozedAt`: the person snoozed something
    * (the window, the phone, a linked machine's forward), so it never shows. `shownAt`: a page claimed it (`POST

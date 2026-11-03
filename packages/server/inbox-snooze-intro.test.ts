@@ -4,7 +4,9 @@
  * not reading first use from the event log on upgrade, or missing a snooze running at upgrade; a snooze by some route
  * (the window, the owner's phone over the tailnet, a phone app through the door, a linked machine's forward) not
  * marking it, or a tailnet guest's marking it; the dialog showing twice (two tabs at once, or after the stamp); a
- * tailnet guest claiming it; a claim with another server session going through.
+ * tailnet guest claiming it; a claim with another server session going through. And the pure rules (inbox-snooze-intro.ts):
+ * the two-day line moving (the owner changed it from seven), an active-days rule coming back, a used or shown mark not
+ * ending it, a dev build deciding it, first use read from the wrong end of the log.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -14,6 +16,7 @@ import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { SNOOZE_INTRO_TENURE_MS, snoozeIntroDue, snoozeIntroFirstUse } from "./inbox-snooze-intro";
 
 const DAY = 24 * 60 * 60 * 1000;
 const MAGIC = "macbook-pro.tail0000.ts.net";
@@ -289,5 +292,42 @@ describe("every snooze route marks it used", () => {
     expect((await snooze(LINKED)).status).toBe(202);
     expect(w.saved()!.snoozedAt).toMatch(/^\d{4}-/);
     expect(await w.due()).toBe(false);
+  });
+});
+
+// The pure rules (inbox-snooze-intro.ts), by a clock the test moves.
+const NOW = new Date("2026-11-02T15:00:00.000Z");
+const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+const HOUR = 3_600_000;
+
+describe("snoozeIntroDue", () => {
+  test("the two-day boundary: due at exactly 48 h of tenure, not a millisecond before", () => {
+    expect(SNOOZE_INTRO_TENURE_MS).toBe(2 * DAY);
+    expect(snoozeIntroDue({ firstUseAt: ago(2 * DAY) }, NOW, true)).toBe(true);
+    expect(snoozeIntroDue({ firstUseAt: ago(2 * DAY - 1) }, NOW, true)).toBe(false);
+    // No active-days rule: one use two days ago is enough.
+    expect(snoozeIntroDue({ firstUseAt: ago(90 * DAY) }, NOW, true)).toBe(true);
+  });
+
+  test("each condition alone stops it", () => {
+    const first = ago(3 * DAY);
+    expect(snoozeIntroDue({ firstUseAt: first }, NOW, false)).toBe(false);
+    expect(snoozeIntroDue({ firstUseAt: first, snoozedAt: ago(DAY) }, NOW, true)).toBe(false);
+    expect(snoozeIntroDue({ firstUseAt: first, shownAt: ago(DAY) }, NOW, true)).toBe(false);
+    expect(snoozeIntroDue({}, NOW, true)).toBe(false);
+    expect(snoozeIntroDue(undefined, NOW, true)).toBe(false);
+  });
+});
+
+describe("snoozeIntroFirstUse", () => {
+  test("the oldest time of any line or record, wherever it is in the log", () => {
+    const lines = [
+      { at: ago(DAY), record: { created_at: ago(DAY) } },
+      // A record rewritten later keeps when it was made.
+      { at: ago(HOUR), record: { created_at: ago(5 * DAY) } },
+      { at: ago(3 * DAY), record: {} },
+    ];
+    expect(snoozeIntroFirstUse(lines)).toBe(ago(5 * DAY));
+    expect(snoozeIntroFirstUse([])).toBeNull();
   });
 });

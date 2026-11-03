@@ -1,6 +1,6 @@
 /**
  * When the one-time Snooze announcement may show (approval "inbox-snooze-announce", 2026-11-02). The Inbox decides who
- * (settings `snooze_intro.due`: core's inbox-snooze-intro.ts) and spends the claim (POST /api/inbox/snooze-intro: only
+ * (settings `snooze_intro.due`: packages/server/inbox-snooze-intro.ts) and spends the claim (POST /api/inbox/snooze-intro: only
  * the first claim ever gets `show: true`, stamped as it is claimed). The page decides when, only at a calm moment:
  *
  *  - right after the person LEAVES a thread that still waits on them without answering it (they close it, go back to
@@ -17,8 +17,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { snoozeIntroNeed, snoozeIntroWaits } from '@plannotator/core/inbox-snooze-intro';
 import { inboxApi } from './api';
+import { snoozeIntroNeed, snoozeIntroWaits } from './snoozeIntroRows';
 import { LIST_INTRO_MIN_ROWS, LIST_INTRO_SETTLED_MS } from './listIntro';
 
 /** The page's thresholds, ms. A test shrinks them (and puts them back). */

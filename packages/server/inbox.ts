@@ -194,7 +194,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
-import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "@plannotator/core/inbox-snooze-intro";
+import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -1781,7 +1781,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The one-time Snooze announcement (approval "inbox-snooze-announce"; the rules are core's inbox-snooze-intro.ts):
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; the rules are inbox-snooze-intro.ts):
    * due on a release build for someone who first used the Inbox two days ago or more, never snoozed and never saw it.
    * Decided live, not at start: the two days pass while the Inbox runs. A dev build reads and writes nothing.
    */

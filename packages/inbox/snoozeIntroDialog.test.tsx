@@ -69,6 +69,16 @@ afterEach(() => {
 });
 
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+/**
+ * Waits until `done` holds, or two seconds pass: what must happen is awaited, not timed, so a slow runner's late timers
+ * cannot fail it. What must not happen is still checked after a fixed wait.
+ */
+async function until(done: () => boolean, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!done() && Date.now() < end) await wait(10);
+}
+/** A settling wait far longer than the steps a test takes inside it, for a test that acts before the page settles. */
+const SLOW_SETTLE_MS = 600;
 const claims = () => posts.filter((p) => p.endsWith('/api/inbox/snooze-intro')).length;
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="snooze-intro"]');
 
@@ -163,7 +173,7 @@ async function leave(state: Partial<State> = {}, options: { early?: boolean; you
   return set;
 }
 
-describe('the calm moment', () => {
+describe.skipIf(!hasDom)('the calm moment', () => {
   test('leaving a waiting thread after reading it, on a settled page past its age: claimed once, then drawn', async () => {
     mount({ ...BASE });
     // Never on load: nothing while the thread is open, however long.
@@ -171,7 +181,7 @@ describe('the calm moment', () => {
     expect(claims()).toBe(0);
     expect(dialog()).toBeNull();
     act(() => root!.render(<Harness state={{ ...BASE, thread: null }} />));
-    await wait(TIMES.settledMs + 120);
+    await until(() => dialog() !== null);
     expect(claims()).toBe(1);
     expect(dialog()).not.toBeNull();
   });
@@ -220,10 +230,11 @@ describe('the calm moment', () => {
   }
 
   test('a draft that reaches the list after the leave: never claimed', async () => {
+    intro.SNOOZE_INTRO_TIMES.settledMs = SLOW_SETTLE_MS;
     const set = await leaveClean();
     await wait(20);
     set({ rows: DRAFTED });
-    await wait(TIMES.settledMs + 200);
+    await wait(SLOW_SETTLE_MS + 200);
     expect(claims()).toBe(0);
     expect(dialog()).toBeNull();
   });
@@ -232,7 +243,7 @@ describe('the calm moment', () => {
     let answer = () => {};
     claimHeld = new Promise<void>((resolve) => (answer = resolve));
     const set = await leaveClean();
-    await wait(TIMES.settledMs + 60);
+    await until(() => claims() === 1);
     expect(claims()).toBe(1);
     set({ rows: DRAFTED });
     await act(async () => answer());
@@ -241,20 +252,21 @@ describe('the calm moment', () => {
   });
 
   test('blocked until the list settles: a list still changing keeps it waiting', async () => {
+    intro.SNOOZE_INTRO_TIMES.settledMs = SLOW_SETTLE_MS;
     const set = mount({ ...BASE });
     await wait(TIMES.pageAgeMs + 20);
     set({ thread: null });
     for (let i = 0; i < 6; i++) {
-      await wait(TIMES.settledMs / 2);
+      await wait(SLOW_SETTLE_MS / 6);
       set({ rows: [ROWS[0]!, ROWS[1]!, row('msg_c'), row(`msg_new${i}`, { section: 'new', unseen: 1 })] });
     }
     expect(claims()).toBe(0);
-    await wait(TIMES.settledMs + 120);
+    await until(() => claims() === 1);
     expect(claims()).toBe(1);
   });
 });
 
-describe('every dismiss is final', () => {
+describe.skipIf(!hasDom)('every dismiss is final', () => {
   const PATHS: [string, (d: HTMLDialogElement) => void][] = [
     ['Got it', (d) => d.querySelector<HTMLButtonElement>('[data-snooze-intro-close]')!.click()],
     ['Escape', (d) => d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))],
@@ -263,6 +275,7 @@ describe('every dismiss is final', () => {
   for (const [name, dismiss] of PATHS) {
     test(`${name}: stamped by the claim before it drew, closed, and never claimed again`, async () => {
       const set = await leave();
+      await until(() => dialog() !== null);
       expect(dialog()).not.toBeNull();
       // The Inbox stamped it when this page claimed it, before the dialog drew.
       expect(stamped).toBe(true);
@@ -281,10 +294,13 @@ describe('every dismiss is final', () => {
 
   test('a reload: the next page claims at its moment, the Inbox answers no, and nothing draws', async () => {
     await leave();
+    await until(() => dialog() !== null);
     expect(dialog()).not.toBeNull();
     act(() => root!.unmount());
     host!.remove();
     await leave();
+    await until(() => claims() === 2);
+    await wait(100);
     expect(claims()).toBe(2);
     expect(dialog()).toBeNull();
   });
@@ -292,7 +308,7 @@ describe('every dismiss is final', () => {
 
 const THREAD = { thread_id: 'msg_a', subject: 'Which index?', messages: [], project: { id: 'prj_1', name: 'billing' } } as unknown as InboxThread;
 
-describe('Try it opens the real Snooze menu and snoozes nothing', () => {
+describe.skipIf(!hasDom)('Try it opens the real Snooze menu and snoozes nothing', () => {
   function frame(children: ReactNode) {
     host = document.createElement('div');
     host.className = 'pn-inbox';

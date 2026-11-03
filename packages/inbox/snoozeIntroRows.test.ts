@@ -1,55 +1,16 @@
 /**
- * The Snooze announcement's rules (approval "inbox-snooze-announce"). What regresses: the two-day line moving (the
- * owner changed it from seven), an active-days rule coming back, a used or shown mark not ending it, a dev build
- * deciding it, first use read from the wrong end of the log, and a row counting as "read and left" when it is unread, typed in, snoozed, fresh, Sent or Quiet.
+ * The window's half of the Snooze announcement's rules (approval "inbox-snooze-announce"). What regresses: a row
+ * counting as "read and left" when it is unread, typed in, snoozed, fresh, Sent or Quiet; one such row being enough;
+ * a snoozed or Sent thread counting as waiting on the person.
  */
 import { describe, expect, test } from "bun:test";
-import type { InboxListRow } from "./inbox-types";
-import {
-  SNOOZE_INTRO_TENURE_MS,
-  snoozeIntroDue,
-  snoozeIntroFirstUse,
-  snoozeIntroNeed,
-  snoozeIntroReadAndLeft,
-  snoozeIntroWaits,
-} from "./inbox-snooze-intro";
+import type { InboxListRow } from "@plannotator/core/inbox-types";
+import { snoozeIntroNeed, snoozeIntroReadAndLeft, snoozeIntroWaits } from "./snoozeIntroRows";
 
 const NOW = new Date("2026-11-02T15:00:00.000Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
-
-describe("snoozeIntroDue", () => {
-  test("the two-day boundary: due at exactly 48 h of tenure, not a millisecond before", () => {
-    expect(SNOOZE_INTRO_TENURE_MS).toBe(2 * DAY);
-    expect(snoozeIntroDue({ firstUseAt: ago(2 * DAY) }, NOW, true)).toBe(true);
-    expect(snoozeIntroDue({ firstUseAt: ago(2 * DAY - 1) }, NOW, true)).toBe(false);
-    // No active-days rule: one use two days ago is enough.
-    expect(snoozeIntroDue({ firstUseAt: ago(90 * DAY) }, NOW, true)).toBe(true);
-  });
-
-  test("each condition alone stops it", () => {
-    const first = ago(3 * DAY);
-    expect(snoozeIntroDue({ firstUseAt: first }, NOW, false)).toBe(false);
-    expect(snoozeIntroDue({ firstUseAt: first, snoozedAt: ago(DAY) }, NOW, true)).toBe(false);
-    expect(snoozeIntroDue({ firstUseAt: first, shownAt: ago(DAY) }, NOW, true)).toBe(false);
-    expect(snoozeIntroDue({}, NOW, true)).toBe(false);
-    expect(snoozeIntroDue(undefined, NOW, true)).toBe(false);
-  });
-});
-
-describe("snoozeIntroFirstUse", () => {
-  test("the oldest time of any line or record, wherever it is in the log", () => {
-    const lines = [
-      { at: ago(DAY), record: { created_at: ago(DAY) } },
-      // A record rewritten later keeps when it was made.
-      { at: ago(HOUR), record: { created_at: ago(5 * DAY) } },
-      { at: ago(3 * DAY), record: {} },
-    ];
-    expect(snoozeIntroFirstUse(lines)).toBe(ago(5 * DAY));
-    expect(snoozeIntroFirstUse([])).toBeNull();
-  });
-});
 
 function row(over: Partial<InboxListRow>): InboxListRow {
   return {
