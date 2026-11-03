@@ -10,30 +10,38 @@ const served = (extra: Record<string, string> = {}) => new Headers({ 'x-forwarde
 
 describe('tailnetAudience', () => {
   test('no mark of serve is local, whatever Host or login a client claims', () => {
-    expect(tailnetAudience(new Headers({ host: '127.0.0.1:4000' }), OWNER)).toBe('local')
-    expect(tailnetAudience(new Headers({ 'x-forwarded-for': '127.0.0.1, ::1' }), OWNER)).toBe('local')
+    expect(tailnetAudience(new Headers({ host: '127.0.0.1:4000' }), [OWNER])).toBe('local')
+    expect(tailnetAudience(new Headers({ 'x-forwarded-for': '127.0.0.1, ::1' }), [OWNER])).toBe('local')
   })
 
   test('the owner through serve, compared case-insensitively and RFC 2047 decoded', () => {
-    expect(tailnetAudience(served({ 'tailscale-user-login': 'Owner@Example.com', 'tailscale-headers-info': 'https://tailscale.com/s/serve-headers' }), OWNER)).toBe('owner')
-    expect(tailnetAudience(served({ 'tailscale-user-login': '=?utf-8?q?J=C3=BCrgen@example.com?=' }), 'jürgen@example.com')).toBe('owner')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'Owner@Example.com', 'tailscale-headers-info': 'https://tailscale.com/s/serve-headers' }), [OWNER])).toBe('owner')
+    expect(tailnetAudience(served({ 'tailscale-user-login': '=?utf-8?q?J=C3=BCrgen@example.com?=' }), ['jürgen@example.com'])).toBe('owner')
+  })
+
+  test('with several owner logins (no owner named, the allowlist stands in), each is the owner and no one else', () => {
+    const owners = ['me@example.com', 'Me@Work.example']
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'me@example.com' }), owners)).toBe('owner')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'me@work.example' }), owners)).toBe('owner')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'guest@example.com' }), owners)).toBe('peer')
+    expect(tailnetAudience(served(), owners)).toBe('peer')
   })
 
   test('another login, a tagged device, funnel, an unreadable owner, a malformed login: peer', () => {
-    expect(tailnetAudience(served({ 'tailscale-user-login': 'guest@example.com' }), OWNER)).toBe('peer')
-    expect(tailnetAudience(served(), OWNER)).toBe('peer')
-    expect(tailnetAudience(served({ 'tailscale-user-login': OWNER, 'tailscale-funnel-request': '?1' }), OWNER)).toBe('peer')
-    expect(tailnetAudience(served({ 'tailscale-user-login': OWNER }), null)).toBe('peer')
-    expect(tailnetAudience(served({ 'tailscale-user-login': '=?utf-8?q?=ZZ?=' }), OWNER)).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': 'guest@example.com' }), [OWNER])).toBe('peer')
+    expect(tailnetAudience(served(), [OWNER])).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': OWNER, 'tailscale-funnel-request': '?1' }), [OWNER])).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': OWNER }), [])).toBe('peer')
+    expect(tailnetAudience(served({ 'tailscale-user-login': '=?utf-8?q?=ZZ?=' }), [OWNER])).toBe('peer')
   })
 
   test('the owner needs a Tailscale X-Forwarded-For: a forged login behind a local proxy is a peer', () => {
     const owner = { 'tailscale-user-login': OWNER }
-    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '192.168.1.5' }), OWNER)).toBe('peer')
-    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '100.64.0.9, 192.168.1.5' }), OWNER)).toBe('peer')
-    expect(tailnetAudience(new Headers(owner), OWNER)).toBe('peer')
-    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '[fd7a:115c:a1e0::1]:443' }), OWNER)).toBe('owner')
-    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '100.127.255.254' }), OWNER)).toBe('owner')
+    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '192.168.1.5' }), [OWNER])).toBe('peer')
+    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '100.64.0.9, 192.168.1.5' }), [OWNER])).toBe('peer')
+    expect(tailnetAudience(new Headers(owner), [OWNER])).toBe('peer')
+    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '[fd7a:115c:a1e0::1]:443' }), [OWNER])).toBe('owner')
+    expect(tailnetAudience(new Headers({ ...owner, 'x-forwarded-for': '100.127.255.254' }), [OWNER])).toBe('owner')
   })
 
   test('Tailscale addresses', () => {
