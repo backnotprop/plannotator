@@ -14,7 +14,7 @@
  * and stays out of the way: no `claude` is on the sandbox PATH.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
@@ -39,7 +39,8 @@ function setEnv(name: string, value: string) {
   });
 }
 
-function setup() {
+/** `homeDir`: the home folder the engine is given, spelled from the real one (a link to it, a trailing slash). */
+function setup(options: { homeDir?: (home: string, root: string) => string } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-host-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -63,7 +64,7 @@ function setup() {
     live: { runStateOf: () => null },
     dataDir,
     serverSession: "srv",
-    homeDir: home,
+    homeDir: options.homeDir ? options.homeDir(home, root) : home,
     platform: "darwin",
     loginEnv: async () => (logins.count++, { HOME: home, PATH: "", FAKE_LOGIN: "yes" }),
     ownEnv: () => ({ HOME: home, PATH: "" }),
@@ -360,8 +361,8 @@ describe("a second agent behind LaunchHost", () => {
 
 describe("Trust folder (`trustOffer`)", () => {
   /** A launch whose start was refused for trust, and an offer that counts its writes and starts the host trusting. */
-  async function refused(options: { atHome?: boolean } = {}) {
-    const world = setup();
+  async function refused(options: { atHome?: boolean; homeDir?: (home: string, root: string) => string } = {}) {
+    const world = setup(options.homeDir ? { homeDir: options.homeDir } : {});
     const { store, fake, launch } = world;
     const project = options.atHome ? store.ensureProject({ name: "home", root: world.home }) : world.project;
     fake.faults.untrusted = true;
@@ -521,6 +522,19 @@ describe("Trust folder (`trustOffer`)", () => {
     await Bun.sleep(20);
     expect(startsOf(fake.calls)).toBe(1);
     expect(store.message(root.id)!.launch!.deleted_at).toBeTruthy();
+  });
+
+  test("the home folder spelled another way is still home: through a link to it, or with a trailing slash", async () => {
+    const linked = (home: string, root: string) => {
+      const link = join(root, "home-link");
+      symlinkSync(home, link);
+      return link;
+    };
+    for (const homeDir of [linked, (home: string) => `${home}/`]) {
+      const { fake, launch, root } = await refused({ atHome: true, homeDir });
+      fake.faults.offer = null;
+      expect(await launch.runOf(root.id, false)).toMatchObject({ untrusted: true, home_folder: true });
+    }
   });
 
   test("a folder the host can't trust (the home folder) shows no button and refuses the route", async () => {
