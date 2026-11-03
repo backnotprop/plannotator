@@ -42,7 +42,7 @@ import { delimiter, join } from 'node:path';
  */
 export const AGENT_CLIS = [
   // The Inbox's agents, the review engines and uninstall.
-  'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen',
+  'claude', 'codex', 'gemini', 'opencode', 'opencode2', 'pi', 'omp', 'amp', 'cline', 'cursor', 'cursor-agent', 'agent', 'devin', 'kiro-cli', 'copilot', 'droid', 'code', 'qwen', 'dsh',
   // The agent terminal's built-in agents not listed above.
   'openclaude', 'autohand', 'agy', 'aider', 'goose', 'kilo', 'crush', 'auggie', 'codebuff', 'command-code', 'cn', 'kimi', 'vibe', 'qwen-code', 'rovo', 'hermes', 'openclaw', 'grok',
   // Not an agent: claude-swap, which every Inbox window reads usage through, and which goes to the Keychain.
