@@ -204,6 +204,8 @@ test('a part in the thread and in the popout takes a comment; the draft survives
   const popout = page.locator('[data-diagram-popout]');
   await expect(popout.locator('[data-diagram-svg] svg')).toBeVisible();
   await expect(badges(popout)).toHaveCount(1);
+  await centreOf(part(popout, 'Deploy'));
+  await shot(page, '02a-desktop-popout-fit');
   // Escape on the popout's canvas closes the popout, not the thread under it.
   await expect(popout.locator('[data-diagram-canvas]')).toBeFocused();
   await page.keyboard.press('Escape');
@@ -446,6 +448,15 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
       }).toBe(true);
       return view();
     };
+    // The panel's own chrome is on the screen: the header, the close button and the zoom strip.
+    const screen = page.viewportSize()!;
+    for (const chrome of [popout.locator('[data-diagram-popout-chrome]'), popout.getByRole('button', { name: 'Close' }), popout.locator('[data-diagram-zoom-strip]')]) {
+      const at = (await chrome.boundingBox())!;
+      expect(at.x).toBeGreaterThanOrEqual(0);
+      expect(at.y).toBeGreaterThanOrEqual(0);
+      expect(at.x + at.width).toBeLessThanOrEqual(screen.width);
+      expect(at.y + at.height).toBeLessThanOrEqual(screen.height);
+    }
     const box = (await canvas.boundingBox())!;
     const centre: Point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     /** The diagram point (its own pixels) under a screen point. */

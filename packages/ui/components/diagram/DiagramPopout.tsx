@@ -39,7 +39,10 @@ export function DiagramPopout({
       onClose={onClose}
       title={title}
       container={container}
-      className="h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] max-w-none"
+      // The visible viewport's height (`dvh`), not the largest one (`vh`): on
+      // iOS Safari with its toolbars showing, 100vh is taller than the screen
+      // and the header, the close button and the zoom strip were cut off.
+      className="h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-none"
       dataAttributes={{ 'data-diagram-popout': '', ...dataAttributes }}
     >
       {/* The popout's own chrome: a press here addresses no diagram part
