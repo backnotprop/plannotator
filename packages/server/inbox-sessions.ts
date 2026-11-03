@@ -917,7 +917,8 @@ export function createInboxLiveSessions(options: {
     });
 
   /** The window's routes; null when the path is not one of them. */
-  const route = async (req: Request, path: string): Promise<Response | null> => {
+  /** `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`. */
+  const route = async (req: Request, path: string, byGuest = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
@@ -972,6 +973,7 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
+      ...(byGuest ? { by_guest: true } : {}),
     });
     return answer({ message: result.message, replayed: result.replayed });
   };
