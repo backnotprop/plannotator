@@ -1095,6 +1095,11 @@ export interface ThreadPaneProps {
    */
   remote?: boolean | null;
   /**
+   * A tailnet guest's page (`tailnetGuest(settings)`): a launched agent's ⋯ has
+   * no Stop or Delete, as the server answers both `owner_only`.
+   */
+  guest?: boolean;
+  /**
    * A file open beside the thread on a desktop hides the list and the
    * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
    * the file (through the pane's unsaved-comment question, as the file's ×
@@ -1341,7 +1346,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   const root = thread.messages[0]!;
@@ -1374,13 +1379,13 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
-          // A resting agent (no line) still runs in the background: Stop is offered then too.
+          // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
           stop:
-            launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
+            !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id))
               : null,
           // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
-          remove: phone ? null : () => setConfirmDelete(true),
+          remove: phone || guest ? null : () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as

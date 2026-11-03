@@ -366,14 +366,14 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     const w = await world({ config: { inboxLaunch: { enabled: true } } });
     const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
     mkdirSync(project.root, { recursive: true });
-    const launched = (key: string) => {
+    const launched = (key: string, startedAt = new Date()) => {
       const id = inboxId("lch");
       const started = w.inbox.store.startPersonThread({
         project_id: project.id,
         body: "Fix the build.",
         to: { host: "claude-code", session: `launch:${id}` },
         idempotency_key: key,
-        launch: { id, agent: "claude-code", session_ref: null, folder: project.root, scratch: false, started_at: new Date().toISOString() },
+        launch: { id, agent: "claude-code", session_ref: null, folder: project.root, scratch: false, started_at: startedAt.toISOString() },
       });
       w.inbox.store.settleLaunch(started.message.id, { to: { host: "claude-code", session: `sess-${key}` }, session_ref: `s${key}` });
       return { id, messageId: started.message.id, stopLog: join(w.inbox.store.dir, "launch", id, "start.log") };
@@ -404,6 +404,27 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     const b = w.launched("b");
     expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status).toBe(200);
     expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+  });
+
+  test("a guest's reply to a stopped session is kept for it but never starts it again; the owner's reply does", async () => {
+    const w = await launchedWorld();
+    // Started past the start grace, read its first message, and not polling now: stopped.
+    const stopped = (key: string) => {
+      const a = w.launched(key, new Date(Date.now() - 5 * 60_000));
+      w.inbox.store.recordDelivery(a.messageId, { host: "claude-code", session: `sess-${key}` });
+      return a;
+    };
+    const a = stopped("a");
+    const b = stopped("b");
+    const reply = (caller: Caller, messageId: string, key: string) => call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing." } });
+    expect((await reply("guest", a.messageId, "r-guest")).status).toBe(200);
+    expect((await reply("owner", b.messageId, "r-owner")).status).toBe(200);
+    // The owner's reply starts its session again (the sandbox has no `claude`, so it is logged as tried).
+    for (let i = 0; i < 100 && !(existsSync(b.stopLog) && readFileSync(b.stopLog, "utf8").includes("respawn sb:")); i++) await Bun.sleep(20);
+    expect(readFileSync(b.stopLog, "utf8")).toContain("respawn sb:");
+    // The guest's, written at the same moment, did not; it waits for the session like any reply.
+    expect(existsSync(a.stopLog) && readFileSync(a.stopLog, "utf8").includes("respawn")).toBe(false);
+    expect(w.inbox.store.pendingReplies("sess-a").map((m) => m.body)).toEqual(["One more thing."]);
   });
 
   test("a tagged machine (no owner): the login its allowlist names starts, stops and deletes like the owner", async () => {
