@@ -222,7 +222,8 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (state !== 'revealed') return;
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap]')) return;
+      // The card's skill list is portaled out of it (ComposerField): a press on it is the card's.
+      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list], [data-fcomp], [data-fcomp-pillwrap], [data-skill-menu-anchor]')) return;
       setRef.current('tucked');
     };
     document.addEventListener('pointerdown', onDown, true);

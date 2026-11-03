@@ -216,6 +216,7 @@ packages/inbox/videoAttachment.test.tsx
 packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
 packages/inbox/skillReferences.test.tsx
+packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/feedbackDialog.test.tsx
 packages/ui/components/HumanOnlySkillNotice.test.tsx

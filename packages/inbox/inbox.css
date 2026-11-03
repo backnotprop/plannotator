@@ -1218,15 +1218,16 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* The composer field (components/ComposerField.tsx): ui's highlight layer paints the words from a
    mirror (.ib-rmirror, the box's own metrics) behind a textarea whose own glyphs are transparent
    (theme.css .pn-ref-input; .ib-rtext would otherwise paint them over the mirror). The skill picker
-   opens above the box at its width. */
+   opens above the box at its width, 8 px from it (10 on a phone). */
 .ib-cfield { position: relative; }
 .ib-rtext.pn-ref-input { color: transparent; }
 .ib-rtext.pn-ref-input.pn-ref-composing { color: var(--foreground); }
-.ib-cfield [data-skill-menu] { margin-bottom: 8px; }
 .ib-cfield [data-skill-human-only-notice] { padding: 0 12px 6px; margin-top: -2px; }
-/* The picker at the caret (compose): portaled into the dialog, hung off a box laid over the caret's line
-   (ComposerField's CaretSkillMenu). Painted after the footer, it floats over it and past the dialog's edge (the
-   dialog is overflow: visible); on a phone it stays above the footer. The box itself takes no clicks. */
+/* The skill picker (ComposerField's FloatingSkillMenu): portaled to the Inbox's root (compose: into its dialog) and
+   hung off a box laid over the field (compose: the caret's line), so no scrolling foot, clipping pane or stacking
+   context around the field can cut or cover it. Which side it opens on and its height come from the room it really
+   has (the visual viewport, under the thread's header), measured in JS; no CSS height here may override that. The box
+   itself takes no clicks. */
 .ib-skanchor { position: absolute; z-index: 60; pointer-events: none; }
 .ib-skanchor > [data-skill-menu] { pointer-events: auto; }
 /* Files pasted into the reply box: compose's tiles, inside the box above its chips. A tile never runs past
@@ -3126,14 +3127,13 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
      has the room above the keyboard. The draft stays as it was and comes back with the foot. */
   :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input, [contenteditable="true"]):focus) .ib-pfoot { display: none; }
-  /* The skill picker: full width directly above the reply box, which sits on the keyboard; never a
-     sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing,
-     the description under the name; a tap inserts on pointerdown, so the keyboard stays up. */
-  .ib-cfield [data-skill-menu] { left: -1px; right: -1px; margin-bottom: 10px; }
-  .ib-cfield [data-skill-menu-list] { max-height: min(198px, var(--ib-vvh, 100dvh) * 0.4) !important; }
-  .ib-cfield [data-skill-item], .ib-skanchor [data-skill-item] { min-height: 44px; flex-wrap: wrap; row-gap: 0; align-content: center; }
-  .ib-cfield [data-skill-item-part="description"], .ib-skanchor [data-skill-item-part="description"] { order: 3; flex-basis: 100%; padding-left: 26px; font-size: var(--ib-fs-12-5, 12.5px); }
-  .ib-cfield [data-skill-item-part="root"], .ib-skanchor [data-skill-item-part="root"] { margin-left: auto; }
+  /* The skill picker: full width directly above the reply box (its outer edges, 10 px above it), which sits on the
+     keyboard; never a sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing and
+     40% of the visible height (ComposerField, caretMenu.ts phoneSkillListHeight), the description under the name; a
+     tap inserts on pointerdown, so the keyboard stays up. */
+  .ib-skanchor [data-skill-item] { min-height: 44px; flex-wrap: wrap; row-gap: 0; align-content: center; }
+  .ib-skanchor [data-skill-item-part="description"] { order: 3; flex-basis: 100%; padding-left: 26px; font-size: var(--ib-fs-12-5, 12.5px); }
+  .ib-skanchor [data-skill-item-part="root"] { margin-left: auto; }
   .ib-cfield [data-skill-human-only-notice] > summary { min-height: 44px; }
   .ib-rfoot { flex-wrap: wrap; }
   .pn-inbox .ib-rchip { height: 32px; }

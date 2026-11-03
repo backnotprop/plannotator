@@ -20,12 +20,14 @@
  * keep their meaning and the host's own `onKeyDown` gets everything else.
  * With no skills installed (or the route missing) `/` and `$` are plain text.
  *
- * Where the picker opens: by default against the field's own box (the reply
- * box, two lines tall, so that is at the caret). A tall field in a modal
- * dialog (compose) passes `caretMenu`: the picker then opens at the caret's
- * line, portaled into the dialog so the field's scroll container cannot clip
- * it, and kept inside the box `caretMenu.bounds` names (compose: the viewport
- * on a desktop, so it floats over the footer; the sheet above its footer on a
+ * Where the picker opens: never inside the field's own boxes (FloatingSkillMenu
+ * portals it out, so no scrolling foot or stacking context can cut or cover
+ * it). By default it hangs off the field's own box (the reply box, two lines
+ * tall, so that is at the caret), inside the room the person really sees (the
+ * visual viewport, under the thread's header). A tall field in a modal dialog
+ * (compose) passes `caretMenu`: the picker then opens at the caret's line,
+ * kept inside the box `caretMenu.bounds` names (compose: the viewport on a
+ * desktop, so it floats over the footer; the sheet above its footer on a
  * phone).
  */
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -36,12 +38,12 @@ import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomp
 import { useSkillReferenceAutocomplete } from '@plannotator/ui/hooks/useSkillReferenceAutocomplete';
 import type { MentionPerson, MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_UPDATE_WORDS, tagPeople, tagPickedWords, type TagOption } from '../tags';
-import { caretAnchor, caretLineRect, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
+import { caretAnchor, caretLineRect, fieldAnchor, phoneSkillListHeight, seenBox, skillListRoom, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
 import { TagNotes, TagPicker } from './TagPicker';
 import { VoiceNote, voiceHidesCaret, voicePaint } from './VoiceMic';
 import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
-import { isTouchScreen } from '../phone';
+import { isPhone, isTouchScreen } from '../phone';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -178,26 +180,27 @@ export function InboxComposerField({
     mention.select(index);
     if (option?.taggable) setAnnounce(tagPickedWords(option));
   };
-  const host = caretMenu ? (innerRef.current?.closest('dialog') ?? null) : null;
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const textarea = innerRef.current;
+  const wrap = wrapRef.current;
+  const host = textarea ? skillMenuHost(textarea) : null;
   const describedBy = [ariaDescribedBy, showNotes ? notesId : null].filter(Boolean).join(' ') || undefined;
   return (
-    <div className="ib-cfield" data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
-      {skills.menu && !tagMenu && caretMenu && host && innerRef.current ? (
-        <CaretSkillMenu textarea={innerRef.current} host={host} options={caretMenu}>
-          {(boundary) => (
+    <div className="ib-cfield" ref={wrapRef} data-composer-field="" data-voice-live={voiceLive ? '' : undefined}>
+      {skills.menu && !tagMenu && textarea && wrap && host ? (
+        <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null}>
+          {(boundary, maxListHeight) => (
             <SkillReferenceMenu
               id={skillListboxId}
               items={skills.menu!.items}
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
               boundary={boundary}
-              prefer={caretMenu.prefer}
-              maxListHeight={caretMenu.maxListHeight}
+              prefer={caretMenu?.prefer ?? 'above'}
+              maxListHeight={maxListHeight}
             />
           )}
-        </CaretSkillMenu>
-      ) : skills.menu && !tagMenu ? (
-        <SkillReferenceMenu id={skillListboxId} items={skills.menu.items} activeIndex={skills.menu.activeIndex} onSelect={skills.select} />
+        </FloatingSkillMenu>
       ) : null}
       {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
       <ComposerTokenTextarea
@@ -249,46 +252,98 @@ export function InboxComposerField({
 }
 
 /**
- * The picker at the caret: a box laid over the caret's line, absolutely
- * positioned in the dialog (a modal dialog is in the top layer, so a portal
- * to the body would render under it), with the menu hanging above or below it
- * as SkillReferenceMenu decides against `options.bounds`. The box follows the
- * caret on every render (typing, a caret move) and on any scroll or resize.
+ * Where the list is drawn: an open modal dialog (compose) when the field is in
+ * one, since a dialog is in the top layer and anything outside it renders
+ * under it; else the Inbox's root, which carries the theme's colours. Never
+ * inside the field's own boxes: the reply foot scrolls in its own box on an
+ * iPhone with the keyboard up, and its `z-index` traps anything inside it
+ * under the thread's header, so a list drawn there was cut at the foot's top
+ * edge (only the last row's bottom showed) and hidden behind the header.
  */
-function CaretSkillMenu({
+function skillMenuHost(field: HTMLElement): HTMLElement {
+  return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox') ?? field.ownerDocument.body;
+}
+
+/** The space the list keeps from the field above it (inbox.css once set it with a margin: 8 px, 10 on a phone); the menu's own gap is 6. */
+const FIELD_GAP_EXTRA = 2;
+const PHONE_FIELD_GAP_EXTRA = 4;
+
+interface MenuFrame {
+  box: AnchorBox;
+  room: VerticalBox | null;
+  cap: number | undefined;
+}
+
+// Object.is: a reading that is NaN (a viewport mid-rotation) still equals itself, so the commit loop converges.
+const sameFrame = (a: MenuFrame, b: MenuFrame) =>
+  Object.is(a.box.top, b.box.top) &&
+  Object.is(a.box.bottom, b.box.bottom) &&
+  Object.is(a.box.left, b.box.left) &&
+  Object.is(a.box.width, b.box.width) &&
+  Object.is(a.cap, b.cap) &&
+  Object.is(a.room?.top, b.room?.top) &&
+  Object.is(a.room?.bottom, b.room?.bottom);
+
+/**
+ * The list, portaled to `host` (skillMenuHost) and laid over a box: the
+ * field's box (the reply box, New message, full screen's card, a page
+ * comment), or with `caret` the caret's line (compose's tall field).
+ * SkillReferenceMenu hangs the list above or below that box by the room it
+ * really has (read at every measure: the visual viewport under the thread's
+ * header, skillListRoom; compose's own bounds with `caret`) and caps the list
+ * to it, so all of the list is on screen and scrolls in what is left. The box
+ * and the room follow the field on every render and on anything that moves
+ * them: a scroll anywhere, a resize, the visual viewport (the keyboard opening
+ * or closing), a change of the field's size, and the root's keyboard state
+ * (phone.ts pins the page a frame after the keyboard opens).
+ */
+function FloatingSkillMenu({
   textarea,
+  wrap,
   host,
-  options,
+  caret,
   children,
 }: {
   textarea: HTMLTextAreaElement;
+  wrap: HTMLElement;
   host: HTMLElement;
-  options: CaretMenuOptions;
-  children: (boundary: () => VerticalBox | null) => React.ReactNode;
+  caret: CaretMenuOptions | null;
+  children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
-  const [box, setBox] = useState<AnchorBox | null>(null);
-  const boundsRef = useRef(options.bounds);
-  boundsRef.current = options.bounds;
-  const boundary = useCallback(() => boundsRef.current(), []);
+  const [frame, setFrame] = useState<MenuFrame | null>(null);
+  const caretRef = useRef(caret);
+  caretRef.current = caret;
+  const room = useCallback((): VerticalBox | null => {
+    const own = caretRef.current;
+    return own ? own.bounds() : skillListRoom(textarea);
+  }, [textarea]);
 
   const update = useCallback(() => {
-    const field = textarea.getBoundingClientRect();
-    // Not laid out (a test DOM): the field's top edge, so the menu still renders.
-    const line = caretLineRect(textarea) ?? { top: field.top, bottom: field.top };
-    const visible = visibleBox(textarea, host);
-    const anchor = caretAnchor(line, visible, { left: field.left, width: field.width });
+    const own = caretRef.current;
+    const phone = isPhone();
+    let anchor: AnchorBox;
+    if (own) {
+      const field = textarea.getBoundingClientRect();
+      // Not laid out (a test DOM): the field's top edge, so the menu still renders.
+      const line = caretLineRect(textarea) ?? { top: field.top, bottom: field.top };
+      anchor = caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
+    } else {
+      anchor = fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
+    }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
-    const next: AnchorBox = {
+    const box: AnchorBox = {
       top: Math.round(anchor.top - h.top - host.clientTop + host.scrollTop),
       bottom: Math.round(anchor.bottom - h.top - host.clientTop + host.scrollTop),
       left: Math.round(anchor.left - h.left - host.clientLeft + host.scrollLeft),
       width: Math.round(anchor.width),
     };
-    setBox((prev) =>
-      prev && prev.top === next.top && prev.bottom === next.bottom && prev.left === next.left && prev.width === next.width ? prev : next,
-    );
-  }, [host, textarea]);
+    const seen = seenBox(textarea.ownerDocument.defaultView ?? window);
+    const phoneCap = phone ? phoneSkillListHeight(seen.bottom - seen.top) : undefined;
+    const cap = own ? own.maxListHeight : Number.isFinite(phoneCap) ? phoneCap : undefined;
+    const next: MenuFrame = { box, room: room(), cap };
+    setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
+  }, [host, textarea, wrap, room]);
 
   // Every commit: the caret moved or the text changed (the equality guard above converges).
   useLayoutEffect(() => {
@@ -296,27 +351,46 @@ function CaretSkillMenu({
   });
 
   useEffect(() => {
-    const viewport = window.visualViewport;
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    viewport?.addEventListener('resize', update);
-    viewport?.addEventListener('scroll', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-      viewport?.removeEventListener('resize', update);
-      viewport?.removeEventListener('scroll', update);
+    const view = textarea.ownerDocument.defaultView ?? window;
+    const viewport = view.visualViewport;
+    let raf = 0;
+    // Now, and again once the page has laid itself out for the change (phone.ts applies the keyboard a frame later).
+    const soon = () => {
+      update();
+      view.cancelAnimationFrame(raf);
+      raf = view.requestAnimationFrame(() => {
+        update();
+        raf = view.requestAnimationFrame(update);
+      });
     };
-  }, [update]);
+    view.addEventListener('scroll', soon, true);
+    view.addEventListener('resize', soon);
+    viewport?.addEventListener('resize', soon);
+    viewport?.addEventListener('scroll', soon);
+    const watch = typeof MutationObserver === 'function' ? new MutationObserver(soon) : null;
+    watch?.observe(textarea.ownerDocument.documentElement, { attributes: true, attributeFilter: ['style', 'data-ib-keyboard', 'data-ib-keyboard-pin'] });
+    const sized = typeof ResizeObserver === 'function' ? new ResizeObserver(soon) : null;
+    sized?.observe(wrap);
+    return () => {
+      view.cancelAnimationFrame(raf);
+      view.removeEventListener('scroll', soon, true);
+      view.removeEventListener('resize', soon);
+      viewport?.removeEventListener('resize', soon);
+      viewport?.removeEventListener('scroll', soon);
+      watch?.disconnect();
+      sized?.disconnect();
+    };
+  }, [update, textarea, wrap]);
 
-  if (!box) return null;
+  if (!frame) return null;
+  const { box } = frame;
   return createPortal(
     <div
       className="ib-skanchor"
-      data-skill-menu-anchor=""
+      data-skill-menu-anchor={caret ? 'caret' : 'field'}
       style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top) }}
     >
-      {children(boundary)}
+      {children(room, frame.cap)}
     </div>,
     host,
   );
