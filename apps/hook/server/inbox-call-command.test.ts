@@ -18,6 +18,7 @@ import type { InboxMessage, InboxThread, InboxTidyPlan, InboxTidyRun } from "@pl
 import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -235,6 +236,14 @@ describe("what a script gets", () => {
     expect(shown.stderr).toBe("");
   });
 
+  test("a question opener with text after its name: sent, stdout still one JSON value, the warning on stderr", async () => {
+    const box = await world();
+    const sent = await cli(box, ["send_message", JSON.stringify({ body: "Pick:\n:::question {#bar}\nWhich bar?\n- [ ] Top\n:::", thread: "Bars" })]);
+    expect(sent.code).toBe(0);
+    expect(JSON.parse(sent.stdout).question_openers_with_text).toEqual([{ line: 2, directive: ":::question" }]);
+    expect(sent.stderr).toBe(`${questionOpenersWithTextText([{ line: 2, directive: ":::question" }]).trim()}\n`);
+  });
+
   test("inside an agent Ask AI started the Inbox is off: nothing is started or sent", async () => {
     const box = sandbox();
     const result = await cli(box, ["read_thread", "{}"], { env: { PLANNOTATOR_ASK_AI_CHILD: "1" } });
@@ -256,6 +265,8 @@ describe("who is calling", () => {
     { name: "Pi", host: "pi", session: "ses-pi", agentName: "Pi", env: { PI_SESSION_ID: "ses-pi" } },
     { name: "Codex", host: "codex", session: CODEX_THREAD, agentName: "Codex", env: { CODEX_THREAD_ID: CODEX_THREAD } },
     { name: "Qwen Code", host: "qwen", session: QWEN_SESSION, agentName: "Qwen Code", env: { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" } },
+    // DeepSeek Harness sets DSH_SESSION_ID (and DSH_SHELL) in every model shell.
+    { name: "DeepSeek Harness", host: "dsh", session: "session-0b9c8e4e", agentName: "DeepSeek Harness", env: { DSH_SHELL: "1", DSH_SESSION_ID: "session-0b9c8e4e" } },
     // OpenCode names no session in its shell: only the value its Tidy gives it says who it is.
     { name: "OpenCode", host: "opencode", session: "ses_opencode1", agentName: "OpenCode", env: { OPENCODE: "1" }, flag: "opencode:ses_opencode1" },
   ];
@@ -320,6 +331,9 @@ describe("who is calling", () => {
       { CODEX_THREAD_ID: CODEX_THREAD, OMPCODE: "1" },
       { PI_SESSION_ID: "ses-pi", CLAUDECODE: "1" },
       { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", QWEN_CODE: "1" },
+      // Claude Code or Pi started from a DeepSeek Harness shell: DSH_* is inherited.
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", CLAUDECODE: "1" },
+      { DSH_SHELL: "1", DSH_SESSION_ID: "session-outer", PI_SESSION_ID: "ses-pi" },
     ]) {
       const refused = await cli(box, ["send_message", send], { env });
       expect(refused).toMatchObject({ code: 1, stdout: "" });
@@ -351,6 +365,25 @@ describe("who is calling", () => {
     expect(caller(null, { QWEN_CODE_SESSION_ID: QWEN_SESSION, QWEN_CODE: "1" })).toEqual({ host: "qwen", session: QWEN_SESSION, name: "Qwen Code" });
     expect(caller(null, { PI_SESSION_ID: "s", OMPCODE: "1" })).toEqual({ host: "pi", session: "s", name: "Pi" });
     expect(caller(null, { CLAUDECODE: "1" })).toBeNull();
+    // DeepSeek Harness: its marker beside its own session is its own shell; DSH_SHELL alone names no session.
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual({ host: "dsh", session: "session-s", name: "DeepSeek Harness" });
+    expect(caller(null, { DSH_SHELL: "1" })).toBeNull();
+    expect(caller(null, { DSH_SHELL: "1", DSH_SESSION_ID: "session-s", GEMINI_CLI: "1" })).toBe("session_ambiguous");
+    // The person's own terminal in DSH Web (DSH_SESSION_ID, no DSH_SHELL): no DSH session, so whoever runs there is themselves.
+    expect(caller(null, { DSH_SESSION_ID: "session-s" })).toBeNull();
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PI_SESSION_ID: "ses-pi" })).toEqual({ host: "pi", session: "ses-pi", name: "Pi" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", PLANNOTATOR_SESSION_TAG: "claude-code:s", CLAUDECODE: "1" })).toEqual({ host: "claude-code", session: "s", name: "Claude Code" });
+    expect(caller(null, { DSH_SESSION_ID: "session-s", CODEX_THREAD_ID: CODEX_THREAD })).toEqual({ host: "codex", session: CODEX_THREAD, name: "Codex" });
+    // A subagent's model shell: the session Plannotator's plugin names (its parent).
+    const sub = { DSH_SHELL: "1", DSH_SESSION_ID: "session-child", DSH_PLANNOTATOR_SESSION_ID: "session-parent", DSH_PLANNOTATOR_SESSION_FOR: "session-child" };
+    expect(caller(null, sub)).toEqual({ host: "dsh", session: "session-parent", name: "DeepSeek Harness" });
+    expect(caller(null, { ...sub, DSH_PLANNOTATOR_SESSION_FOR: "session-other" })).toEqual({ host: "dsh", session: "session-child", name: "DeepSeek Harness" });
+    // A mismatch names the variable the session came from, so unsetting it changes something.
+    const mismatch = inboxCallerOf("dsh:session-mine", sub);
+    expect(mismatch.ok ? null : mismatch.message).toContain("from DSH_PLANNOTATOR_SESSION_ID");
+    expect(mismatch.ok ? null : mismatch.message).not.toContain("from DSH_SESSION_ID");
+    const plain = inboxCallerOf("dsh:session-mine", { DSH_SHELL: "1", DSH_SESSION_ID: "session-child" });
+    expect(plain.ok ? null : plain.message).toContain("from DSH_SESSION_ID");
     // A malformed variable is no session, as in the shim.
     expect(caller(null, { PLANNOTATOR_SESSION_TAG: "cursor:ses", CODEX_THREAD_ID: "not-a-uuid" })).toBeNull();
     // One session named twice is one session.
@@ -374,30 +407,41 @@ describe("who is calling", () => {
     expect(parseCallCommand(["--session ses_x", "card"])).toMatchObject({ ok: false, code: "usage", error: expect.stringContaining("separate words") });
   });
 
-  test("a read with no session settles nothing for the thread's owner; one that names a session, or a raw MCP client's, still does", async () => {
+  test("a read with no session settles nothing for the thread's owner; one that names the owner's session does; a raw MCP client's settles only its own", async () => {
     const box = await world();
     const { client, server, project } = box;
     await poll(server, "ses-a", project);
-    const replied = async (subject: string) => {
-      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, agent_session: "ses-a", agent_host: "claude-code" });
-      const words = (await (await post(server, `/api/inbox/messages/${asked.message_id}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } };
-      return { thread: asked.thread_id as string, reply: words.reply.id };
+    const answer = async (messageId: string, subject: string) =>
+      ((await (await post(server, `/api/inbox/messages/${messageId}/reply`, { words: `${subject} yes.`, idempotency_key: subject })).json()) as { reply: { id: string } }).reply.id;
+    const replied = async (subject: string, session: string | null = "ses-a") => {
+      const asked = await tool(client, "send_message", { body: `${subject}?`, subject, thread: subject, project_path: project, ...(session ? { agent_session: session, agent_host: "claude-code" } : {}) });
+      return { thread: asked.thread_id as string, reply: await answer(asked.message_id, subject) };
     };
     const scripted = await replied("Scripted");
     const raw = await replied("Raw");
     const named = await replied("Named");
+    // A raw MCP client that names no session, sending and reading: the reply to it is its own to settle.
+    const own = await replied("Own", null);
+    const checked = async (thread: string) => (await threadOf(server, thread)).messages[0]!.agent_checked_seq ?? null;
 
     for (const json of [{ thread_id: scripted.thread }, { thread_id: scripted.thread, format: "full" }]) {
       const read = await cli(box, ["read_thread", JSON.stringify(json)]);
       expect(read.code).toBe(0);
       expect(read.stdout).toContain("Scripted yes.");
     }
+    // A script's read with no session is a peek, even of a reply to a message sent with none.
+    expect((await cli(box, ["read_thread", JSON.stringify({ thread_id: own.thread, format: "full" })])).code).toBe(0);
+    expect(await checked(own.thread)).toBeNull();
+    // A raw MCP client's read with no session is not a peek: it settles the reply to its own message...
+    await tool(client, "read_thread", { thread_id: own.thread });
+    expect(await checked(own.thread)).not.toBeNull();
+    // ...but not one owed to ses-a, whose connection takes it (only a reply's recipient settles it).
     await tool(client, "read_thread", { thread_id: raw.thread });
     expect((await cli(box, ["--session", "claude-code:ses-a", "read_thread", JSON.stringify({ thread_id: named.thread })])).code).toBe(0);
 
     const handedOut = (await poll(server, "ses-a", project)).map((command) => command.id);
     expect(handedOut).toContain(scripted.reply);
-    expect(handedOut).not.toContain(raw.reply);
+    expect(handedOut).toContain(raw.reply);
     expect(handedOut).not.toContain(named.reply);
   });
 
