@@ -433,7 +433,7 @@ test('a link never takes a scratch folder out of the root: one at the name is sk
   // The route answers after stop and rm.
   await deleteFromMenu(page, sent.thread_id);
   // The toast says the folder was kept.
-  await expect(page.getByText('its scratch folder was kept')).toBeVisible();
+  await expect(page.getByText('its scratch folder was kept', { exact: true })).toBeVisible();
   expect(fake.calls().filter((c) => c.argv[0] === 'purge')).toHaveLength(before);
   expect(lstatSync(folder).isSymbolicLink()).toBe(true);
   expect(readdirSync(outside)).toEqual(['keep.txt']);
@@ -461,7 +461,7 @@ test('Delete acts on the folder the Inbox made, once, and never purges past it: 
   writeFileSync(join(swapped.folder, 'keep.txt'), 'another folder');
   let before = purges().length;
   await deleteFromMenu(page, swapped.thread_id);
-  await expect(page.getByText('its scratch folder was kept')).toBeVisible();
+  await expect(page.getByText('its scratch folder was kept', { exact: true })).toBeVisible();
   expect(purges()).toHaveLength(before);
   expect(readdirSync(swapped.folder)).toEqual(['keep.txt']);
   expect(fake.agents().some((a) => a.cwd === swapped.folder)).toBe(false);
