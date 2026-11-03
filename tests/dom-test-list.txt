@@ -126,6 +126,7 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/composeTrust.test.tsx
 packages/inbox/openInTerminal.test.tsx
+packages/inbox/runTrustHowto.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
