@@ -4158,6 +4158,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       json,
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
+      isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
       timings: options.machineLinkTimings,
     });
     if (phonesOn) {

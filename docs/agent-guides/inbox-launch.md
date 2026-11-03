@@ -98,7 +98,7 @@ The folder menu ends, under a line, with **New scratch folder** and the folder a
 
 ### Window routes
 
-Same origin and `serverSession`, like every window write. Open and the settings route are refused over the tailnet. Starting an agent is the owner's: a Send with `to.launch` and Try again answer a tailnet login from `inboxTailscaleAllow` `403 owner_only` (as Ask AI does), and the owner over the tailnet as on the computer (`inbox-tailnet-owner.test.ts`, "starting an agent is the owner's"). So are Stop and Delete: a guest gets `403 owner_only` and the session runs on ("stopping or deleting an agent is the owner's").
+Same origin and `serverSession`, like every window write. Open and the settings route are refused over the tailnet. Starting an agent is the owner's: a Send with `to.launch` and Try again answer a tailnet login from `inboxTailscaleAllow` `403 owner_only` (as Ask AI does), and the owner over the tailnet as on the computer (`inbox-tailnet-owner.test.ts`, "starting an agent is the owner's"). So are Stop and Delete: a guest gets `403 owner_only` and the session runs on ("stopping or deleting an agent is the owner's"). Every one of these asks `isOwnerRequest` (through `isGuest` in `inbox.ts`), so on a tagged machine, which has no owner, the logins `inboxTailscaleAllow` names are the owner here too.
 
 - `POST /api/inbox/launch/:id/stop`: `claude stop`.
 - `POST /api/inbox/launch/:id/open`: macOS Terminal through `osascript`, running `claude attach <short>` in the folder (plain `claude` in an untrusted folder, so its trust prompt shows).

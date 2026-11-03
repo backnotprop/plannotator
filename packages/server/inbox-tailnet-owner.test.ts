@@ -303,11 +303,13 @@ describe("what the approval opened, by caller", () => {
     expect(w.config().autoUpdate).toBeUndefined();
   });
 
-  test("a machine Tailscale names no owner for (a tagged device) has no owner over the tailnet: an allowed login stays a guest", async () => {
+  test("a machine Tailscale names no owner for (a tagged device): its allowed login is the owner, and the page says so", async () => {
     const w = await world({ tagged: true });
     expect(w.inbox.tailscale.state().owner).toBeNull();
-    expect(await answerOf(await call(w, "guest", { path: "/api/inbox/agents" }))).toEqual(REFUSED);
-    expect(((await (await call(w, "guest", { path: "/api/inbox/settings" })).json()) as Json).guest).toBe(true);
+    const settings = (await (await call(w, "guest", { path: "/api/inbox/settings" })).json()) as Json;
+    expect([settings.via, settings.guest]).toEqual(["tailnet", false]);
+    // A login it does not allow is still refused at the listener.
+    expect(await answerOf(await call(w, "guest", { path: "/api/inbox/settings" }, { "Tailscale-User-Login": "someone@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
   });
 });
 
@@ -403,6 +405,37 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status).toBe(200);
     expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
   });
+
+  test("a tagged machine (no owner): the login its allowlist names starts, stops and deletes like the owner", async () => {
+    const w = await world({ tagged: true, config: { inboxLaunch: { enabled: true } } });
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    mkdirSync(project.root, { recursive: true });
+    const send: Call = { path: "/api/inbox/messages", body: { idempotency_key: "k-tagged", body: "Fix the build.", to: { launch: { agent: "claude-code", project_id: project.id } } } };
+    // Past who they are: only the sandbox's missing `claude` stops the start.
+    expect(await answerOf(await call(w, "guest", send))).toEqual([409, "agent_unavailable"]);
+    const id = inboxId("lch");
+    const started = w.inbox.store.startPersonThread({
+      project_id: project.id,
+      body: "Fix the build.",
+      to: { host: "claude-code", session: `launch:${id}` },
+      idempotency_key: "k-seed",
+      launch: { id, agent: "claude-code", session_ref: null, folder: project.root, scratch: false, started_at: new Date().toISOString() },
+    });
+    w.inbox.store.settleLaunch(started.message.id, { to: { host: "claude-code", session: "sess-t" }, session_ref: "st" });
+    expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/stop`, body: {} })).status).toBe(200);
+    expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/delete`, body: {} })).status).toBe(200);
+    expect(w.inbox.store.message(started.message.id)!.launch!.deleted_at).toBeString();
+  });
+});
+
+describe("a tagged machine: the login its allowlist names has every route the owner has", () => {
+  for (const row of OPENED) {
+    test(row.name, async () => {
+      const w = await world({ ...row.world, tagged: true });
+      expect(await answerOf(await call(w, "guest", row.call(w)))).toEqual([row.ok ?? 200, undefined]);
+      if (row.did) expect(row.did(w)).toBe(true);
+    });
+  }
 });
 
 describe("what stays refused for everyone over the tailnet", () => {
