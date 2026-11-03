@@ -28,7 +28,7 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
  * one bordered button is Open in Terminal, where something is blocked on the
  * person (a permission prompt, an untrusted folder). No keyboard shortcuts.
  */
-/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). `guest`: a tailnet guest's page (`tailnetGuest`), which gets no Stop or Try again: the server answers both `owner_only`. */
+/** `canReaddress`: the waiting message can go to another session (Send to another session is shown under the line). `guest`: a tailnet guest's page (`tailnetGuest`), which gets no Stop or Try again (the server answers both `owner_only`), and whose stopped line never says a reply starts it again. */
 export function RunLine({ run, phone, canReaddress = false, guest = false, onChanged }: { run: InboxRun; phone: boolean; canReaddress?: boolean; guest?: boolean; onChanged: () => void }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry'>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +129,11 @@ export function RunLine({ run, phone, canReaddress = false, guest = false, onCha
       break;
     case 'stopped':
       icon = 'stop';
-      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`).
-      text =
-        run.stopped_by_person && run.since
+      // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`). A guest's reply never
+      // starts it again (the server's rule), and the Stop was never theirs.
+      text = guest
+        ? `${name} stopped. Your reply waits for it.`
+        : run.stopped_by_person && run.since
           ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
           : run.cause
             ? `${name} stopped. ${run.cause}`

@@ -184,6 +184,7 @@ export function createInboxCompose(options: {
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
+        ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });
     } catch (error) {
