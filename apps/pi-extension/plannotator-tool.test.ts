@@ -99,6 +99,7 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 	const notices: Array<{ message: string; type: string }> = [];
 	const launches: Launch[] = [];
 	const planReviews: Array<{ decide: (result: PlanReviewDecision) => void }> = [];
+	let stale = false;
 
 	const pi = {
 		events: { on: () => undefined, emit: () => undefined },
@@ -118,7 +119,10 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 		getCommands: () => [],
 		appendEntry: () => undefined,
 		sendMessage: () => undefined,
-		sendUserMessage: (text: string, sendOptions: unknown) => sent.push({ text, options: sendOptions }),
+		sendUserMessage: (text: string, sendOptions: unknown) => {
+			if (stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+			sent.push({ text, options: sendOptions });
+		},
 	};
 
 	const makeCtx = (id: string) => ({
@@ -214,6 +218,9 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 		},
 		async command(name: string, args: string) {
 			await commands.get(name)!.handler(args, ctx);
+		},
+		goStale() {
+			stale = true;
 		},
 		async startSession() {
 			for (const handler of handlers.get("session_start") ?? []) await handler({ reason: "startup" }, ctx);
@@ -465,6 +472,30 @@ describe("plannotator tool on Pi", () => {
 		expect(harness.sent[0]!.text).toContain("Rename b.");
 		expect(harness.sent[0]!.options).toEqual({ deliverAs: "followUp" });
 	});
+
+	for (const action of ["annotate", "review", "last"] as const) {
+		for (const stale of [false, true]) {
+			test(`${action} feedback goes to ${stale ? "the replacement when the opener is stale" : "the live opener, not an in-process subagent"}`, async () => {
+				const origin = createHarness({ branch: [assistant("a1", [{ type: "text", text: "Original answer." }])] });
+				origin.writeFile("notes.md", "# Notes\n");
+				await origin.startSession();
+				await origin.call({ action, ...(action === "annotate" ? { target: "notes.md" } : {}) });
+				const other = createHarness();
+				await other.startSession();
+				if (stale) origin.goStale();
+
+				await postJson(`${origin.launches[0]!.url}/api/feedback`, {
+					feedback: "Clarify the original review.", annotations: [], approved: false,
+				});
+				const recipient = stale ? other : origin;
+				await until(() => recipient.sent.length > 0);
+				expect(recipient.sent).toHaveLength(1);
+				expect((stale ? origin : other).sent).toHaveLength(0);
+				expect(recipient.sent[0]!.text).toContain("Clarify the original review.");
+				expect(recipient.sent[0]!.text.includes("browser tab opened before Pi switched sessions")).toBe(stale);
+			});
+		}
+	}
 
 	test("review feedback carried only in the text (PR description or editor notes, no annotations) reaches the agent through the tool path", async () => {
 		const harness = createHarness();

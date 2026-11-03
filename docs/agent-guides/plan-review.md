@@ -226,7 +226,11 @@ reaches it anyway is refused, since nothing could deliver the decision later.
 
 **Tab loss and feedback delivery.** Pi's annotation sessions do not enable the
 blocking CLI's client lease, even with `gate: true`: closing a tab or losing a
-tunnel leaves the review open until an explicit decision or close.
+tunnel leaves the review open until an explicit decision or close. Feedback
+tries the opener's `pi.sendUserMessage` first. Only if that throws does it use
+the current-session fallback, so an Oh My Pi in-process subagent cannot take
+feedback from a still-live opener. A replaced Pi runtime still falls back to
+the current session with the existing switched-session header.
 
 **Sessions, list and close.** Every review the extension opens (tool,
 commands, `plannotator_submit_plan`) is recorded in ONE process-wide registry

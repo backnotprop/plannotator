@@ -326,8 +326,8 @@ function sendUserMessageWithCurrentSessionFallback(
 	errorMessage: string,
 	origin: PiSessionIdentity,
 ): void {
-	if (trySendUserMessageToDifferentCurrentSession(content, options, errorMessage, origin)) return;
-
+	// OMP subagents share the current-session slot while the opener is still live.
+	// Only redirect feedback if the opener can no longer accept it.
 	try {
 		pi.sendUserMessage(content, resolveIdleDeliveryOptions(ctx, options));
 		return;
