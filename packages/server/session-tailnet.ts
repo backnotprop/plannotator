@@ -15,7 +15,8 @@
  *
  * One session per CLI process, so the state is the process's (like the served
  * hostname in request-host-guard.ts). Nothing here runs unless the CLI
- * publishes a session over the tailnet AND a host handed it a bridge.
+ * publishes a session over the tailnet. The owners are read for every such
+ * session: hover cards (ref-cards.ts) use this gate with or without a bridge.
  */
 
 import {
