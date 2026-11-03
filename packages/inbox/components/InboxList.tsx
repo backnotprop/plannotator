@@ -29,6 +29,7 @@ import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { useInboxTextSize } from '../textSize';
+import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
@@ -642,6 +643,17 @@ function fitCountsColumn(list: HTMLElement, pinColumn: boolean): boolean {
   return drawn;
 }
 
+/** The page's zoom (device pixels per CSS pixel), read again on each resize: a zoom changes it, and text widths with it. */
+function useDevicePixelRatio(): number {
+  const [ratio, setRatio] = useState(() => (typeof window === 'undefined' ? 1 : window.devicePixelRatio));
+  useEffect(() => {
+    const read = () => setRatio(window.devicePixelRatio);
+    window.addEventListener('resize', read);
+    return () => window.removeEventListener('resize', read);
+  }, []);
+  return ratio;
+}
+
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
@@ -1090,8 +1102,12 @@ export function InboxList(props: InboxListProps) {
   const pinColumn = !props.phone && !twoLine && !!props.pinned && visible.some((s) => s.threads.some((row) => props.pinned!.has(row.thread_id)));
   // With the pin's column, the counts' column holds the widest counts (`fitCountsColumn`), so no count runs under a
   // pin: fitted again when what it depends on changes (the pin's column, the counts drawn, the columns the list's
-  // width and look draw, the text size), and once the fonts are in. Not on the commit that opens or closes a thread:
-  // it still draws the other column's rows, and the layout effects draw the new ones before the browser paints.
+  // width and look draw, the text size, the palette on screen and its mode, whose `--font-sans` differ, and the
+  // zoom), and once the fonts are in. Not on the commit that opens or closes a thread: it still draws the other
+  // column's rows, and the layout effects draw the new ones before the browser paints.
+  // The rule this rests on: one `openCountsKey` always draws the same parts in `.ib-cq`, with the same classes, text
+  // and width, whatever the row's state (hovered, its tooltip open or not yet mounted). A change inside `.ib-cq` that
+  // breaks it must add what it depends on to `fitKey`, or the column keeps a stale width.
   const settled = besideThread === props.narrow;
   const countsKey = useMemo(() => {
     if (!pinColumn || !settled) return '';
@@ -1106,7 +1122,10 @@ export function InboxList(props: InboxListProps) {
     return [...keys].sort().join(' ');
   }, [pinColumn, settled, props.sections, quietOpen, snoozedOpen]);
   const textSize = useInboxTextSize();
-  const fitKey = `${pinColumn}|${fullWords}|${noProject}|${listLookClasses(look)}|${textSize}|${countsKey}`;
+  // ThemeProvider puts the palette's classes on <html> while it renders, before this list's layout effects run.
+  const { colorTheme, resolvedMode } = useTheme();
+  const zoom = useDevicePixelRatio();
+  const fitKey = `${pinColumn}|${fullWords}|${noProject}|${listLookClasses(look)}|${textSize}|${colorTheme}|${resolvedMode}|${zoom}|${countsKey}`;
   const fitted = useRef<string | null>(null);
   const pinColumnRef = useRef(pinColumn);
   pinColumnRef.current = pinColumn;

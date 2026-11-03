@@ -6,11 +6,13 @@
  *
  * The data: one project with a pinned thread and counts from none to "[□ 99+] ?99+" (one question, 12 questions,
  * an action item and a question, 12 and 12, three action items alone, 99+ questions alone, 99+ and 99+, and above
- * that last one 99+ action items with one question), and one project with no pin and wide counts. For light and dark, every text size (12 to 15 px), and each shape (the wide
- * list with the full words at 1440 px, with the short words at 1280 px, one project's list at 1024 px, the
- * three-line rows of the whole list at 1024 px, the column beside an open thread, the list with no pin, a 390 px
- * phone), the column's width (`--ib-cq-w` on the list) is the per-row measure's (`perRow` below, the code before),
- * and again after the colour scheme changes on the open page.
+ * that last one 99+ action items with one question), and one project with no pin and wide counts. The palette's
+ * halves draw different fonts (GitHub's system-ui in light, Plannotator's Inter in dark). For light and dark, every
+ * text size (12 to 15 px), and each shape (the wide list with the full words at 1440 px, with the short words at
+ * 1280 px, one project's list at 1024 px, the three-line rows of the whole list at 1024 px, the column beside an
+ * open thread, the list with no pin, a 390 px phone), the column's width (`--ib-cq-w` on the list) is the per-row
+ * measure's (`perRow` below, the code before), and again after the colour scheme changes on the open page. A scheme
+ * change on the open page, then a list render that changes nothing else, keep the new font's width.
  *
  * Then in the wide list: opening a thread reads no counts cell's box, and the way back reads one cell for each
  * different counts, never one per row.
@@ -76,6 +78,9 @@ test.beforeAll(async () => {
     expect(res.ok, `${path}: ${res.status} ${await res.text()}`).toBe(true);
   };
   await post(`/api/inbox/threads/${pinned}/pin`, { pinned: true });
+  // Halves whose fonts differ (GitHub's system-ui in light, Plannotator's Inter in dark), so a change of scheme on
+  // an open page changes the counts' width.
+  await post('/api/inbox/settings', { theme: { mode: 'system', light: 'github', dark: 'plannotator' } });
   const model = (await (await fetch(new URL('/api/inbox/projects', url))).json()) as { projects: { id: string; name: string }[] };
   projects.pinned = model.projects.find((p) => p.name === 'workspaces')!.id;
   projects.unpinned = model.projects.find((p) => p.name === 'docs-site')!.id;
@@ -178,6 +183,37 @@ for (const size of [12, 13, 14, 15]) {
     }
   });
 }
+
+test('a scheme change between halves with different fonts fits the column to the new font, and keeps it', async ({ browser }) => {
+  await post('/api/inbox/settings', { text_size: 14 });
+  const { context, page: p } = await page(browser, 1440, 'dark');
+  try {
+    await p.goto(url);
+    await expect(p.locator('.ib-lbody .ib-row').first()).toBeVisible();
+    const font = () => p.evaluate(() => getComputedStyle(document.querySelector('.pn-inbox')!).fontFamily);
+    await expect.poll(() => p.evaluate(() => document.documentElement.classList.contains('theme-plannotator'))).toBe(true);
+    const dark = await fit(p);
+    const darkFont = await font();
+    expect(dark.app, 'dark (Inter)').toBe(dark.perRow);
+    await p.emulateMedia({ colorScheme: 'light' });
+    await expect.poll(() => p.evaluate(() => document.documentElement.classList.contains('theme-github'))).toBe(true);
+    expect(await font(), 'the light half draws another font').not.toBe(darkFont);
+    const light = await fit(p);
+    expect(light.app, 'light (system-ui)').toBe(light.perRow);
+    // A list render that changes nothing the column depends on (a row's menu, opened and closed) keeps it.
+    await p.locator('.ib-lbody .ib-row').first().click({ button: 'right' });
+    await p.keyboard.press('Escape');
+    const after = await fit(p);
+    expect(after.app, 'after an unrelated render').toBe(after.perRow);
+    // And back to the dark half.
+    await p.emulateMedia({ colorScheme: 'dark' });
+    await expect.poll(() => p.evaluate(() => document.documentElement.classList.contains('theme-plannotator'))).toBe(true);
+    const back = await fit(p);
+    expect(back.app, 'dark again').toBe(back.perRow);
+  } finally {
+    await context.close();
+  }
+});
 
 test('opening a thread reads no counts cell; the way back reads one cell for each different counts', async ({ browser }) => {
   await post('/api/inbox/settings', { text_size: 14 });

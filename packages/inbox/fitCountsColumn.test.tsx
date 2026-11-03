@@ -10,8 +10,10 @@
  *  - the width is the one the per-row measure gives (`perRowWidth`, the code before this change), for every set of
  *    counts below, so it can't drift;
  *  - a long list with few different counts reads a few cells, never one per row;
- *  - a list read with the same counts, a new selection, and the open of a thread read nothing.
- * tests/e2e/inbox-fit-counts.spec.ts compares the two widths in a real Chromium.
+ *  - a list read with the same counts, a new selection, and the open of a thread read nothing;
+ *  - it is fitted again when the text size changes, when the Snoozed band opens on the widest counts, and when the
+ *    widest rows leave (back to 84px).
+ * tests/e2e/inbox-fit-counts.spec.ts compares the two widths in a real Chromium, with palettes whose fonts differ.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -23,6 +25,7 @@ import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-typ
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { adoptSavedTextSize, resetInboxTextSizeForTests } = (hasDom ? await import('./textSize') : {}) as typeof import('./textSize');
 
 /** A waiting row with `actions` open action items among `open` open questions. */
 function row(n: number, open: number, actions = 0): InboxListRow {
@@ -66,10 +69,12 @@ const undrawn = new Set<string>();
 /** The list itself is not drawn (no box at all). */
 let listUndrawn = false;
 
+/** A part's width, scaled with the text size on the document (textSize.ts, 14px when unset). */
 function partWidth(part: Element): number {
   const digits = (part.querySelector('[aria-hidden="true"]:not(svg)')?.textContent ?? '').length;
-  if (part.classList.contains('ib-b-act')) return 27.6 + 7.43 * digits;
-  if (part.classList.contains('ib-qn')) return 19.2 + 7.43 * digits;
+  const scale = (Number(document.documentElement.style.getPropertyValue('--inbox-text-size')) || 14) / 14;
+  if (part.classList.contains('ib-b-act')) return (27.6 + 7.43 * digits) * scale;
+  if (part.classList.contains('ib-qn')) return (19.2 + 7.43 * digits) * scale;
   return 0;
 }
 
@@ -142,6 +147,7 @@ afterEach(() => {
   reads.clear();
   undrawn.clear();
   listUndrawn = false;
+  resetInboxTextSizeForTests();
 });
 
 function draw(sections: InboxListSection[], opts: { pinned?: string[]; narrow?: boolean; selected?: string | null } = {}): void {
@@ -279,4 +285,54 @@ test.skipIf(!hasDom)('the same counts read again, a new selection and the open o
   expect(reads.size).toBeGreaterThan(0);
   expect(column()).toBe(expected());
   expect(column()).not.toBe(fitted);
+});
+
+test.skipIf(!hasDom)('a new text size fits the column again, to the new widest', () => {
+  setUp();
+  resetInboxTextSizeForTests();
+  draw(read([[1, 0], [24, 12], [2, 1]]));
+  const at14 = column();
+  expect(at14).toBe(expected());
+  expect(at14).not.toBe('');
+  // Settings → Text size: on the document at once, with no new list read.
+  act(() => adoptSavedTextSize(15));
+  expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('15');
+  expect(column()).toBe(expected());
+  expect(column()).not.toBe(at14);
+});
+
+test.skipIf(!hasDom)('opening the Snoozed band on the widest counts widens the column', () => {
+  setUp();
+  const waiting = [row(0, 1), row(1, 2, 1)];
+  const snoozed = { ...row(2, 250, 120), section: 'snoozed' as InboxListRow['section'] };
+  const sections = (): InboxListSection[] =>
+    JSON.parse(
+      JSON.stringify([
+        { id: 'waiting', label: 'Waiting on you', threads: waiting },
+        { id: 'snoozed', label: 'Snoozed', threads: [snoozed] },
+      ]),
+    );
+  draw(sections());
+  // Folded: its rows are not drawn, and the column fits the rows that are.
+  expect(list().querySelector('[data-thread-id="msg_2"]')).toBeNull();
+  expect(column()).toBe(expected());
+  expect(column()).toBe('');
+  act(() => list().querySelector<HTMLButtonElement>('[data-section-id="snoozed"] button.ib-band')!.click());
+  expect(list().querySelector('.ib-row[data-thread-id="msg_2"]')).not.toBeNull();
+  expect(column()).toBe(expected());
+  expect(column()).not.toBe('');
+});
+
+test.skipIf(!hasDom)('the widest rows leaving narrow the column again, down to its 84px', () => {
+  setUp();
+  draw(read([[1, 0], [24, 12], [250, 120]]));
+  const widest = column();
+  expect(widest).toBe(expected());
+  draw(read([[1, 0], [24, 12]]));
+  expect(column()).toBe(expected());
+  expect(column()).not.toBe(widest);
+  expect(column()).not.toBe('');
+  draw(read([[1, 0], [2, 1]]));
+  expect(column()).toBe('');
+  expect(column()).toBe(expected());
 });
