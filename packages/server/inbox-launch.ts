@@ -60,7 +60,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -169,8 +169,6 @@ export function createInboxLaunch(options: {
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   /** A tailnet request from someone other than this computer's owner: never starts, stops or deletes an agent (Try again, Stop, Delete). Absent: nobody is. */
   isGuest?: (req: Request, via: string) => boolean;
-  /** The store write being made now is a tailnet guest's request (`isGuest`): its reply is kept and delivered, but never starts a stopped session again. Absent: none is. */
-  writtenByGuest?: () => boolean;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -675,33 +673,6 @@ export function createInboxLaunch(options: {
         stateOf(host).view = null;
       });
   };
-  /**
-   * The replies a tailnet guest wrote to each launched thread. Kept in `launch/<id>/guest-replies` too, so the sweep
-   * after an Inbox restart never starts a session for one either.
-   */
-  const guestReplies = new Map<string, Set<string>>();
-  const guestRepliesOf = (launchId: string): Set<string> => {
-    let ids = guestReplies.get(launchId);
-    if (!ids) {
-      ids = new Set();
-      try {
-        for (const id of readFileSync(join(launchDir(launchId), "guest-replies"), "utf8").split("\n")) if (id) ids.add(id);
-      } catch {
-        // None written yet.
-      }
-      guestReplies.set(launchId, ids);
-    }
-    return ids;
-  };
-  const noteGuestReply = (launchId: string, messageId: string) => {
-    guestRepliesOf(launchId).add(messageId);
-    try {
-      mkdirSync(launchDir(launchId), { recursive: true, mode: 0o700 });
-      appendFileSync(join(launchDir(launchId), "guest-replies"), `${messageId}\n`, { mode: 0o600 });
-    } catch {
-      // Held for this run still.
-    }
-  };
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
@@ -714,10 +685,9 @@ export function createInboxLaunch(options: {
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
     // A tailnet guest's reply waits for the session as any reply does; only the owner's (or this computer's) starts it again.
-    const guests = guestRepliesOf(launch.id);
     const newest = store
       .pendingReplies(root.to.session, { tags: true })
-      .filter((reply) => !guests.has(reply.id))
+      .filter((reply) => !reply.by_guest)
       .at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
@@ -728,10 +698,7 @@ export function createInboxLaunch(options: {
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
     const root = store.message(message.thread_id);
-    if (!root?.launch) return;
-    // Asked here, inside the write's own request.
-    if (options.writtenByGuest?.()) noteGuestReply(root.launch.id, message.id);
-    queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
+    if (root?.launch) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
   });
 
   // ── Routes ──
@@ -751,7 +718,8 @@ export function createInboxLaunch(options: {
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
-      if (via === "tailnet") return json({ error: "Only from this computer.", code: "owner_only" }, 403);
+      // The owner's, from this computer or over the tailnet (their phone); never a guest's.
+      if (options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can read this.", code: "owner_only" }, 403);
       // Never another site's page: a read here may start the person's login shell.
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
       // `ahead=1` (the composer picked "Start Claude Code"): read now, off the Send's path, so a change to the
@@ -766,7 +734,8 @@ export function createInboxLaunch(options: {
     const localOnly = () => json({ error: "Only from this computer.", code: "owner_only" }, 403);
     if (match[1] === "settings") {
       if (match[2]) return null;
-      if (via === "tailnet") return localOnly();
+      // The owner's, from this computer or over the tailnet (their phone), as main's other settings are; never a guest's.
+      if (options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can change this.", code: "owner_only" }, 403);
       if ("scratch_dir" in body) {
         // Settings → Agents' "Scratch folders": a full path (`~/` is the person's home); empty or null is the default.
         const raw = body.scratch_dir;

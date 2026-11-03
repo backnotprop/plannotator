@@ -33,6 +33,8 @@ const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
 const GUEST = "guest@example.com";
 const KEY = "sk-phone-0123456789abcd";
+/** A 1 × 1 PNG: an image a reply's Markdown can show. */
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 type Caller = "local" | "owner" | "guest";
 
@@ -91,6 +93,8 @@ interface WorldOptions {
   tagged?: boolean;
   launchInstaller?: () => void;
   board?: boolean;
+  /** An Inbox started again on this data dir (a restart): kept as it is, its config written again. */
+  dataDir?: string;
 }
 
 /** A real Inbox with an update known, one agent on PATH, a card with a PR, and every outside process scripted. */
@@ -98,8 +102,8 @@ async function world(options: WorldOptions = {}) {
   const fake = createFakeAgents("plannotator-tailnet-owner-");
   fakes.push(fake);
   fake.install("codex");
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-tailnet-owner-data-")));
-  roots.push(root);
+  const root = options.dataDir ?? realpathSync(mkdtempSync(join(tmpdir(), "plannotator-tailnet-owner-data-")));
+  if (!options.dataDir) roots.push(root);
   const dataDir = root;
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST", "PLANNOTATOR_AUTO_UPDATE", "PLANNOTATOR_UPDATE_CHECK"]) setEnv(name, undefined);
@@ -362,8 +366,8 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
 
 describe("stopping or deleting an agent is the owner's (a guest never ends the owner's session)", () => {
   /** A launched thread whose session started: Stop and Delete have a session to act on. */
-  async function launchedWorld() {
-    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+  async function launchedWorld(dataDir?: string) {
+    const w = await world({ config: { inboxLaunch: { enabled: true } }, ...(dataDir ? { dataDir } : {}) });
     const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
     mkdirSync(project.root, { recursive: true });
     const launched = (key: string, startedAt = new Date()) => {
@@ -378,7 +382,13 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
       w.inbox.store.settleLaunch(started.message.id, { to: { host: "claude-code", session: `sess-${key}` }, session_ref: `s${key}` });
       return { id, messageId: started.message.id, stopLog: join(w.inbox.store.dir, "launch", id, "start.log") };
     };
-    return { ...w, launched };
+    /** Started past the start grace, read its first message (unless `read` is false), and not polling now: stopped. */
+    const stopped = (key: string, options: { startedAt?: Date; read?: boolean } = {}) => {
+      const a = launched(key, options.startedAt ?? new Date(Date.now() - 5 * 60_000));
+      if (options.read !== false) w.inbox.store.recordDelivery(a.messageId, { host: "claude-code", session: `sess-${key}` });
+      return a;
+    };
+    return { ...w, project, launched, stopped };
   }
 
   test("Stop: a guest is refused and nothing is stopped; the owner over the tailnet and this computer stop it", async () => {
@@ -406,25 +416,112 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
   });
 
+  type Launched = { id: string; messageId: string; stopLog: string };
+  /** A respawn is logged in the launch's folder (the sandbox has no `claude`, so it is logged as tried). */
+  const respawned = (launch: Launched) => existsSync(launch.stopLog) && readFileSync(launch.stopLog, "utf8").includes("respawn ");
+  /** The respawn sweep runs every second: wait for `check`, up to `ms`. */
+  async function waitFor(check: () => boolean, ms = 6000): Promise<boolean> {
+    const end = Date.now() + ms;
+    while (!check() && Date.now() < end) await Bun.sleep(25);
+    return check();
+  }
+  const reply = (w: World, caller: Caller, messageId: string, key: string, extra: Json = {}) =>
+    call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing.", ...extra } });
+  const replyId = async (response: Response) => ((await response.json()) as { reply: { id: string } }).reply.id;
+
   test("a guest's reply to a stopped session is kept for it but never starts it again; the owner's reply does", async () => {
     const w = await launchedWorld();
-    // Started past the start grace, read its first message, and not polling now: stopped.
-    const stopped = (key: string) => {
-      const a = w.launched(key, new Date(Date.now() - 5 * 60_000));
-      w.inbox.store.recordDelivery(a.messageId, { host: "claude-code", session: `sess-${key}` });
-      return a;
-    };
-    const a = stopped("a");
-    const b = stopped("b");
-    const reply = (caller: Caller, messageId: string, key: string) => call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing." } });
-    expect((await reply("guest", a.messageId, "r-guest")).status).toBe(200);
-    expect((await reply("owner", b.messageId, "r-owner")).status).toBe(200);
-    // The owner's reply starts its session again (the sandbox has no `claude`, so it is logged as tried).
-    for (let i = 0; i < 100 && !(existsSync(b.stopLog) && readFileSync(b.stopLog, "utf8").includes("respawn sb:")); i++) await Bun.sleep(20);
-    expect(readFileSync(b.stopLog, "utf8")).toContain("respawn sb:");
-    // The guest's, written at the same moment, did not; it waits for the session like any reply.
-    expect(existsSync(a.stopLog) && readFileSync(a.stopLog, "utf8").includes("respawn")).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a").map((m) => m.body)).toEqual(["One more thing."]);
+    const a = w.stopped("a");
+    const b = w.stopped("b");
+    const guests = await reply(w, "guest", a.messageId, "r-guest");
+    expect(guests.status).toBe(200);
+    expect((await reply(w, "owner", b.messageId, "r-owner")).status).toBe(200);
+    // The owner's reply starts its session again.
+    expect(await waitFor(() => respawned(b))).toBe(true);
+    // The guest's, written at the same moment, did not; it waits for the session like any reply, marked as the guest's.
+    expect(respawned(a)).toBe(false);
+    expect(w.inbox.store.pendingReplies("sess-a").map((m) => [m.body, m.by_guest])).toEqual([["One more thing.", true]]);
+    expect(w.inbox.store.pendingReplies("sess-b").map((m) => m.by_guest)).toEqual([undefined]);
+    expect(w.inbox.store.message(await replyId(guests))!.by_guest).toBe(true);
+  });
+
+  test("a guest's reply in another thread the session started never starts it again; the owner's does", async () => {
+    const w = await launchedWorld();
+    const a = w.stopped("a");
+    const b = w.stopped("b");
+    // Each session asked something in a thread of its own, beside the launched one.
+    const side = (key: string) =>
+      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Which port?", thread: "Side question" }).message.id;
+    expect((await reply(w, "guest", side("a"), "r-guest")).status).toBe(200);
+    expect((await reply(w, "owner", side("b"), "r-owner")).status).toBe(200);
+    // Only the sweep sees a reply outside the launched thread: the owner's starts b.
+    expect(await waitFor(() => respawned(b))).toBe(true);
+    expect(respawned(a)).toBe(false);
+    expect(w.inbox.store.pendingReplies("sess-a").map((m) => m.by_guest)).toEqual([true]);
+  });
+
+  test("a guest's tag of a stopped session never starts it again; the owner's tag does", async () => {
+    const w = await launchedWorld();
+    const a = w.stopped("a");
+    const b = w.stopped("b");
+    // Each session wrote through MCP once (no wake), so a tag can name it while it is stopped.
+    for (const key of ["a", "b"]) {
+      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Done with the build.", thread: `Note ${key}` });
+    }
+    // Another agent's thread, where the person tags them.
+    const other = (n: number) =>
+      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "codex", session: "ses-other", name: "Codex" }, body: `Ready for review ${n}.`, thread: `Review ${n}` }).message.id;
+    const tag = (key: string) => ({ words: `@Claude look at this ${key}.`, tags: [{ host: "claude-code", session: `sess-${key}` }] });
+    expect((await reply(w, "guest", other(1), "r-guest", tag("a"))).status).toBe(200);
+    expect((await reply(w, "owner", other(2), "r-owner", tag("b"))).status).toBe(200);
+    expect(await waitFor(() => respawned(b))).toBe(true);
+    expect(respawned(a)).toBe(false);
+    expect(w.inbox.store.pendingReplies("sess-a", { tags: true }).map((m) => m.by_guest)).toEqual([true]);
+  });
+
+  test("the owner's reply that a guest's request writes again (its images captured on the guest's read) still starts the session", async () => {
+    const w = await launchedWorld();
+    // In its start grace for 2 more seconds: the owner's reply waits for the sweep after it.
+    const a = w.stopped("a", { startedAt: new Date(Date.now() - 58_000) });
+    writeFileSync(join(w.project.root, "shot.png"), Buffer.from(PNG_1PX, "base64"));
+    const owners = await reply(w, "local", a.messageId, "r-owner", { words: "This one: ![shot](shot.png)" });
+    expect(owners.status).toBe(200);
+    const id = await replyId(owners);
+    expect(w.inbox.store.message(id)!.inline_images ?? []).toHaveLength(0);
+    // A guest opens the thread: the image is captured then, and the owner's reply's line is written again.
+    expect((await call(w, "guest", { path: `/api/inbox/threads/${a.messageId}` })).status).toBe(200);
+    expect(await waitFor(() => (w.inbox.store.message(id)!.inline_images ?? []).length > 0, 3000)).toBe(true);
+    expect(respawned(a)).toBe(false);
+    // Still the owner's: once the grace is over, the sweep starts the session for it.
+    expect(w.inbox.store.message(id)!.by_guest).toBeUndefined();
+    expect(await waitFor(() => respawned(a))).toBe(true);
+  });
+
+  test("a guest's reply stays the guest's across an Inbox restart: the sweep after it never starts the session for it", async () => {
+    const before = await launchedWorld();
+    const a = before.stopped("a");
+    // b has not read its first message yet, so nothing starts it before the restart.
+    const b = before.stopped("b", { read: false });
+    const id = await replyId(await reply(before, "guest", a.messageId, "r-guest"));
+    expect((await reply(before, "local", b.messageId, "r-owner")).status).toBe(200);
+    before.inbox.stop();
+    servers.splice(servers.indexOf(before.inbox), 1);
+    const after = await launchedWorld(before.dataDir);
+    expect(after.inbox.store.message(id)!.by_guest).toBe(true);
+    // b reads its first message: the next sweep starts it for the owner's reply, and passes over a.
+    after.inbox.store.recordDelivery(b.messageId, { host: "claude-code", session: "sess-b" });
+    expect(await waitFor(() => respawned(b))).toBe(true);
+    expect(respawned(a)).toBe(false);
+  });
+
+  test("a guest's reply to a deleted launch writes nothing in the launch's folder", async () => {
+    const w = await launchedWorld();
+    const a = w.stopped("a");
+    expect((await call(w, "local", { path: `/api/inbox/launch/${a.id}/delete`, body: {} })).status).toBe(200);
+    expect(existsSync(join(w.inbox.store.dir, "launch", a.id))).toBe(false);
+    expect((await reply(w, "guest", a.messageId, "r-guest")).status).toBe(200);
+    await Bun.sleep(1500);
+    expect(existsSync(join(w.inbox.store.dir, "launch", a.id))).toBe(false);
   });
 
   test("a tagged machine (no owner): the login its allowlist names starts, stops and deletes like the owner", async () => {
@@ -446,6 +543,37 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/stop`, body: {} })).status).toBe(200);
     expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/delete`, body: {} })).status).toBe(200);
     expect(w.inbox.store.message(started.message.id)!.launch!.deleted_at).toBeString();
+  });
+});
+
+describe("launch settings are the owner's, on their phone too", () => {
+  test("the full-permissions switch: the owner over the tailnet and this computer change it; a guest is refused and nothing changes", async () => {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const set = (caller: Caller, on: boolean) => call(w, caller, { path: "/api/inbox/launch/settings", body: { full_permissions: on } });
+    const fullPermissions = () => (w.config().inboxLaunch as Json).fullPermissions;
+    expect(await answerOf(await set("guest", true))).toEqual([403, "owner_only"]);
+    expect(fullPermissions()).toBeUndefined();
+    expect((await set("owner", true)).status).toBe(200);
+    expect(fullPermissions()).toBe(true);
+    expect((await set("local", false)).status).toBe(200);
+    expect(fullPermissions()).toBe(false);
+  });
+
+  test("the scratch folder: the owner over the tailnet sets it; a guest is refused and nothing changes", async () => {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const folder = join(w.dataDir, "scratch-here");
+    const set = (caller: Caller) => call(w, caller, { path: "/api/inbox/launch/settings", body: { scratch_dir: folder } });
+    const scratchDir = () => (w.config().inboxLaunch as Json).scratchDir;
+    expect(await answerOf(await set("guest"))).toEqual([403, "owner_only"]);
+    expect(scratchDir()).toBeUndefined();
+    expect((await set("owner")).status).toBe(200);
+    expect(scratchDir()).toBe(folder);
+  });
+
+  test("a tagged machine (no owner): the login its allowlist names changes it like the owner", async () => {
+    const w = await world({ tagged: true, config: { inboxLaunch: { enabled: true } } });
+    expect((await call(w, "guest", { path: "/api/inbox/launch/settings", body: { full_permissions: true } })).status).toBe(200);
+    expect((w.config().inboxLaunch as Json).fullPermissions).toBe(true);
   });
 });
 
