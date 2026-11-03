@@ -224,6 +224,10 @@ names every file (`Files:` + `annotateBundleTargetText`). A session without
 UI (print/JSON mode) never has the tool active (see above), and a call that
 reaches it anyway is refused, since nothing could deliver the decision later.
 
+**Tab loss and feedback delivery.** Pi's annotation sessions do not enable the
+blocking CLI's client lease, even with `gate: true`: closing a tab or losing a
+tunnel leaves the review open until an explicit decision or close.
+
 **Sessions, list and close.** Every review the extension opens (tool,
 commands, `plannotator_submit_plan`) is recorded in ONE process-wide registry
 (`getProcessPiReviewRegistry` in `apps/pi-extension/plannotator-tool-host.ts`,

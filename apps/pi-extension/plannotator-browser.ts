@@ -955,7 +955,8 @@ export async function startMarkdownAnnotationSession(
 		sourceConverted,
 		gate,
 		approvalNotesSupported: true,
-		clientLeaseSupported: gate === true && !isRemoteSession(),
+		// Pi reviews return immediately; losing a tab must not dismiss the review.
+		clientLeaseSupported: false,
 		rawHtml,
 		renderHtml,
 		convertHtml,

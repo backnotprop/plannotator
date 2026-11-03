@@ -14,10 +14,15 @@ delete process.env.PLANNOTATOR_BROWSER;
 delete process.env.BROWSER;
 
 import { afterAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	getActiveBrowserSessionCount,
 	shouldUseLocalPrCheckout,
 	startBrowserDecisionSession,
+	startMarkdownAnnotationSession,
 	startServerWithSelfPreemption,
 	stopAllBrowserDecisionSessions,
 } from "./plannotator-browser.ts";
@@ -112,6 +117,42 @@ describe("browser URL notification", () => {
 		// no-browser-guard: sentinel under test (openBrowser returns before any launch)
 		expect(await notificationsFor({ plannotatorBrowser: "none", announcedInTurn: true })).toEqual([]);
 	});
+});
+
+test("a nonblocking gated annotation keeps its lease off and waits for an explicit decision", async () => {
+	const keys = ["PLANNOTATOR_REMOTE", "PLANNOTATOR_PORT", "PLANNOTATOR_DATA_DIR", "PLANNOTATOR_BROWSER"] as const;
+	const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+	const dir = mkdtempSync(join(tmpdir(), "plannotator-pi-nonblocking-"));
+	const htmlPath = join(import.meta.dir, "plannotator.html");
+	const stubbed = !existsSync(htmlPath);
+	if (stubbed) writeFileSync(htmlPath, "<!doctype html><title>Annotate</title>");
+	process.env.PLANNOTATOR_DATA_DIR = dir;
+	process.env.PLANNOTATOR_REMOTE = "0";
+	process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
+	delete process.env.PLANNOTATOR_PORT;
+	const ctx = { cwd: dir, hasUI: true, ui: { notify() {} } } as ExtensionContext;
+	let session: Awaited<ReturnType<typeof startMarkdownAnnotationSession>> | undefined;
+	try {
+		session = await startMarkdownAnnotationSession(ctx, join(dir, "notes.md"), "# Notes", "annotate", undefined, undefined, undefined, true);
+		const plan = await (await fetch(`${session.url}/api/plan`)).json();
+		expect(plan.gate).toBe(true);
+		expect(plan.clientLease).toEqual({ enabled: false });
+		const lease = await fetch(`${session.url}/api/annotate/client-lease`);
+		expect(lease.status).toBe(404);
+		await lease.body?.cancel();
+		expect(session.hostControl?.status().decided).toBe(false);
+		const decision = session.waitForDecision();
+		expect((await fetch(`${session.url}/api/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(200);
+		expect(await decision).toMatchObject({ approved: true });
+	} finally {
+		session?.stop();
+		for (const key of keys) {
+			if (saved[key] === undefined) delete process.env[key];
+			else process.env[key] = saved[key];
+		}
+		if (stubbed) rmSync(htmlPath, { force: true });
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 describe("sessionOpenedMessage", () => {
