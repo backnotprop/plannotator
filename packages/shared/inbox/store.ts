@@ -92,6 +92,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_TAGS_MAX,
+  INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
   type InboxSentRecipient,
   type InboxTag,
@@ -213,6 +214,8 @@ export interface InboxSendInput {
   guide?: InboxGuideRef | null;
   /** The folder inside the project the agent sent from, when not its root (`InboxMessage.base_path`). */
   base_path?: string | null;
+  /** The sender's own project, when it sent into another project's thread (`InboxMessage.from_project`). */
+  from_project?: { name: string; root: string } | null;
   /**
    * Earlier questions of the same thread this message supersedes:
    * `<message id>` (each open question of it) or `<message id>/<key>`. A
@@ -466,7 +469,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
     const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
-    if (typeof session !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(session)) {
+    if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
@@ -2867,8 +2870,10 @@ export class InboxStore {
       ...thread,
       messages: thread.messages.map((message) => {
         let out: InboxMessageWire = message;
+        // The writer's own folder, by name only: an agent never reads another folder's absolute path.
+        if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
         if (message.ack !== undefined) {
-          const { ack, ...rest } = message;
+          const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
@@ -3408,6 +3413,10 @@ export class InboxStore {
       ...(input.inline_images !== undefined ? { inline_images: input.inline_images.map((image) => ({ ...image, sent_at: at })) } : {}),
       ...(input.guide ? { guide: input.guide } : {}),
       ...(basePath ? { base_path: basePath } : {}),
+      // Only into another project's thread: a send that landed in its own project (or one combined with it) is from there.
+      ...(input.from_project && input.from_project.root !== this.projectsById.get(projectId)?.root && !this.projectGroup(projectId).some((id) => this.projectsById.get(id)?.root === input.from_project!.root)
+        ? { from_project: { name: input.from_project.name, root: input.from_project.root } }
+        : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
@@ -4861,7 +4870,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -4885,7 +4894,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after);
+      return this.writeReplyDraft(threadId, existing, body, after, given);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -4917,11 +4926,14 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files);
+    return this.writeReplyDraft(threadId, existing, body, files, given);
   }
 
-  /** Write a thread's draft whole, its `updated_at` strictly later than the last one's. */
-  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[]): InboxReplyDraft {
+  /**
+   * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
+   * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own.
+   */
+  private writeReplyDraft(threadId: string, existing: InboxReplyDraft | null, body: string, files: readonly InboxDraftFile[], recipients: readonly string[] | null = null): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
     const updatedAt = existing && at <= existing.updated_at ? new Date(Date.parse(existing.updated_at) + 1).toISOString() : at;
@@ -4933,6 +4945,8 @@ export class InboxStore {
       updated_at: updatedAt,
       ...(files.length > 0 ? { files: [...files] } : {}),
     };
+    const aimed = recipients ?? existing?.recipients ?? [];
+    if (aimed.length > 0) draft.recipients = [...aimed];
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.noteReplyDraftRemovals(threadId, existing, draft);
@@ -4972,7 +4986,8 @@ export class InboxStore {
     const after = settleReplyDraftAfterSend(existing, { clearDraft: updatedAt, words, uploads });
     if (after.kind === "unchanged") return false;
     if (after.kind === "delete") return this.deleteReplyDraft(threadId);
-    this.writeReplyDraft(threadId, existing, "", after.files);
+    // The words went to whom they were aimed at: the files left behind are aimed at no one yet.
+    this.writeReplyDraft(threadId, existing, "", after.files, []);
     return true;
   }
 

@@ -1,4 +1,5 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { randomUUID } from "node:crypto";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
@@ -163,6 +164,9 @@ export async function startPlanReviewServer(options: {
 	 */
 	approvalNotesSupported?: boolean;
 }): Promise<PlanServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	// The archive browser is not plan review: it sends nothing, as in the CLI.
+	if (options.mode !== "archive") schedulePiDailyPing("plan");
 	const gitUser = detectGitUser();
 	const sharingEnabled =
 		options.sharingEnabled ?? resolveSharingEnabled(loadConfig());

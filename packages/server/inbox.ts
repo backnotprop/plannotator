@@ -67,6 +67,8 @@ import {
   INBOX_CODEX_HOST,
   INBOX_QWEN_HOST,
   isQwenSessionId,
+  INBOX_T3_HOST,
+  isT3ThreadId,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_WAKING_HOSTS,
   INBOX_HOST_NAMES,
@@ -90,6 +92,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import {
+  INBOX_REMINDER_HOSTS,
   INBOX_TOOL_HOSTS,
   cookieHostState,
   loadConfig,
@@ -106,6 +109,7 @@ import {
   resolveInboxTool,
   saveConfig,
   configuredInboxTool,
+  inboxToolWith,
   configuredInboxReminder,
   resolveInboxReminder,
   type InboxToolHost,
@@ -114,6 +118,7 @@ import {
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
+import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
@@ -174,6 +179,7 @@ import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
+import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
 import {
   claudePluginBehindInbox,
   claudeRestartCommand,
@@ -192,6 +198,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
+import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -265,6 +272,8 @@ const SSE_HEARTBEAT_MS = 15_000;
  */
 export const INBOX_WINDOW_HEARTBEAT_MS = 10_000;
 const DEFAULT_HEALTH_TICK_MS = 60_000;
+/** How often a running Inbox checks the daily ping (it sends at most once a UTC day). */
+const DAILY_PING_CHECK_MS = 60 * 60 * 1000;
 /** How often the sidebar's "Reload Claude Code N" is checked against the live sessions (a session restarted or went away). */
 const INBOX_RESTART_WATCH_MS = 5_000;
 /** How often the live sessions' delivery signature is compared while a window listens (`event: deliveries`). */
@@ -442,6 +451,8 @@ export interface InboxServerOptions {
   accounts?: { environment?: AgentEnvironment; timeoutMs?: number; hardLimitMs?: number; cacheMs?: number };
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
+  /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
+  t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
 }
 
 /**
@@ -479,6 +490,7 @@ export interface InboxServer {
   codexWake: InboxCodexWake;
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
+  t3Wake: InboxT3Wake;
   stop: () => void;
 }
 
@@ -736,6 +748,9 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
   }
 }
 
+/** A snooze write: this machine's thread, or a linked machine's through the forward (`/api/inbox/m/<machine>/…`). */
+const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze$/;
+
 /**
  * Whether an Inbox ran on this machine before this start, from evidence that
  * predates it (read before this start writes the version, the store or the
@@ -869,11 +884,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const binaryPath = options.binaryPath !== undefined ? options.binaryPath : version !== "dev" ? process.execPath : null;
   // The sidebar's Update button (packages/server/inbox-updates.ts): the release
   // check, the binary on disk, Update now, Remind me tomorrow.
+  let lastDailyPingCheck = 0;
   const updates = createInboxUpdates({
     dataDir,
     version,
     binaryPath,
     healthTickMs: options.healthTickMs ?? DEFAULT_HEALTH_TICK_MS,
+    // The daily ping (packages/shared/daily-ping.ts): checked when the Inbox
+    // starts, then at most once an hour on the update timer; in the background.
+    onTick: () => {
+      const at = Date.now();
+      if (at - lastDailyPingCheck < DAILY_PING_CHECK_MS) return;
+      lastDailyPingCheck = at;
+      scheduleDailyPing({ version, dataDir, tool: "inbox" });
+    },
     ...options.updates,
     onChange: () => {
       for (const listener of statusListeners) listener();
@@ -977,7 +1001,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         sessionWakes: async (host, session, meta) =>
           (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
           (await codexWake.wakes(host, session, meta)) ||
-          qwenWake.wakes(host, session, meta),
+          (await qwenWake.wakes(host, session, meta)) ||
+          (await t3Wake.wakes(host, session)),
         bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
@@ -1319,7 +1344,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             }
           : null;
         // No tool (the inboxTool switch, or Claude Code's mod off): no reminder.
-        const reminder = host
+        const reminder = host && INBOX_REMINDER_HOSTS.includes(host)
           ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }
           : null;
         // With PLANNOTATOR_INBOX_NOTES=0 only a note already written is listed, so it can still be turned off.
@@ -1375,12 +1400,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi and OpenCode have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode and DeepSeek Harness have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
     if (typeof body.reminder === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
+      if (!(INBOX_REMINDER_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
       if (parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv) !== undefined) problems.push("PLANNOTATOR_INBOX_TOOL decides this");
       else {
         const current = loadConfig().inboxReminder;
@@ -1774,6 +1799,46 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return loadConfig().inboxListIntro?.shownAt === at;
   };
 
+  /**
+   * The one-time Snooze announcement (approval "inbox-snooze-announce"; the rules are inbox-snooze-intro.ts):
+   * due on a release build for someone who first used the Inbox two days ago or more, never snoozed and never saw it.
+   * Decided live, not at start: the two days pass while the Inbox runs. A dev build reads and writes nothing.
+   */
+  const snoozeIntroRelease = normalizeStableVersion(version) !== null;
+  /** The saved state, with first use filled in from the event log when it is missing (an empty log at the backfill). */
+  const snoozeIntroSaved = (): SnoozeIntroSaved | undefined => {
+    const saved = loadConfig().inboxSnoozeIntro;
+    if (!snoozeIntroRelease || !saved || saved.firstUseAt) return saved;
+    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
+    if (!firstUseAt) return saved;
+    saveConfig({ inboxSnoozeIntro: { ...saved, firstUseAt } });
+    return { ...saved, firstUseAt };
+  };
+  // The backfill, once, at the first release start that knows the key (an upgrade): first use from the event log, and
+  // a snooze running now is a snooze the person made.
+  if (snoozeIntroRelease && loadConfig().inboxSnoozeIntro === undefined) {
+    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
+    saveConfig({ inboxSnoozeIntro: { ...(firstUseAt ? { firstUseAt } : {}), ...(store.snoozes().length > 0 ? { snoozedAt: new Date().toISOString() } : {}) } });
+  }
+  /** Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. */
+  const snoozeIntroState = (owner: boolean) => ({
+    due: owner && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
+  });
+  /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
+  const markSnoozeUsed = () => {
+    const saved = loadConfig().inboxSnoozeIntro;
+    if (saved?.snoozedAt) return;
+    saveConfig({ inboxSnoozeIntro: { ...saved, snoozedAt: new Date().toISOString() } });
+  };
+  /**
+   * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
+   * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
+   */
+  const claimSnoozeIntro = (owner: boolean): boolean => {
+    if (!snoozeIntroState(owner).due) return false;
+    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
+  };
+
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
   const updatesState = () => {
     const config = loadConfig();
@@ -1899,8 +1964,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const ownerOrLocal = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
-  /** What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. */
-  const settingsModel = (via: RequestVia, guest: boolean) => ({
+  /**
+   * What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. `withStore`: the
+   * Storage sizes too, a walk of every file, for a page older than GET /api/inbox/settings/storage (it reads
+   * `settings.store` and breaks without it); a current page asks with `?store=0` and reads the sizes on their own.
+   */
+  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
@@ -1924,6 +1993,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sound: soundState(),
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
+    /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
+    snooze_intro: snoozeIntroState(!guest),
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -1946,7 +2017,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
     prompts: promptsState(!guest),
-    store: perfPhase("disk", () => store.diskUsage()),
+    ...(withStore ? { store: perfPhase("disk", () => store.diskUsage()) } : {}),
+    /** Settings → Storage's folder, so its line is drawn before the count. The sizes are their own read: GET /api/inbox/settings/storage. */
+    store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
     /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
@@ -1960,25 +2033,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw new InboxError("validation_error", "inbox_tool: an object of host to boolean.", { field: "inbox_tool" });
     }
-    const config = loadConfig();
-    const next: Partial<Record<InboxToolHost, boolean>> = {};
-    for (const host of INBOX_TOOL_HOSTS) {
-      const current = configuredInboxTool(config, host);
-      if (current !== undefined) next[host] = current;
-    }
+    const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
       }
-      next[host as InboxToolHost] = value;
+      changes[host as InboxToolHost] = value;
     }
     if (validateOnly) return inboxToolState();
-    saveConfig({ inboxTool: next });
+    // Every other entry is kept, a host this version does not know included.
+    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, changes) });
     const saved = loadConfig();
-    for (const [host, value] of Object.entries(next)) {
+    for (const [host, value] of Object.entries(changes)) {
       if (configuredInboxTool(saved, host as InboxToolHost) !== value) {
         throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       }
@@ -2431,6 +2500,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (await codexWake.wakes(INBOX_CODEX_HOST, thread, meta)) {
             await live.seenWakeOnly(thread, INBOX_CODEX_HOST, args?.project_path);
           }
+        } else if (session && args?.agent_host === INBOX_T3_HOST && isT3ThreadId(session)) {
+          // A T3 Code thread (inbox-t3-wake.ts; the shim names it from T3CODE_THREAD_ID): it is there, and while
+          // a saved T3 grant reaches it, it is live for New message, compose and tags.
+          t3Wake.noteToolCall(session);
+          if (await t3Wake.wakes(INBOX_T3_HOST, session)) await live.seenWakeOnly(session, INBOX_T3_HOST, args?.project_path);
         } else if (session && args?.agent_host === INBOX_CODEX_HOST && isCodexThreadId(session)) {
           codexWake.noteToolCall(session, null);
         } else if (session && args?.agent_host === INBOX_QWEN_HOST && isQwenSessionId(session)) {
@@ -2476,8 +2550,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session),
-    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session)],
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
+    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
   });
 
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
@@ -2499,6 +2573,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
     ...options.qwenWake,
+  });
+
+  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn through T3's MCP API, under the
+  // grant `plannotator t3 login` saved (inbox-t3-wake.ts).
+  const t3Wake = createInboxT3Wake({
+    store,
+    dataDir,
+    commandOf: (item, session) => replyCommand(item, false, session),
+    ...options.t3Wake,
   });
 
   // A reply that waited 5 minutes on a busy session goes into its running turn by itself, as if the person
@@ -2545,7 +2628,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
-    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId),
+    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
   });
@@ -3076,8 +3159,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ error: "Not found", code: "not_found" }, 404);
       }
+      // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      if (path === "/api/inbox/settings/storage") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        return json(perfPhase("disk", () => store.diskUsage()));
+      }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via), url.searchParams.get("store") !== "0"));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -3220,6 +3308,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ show: claimListIntro(via), list_intro: listIntroState() });
+      }
+
+      // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
+      // once per machine, on this computer or the owner's phone; a tailnet guest never.
+      if (path === "/api/inbox/snooze-intro") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const owner = ownerOrLocal(req, via);
+        return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -3837,6 +3935,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
+  // Snooze, by any route the person has (the window and the phone here, a linked machine's thread through the
+  // forward, a phone app or a linked machine through the door, which hands its write to this same path): once it went
+  // through, the one-time Snooze announcement never shows (approval "inbox-snooze-announce"). snoozes.json cannot say
+  // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
+  const handleMarkingSnoozes = async (req: Request, via: RequestVia): Promise<Response> => {
+    const ask = req.method === "POST" && INBOX_SNOOZE_WRITE.test(new URL(req.url, "http://127.0.0.1").pathname) && ownerOrLocal(req, via) ? req.clone() : null;
+    const response = await handle(req, via);
+    if (ask && response.ok) {
+      const body = (await ask.json().catch(() => null)) as { until?: unknown } | null;
+      if (typeof body?.until === "string") markSnoozeUsed();
+    }
+    return response;
+  };
   // With the debug log on only (inbox-perf.ts): Server-Timing on every API answer, slow requests and a stalled loop
   // noted. Off, the handler is not wrapped and perfPhase does nothing but a compare.
   // The store's load time and the loop watch start with the first request the log keeps, so the log stays empty until then.
@@ -3859,10 +3970,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
           debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
         }
-        return handle(req, via);
+        return handleMarkingSnoozes(req, via);
       }, debugOwner)
-    : handle;
-  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handle;
+    : handleMarkingSnoozes;
+  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handleMarkingSnoozes;
 
   /**
    * The window's own port: everything here came from this computer. A
@@ -4052,6 +4163,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     unsubscribeAgentWork();
     codexWake.stop();
     qwenWake.stop();
+    t3Wake.stop();
     voice.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
@@ -4068,7 +4180,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

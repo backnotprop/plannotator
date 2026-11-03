@@ -8,6 +8,7 @@ import {
   getAnnotateMessageFeedbackPrompt,
 } from "@plannotator/shared/prompts";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
+import { scheduleOpenCodeDailyPing } from "./daily-ping";
 import type { SessionBridge } from "@plannotator/ai/session-bridge";
 
 export interface EmbeddedPlanReviewInput {
@@ -80,6 +81,8 @@ export async function runEmbeddedPlanReview(
 ): Promise<EmbeddedPlanReviewResult> {
   input.abortSignal?.throwIfAborted();
   const { startPlannotatorServer, handleServerReady } = await loadPlanServer();
+  // The daily ping (daily-ping.ts): in the background, never awaited.
+  scheduleOpenCodeDailyPing("plan");
   const { listOpenCodeSession } = await import("./session-registry");
   const { detectProjectName } = await import("@plannotator/server/project");
   const server = await startPlannotatorServer({

@@ -602,6 +602,13 @@ const store = new ChatWindowStore({ initialGeometry: saved, onGeometryChange: sa
   - A run of inline text with a word past 8,000 characters stays literal. So a `data:` image past that size stays text in markdown or in a sentence. A raw `<img>` on its own line is not inline text: only the 256,000-character limit on the whole text applies to it.
   - `ChatTranscript` follows an image that loads while the pane is at its live edge. It follows only with its own `richMarkdown` on, so a `ChatMarkdown` of yours that turns it on inside a transcript that does not stays where it is.
   - Images are sized by Tailwind's preflight (`max-width: 100%; height: auto`), which `styles.css` carries. With no preflight on your page, add your own rule, or a model's `width` can overflow the column.
+- **The person's text as typed** (ui 0.60.0). `keepUserBlankLines` on `ChatTranscript` (also on `ChatMessageView`, and `keepBlankLines` on a `ChatMarkdown` with `literalHtml`) draws the person's messages as the Inbox draws a person's reply: each line break stays a line break, and a paragraph after 2 or more blank lines keeps them (up to 10) instead of one paragraph gap. The gap is drawn as one `<br>` per blank line past the first, before the paragraph, so no `style` or `class` reaches the sanitizer. Blank lines before the first block, inside a list, a quote or a code block are not kept, as in the Inbox. The agent's text is not affected. Off by default; Plannotator never turns it on.
+
+  ```tsx
+  <ChatTranscript messages={messages} status={status} agentName="Agent" keepUserBlankLines />
+  ```
+
+  A `ChatMarkdown` you return from `renderPart` hears the transcript's setting when it has `literalHtml`; pass `keepBlankLines={false}` to one to say no.
 - **Parts.** `renderPart(part, { message, index })` draws a part; return `undefined` to fall through, or `null` to draw nothing. To paint into a text part, return your own `ChatMarkdown`, with the props the transcript gives its own plus yours. Leave out `literalHtml` and a person's `<b>` draws bold:
 
   ```tsx
@@ -679,7 +686,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.58.0 depends exactly on `@plannotator/core` 0.25.15. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.60.0 depends exactly on `@plannotator/core` 0.25.18. `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

@@ -137,7 +137,8 @@ beforeEach(async () => {
       accountReads.push(String(input));
       if (accountsRoute) return accountsRoute();
     }
-    if (settingsRoute && String(input) === '/api/inbox/settings') await settingsRoute();
+    // The route without its query: the window reads `/api/inbox/settings?store=0`.
+    if (settingsRoute && String(input).split('?')[0] === '/api/inbox/settings') await settingsRoute();
     const answer = await call(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     if (String(input).startsWith('/api/inbox/accounts') && String(input) !== '/api/inbox/accounts/switch') readsAnswered += 1;
     if (listNamesNoMachine && String(input).includes('machines=1')) return Response.json({ ...JSON.parse(answer.text), machines: undefined }, { status: answer.status });
