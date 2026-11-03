@@ -147,7 +147,11 @@ export function parseCallCommand(argv: readonly string[]): ParsedCallCommand {
   }
   const [action, json, ...more] = positional;
   if (action === undefined) return { ok: false, code: "usage", error: "inbox call needs an action." };
-  if (!(INBOX_CALL_ACTIONS as readonly string[]).includes(action)) return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${INBOX_CALL_ACTIONS.join(", ")}.` };
+  // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
+  // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
+  if (!(INBOX_CALL_ACTIONS as readonly string[]).includes(action)) {
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${INBOX_CALL_ACTIONS.filter((name) => name !== "steps").join(", ")}.` };
+  }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
 }

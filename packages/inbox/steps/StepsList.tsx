@@ -5,9 +5,8 @@
  */
 
 import type { InboxStepsWire } from '@plannotator/core/inbox-types';
-import { agentName } from '../format';
 import { Icon } from '../icons';
-import { STEP_STATUS_WORDS, presenceClass, stepMeta, stepsAsOf, stepsCount, stepsName } from './model';
+import { STEP_STATUS_WORDS, presenceClass, stepMeta, stepsAsOf, stepsCount, stepsListLabels, stepsName } from './model';
 import { StepGlyph, StepsPie } from './StepsMarks';
 
 export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWaiting?: (() => void) | null; now?: Date }) {
@@ -109,11 +108,13 @@ export function StepsLists({
   /** Each head's label is a section heading (the opened card). */
   heading?: boolean;
 }) {
+  // Two sessions of one agent each get a number, so the person can tell the lists apart.
+  const labels = stepsListLabels(lists);
   return (
     <>
       {lists.map((list, index) => (
-        <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(agentName(list.agent), list)}>
-          <StepsHead list={list} label={lists.length > 1 ? agentName(list.agent) : 'Checklist'} now={now} heading={heading}>
+        <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(labels[index]!, list)}>
+          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} now={now} heading={heading}>
             {index === 0 ? headExtra : null}
           </StepsHead>
           <StepsList list={list} onWaiting={onWaiting?.(list) ?? null} now={now} />

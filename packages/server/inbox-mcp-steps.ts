@@ -68,8 +68,14 @@ export function stepsProgressText(record: Pick<InboxSteps, "steps">): string {
   return `${done} of ${total} done${doing ? `; doing: ${doing}` : ""}`;
 }
 
-/** Checks a list before a send, so a refused list never leaves a message sent without it. */
-export function checkStepsInput(steps: unknown): void {
+/**
+ * Checks a list before a send, with everything the store's `setThreadSteps` would refuse it for but the thread (the
+ * send makes or checks that), so a refused list never leaves a message sent without it.
+ */
+export function checkStepsInput(steps: unknown, agent: InboxAuthor): void {
+  if (agent.kind !== "agent" || !agent.session?.trim()) {
+    throw new InboxError("validation_error", "agent_session: steps belong to an agent session (the connection fills it).", { field: "agent_session" });
+  }
   const checked = normalizeInboxSteps(steps, [], new Date(0).toISOString());
   if ("error" in checked) throw new InboxError("validation_error", checked.error, { field: checked.field });
 }

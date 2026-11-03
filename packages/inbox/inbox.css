@@ -5255,7 +5255,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-st[data-step-status="dropped"] .ib-st-t { text-decoration: line-through; text-decoration-color: var(--ib-st-faint); }
 .ib-st-wait { color: var(--ib-st-amber); }
 .pn-inbox .ib-st-jump { flex: none; max-width: none; display: inline-flex; align-items: center; gap: 2px; border: 0; background: none; padding: 2px 0 2px 12px; cursor: pointer; color: var(--ib-st-amber); }
-.ib-st-jump:hover { text-decoration: underline; text-underline-offset: 2px; }
+@media (hover: hover) { .ib-st-jump:hover { text-decoration: underline; text-underline-offset: 2px; } }
 .ib-st-jump:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 4px; }
 
 /* the shapes */

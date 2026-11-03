@@ -22,7 +22,7 @@ import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxStepsWire, InboxThread } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
 import { dispatchInboxFrame, type InboxEventHandlers } from './api';
-import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsCount, stepsDoneWords, stepsName, stepsWaitTarget, threadBoardCard } from './steps/model';
+import { cardStepLists, pieGeometry, stepMeta, stepsAsOf, stepsCount, stepsDoneWords, stepsListLabels, stepsName, stepsWaitTarget, threadBoardCard } from './steps/model';
 import { createStepsBus } from './steps/useThreadSteps';
 
 const hasDom = typeof document !== 'undefined';
@@ -139,6 +139,16 @@ describe('the rules (steps/model.ts)', () => {
     expect(threadBoardCard(cards, M1)?.id).toBe('crd_live');
     expect(threadBoardCard(cards.slice(0, 1), M1)).toBeNull();
     expect(stepsDoneWords(list('working'))).toBe('3 of 6 steps done');
+  });
+
+  // Review of #2571, finding 2: two sessions of one agent must not read the same.
+  test('heads: each agent\'s name; two sessions of one agent numbered in the order their lists began, kept as they tick', () => {
+    const second = { ...list('working'), id: 'stp_02', agent: { ...A, session: 'ses_a2' } };
+    const first = { ...list('idle'), id: 'stp_01' };
+    const codex = { ...list('idle', B), id: 'stp_03' };
+    expect(stepsListLabels([second, first, codex])).toEqual(['Claude Code · 2', 'Claude Code · 1', 'Codex']);
+    expect(stepsListLabels([first, second])).toEqual(['Claude Code · 1', 'Claude Code · 2']);
+    expect(stepsListLabels([first, codex])).toEqual(['Claude Code', 'Codex']);
   });
 
   test('"3/6": a dropped step is not counted; the name says whose and how far', () => {
@@ -384,6 +394,25 @@ test.skipIf(!hasDom)('a phone: the sheet over a scrim, with a close', async () =
   expect(document.querySelector('[data-steps-scrim]')).not.toBeNull();
   await act(async () => document.querySelector<HTMLElement>('[data-steps-close]')!.click());
   await until(() => !panel(), 'the sheet to close');
+});
+
+// Review of #2571, finding 3: presence moves often; a thread showing no list has nothing it could change.
+test.skipIf(!hasDom)('live: presence moving reads again only while a list shows', async () => {
+  const { bus } = await render();
+  await until(() => !!button(), 'the steps button');
+  const reads = stepsReads;
+  act(() => bus.emit('presence'));
+  await until(() => stepsReads === reads + 1, 'a presence read');
+  answer = async () => Response.json({ serverSession: 's', on: true, steps: [] });
+  act(() => bus.emit(M1));
+  await until(() => !button(), 'the list cleared');
+  const cleared = stepsReads;
+  act(() => bus.emit('presence'));
+  await settle();
+  expect(stepsReads).toBe(cleared);
+  // A catch-up still reads (a steps line may have come meanwhile).
+  act(() => bus.emit('*'));
+  await until(() => stepsReads === cleared + 1, 'a catch-up read');
 });
 
 test.skipIf(!hasDom)('live: a change for this thread or every thread reads again; another thread\'s does not; an older answer never lands last', async () => {

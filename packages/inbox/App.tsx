@@ -1504,7 +1504,12 @@ function Inbox() {
     if (!stepsShownOn) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const unsubscribe = stepsBus.subscribe((change) => {
-      if (change !== '*' && !cardsNowRef.current?.cards.some((card) => card.threads.includes(change))) return;
+      const now = cardsNowRef.current;
+      // Presence moving changes only a checklist a card wears; a thread's steps line, only a card that links it.
+      const wanted =
+        change === '*' ||
+        (change === 'presence' ? Object.keys(now?.steps ?? {}).length > 0 : !!now?.cards.some((card) => card.threads.includes(change)));
+      if (!wanted) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => void refreshCards(), 250);
     });
@@ -1788,8 +1793,9 @@ function Inbox() {
         onDeliveries: () => {
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
-          // So does each steps list's presence (the in-progress mark turns only while its session works).
-          stepsBus.emit('*');
+          // So does each steps list's presence (the in-progress mark turns only while its session works): read
+          // again only where a list shows.
+          stepsBus.emit('presence');
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);

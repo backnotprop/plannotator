@@ -12,7 +12,7 @@
 
 import { inboxStepsProgress, type InboxStep, type InboxStepStatus, type InboxStepsPresence, type InboxStepsWire } from '@plannotator/core/inbox-types';
 import type { OpenActionItem, OpenQuestion } from '@plannotator/core/inbox-open-questions';
-import { shortTime, whenTime } from '../format';
+import { agentName, shortTime, whenTime } from '../format';
 
 /** The lists the window shows: those with steps (a cleared list is gone), in the server's order. */
 export function shownStepLists(lists: readonly InboxStepsWire[]): InboxStepsWire[] {
@@ -39,6 +39,21 @@ export function threadBoardCard<T extends { threads: readonly string[]; column: 
 export function stepsDoneWords(list: Pick<InboxStepsWire, 'steps'>): string {
   const { done, total } = stepsCount(list);
   return `${done} of ${total} steps done`;
+}
+
+/**
+ * Each list's head when there is more than one: its agent's name, and where two sessions of one agent keep lists in
+ * the thread, a number for each ("Claude Code · 1", "Claude Code · 2") in the order the sessions started their lists
+ * (their `stp_` ids), so a list keeps its number as the other one ticks.
+ */
+export function stepsListLabels(lists: readonly Pick<InboxStepsWire, 'id' | 'agent'>[]): string[] {
+  const names = lists.map((list) => agentName(list.agent));
+  return lists.map((list, index) => {
+    const same = lists.filter((_, j) => names[j] === names[index]);
+    if (same.length < 2) return names[index]!;
+    const order = same.map((other) => other.id).sort();
+    return `${names[index]} · ${order.indexOf(list.id) + 1}`;
+  });
 }
 
 /** How a step reads to a screen reader after its text. */
