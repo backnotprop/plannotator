@@ -20,9 +20,12 @@
  *    address (every entry in 100.64.0.0/10 or fd7a:115c:a1e0::/48, so a local
  *    reverse proxy that passes a client's headers on cannot make a forged
  *    login the owner), and the login is the one that owns this machine
- *    (`tailscale status --json`, Self.UserID -> LoginName).
+ *    (`tailscale status --json`, Self.UserID -> LoginName), or, when
+ *    Tailscale names no owner (a tagged machine, or an untagged one whose
+ *    owner it does not report), one of the logins in `inboxTailscaleAllow`,
+ *    the rule the Inbox's `isOwnerRequest` follows.
  *  - `peer`: through serve and anything else (another login, a tagged device
- *    with no login, a funnel request, or an owner nobody could read).
+ *    with no login, a funnel request, or no owner named and no allowlist).
  *
  * The same marks the Inbox's window port refuses (#1867: a local reverse
  * proxy that sends only loopback `X-Forwarded-For` reads as local).
@@ -89,9 +92,13 @@ export function cameThroughTailscale(headers: Headers): boolean {
   return value !== null && value.split(",").map(forwardedAddress).some(isTailnetAddress);
 }
 
-/** Who a request is from, for a session whose machine is owned by `ownerLogin` (null: nobody could say). */
-export function tailnetAudience(headers: Headers, ownerLogin: string | null): TailnetAudience {
+/**
+ * Who a request is from, for a session whose owner is any of `ownerLogins`
+ * (`readTailnetOwners` in packages/server/session-tailnet.ts: the owner
+ * Tailscale names, else the allowlist). Empty: nobody is the owner.
+ */
+export function tailnetAudience(headers: Headers, ownerLogins: readonly string[]): TailnetAudience {
   if (!cameThroughTailscaleServe(headers)) return "local";
-  if (!ownerLogin || !forwardedForIsTailnet(headers)) return "peer";
-  return checkTailnetIdentity(headers, [normalizeTailnetLogin(ownerLogin)]).ok ? "owner" : "peer";
+  if (ownerLogins.length === 0 || !forwardedForIsTailnet(headers)) return "peer";
+  return checkTailnetIdentity(headers, ownerLogins.map(normalizeTailnetLogin)).ok ? "owner" : "peer";
 }
