@@ -18,6 +18,7 @@ import type { InboxMessage, InboxThread, InboxTidyPlan, InboxTidyRun } from "@pl
 import { INBOX_TIDY_INSTRUCTION } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -233,6 +234,14 @@ describe("what a script gets", () => {
     const shown = await cli(box, ["send_message", JSON.stringify({ body: "The new look: ![look](look.png)", thread: "Look", attachments: ["look.png"] })]);
     expect(shown.code).toBe(0);
     expect(shown.stderr).toBe("");
+  });
+
+  test("a question opener with text after its name: sent, stdout still one JSON value, the warning on stderr", async () => {
+    const box = await world();
+    const sent = await cli(box, ["send_message", JSON.stringify({ body: "Pick:\n:::question {#bar}\nWhich bar?\n- [ ] Top\n:::", thread: "Bars" })]);
+    expect(sent.code).toBe(0);
+    expect(JSON.parse(sent.stdout).question_openers_with_text).toEqual([{ line: 2, directive: ":::question" }]);
+    expect(sent.stderr).toBe(`${questionOpenersWithTextText([{ line: 2, directive: ":::question" }]).trim()}\n`);
   });
 
   test("inside an agent Ask AI started the Inbox is off: nothing is started or sent", async () => {

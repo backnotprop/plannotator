@@ -41,6 +41,7 @@ import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, inboxTidyMcpLine, parseInboxS
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
@@ -241,7 +242,17 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // A Tidy that waited for this session's next call rides this result: a script keeps only what it prints, so the agent reads it here.
   const tidy = result?.structuredContent?.tidy as (Pick<InboxTidyMark, "id"> & { text: string }) | undefined;
   if (tidy) err(`${inboxTidyMcpLine(tidy.id)}\n\n${tidy.text}\n`);
-  // Pictures sent only as attachments: the result text's advice, on stderr so stdout stays one JSON value.
+  // A question line that opened no block (`:::question {#x}`): the result text's warning, one line each, on stderr so stdout stays one JSON value.
+  const openers = result?.structuredContent?.question_openers_with_text;
+  const moreOpeners = result?.structuredContent?.question_openers_with_text_more;
+  if (Array.isArray(openers) && openers.length > 0) {
+    try {
+      err(`${questionOpenersWithTextText(openers as QuestionOpenerWithText[], typeof moreOpeners === "number" ? moreOpeners : 0).trim()}\n`);
+    } catch {
+      // A malformed list (never from this Inbox) prints no warning; the result below still does.
+    }
+  }
+  // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
