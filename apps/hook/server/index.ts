@@ -240,6 +240,7 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
 import { runInboxCallCommand } from "./inbox-call-command";
+import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
@@ -344,6 +345,21 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox steps <thread> --json '<list>'`: an agent's thread steps, sugar over `inbox call steps` (inbox-steps-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "steps") {
+    const stepsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxStepsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(stepsDataDir),
       }),
     );
   }
@@ -656,6 +672,8 @@ if (isVersionInvocation(args)) {
 
 /** The person turned the Inbox's Board on (config.json `inboxBoard`): only then does either help mention cards. */
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
+// Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
+const stepsOnForHelp = () => loadConfig().inboxSteps === true;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
@@ -671,7 +689,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   console.log(
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp() })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp() })
       : formatSubcommandHelp(helpSubcommand),
   );
   process.exit(0);

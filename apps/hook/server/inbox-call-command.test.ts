@@ -59,8 +59,8 @@ function sandbox() {
   const project = join(root, "code", "billing");
   mkdirSync(project, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
-  // The Board is something the person turns on: on here.
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+  // The Board and thread steps are things the person turns on: on here, so every action the command takes is served.
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true, inboxSteps: true }));
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: join(root, "home"),
@@ -81,7 +81,7 @@ type Box = ReturnType<typeof sandbox>;
 async function world() {
   const box = sandbox();
   const clock = { behind: 0 };
-  const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null, board: true, storeNow: () => new Date(Date.now() - clock.behind) });
+  const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null, board: true, steps: true, storeNow: () => new Date(Date.now() - clock.behind) });
   servers.push(server);
   const client = new Client({ name: "inbox-call-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));

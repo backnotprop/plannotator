@@ -89,6 +89,7 @@ import {
   type InboxProject,
   type InboxProjectRepo,
   type InboxTag,
+  inboxStepsProgress,
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import {
@@ -163,7 +164,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
@@ -1011,6 +1012,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
+        // Thread steps: the steps tool and field are listed and served only while the person has them on.
+        stepsOn,
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
@@ -2332,6 +2335,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * that tags others is told who else it went to.
    */
   const replyCommand = (reply: InboxMessage, sendNow = false, session: string | null = null): InboxReplyCommand => {
+    const command = replyCommandOf(reply, sendNow, session);
+    // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
+    // the person has steps on. Never on a Tidy, a 👍 or a hand-off notice: those are not about the thread's work.
+    if (!stepsOn() || command.tidy || command.ack_of || command.handed_away) return command;
+    const receiver = session ?? store.recipientOf(reply)?.session ?? null;
+    const list = receiver ? store.stepsOf(reply.thread_id, receiver) : null;
+    if (!list) return command;
+    const { done, total, doing } = inboxStepsProgress(list.steps);
+    return total > 0 ? { ...command, steps: { done, total, doing } } : command;
+  };
+  const replyCommandOf = (reply: InboxMessage, sendNow: boolean, session: string | null): InboxReplyCommand => {
     const tag = session && !store.isOwner(reply, session) ? (reply.tags?.find((t) => t.session === session) ?? null) : null;
     // Every wake's title, decided once: null on a plain reply in a thread with no name (an older connection says `a reply` too).
     const subject = store.agentTitle(reply, session);
@@ -2509,8 +2523,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!body || typeof body !== "object" || Array.isArray(body)) return null;
     const call = body as { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: { name?: unknown } };
     if (call.method !== "tools/call" || call.id === undefined) return null;
-    const text = call.params?.name === INBOX_REMOVED_ACTION ? INBOX_REMOVED_ACTION_TEXT : call.params?.name === "card" && !boardOn() ? INBOX_BOARD_OFF_TEXT : null;
+    const text =
+      call.params?.name === INBOX_REMOVED_ACTION
+        ? INBOX_REMOVED_ACTION_TEXT
+        : call.params?.name === "card" && !boardOn()
+          ? INBOX_BOARD_OFF_TEXT
+          : call.params?.name === "steps" && !stepsOn()
+            ? INBOX_STEPS_OFF_TEXT
+            : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
+  };
+
+  /**
+   * A send_message carrying `steps` while steps are off (a session that listed
+   * the field while they were on): the message still goes, without the list,
+   * instead of failing on a field the schema no longer has. Null when the
+   * body needs no change.
+   */
+  const withoutOffSteps = (body: unknown): unknown | null => {
+    if (stepsOn() || !body || typeof body !== "object" || Array.isArray(body)) return null;
+    const call = body as { method?: unknown; params?: { name?: unknown; arguments?: Record<string, unknown> } };
+    if (call.method !== "tools/call" || call.params?.name !== "send_message" || !call.params.arguments || !("steps" in call.params.arguments)) return null;
+    const { steps: _dropped, ...rest } = call.params.arguments;
+    return { ...call, params: { ...call.params, arguments: rest } };
   };
 
   /** The agent sessions a `/mcp` POST's tool calls name (a batch included), as MCP presence. */
@@ -2923,6 +2958,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         void noteMcpPresence(body);
         const refused = refusedToolCall(body);
         if (refused) return refused;
+        const stripped = withoutOffSteps(body);
+        if (stripped) {
+          const headers = new Headers(req.headers);
+          headers.delete("content-length");
+          return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
+        }
       }
       return mcp.fetch(req);
     }

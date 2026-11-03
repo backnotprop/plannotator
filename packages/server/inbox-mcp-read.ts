@@ -681,7 +681,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
 }
 
 /** The whole windowed read as text: complete for an agent (the JSON adds nothing it needs). */
-export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = ""): string {
+export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = "", steps: readonly string[] = []): string {
   const { thread, window } = result;
   const persons = thread.participants.filter((p) => p.kind === "person").reduce((sum, p) => sum + p.messages, 0);
   const out: string[] = [];
@@ -717,6 +717,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   if (thread.questions?.length) {
     out.push(`Questions of messages not shown: ${thread.questions.map((q) => `${q.message_id}/${questionWords(q, true)}`).join("; ")}`);
   }
+  // Thread steps (approval "inbox-thread-steps"): given only while the person has them on.
+  out.push(...steps);
   const range = window.after !== undefined || window.before !== undefined
     ? ` Range:${window.after !== undefined ? ` after ${window.after}` : ""}${window.before !== undefined ? ` before ${window.before}` : ""}; ${window.left_out} other message${window.left_out === 1 ? "" : "s"} left out.`
     : "";

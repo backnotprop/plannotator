@@ -2221,6 +2221,14 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
 const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+/**
+ * What thread steps add to the entry when the person turns them on (the
+ * `steps` action and send_message's `steps` field; approval
+ * "inbox-thread-steps"), for the switch's words. Measured on Pi's request
+ * shape from a real Inbox, steps on minus steps off (checked within 5% by
+ * inbox-steps-agent.test.ts): 800 bytes; tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
+ */
+export const INBOX_TOOL_COST_STEPS = { bytes: 800, tokens: 220 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
