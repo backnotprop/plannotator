@@ -6165,7 +6165,9 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-crdp-phone .ib-crdp-foot .ib-btn { min-height: 44px; }
   .ib-crdp-notesform textarea, .ib-crdp-link input, .ib-crdp-drop input, .ib-ncd-title, .ib-ncd-notes, .ib-ncd-links input { font-size: var(--ib-fs-16-in, 16px); }
-  dialog.ib-dlg.ib-ncd.ib-ncd-phone { width: 100vw; height: var(--ib-vvh, 100dvh); max-height: none; border-radius: 0; margin: 0; }
+  /* The whole screen: a modal <dialog> keeps the browser's `max-width: calc(100% - 6px - 2em)`, so lift it, or the
+     window is capped (286 px at 320) and sits at the left edge. */
+  dialog.ib-dlg.ib-ncd.ib-ncd-phone { inset: 0 auto auto 0; width: 100%; max-width: none; height: var(--ib-vvh, 100dvh); max-height: none; border: 0; border-radius: 0; margin: 0; }
   .ib-ncd-phone .ib-ncd-form { height: var(--ib-vvh, 100dvh); }
   .ib-ncd-phone .ib-ncd-body { flex: 1; }
   .ib-ncd-phone .ib-ncd-modes { flex: 1; justify-content: space-around; }
