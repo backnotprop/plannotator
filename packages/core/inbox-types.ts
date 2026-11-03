@@ -585,6 +585,14 @@ export interface InboxMessage {
    */
   started_by_person?: true;
   /**
+   * On a person message a tailnet guest wrote (a login `inboxTailscaleAllow`
+   * let in that is not this computer's owner): a reply, a re-ask, a new
+   * message or a thread started in compose. It is kept and delivered as any,
+   * but never starts a stopped launched session again. Set once, when the
+   * message is written; absent on the owner's and on every other message.
+   */
+  by_guest?: true;
+  /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the

@@ -1,7 +1,7 @@
 /**
  * Settings → Agents' read of how a launch would start (GET /api/inbox/launch/settings),
  * on a real launch module over a temp data dir and a temp home. What each test guards:
- * another site's page and the tailnet are refused before the person's login shell is
+ * another site's page and a tailnet guest are refused before the person's login shell is
  * started; concurrent reads share one shell read; the person's own bypass consent, read
  * from their Claude files, decides whether Full permissions can apply; and a person
  * whose Claude settings set a default mode is not shown (or started in) auto mode.
@@ -15,6 +15,8 @@ import { createInboxLaunch } from "./inbox-launch";
 import { claudeBypassSetup, createAgentEnvironmentFor } from "./inbox-agents";
 
 const restore: (() => void)[] = [];
+/** The machine's owner over the tailnet: every other allowed login is a guest. */
+const OWNER = "owner@example.com";
 afterEach(() => {
   for (const undo of restore.splice(0).reverse()) undo();
 });
@@ -62,6 +64,8 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
+    // As inbox.ts's `isGuest`: a tailnet login that is not the owner's.
+    isGuest: (req, via) => via === "tailnet" && req.headers.get("tailscale-user-login") !== OWNER,
   });
   restore.push(() => launch.stop());
   const get = async (headers: Record<string, string> = {}, via = "local", query = "") => {
@@ -72,15 +76,17 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
 }
 
 describe("GET /api/inbox/launch/settings", () => {
-  test("another site's page and the tailnet are refused, and never start the login shell", async () => {
+  test("another site's page and a tailnet guest are refused, and never start the login shell; the owner reads it on their phone too", async () => {
     const { get, reads } = setup();
     expect(await get({ origin: "https://evil.example" })).toMatchObject({ status: 403, body: { code: "cross_origin" } });
     expect(await get({ "sec-fetch-site": "cross-site" })).toMatchObject({ status: 403, body: { code: "cross_origin" } });
-    expect(await get({}, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
+    expect(await get({ "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
     expect(reads.count).toBe(0);
     // The window's own page reads.
     expect((await get({ origin: "http://127.0.0.1:4000", "sec-fetch-site": "same-origin" })).status).toBe(200);
     expect(reads.count).toBe(1);
+    // The owner over the tailnet, as main's other settings.
+    expect((await get({ "tailscale-user-login": OWNER }, "tailnet")).status).toBe(200);
   });
 
   test("concurrent reads share one login-shell read, and a fresh read is reused", async () => {
