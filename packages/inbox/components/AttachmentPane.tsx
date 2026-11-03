@@ -638,7 +638,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!full || !section || (kind !== 'image' && kind !== 'video' && !(kind === 'html' && hasComposer))) return;
     const place = () => {
       const row = fileFootRow(section);
-      section.style.setProperty('--ib-fvfoot', `${row ? Math.round(row.getBoundingClientRect().height) : 0}px`);
+      // The layout height (offsetHeight), not the box on screen: a card flying into the corner control is scaled down.
+      section.style.setProperty('--ib-fvfoot', `${row ? row.offsetHeight : 0}px`);
     };
     place();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);

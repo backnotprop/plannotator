@@ -9,8 +9,9 @@
  * zoomed, a tall picture or a panorama zoomed below its Fit, a double tap, a
  * swipe between pictures and a drag down to close. A zoomed picture still
  * slides under the bars. Hide takes the card too and gives the picture the
- * whole screen, and so does minimizing the comment box (restoring it brings
- * the card and the picture back, with no jump). The card is one row and one height (approval
+ * whole screen, and so does the comment box's ⌄, the same gather into the
+ * corner control (approval "inbox-fullscreen-gather"; one tap on it brings
+ * the toolbar, the card and the picture back, with no jump). The card is one row and one height (approval
  * "inbox-option-card-lean": the letter and the name, no arrows on a phone, no
  * question, dots or end note), a long name giving way with an ellipsis, and the
  * last option is said in the live region on the step onto it. A phone on its
@@ -305,7 +306,7 @@ async function tapFit(page: Page) {
 }
 
 /** A tap that moves the tools to `state`, once the pane is there and what fades or refits with it has finished. */
-async function tapTools(page: Page, button: string, state: 'tucked' | 'revealed' | 'pinned') {
+async function tapTools(page: Page, button: string, state: 'tucked' | 'pinned') {
   await tapButton(page.locator(button));
   await expect(page.locator(`[data-tools="${state}"]`)).toHaveCount(1);
   await atRest(page);
@@ -422,39 +423,39 @@ for (const { name, width, height } of [
       inTheClear(await layout(page));
       await page.getByRole('radio', { name: /Comment/ }).first().tap();
       await settled(page);
-      // Minimizing the comment box takes the card (the owner: "I also want that options panel to go away"):
-      // the picture refits above the toolbar, a pinch and a swipe still work, and restoring brings the card and the picture back.
-      const beforeMinimize = await layout(page);
-      await tapButton(page.locator('.ib-fcomp-min'));
-      await atRest(page);
-      const minimized = await layout(page);
-      expect(minimized.card, 'the card goes with the comment box').toBeNull();
-      expect(minimized.toolbar).not.toBeNull();
-      inTheClear(minimized);
-      expect(minimized.image.height).toBeGreaterThanOrEqual(beforeMinimize.image.height);
-      await shot(page, `${tag}-A-minimized`);
-      await spread(page, middle(minimized), 90, 320);
+      // The comment box's ⌄ gathers the tools into the corner control, the card with them (the owner: "I also want
+      // that options panel to go away"; approval "inbox-fullscreen-gather"): the picture gets the whole screen, a pinch
+      // and a swipe still work, and one tap on the corner control brings the card and the picture back, with no jump.
+      const beforeGather = await layout(page);
+      await tapTools(page, '.ib-fcomp-min', 'tucked');
+      const gathered = await layout(page);
+      expect(gathered.card, 'the card goes with the tools').toBeNull();
+      expect(gathered.toolbar, 'the toolbar goes too').toBeNull();
+      expect(gathered.composer, 'and the comment box').toBeNull();
+      expect(gathered.image.height).toBeGreaterThanOrEqual(beforeGather.image.height);
+      expect(Math.abs(gathered.image.top - gathered.stage.top - (gathered.stage.bottom - gathered.image.bottom)), 'centred on the whole stage').toBeLessThan(1);
+      await shot(page, `${tag}-A-gathered`);
+      await spread(page, middle(gathered), 90, 320);
       await settled(page);
-      expect((await layout(page)).scale).toBeGreaterThan(minimized.scale * 2);
-      await spread(page, middle(minimized), 320, 50);
+      expect((await layout(page)).scale).toBeGreaterThan(gathered.scale * 2);
+      await spread(page, middle(gathered), 320, 50);
       await settled(page);
-      await spread(page, middle(minimized), 200, 60);
+      await spread(page, middle(gathered), 200, 60);
       await settled(page);
-      same((await layout(page)).image, minimized.image);
-      await tapButton(page.locator('.ib-fcomp-pill'));
-      await atRest(page);
-      same((await layout(page)).image, beforeMinimize.image);
-      same((await layout(page)).card!, beforeMinimize.card!);
-      // A swipe while it is minimized steps to the next option, and the card is there with the box.
-      await tapButton(page.locator('.ib-fcomp-min'));
-      await atRest(page);
+      same((await layout(page)).image, gathered.image);
+      await tapTools(page, '[data-full-view-handle]', 'pinned');
+      same((await layout(page)).image, beforeGather.image);
+      same((await layout(page)).card!, beforeGather.card!);
+      // A swipe while gathered steps to the next option, and one tap brings the tools back with its card.
+      await tapTools(page, '.ib-fcomp-min', 'tucked');
       const hiddenAt = await layout(page);
       await touch.down(hiddenAt.stage.right - 60, middle(hiddenAt).y, -hiddenAt.stage.width * 0.5, 0);
       await touch.up();
       await settled(page, 600);
-      await tapButton(page.locator('.ib-fcomp-pill'));
-      await atRest(page);
+      await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
+      await tapTools(page, '[data-full-view-handle]', 'pinned');
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+      await expect(caption(page)).toBeVisible();
 
       // A tall picture reads from the top, reaches its end, and zooms below its Fit: the whole of it, in the clear.
       await openChoice(page, url, thread, 'D');
@@ -471,11 +472,10 @@ for (const { name, width, height } of [
       }
       const held = await layout(page);
       expect(held.image.top).toBeGreaterThan(end.image.top + 200);
-      // Where the person panned to holds when the room changes: Hide (and minimize) refit only a picture resting at Fit.
+      // Where the person panned to holds when the room changes: Hide (and ⌄) refit only a picture resting at Fit.
       await hideTools(page);
       expect(Math.abs((await layout(page)).image.top - held.image.top), 'Hide does not snap a panned picture back').toBeLessThan(1.5);
-      await tapTools(page, '[data-full-view-handle]', 'revealed');
-      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
+      await tapTools(page, '[data-full-view-handle]', 'pinned');
       expect(Math.abs((await layout(page)).image.top - held.image.top), 'showing the tools again does not either').toBeLessThan(1.5);
       await panTo(page, touch, 'top');
       for (let i = 0; i < 3; i++) {
@@ -514,11 +514,9 @@ for (const { name, width, height } of [
       expect(Math.abs(hidden.image.top - hidden.stage.top - (hidden.stage.bottom - hidden.image.bottom)), 'centred on the whole stage').toBeLessThan(1);
       expect(Math.min(hidden.image.top - hidden.stage.top, hidden.image.left - hidden.stage.left)).toBeLessThan(14);
       await shot(page, `${tag}-C-hidden`);
-      // The handle brings the toolbar back for a moment: the picture stays, the card stays away, until the tools are kept out.
-      await tapTools(page, '[data-full-view-handle]', 'revealed');
-      await expect(caption(page)).toBeHidden();
-      same((await layout(page)).image, hidden.image);
-      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
+      // One tap on the corner control brings everything back: the toolbar, the card, and the picture where it was.
+      await tapTools(page, '[data-full-view-handle]', 'pinned');
+      await expect(caption(page)).toBeVisible();
       same((await layout(page)).image, tools.image);
 
       // A plain picture gets the same: the toolbar is the floor.
@@ -539,8 +537,7 @@ for (const { name, width, height } of [
       const plainHidden = await layout(page);
       expect(plainHidden.toolbar).toBeNull();
       expect(Math.abs(plainHidden.image.top - plainHidden.stage.top - (plainHidden.stage.bottom - plainHidden.image.bottom))).toBeLessThan(1);
-      await tapTools(page, '[data-full-view-handle]', 'revealed');
-      await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
+      await tapTools(page, '[data-full-view-handle]', 'pinned');
 
       // A drag down closes, back to the thread.
       const close = await layout(page);
@@ -774,7 +771,7 @@ test('a phone on its side stays as it was: the card still floats over the pictur
   }
 });
 
-test('under reduced motion a phone\'s Hide and minimize take the card with no fade', async () => {
+test('under reduced motion a phone\'s Hide and ⌄ take the card with no fade, and nothing flies into the corner', async () => {
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
   try {
@@ -782,14 +779,17 @@ test('under reduced motion a phone\'s Hide and minimize take the card with no fa
     const page = await context.newPage();
     await openChoice(page, url, thread, 'B');
     const fade = () => page.locator('.ib-optcap').evaluate((el) => getComputedStyle(el).transitionDuration);
+    // Gathered under reduced motion, what floats only fades out where it sits (approval "inbox-fullscreen-gather"): no travel.
+    const moved = () =>
+      page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.ib-fvbar, .ib-fcomp, .ib-imgbar')].map((el) => getComputedStyle(el).transform).filter((t) => t !== 'none' && !/^matrix\(1, 0, 0, 1, (-?[\d.]+), 0\)$/.test(t)));
     expect(await fade()).toBe('0s');
     await hideTools(page);
     expect(await fade()).toBe('0s');
-    await tapTools(page, '[data-full-view-handle]', 'revealed');
-    await tapTools(page, '[data-full-view-bar] button[aria-label="Keep tools out"]', 'pinned');
-    await tapButton(page.locator('.ib-fcomp-min'));
-    await atRest(page);
+    expect(await moved()).toEqual([]);
+    await tapTools(page, '[data-full-view-handle]', 'pinned');
+    await tapTools(page, '.ib-fcomp-min', 'tucked');
     expect(await fade()).toBe('0s');
+    expect(await moved()).toEqual([]);
     await context.close();
   } finally {
     await browser.close().catch(() => {});

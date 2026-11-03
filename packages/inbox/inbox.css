@@ -2150,7 +2150,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 /* A question's picture choices in full screen (approval "inbox-option-card-lean", over "Option caption"): one row, the
    choice on screen (Previous, its letter, its name, "Recommended" in plain text, Next; a phone swipes, so no arrows).
    It stays while the set is open, in place of the step chip, and is always one height (`--ib-optcap-h`), so the picture
-   fits clear above it. Hide takes it with the rest, and so does minimizing the comment box. */
+   fits clear above it. Hide takes it with the rest, and so does the composer's ⌄ (the same gather). */
 .ib-view.ib-fullview { --ib-optcap-h: max(42px, calc(42px * var(--ib-type, 14) / 14)); }
 .ib-optcap { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(640px, calc(100% - 32px)); height: var(--ib-optcap-h); padding: 0 6px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); pointer-events: none; transition: opacity 180ms ease 180ms; }
 :root.light .ib-optcap { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14); }
