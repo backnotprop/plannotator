@@ -200,9 +200,9 @@ function pointer(type: string, target: Element, init: { x: number; y: number; sh
 }
 
 /** A finger on node D: the first one down is the primary pointer, as in a browser. */
-function touch(type: string, x: number, { pointerId = 7, isPrimary = true } = {}): void {
+function touch(type: string, x: number, { pointerId = 7, isPrimary = true, y = 10 } = {}): void {
   const Ctor = (globalThis as { PointerEvent?: typeof MouseEvent }).PointerEvent ?? MouseEvent;
-  const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: 10, button: 0, ...(Ctor !== MouseEvent ? { pointerId, pointerType: 'touch', isPrimary } : {}) } as MouseEventInit);
+  const event = new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ...(Ctor !== MouseEvent ? { pointerId, pointerType: 'touch', isPrimary } : {}) } as MouseEventInit);
   if ((event as PointerEvent).pointerType !== 'touch') Object.defineProperty(event, 'pointerType', { value: 'touch' });
   if ((event as PointerEvent).isPrimary !== isPrimary) Object.defineProperty(event, 'isPrimary', { value: isPrimary });
   host!.querySelector('[id$="-flowchart-D-1"]')!.dispatchEvent(event);
@@ -213,6 +213,15 @@ async function clickPart(target: Element, shift = false): Promise<void> {
     pointer('pointerdown', target, { x: 10, y: 10, shift });
     pointer('pointerup', target, { x: 10, y: 10, shift });
   });
+}
+
+/** The canvas transform's translate and scale, to a thousandth (a pinch's steps multiply in floating point). */
+function expectView(wrapper: HTMLElement, x: number, y: number, scale: number): void {
+  const match = /translate\((-?[\d.e-]+)px, (-?[\d.e-]+)px\) scale\(([\d.e-]+)\)/.exec(wrapper.style.transform);
+  expect(match).not.toBeNull();
+  expect(Number(match![1])).toBeCloseTo(x, 3);
+  expect(Number(match![2])).toBeCloseTo(y, 3);
+  expect(Number(match![3])).toBeCloseTo(scale, 3);
 }
 
 function viewer(props: Partial<DiagramViewerProps> & { comments?: readonly DiagramComment[] }): React.ReactElement {
@@ -741,5 +750,55 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
       touch('pointerup', 10);
     });
     await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+  });
+
+  test('two fingers pinch-zoom about their midpoint and pan with it; the finger left behind pans on, never taps', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    expect(wrapper.style.transform).toBe('translate(0px, 0px) scale(1)');
+    // Fingers 30 px apart spread to 90 px about the same midpoint (25, 10): three times the scale, the midpoint's part stays put.
+    await act(async () => {
+      touch('pointerdown', 10);
+      touch('pointerdown', 40, { pointerId: 8, isPrimary: false });
+      touch('pointermove', -20);
+      touch('pointermove', 70, { pointerId: 8, isPrimary: false });
+    });
+    expectView(wrapper, -50, -20, 3);
+    // Both fingers move down 30 px together: the diagram follows, the scale holds.
+    await act(async () => {
+      touch('pointermove', -20, { y: 40 });
+      touch('pointermove', 70, { pointerId: 8, isPrimary: false, y: 40 });
+    });
+    expectView(wrapper, -50, 10, 3);
+    // One finger lifts: the other drags the diagram on, and lifting it opens nothing.
+    await act(async () => {
+      touch('pointerup', 70, { pointerId: 8, isPrimary: false, y: 40 });
+      touch('pointermove', -10, { y: 40 });
+      touch('pointerup', -10, { y: 40 });
+    });
+    expectView(wrapper, -40, 10, 3);
+    await settle(400);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+  });
+
+  test('a double tap zooms in about the finger from Fit and back to Fit from anywhere else, and opens nothing', async () => {
+    await mount(viewer({ onCreateComment: noop }));
+    await waitFor(() => expect(host!.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
+    const wrapper = q<HTMLElement>('[data-diagram-svg]');
+    const doubleTap = async (x: number) => {
+      await act(async () => {
+        touch('pointerdown', x);
+        touch('pointerup', x);
+        touch('pointerdown', x + 3, { pointerId: 9 });
+        touch('pointerup', x + 3, { pointerId: 9 });
+      });
+    };
+    await doubleTap(20);
+    expectView(wrapper, -23, -10, 2);
+    await doubleTap(60);
+    expectView(wrapper, 0, 0, 1);
+    await settle(400);
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
   });
 });

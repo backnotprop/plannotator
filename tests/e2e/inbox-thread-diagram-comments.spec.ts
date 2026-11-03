@@ -13,7 +13,10 @@
  *  - an archived message, a sent reply and the person's own message open
  *    nothing, as they take no comment on their words;
  *  - on a phone: a tap opens the composer inside the window, a swipe scrolls
- *    the thread, a sideways drag pans, and neither opens anything.
+ *    the thread, a sideways drag pans, and neither opens anything;
+ *  - on a phone, full screen: two fingers pinch-zoom about themselves, one or
+ *    two pan once zoomed, a double tap zooms in and back to Fit, Fit still
+ *    fits, and a single tap on a part still opens the composer.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/thread-diagram-comments/.
@@ -26,7 +29,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { finger } from './phone-touch';
+import { finger, pinch, type Point } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -368,6 +371,149 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await expect(page.locator('.ib-rbox')).toHaveCount(0);
     const answer = await claude.nextReply(sent.thread_id as string, 10);
     expect(answer.body).toContain('Diagram node Tests pass? (B)');
+  } finally {
+    await context.close();
+  }
+});
+
+/** A wide architecture diagram (the owner's report): at Fit on a phone its words are too small to read. */
+const ARCHITECTURE = [
+  'Where the pieces sit:',
+  '',
+  '```mermaid',
+  'flowchart TB',
+  '  subgraph ways["Ways in"]',
+  "    S[Skill / MCP for the team's agents]",
+  '    G[GitHub App: PR checks and comments]',
+  '    C[exotic CLI: open source, local]',
+  '  end',
+  '  subgraph platform["Exotic platform (Cloudflare)"]',
+  '    D[Dashboard: approve changes, rules, history, billing]',
+  '    J[Job engine: durable workflows, every step checkpointed]',
+  '    M[(Models, rules, baselines, history)]',
+  '  end',
+  '  subgraph adapters["Agent adapters (pick any)"]',
+  '    P[Pi / Pi Durable]',
+  '    A[Claude Agent SDK]',
+  '    X[Codex]',
+  '  end',
+  '  subgraph runs["Where code runs (pick per customer)"]',
+  '    L[Their laptop: CLI, free]',
+  '    H[Our hosted sandboxes: default, paid]',
+  '    R[Their runner or CI: enterprise]',
+  '  end',
+  '  S --> J',
+  '  G --> J',
+  '  C --> J',
+  '  D --- M',
+  '  J --> M',
+  '  J --> adapters',
+  '  J --> runs',
+  '```',
+].join('\n');
+
+test('on a phone, full screen: a pinch zooms about the fingers, one or two fingers pan, a double tap zooms in and back to Fit', async ({ browser }) => {
+  const { claude, project } = world;
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true, colorScheme: 'dark' });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    const sent = await claude.send({ project_path: project, subject: 'Architecture on a phone', thread: 'architecture-phone', body: ARCHITECTURE });
+    await page.goto(`${world.url}#thread=${sent.thread_id}`);
+    const mermaid = message(page, sent.message_id as string).locator('[data-diagram-block="mermaid"]');
+    await expect(mermaid.locator('[data-diagram-svg] svg')).toBeVisible();
+    await mermaid.locator('[data-diagram-expand]').tap();
+    const popout = page.locator('[data-diagram-popout]');
+    const canvas = popout.locator('[data-diagram-canvas]');
+    const svg = popout.locator('[data-diagram-svg]');
+    await expect(svg.locator('svg')).toBeVisible();
+
+    /** The canvas's live translate and scale. */
+    const view = async () => {
+      const transform = await svg.evaluate((el) => (el as HTMLElement).style.transform);
+      const [, x, y, scale] = /translate\(([-\d.e]+)px, ([-\d.e]+)px\) scale\(([-\d.e]+)\)/.exec(transform)!;
+      return { x: Number(x), y: Number(y), scale: Number(scale) };
+    };
+    /** The view once two reads in a row agree (Fit runs on arrival and on every resize). */
+    const settledView = async () => {
+      let last = '';
+      await expect.poll(async () => {
+        const now = JSON.stringify(await view());
+        const same = now === last;
+        last = now;
+        return same;
+      }).toBe(true);
+      return view();
+    };
+    const box = (await canvas.boundingBox())!;
+    const centre: Point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    /** The diagram point (its own pixels) under a screen point. */
+    const under = (v: { x: number; y: number; scale: number }, at: Point) => ({ x: (at.x - box.x - v.x) / v.scale, y: (at.y - box.y - v.y) / v.scale });
+    const doubleTap = async (at: Point) => {
+      await page.touchscreen.tap(at.x, at.y);
+      await page.waitForTimeout(80);
+      await page.touchscreen.tap(at.x, at.y);
+    };
+
+    const fit = await settledView();
+    await shot(page, '10-phone-popout-fit');
+
+    // Two fingers spread from 60 px to 220 px apart about the middle: the diagram grows with them, about them.
+    const spot = under(fit, centre);
+    await pinch(page, [{ x: centre.x - 30, y: centre.y }, { x: centre.x + 30, y: centre.y }], [{ x: centre.x - 110, y: centre.y }, { x: centre.x + 110, y: centre.y }]);
+    const pinched = await settledView();
+    await shot(page, '11-phone-pinched');
+    expect.soft(pinched.scale, 'a pinch zooms').toBeGreaterThan(fit.scale * 2.5);
+    const still = under(pinched, centre);
+    expect.soft(Math.hypot(still.x - spot.x, still.y - spot.y) * pinched.scale, 'the part between the fingers stays between them').toBeLessThan(6);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // One finger pans the zoomed diagram, and opens nothing.
+    const hand = await finger(page, 'chromium');
+    await hand.down(centre.x, centre.y, -90, -70);
+    await hand.up();
+    const panned = await settledView();
+    expect.soft(panned.x - pinched.x, 'one finger pans sideways').toBeCloseTo(-90, 0);
+    expect.soft(panned.y - pinched.y, 'one finger pans down').toBeCloseTo(-70, 0);
+    expect.soft(panned.scale).toBeCloseTo(pinched.scale, 3);
+
+    // Two fingers moving together pan as well, at the same scale.
+    await pinch(page, [{ x: centre.x - 50, y: centre.y }, { x: centre.x + 50, y: centre.y }], [{ x: centre.x - 50, y: centre.y + 80 }, { x: centre.x + 50, y: centre.y + 80 }]);
+    const dragged = await settledView();
+    await shot(page, '12-phone-panned');
+    expect.soft(dragged.y - panned.y, 'two fingers pan').toBeCloseTo(80, 0);
+    expect.soft(dragged.scale).toBeCloseTo(panned.scale, 3);
+    await page.waitForTimeout(500);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // A double tap away from Fit goes back to Fit; at Fit it zooms in about the finger.
+    await doubleTap(centre);
+    const back = await settledView();
+    await shot(page, '13-phone-double-tap-back-to-fit');
+    expect.soft(back.scale, 'a double tap zoomed in goes back to Fit').toBeCloseTo(fit.scale, 3);
+    const tapAt: Point = { x: centre.x + 40, y: centre.y - 60 };
+    const tapSpot = under(back, tapAt);
+    await doubleTap(tapAt);
+    const zoomed = await settledView();
+    await shot(page, '14-phone-double-tap-zoomed-in');
+    expect.soft(zoomed.scale, 'a double tap at Fit zooms in').toBeCloseTo(fit.scale * 2, 3);
+    const tapStill = under(zoomed, tapAt);
+    expect.soft(Math.hypot(tapStill.x - tapSpot.x, tapStill.y - tapSpot.y) * zoomed.scale, 'about the finger').toBeLessThan(2);
+    await page.waitForTimeout(500);
+    await expect.soft(composer(page)).toHaveCount(0);
+
+    // The corner control's Fit still fits.
+    await popout.getByRole('button', { name: 'Fit diagram' }).tap();
+    expect.soft((await settledView()).scale).toBeCloseTo(fit.scale, 3);
+
+    // A single tap on a part still opens the composer on it.
+    const codex = await centreOf(part(popout, 'Codex'));
+    await page.touchscreen.tap(codex.x, codex.y);
+    await expect(composer(page)).toContainText('Codex');
+    await composer(page).getByRole('button', { name: 'Cancel' }).tap();
+    await expect(composer(page)).toHaveCount(0);
+    expect(errors).toEqual([]);
   } finally {
     await context.close();
   }
