@@ -6642,6 +6642,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
    Comment, under the tabs. The card is the one tool left, solid so the page's words do not read through it, and every
    target is 44 px. */
 .ib-view.ib-fullview.ib-phone:has(.ib-fcomp-slot:not([hidden]) .ib-htmlcomment) .ib-fvdock { visibility: hidden; }
+/* Gathered with words in the card (approval "inbox-fullscreen-gather"), the card stays and the dock with it hidden:
+   the corner control still shows, the one way back. */
+.ib-view.ib-fullview.ib-phone:has(.ib-fcomp-slot:not([hidden]) .ib-htmlcomment) .ib-fvdock[data-bar="tucked"] .ib-fvhandle { visibility: visible; }
 .ib-view.ib-fullview.ib-phone:has(.ib-htmlframe) .ib-fcomp.ib-phone { background: var(--popover); }
 .ib-htmlcomment { flex-direction: column; }
 .ib-htmlcomment-on { display: flex; align-items: center; gap: 2px; min-height: 44px; padding-left: 6px; }

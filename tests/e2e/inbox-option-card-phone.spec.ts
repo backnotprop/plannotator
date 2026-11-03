@@ -131,9 +131,12 @@ function layout(page: Page) {
 
 type Layout = Awaited<ReturnType<typeof layout>>;
 
-/** Where the picture's clear space ends: the card's top, or the toolbar's. */
-const floor = (l: Layout) => (l.card ?? l.toolbar)!.top;
-const ceiling = (l: Layout) => l.sizeBar!.bottom;
+/**
+ * Where the picture's clear space ends: the card's top, or the toolbar's, under the size bar. Gathered into the corner
+ * control (approval "inbox-fullscreen-gather"), the size bar, the card and the toolbar all go: the whole stage is clear.
+ */
+const floor = (l: Layout) => (l.card ?? l.toolbar)?.top ?? l.stage.bottom;
+const ceiling = (l: Layout) => l.sizeBar?.bottom ?? l.stage.top;
 const same = (a: Box, b: Box) => {
   for (const side of ['top', 'bottom', 'left', 'right'] as const) expect(Math.abs(a[side] - b[side]), side).toBeLessThan(1.5);
 };
