@@ -367,6 +367,17 @@ After you approve a plan in Plannotator, Qwen Code asks you to confirm it once m
 
 To install the extension by hand from a Plannotator checkout: `qwen extensions install ./apps/qwen-code/extension --consent`. `plannotator uninstall` removes it.
 
+## T3 Code
+
+For Claude threads in T3 Code, connect Plannotator to T3 once. Then, when you answer an agent in the Plannotator Inbox, your reply arrives in its T3 thread as a new turn.
+
+```bash
+plannotator t3 login --url <T3 MCP URL>
+claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3
+```
+
+The MCP URL is in T3 Settings → Connections and ends in `/mcp`. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. Skip the second line if Claude Code already has a `plannotator-inbox` server. With `--t3`, that server shows its tools only inside T3 threads. Only Claude threads in T3 wake; other agents in T3 read the reply when they next check the Inbox. `plannotator t3 --help` has the details.
+
 ## Kilo Code
 
 Coming soon.

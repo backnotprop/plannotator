@@ -255,6 +255,7 @@ Then finish the step for your agent:
 | **Kiro CLI** | Nothing. Skills and an example agent are installed automatically. Try `kiro-cli chat --agent plannotator`. | [README](apps/kiro-cli/README.md) |
 | **OpenCode** | Add `"plugin": ["@plannotator/opencode@latest"]` to `opencode.json`. Restart OpenCode. | [README](apps/opencode-plugin/README.md) |
 | **Pi** | Skip the installer. Just `pi install npm:@plannotator/pi-extension`. Start Pi with `--plan`, or toggle with `/plannotator-plan-mode`. | [README](apps/pi-extension/README.md) |
+| **T3 Code** | For Claude threads in T3: run `plannotator t3 --help` and follow its two steps (sign in to T3 once, add the `--t3` MCP entry). Your Inbox replies then arrive in the thread as new turns. | [README](packages/t3-code/README.md) |
 
 **Updating:** run the installer again for the binary and slash commands. It also updates an installed Claude Code plugin when the `claude` command is on your PATH (opt out with `--skip-claude-plugin`); otherwise run `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code (refreshing the marketplace alone does not update the plugin). Pi: `pi update --extensions` (a plain `pi update` updates only Pi).
 

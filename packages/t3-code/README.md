@@ -2,7 +2,9 @@
 
 Claude keeps using ordinary Plannotator commands. An optional installer-managed Claude hook connects supported review launches to the originating T3 conversation automatically, after one-time authorization. **Ask this session** sends a question into that conversation and displays its answer in the review.
 
-This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. It requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill. Inbox is outside this integration.
+This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. It requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill.
+
+The Plannotator Inbox uses the same sign-in: after `plannotator t3 login`, a reply the person sends to an agent in a T3 Claude thread arrives in that thread as a new turn. Its setup is in `plannotator t3 --help`: the login, then `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (that entry lists its tools only inside a T3 thread). See "T3 Code" in `docs/agent-guides/inbox-notifications-and-agents.md`.
 
 ## Setup
 

@@ -1,9 +1,30 @@
+/**
+ * `plannotator t3 --help`. The first part (up to "Ask this session") is the
+ * owner-approved setup text for the Inbox wake: keep it short and plain.
+ */
 export const T3_CLI_USAGE = [
-  "One-time connection setup:",
+  "Usage:",
   "  plannotator t3 login --url <T3 MCP URL>",
-  "  plannotator t3 logout --url <T3 MCP URL>   (forget the grant, stop its workers)",
+  "  plannotator t3 logout --url <T3 MCP URL>",
   "",
-  "Opt in to the Claude hook with install.sh --with-t3, then restart the Claude provider session.",
+  "Connect Plannotator to T3 Code once. Then, when you answer an agent in the",
+  "Plannotator Inbox, your reply arrives in its T3 thread as a new turn.",
+  "",
+  "Setup, once per computer:",
+  "  1. plannotator t3 login --url <T3 MCP URL>",
+  "     The URL is in T3 Settings → Connections and ends in /mcp. On T3's sign-in",
+  "     page, choose Supervised or higher, at least the mode your threads run in.",
+  "     Read only cannot send replies.",
+  "  2. claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3",
+  "     Skip this if Claude Code already has a plannotator-inbox server.",
+  "     With --t3, the server shows its tools only inside T3 threads.",
+  "",
+  "Only Claude threads in T3 wake. Other agents in T3 read the reply when they",
+  "next check the Inbox. A sign-in lasts 30 days; then run login again.",
+  "logout forgets the sign-in.",
+  "",
+  "Ask this session from reviews (optional): opt in to the Claude hook with",
+  "install.sh --with-t3, then restart the Claude provider session.",
   "Agents use ordinary plannotator review, annotate and last commands. The default plugin is unchanged.",
   "The hook discovers their originating T3 conversation automatically. The skill needs no changes.",
   "Uses T3's existing external MCP API; no Plannotator MCP server is added to the provider.",
