@@ -1,7 +1,7 @@
 /**
  * The calm moment for a one-time reveal (approval "inbox-feature-reveal", 2026-11-03; first built for the Snooze
  * announcement, approval "inbox-snooze-announce"). The Inbox decides which reveal this page may arm (settings
- * `reveal.next`, packages/core/inbox-reveals.ts) and spends the claim; the page decides when:
+ * `reveal.next`, packages/shared/inbox/reveals.ts) and spends the claim; the page decides when:
  *
  *  - right after the person LEAVES a thread they had open for `readMs` (5 s) or more (each reveal says which leaves
  *    count: Snooze's thread must still wait on them; the Board's leave must land on the list);

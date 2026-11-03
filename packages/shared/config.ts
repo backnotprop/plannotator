@@ -464,7 +464,7 @@ export interface PlannotatorConfig {
   inboxBoard?: boolean;
   /**
    * The queue of one-time reveals for returning users (approval
-   * "inbox-feature-reveal"; rules in packages/core/inbox-reveals.ts). Written
+   * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
    * on this machine (list options, voice, Snooze, the Board), the 48 h
    * spacing's clock. `waitingSince`: when each reveal first became next, for

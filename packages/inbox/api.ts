@@ -43,7 +43,6 @@ import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import type { RevealId as InboxRevealId } from '@plannotator/core/inbox-reveals';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
@@ -69,6 +68,9 @@ import type {
 
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
+
+/** A reveal for returning users, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server side). */
+export type InboxRevealId = 'snooze' | 'board' | 'steps';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 

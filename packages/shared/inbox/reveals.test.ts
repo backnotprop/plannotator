@@ -5,7 +5,7 @@
  * change) or its 5 threads moving; a dev build, a feature the person decided, or the steps placeholder being revealed.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./inbox-reveals";
+import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;

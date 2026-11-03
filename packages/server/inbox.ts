@@ -199,7 +199,7 @@ import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
-import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/core/inbox-reveals";
+import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -1795,7 +1795,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const claimListIntro = (via: RequestVia): boolean => {
     if (via !== "local" || !listIntroState().due) return false;
     const at = new Date().toISOString();
-    // A one-time announcement: it counts toward the reveals' 48 h spacing (inbox-reveals.ts). A dev build never stamps
+    // A one-time announcement: it counts toward the reveals' 48 h spacing (shared/inbox/reveals.ts). A dev build never stamps
     // that clock.
     saveConfig({
       inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at },
@@ -1828,7 +1828,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
   /**
    * Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. Its own
-   * rules, and the reveals' queue (inbox-reveals.ts): the 48 h spacing, and the Board going first once Snooze waited
+   * rules, and the reveals' queue (shared/inbox/reveals.ts): the 48 h spacing, and the Board going first once Snooze waited
    * three days for its moment.
    */
   const snoozeIntroState = (owner: boolean) => ({
@@ -1925,7 +1925,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/core/inbox-reveals.ts):
+   * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/shared/inbox/reveals.ts):
    * Snooze, then the Board. Read live, like Snooze: the days pass while the Inbox runs. A dev build decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
    * the person's (or an earlier reveal's), and a test's `board` option decides it too.
@@ -2077,7 +2077,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     list_intro: listIntroState(),
     /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
     snooze_intro: snoozeIntroState(!guest),
-    /** The reveals for returning users (inbox-reveals.ts): the one this page may arm, or null. Never for a guest. */
+    /** The reveals for returning users (shared/inbox/reveals.ts): the one this page may arm, or null. Never for a guest. */
     reveal: { next: revealNow(!guest) },
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
