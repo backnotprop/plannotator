@@ -178,7 +178,7 @@ test('desktop: never on load; at the calm moment the Board turns on with its fir
   await expect(b.locator(DIALOG)).toHaveCount(0);
   expect(config(w).inboxBoard).toBeUndefined();
   // The moment: a thread read and closed, back to the list.
-  await readAndLeave(a, w.ids['cache-rate']!);
+  await readAndLeave(a, w.ids['invoice-pdf']!);
   await expect(a.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
   // The claim turned the Board on and stamped its first-visit dialog, before the person did anything with it.
   const saved = config(w);
@@ -232,7 +232,7 @@ test('a 390 px phone: the sidebar sheet before and after, the dialog as a sheet,
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
   await page.waitForTimeout(PAGE_AGE_MS);
-  await readAndLeave(page, w.ids['cache-rate']!, true);
+  await readAndLeave(page, w.ids['invoice-pdf']!, true);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
   expect(config(w).inboxBoard).toBe(true);
   await shots(page, 'phone-{s}-reveal');
