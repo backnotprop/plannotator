@@ -6172,7 +6172,13 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-ncd-phone .ib-ncd-body { flex: 1; }
   .ib-ncd-phone .ib-ncd-modes { flex: 1; justify-content: space-around; }
   .ib-ncd-phone .ib-ncd-mode { min-height: 44px; flex: 1; justify-content: center; }
-  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) 12px 0; min-height: 56px; }
+  /* Every edge clears the safe areas (a phone on its side has ~59 px left and right; the home bar is below). */
+  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left)); min-height: 56px; }
+  .ib-ncd-phone .ib-ncd-body { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-row { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-err { margin-left: calc(22px + env(safe-area-inset-left)); margin-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-foot { padding: 12px calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
+  :root[data-ib-keyboard] .ib-ncd-phone .ib-ncd-foot { padding-bottom: 12px; }
   .ib-ncd-phone .ib-ncd-head h2 { text-align: center; }
   .ib-ncd-pick .ib-cp-picker { left: 8px; right: 8px; width: auto; }
   dialog.ib-dlg.ib-bi.ib-bi-phone { margin: auto auto 12px; }

@@ -6,11 +6,17 @@
  * width was capped and the box sat at the left edge.
  *
  * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
- * default text size and the largest (15), in light and dark: the window's box
- * is the viewport's, Cancel and Add sit in its top bar inside the screen, and
- * nothing scrolls sideways. With a keyboard up (`--ib-vvh`, as phone.ts sets it
- * on an iPhone) the window ends at the keyboard's top and the title and notes
- * are above it. At 1440 px the window is as before: 760 px wide and centred.
+ * default text size and the largest (15), each in one colour scheme: the
+ * window's box is the viewport's, Cancel and Add sit in its top bar inside the
+ * screen, and nothing scrolls sideways. With a keyboard up (`--ib-vvh`, as
+ * phone.ts sets it on an iPhone) the window ends at the keyboard's top and the
+ * title and notes are above it. At 1440 px the window is as before: 760 px wide
+ * and centred.
+ *
+ * Not proved here: the left, right and bottom safe areas (Chromium has no
+ * `env(safe-area-inset-*)` to emulate; a phone on its side shows them), and the
+ * layout in the other colour scheme: each phone test only takes a PNG in light
+ * and in dark for a person to look at.
  *
  * Build the binary first (see inbox.spec.ts). PNGs land in
  * .local/proof/new-card-phone/ (PLANNOTATOR_E2E_SHOTS_DIR names another folder).
@@ -110,6 +116,7 @@ for (const size of [14, 15]) {
         await openNewCard(page);
         await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : '15');
         await expect(page.locator('dialog[data-dialog="new-card"]')).toHaveClass(/ib-ncd-phone/);
+        // PNGs only, for a person to look at: the measures below run once, in this test's own scheme.
         for (const shotScheme of ['light', 'dark'] as const) {
           await page.emulateMedia({ colorScheme: shotScheme });
           await page.waitForTimeout(150);
