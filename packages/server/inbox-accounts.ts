@@ -36,7 +36,7 @@
  * A linked machine's read is this same read on that machine, asked for through
  * its door (`accountsOf` in inbox-machines.ts) and picked by name again here.
  *
- * Switch (step 3, this computer only) is `cswap switch <number> --json`, which
+ * Switch (step 3; a linked machine's is the same call there) is `cswap switch <number> --json`, which
  * writes the login Claude Code uses. Never killed, at any limit; one at a
  * time; a fixed answer with no address and no `cswap` words. Before it runs, a
  * new list (never the kept answer) must still have the login the window showed
@@ -44,7 +44,7 @@
  * row's, so a list renumbered since switches nothing, or says so. Its end drops
  * the kept answer and any run begun before it, and a read asked for during it
  * waits for it, so the next read is a new run that shows the account in use. `switchTo` takes no request: a linked machine's
- * switch (step 4) is this same call on that machine.
+ * switch is this same call on that machine, reached through its door (`parsePeerSwitch` reads its answer here).
  */
 
 import type {
@@ -52,8 +52,10 @@ import type {
   InboxAccountsFailure,
   InboxAccountsRead,
   InboxAccountSwitch,
+  InboxAccountSwitchFailure,
   InboxAccountSwitchTarget,
   InboxAccountUsage,
+  InboxMachineAccountSwitch,
   InboxMachineAccountsRead,
   InboxUsageWindow,
 } from "@plannotator/core/inbox-types";
@@ -147,6 +149,23 @@ export function parsePeerAccounts(value: unknown): InboxMachineAccountsRead {
   if (value.state === "failed") return failed(typeof value.reason === "string" && FAILURES.includes(value.reason) ? (value.reason as InboxAccountsFailure) : "run_failed");
   const accounts = value.state === "accounts" && Array.isArray(value.accounts) ? accountList(value.accounts.slice(0, MACHINE_ACCOUNTS_MAX_ROWS)) : null;
   return accounts ? { state: "accounts", accounts } : { state: "needs_update" };
+}
+
+const SWITCH_FAILURES: readonly string[] = [...FAILURES, ...(["changed", "renumbered", "busy"] satisfies InboxAccountSwitchFailure[])];
+
+/**
+ * A linked machine's switch answer, picked by name again: a number, a known
+ * reason, or not installed. Anything else came from a build apart, which the
+ * read after it settles.
+ */
+export function parsePeerSwitch(value: unknown): InboxMachineAccountSwitch {
+  if (!isRecord(value)) return { state: "unreachable" };
+  if (value.state === "not_installed") return { state: "not_installed" };
+  if (value.state === "switched" && typeof value.number === "number" && Number.isSafeInteger(value.number) && value.number >= 0) return { state: "switched", number: value.number };
+  if (value.state === "failed") {
+    return { state: "failed", reason: typeof value.reason === "string" && SWITCH_FAILURES.includes(value.reason) ? (value.reason as InboxAccountSwitchFailure) : "run_failed" };
+  }
+  return { state: "needs_update" };
 }
 
 /** What the window may know of `cswap list --json`'s output. */

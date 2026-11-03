@@ -216,9 +216,9 @@ test('Settings: one block per machine, this one first, each with its own list, a
   await expect(notesOf(page, 'Studio', 'work')).toHaveText('on Laptop');
   await expect(notesOf(page, 'Mini', 'team')).toContainText('most room');
   await expect(rowOf(page, 'Mini').locator('[data-in-use] [data-l="hot"]')).toHaveCount(1);
-  // This machine's other rows are the switch; a linked machine's rows are not, in this build.
+  // Every row not in use is the switch, on every machine.
   await expect(rowOf(page, 'Studio').locator('button[data-account]')).toHaveCount(1);
-  await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(0);
+  await expect(rowOf(page, 'Mini').locator('button[data-account]')).toHaveCount(2);
 
   // The usage lines up down the page, every machine's rows in one column.
   const left = await page.locator('[data-account-use="bars"]').evaluateAll((els) => [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().left)))]);
