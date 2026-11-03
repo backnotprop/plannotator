@@ -392,17 +392,21 @@ export const INBOX_TOOL_HELP_NOTE = "Every field and question syntax: `plannotat
 export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlasts a reply) is off until the person turns it on; see `plannotator card --help`."
 
 /**
- * Thread steps (approval "inbox-thread-steps", 2026-11-03): the `steps`
- * action's line, the owner's approved text word for word (the agent tool
- * prints it as `- steps: <this>`; the MCP tool's description is the same).
- * Served only while the person has steps on (config.json `inboxSteps`):
- * off, no agent text carries any of it.
+ * Thread steps (approval "inbox-thread-steps", 2026-11-03): the owner's
+ * approved text word for word, after `steps: `. It rides the `steps` field's
+ * description (a field description does not count toward Claude Code's 2,048
+ * characters; the owner chose this over a cut description) and is the MCP
+ * tool's description. Served only while the person has steps on (config.json
+ * `inboxSteps`): off, no agent text carries any of it.
  */
 export const INBOX_STEPS_LEAD =
   'your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.'
 
-/** The `steps` field (the action's, and send_message's while steps are on). */
-export const INBOX_STEPS_FIELD_DESCRIPTION = 'The whole list: [{ step, status, note? }]. No thread yet: send it with the send_message that starts one.'
+/** The agent tool's line for the `steps` action (the owner, 2026-11-03): short, so the description stays under 2,048. */
+export const INBOX_STEPS_ACTION_LINE = "keep the person's view of your plan for this thread current (details on the steps field)."
+
+/** The `steps` field (the action's, and send_message's while steps are on): the approved text, then where a list goes before there is a thread. */
+export const INBOX_STEPS_FIELD_DESCRIPTION = `steps: ${INBOX_STEPS_LEAD} No thread yet: send it with the send_message that starts one.`
 
 /**
  * The wake's one line on a reply in a thread where the session keeps steps
@@ -438,7 +442,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   search: 'Find messages by words, older ones too (read-only).',
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
-  steps: INBOX_STEPS_LEAD,
+  steps: INBOX_STEPS_ACTION_LINE,
 }
 
 /**
