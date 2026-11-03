@@ -253,7 +253,7 @@ async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType
 
 const button = () => document.querySelector<HTMLButtonElement>('[data-steps-button]');
 const panel = () => document.querySelector<HTMLElement>('[data-steps-panel]');
-const rows = () => [...(panel()?.querySelectorAll<HTMLElement>('.ib-st') ?? [])];
+const rows = () => [...(panel()?.querySelectorAll<HTMLElement>('.ib-st-row') ?? [])];
 
 async function press(el: HTMLElement) {
   await act(async () => {
@@ -397,4 +397,50 @@ test.skipIf(!hasDom)('live: a change for this thread or every thread reads again
   await settle();
   await settle();
   expect(button()!.textContent).toBe('4/6');
+});
+
+// Break-ui #1: the step row's class once was `.ib-st`, which is also the foot's status words (the draft note, the
+// archived note), Settings → Archived and the Open in caret: its padding and hover moved all of them. Checked with the
+// window's own stylesheet, so a rule that reaches them again fails here.
+test.skipIf(!hasDom)('the checklist\'s row styles never reach the foot\'s status words', async () => {
+  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+  const box = document.createElement('div');
+  box.className = 'pn-inbox';
+  box.innerHTML = '<div class="ib-acts"><span class="ib-draft-foot"><span class="ib-st">Your reply, 4 picks</span></span></div><ul class="ib-sts"><li class="ib-st-row">Replay</li></ul>';
+  document.body.appendChild(box);
+  try {
+    const status = getComputedStyle(box.querySelector('.ib-st')!);
+    const row = getComputedStyle(box.querySelector('.ib-st-row')!);
+    // The stylesheet is in force: the step row has its 10 px sides.
+    expect(row.paddingLeft).toBe('10px');
+    expect(status.paddingLeft === '' || status.paddingLeft === '0px').toBe(true);
+    expect(status.display).not.toBe('flex');
+  } finally {
+    box.remove();
+    style.remove();
+  }
+});
+
+// Break-ui #2: on a phone every done time read "2:…". A time never shrinks; a note does.
+test.skipIf(!hasDom)('a step\'s time keeps its width; only a note gives way', async () => {
+  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+  await render();
+  await until(() => !!button(), 'the steps button');
+  await openPanel();
+  try {
+    const done = rows().find((r) => r.dataset.stepStatus === 'done')!.querySelector<HTMLElement>('.ib-st-m')!;
+    const noted = rows().find((r) => r.dataset.stepStatus === 'doing')!.querySelector<HTMLElement>('.ib-st-m')!;
+    expect(getComputedStyle(done).flexShrink).toBe('0');
+    expect(getComputedStyle(noted).flexShrink).toBe('1');
+    // The step's own words read in their own direction (an Arabic step starts at its right).
+    expect(rows()[0]!.querySelector('.ib-st-t')!.getAttribute('dir')).toBe('auto');
+  } finally {
+    style.remove();
+  }
 });

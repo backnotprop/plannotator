@@ -15,18 +15,21 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
       {list.steps.map((step, index) => {
         const meta = stepMeta(step, now);
         return (
-          <li key={`${index}:${step.step}`} className="ib-st" data-step-status={step.status} aria-label={`${step.step}, ${STEP_STATUS_WORDS[step.status]}${step.note && step.status !== 'done' ? `: ${step.note}` : ''}`}>
+          <li key={`${index}:${step.step}`} className="ib-st-row" data-step-status={step.status} aria-label={`${step.step}, ${STEP_STATUS_WORDS[step.status]}${step.note && step.status !== 'done' ? `: ${step.note}` : ''}`}>
             <span className="ib-st-gl">
               <StepGlyph status={step.status} />
             </span>
-            <span className="ib-st-t">{step.step}</span>
+            {/* An agent's words, in whatever script: the browser finds their direction. */}
+            <span className="ib-st-t" dir="auto">
+              {step.step}
+            </span>
             {meta?.kind === 'time' && (
-              <span className="ib-st-m" title={meta.title}>
+              <span className="ib-st-m ib-st-time" title={meta.title}>
                 {meta.text}
               </span>
             )}
             {meta?.kind === 'note' && (
-              <span className="ib-st-m" title={meta.text}>
+              <span className="ib-st-m" dir="auto" title={meta.text}>
                 {meta.text}
               </span>
             )}
@@ -55,7 +58,7 @@ export function StepsHead({ list, label, children, now, headingId }: { list: Inb
   const asOf = stepsAsOf(list, now);
   return (
     <div className="ib-st-head" data-steps-head="">
-      <span className="ib-st-lbl" id={headingId}>
+      <span className="ib-st-lbl" id={headingId} title={label} dir="auto">
         {label}
       </span>
       <span className="ib-st-plan" aria-label={`${done} of ${total} done`}>
