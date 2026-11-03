@@ -386,6 +386,7 @@ function switchLineText(line: SwitchLine, label: string): string {
     bad_output: 'claude-swap gave an unreadable answer.',
     unknown_schema: 'Update Plannotator and claude-swap.',
     changed: 'The accounts changed. Pick again.',
+    renumbered: 'The accounts changed during the switch. The list shows the one in use.',
     busy: 'Another switch is going.',
     not_installed: 'claude-swap is not installed.',
     owner_only: 'Owner only.',
@@ -532,7 +533,7 @@ function MachineGroup({ self, view, linked, rows }: { self: string; view: Accoun
               rows={rows}
               active={active}
               lastSwitch={lastSwitch}
-              onSwitch={(to, label) => void switchTo({ number: to.number, email: to.email, organizationName: to.organizationName }, label)}
+              onSwitch={(to, label) => void switchTo({ number: to.number, email: to.email, organizationName: to.organizationName, alias: to.alias }, label)}
             />
           ) : undefined}
         </MachineRow>

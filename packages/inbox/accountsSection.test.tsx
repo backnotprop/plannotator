@@ -1476,3 +1476,35 @@ test.skipIf(!hasDom)('the peek stays read-only: no switch in it, before or after
   expect(peek()!.textContent).not.toContain('Switch');
   expect(peek()!.textContent).toContain('personal');
 });
+
+test.skipIf(!hasDom)("a later read answers the switch's line: Refresh clears \"Still switching\" once it shows the account in use, and a \"Couldn't switch\" too", async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  switchRoute = async () => json({ state: 'failed', reason: 'timed_out' });
+  accountsRoute = async () => json({ state: 'failed', reason: 'timed_out' });
+  await switchTo(el, 1);
+  await until(() => switchFailed(el)?.getAttribute('data-accounts-switch-failed') === 'still_switching', 'still switching');
+  // The switch ended meanwhile, in the account picked.
+  accountsRoute = null;
+  answer({ stdout: LIST_AFTER });
+  act(() => refresh(el).click());
+  await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
+  expect(switchFailed(el)).toBeNull();
+
+  switchRoute = async () => json({ state: 'failed', reason: 'run_failed' });
+  await switchTo(el, 2);
+  await until(() => switchFailed(el) !== null, 'the failure line');
+  act(() => refresh(el).click());
+  await until(() => switchFailed(el) === null, 'the line answered');
+  expect(switchControl(el)!.textContent).toBe('personal');
+});
+
+test.skipIf(!hasDom)('a switch that went to another login under the same number says so, and the control shows the one the read shows', async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  switchRoute = async () => json({ state: 'failed', reason: 'renumbered' });
+  await switchTo(el, 1);
+  await until(() => switchFailed(el) !== null, 'the line');
+  expect(switchFailed(el)!.textContent).toBe("Couldn't switch to personal. The accounts changed during the switch. The list shows the one in use.");
+  expect(switches[0]).toMatchObject({ number: 1, email: 'a@fake.test', organizationName: 'Fake a@fake.test', alias: 'personal' });
+});

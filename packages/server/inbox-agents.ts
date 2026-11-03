@@ -173,6 +173,15 @@ export function runUntilExit(argv: readonly string[], env: Readonly<Record<strin
   return spawnRun(argv, env, hardLimitMs, undefined, undefined, true);
 }
 
+/**
+ * `runUntilExit` with no limit at all: never killed, however long it takes,
+ * and left to finish if this process stops. For a run that writes a login
+ * (`cswap switch`), where a kill at any moment could land mid-write.
+ */
+export function runToExit(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): Promise<AgentRunResult> {
+  return spawnRun(argv, env, Number.POSITIVE_INFINITY, undefined, undefined, true);
+}
+
 function spawnRun(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
@@ -235,10 +244,11 @@ function spawnRun(
       child.stderr?.destroy();
       done(result);
     };
-    const timer = setTimeout(stopRun, timeoutMs);
+    // No limit (`runToExit`): no timer, since setTimeout would take Infinity as 1 ms.
+    const timer = Number.isFinite(timeoutMs) ? setTimeout(stopRun, timeoutMs) : undefined;
     if (outlivesThisProcess) {
       // Not in liveRuns, and nothing here keeps this process up for it.
-      timer.unref?.();
+      timer?.unref?.();
       child.unref();
       (child.stdout as { unref?: () => void } | null)?.unref?.();
     } else {

@@ -35,7 +35,7 @@ export interface AccountSwitch {
   label: string;
   /** From the pick until the read after the switch answers: the control says "Switching…". */
   going: boolean;
-  /** Null while going, and once the read after it shows `to` in use. */
+  /** Null while going, once the read after it shows `to` in use, and once any later read answers with a list: the page then shows that read. */
   line: SwitchLine | null;
 }
 
@@ -92,7 +92,7 @@ async function readMachines(fresh: boolean, going: Map<string, { again: boolean 
 
 /** Whether `account` is the login `to` names: the read after a switch says whether it took. */
 const isTarget = (account: InboxAccount, to: InboxAccountSwitchTarget) =>
-  account.number === to.number && (account.email ?? null) === to.email && (account.organizationName ?? null) === to.organizationName;
+  account.number === to.number && (account.email ?? null) === to.email && (account.organizationName ?? null) === to.organizationName && (account.alias ?? null) === to.alias;
 
 /**
  * What a switch leaves on the page, from its answer and the read after it. The
@@ -140,6 +140,8 @@ function useAccountsRead(): Accounts {
         setView(next);
       }
       setReading(false);
+      // A later good read answers the last switch's line, whatever it said: the pill and the list now show where it is.
+      if (next.state === 'accounts') setLastSwitch((held) => (held && !held.going && held.line ? { ...held, line: null } : held));
     };
     running.current ??= run().finally(() => {
       running.current = null;

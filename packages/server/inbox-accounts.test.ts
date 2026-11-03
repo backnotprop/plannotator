@@ -884,7 +884,15 @@ const LIST_AFTER = (() => {
   return JSON.stringify({ ...list, activeAccountNumber: 1, accounts: list.accounts.map((row) => ({ ...row, active: row.number === 1 })) });
 })();
 /** Account 1 of the sample, as the window showed it. */
-const PERSONAL = { number: 1, email: "a@fake.test", organizationName: "Fake a@fake.test" };
+const PERSONAL = { number: 1, email: "a@fake.test", organizationName: "Fake a@fake.test", alias: "personal" };
+/** The sample's API key, as the window showed it: no address, no alias. */
+const KEY = { number: 3, email: null, organizationName: null, alias: null };
+/** The sample list as `cswap swap 1 3` in a terminal leaves it: the API key under #1, `personal` under #3. */
+const SWAPPED = (() => {
+  const list = JSON.parse(LIST) as { accounts: { number: number }[] };
+  const moved = list.accounts.map((row) => ({ ...row, number: row.number === 1 ? 3 : row.number === 3 ? 1 : row.number }));
+  return JSON.stringify({ ...list, accounts: moved.sort((a, b) => a.number - b.number) });
+})();
 const inUse = (read: InboxAccountsRead) => listed(read).find((account) => account.active)?.number;
 const switchCalls = (bin: string) => fakeCswapCalls(bin).filter((call) => call.startsWith("switch"));
 
@@ -899,28 +907,28 @@ describe.skipIf(process.platform === "win32")("switch", () => {
     // No address and none of `cswap`'s words: a door keeps answers on disk.
     expect(text).not.toContain("@");
     expect(text).not.toContain("Account-1");
-    // The match used the kept read: no second list before the switch. The read after it is not the kept one.
-    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json"]);
+    // The match ran a new list, inside the kept answer's time; the read after the switch is a new run too.
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "list --json", "switch 1 --json"]);
     expect(inUse(await w.read())).toBe(1);
-    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json", "list --json"]);
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "list --json", "switch 1 --json", "list --json"]);
   });
 
   test("an API key switches by its number, with no address to match", async () => {
     const stdout = JSON.stringify({ schemaVersion: 1, switched: true, from: { number: 2, email: "b@fake.test" }, to: { number: 3, email: "api-key-3@token.local" }, reason: "switched" });
     const w = await world({ cswapSwitch: { stdout } });
-    expect(await (await w.switchTo({ number: 3, email: null, organizationName: null })).json()).toEqual({ state: "switched", number: 3 });
+    expect(await (await w.switchTo(KEY)).json()).toEqual({ state: "switched", number: 3 });
     expect(switchCalls(w.bin)).toEqual(["switch 3 --json"]);
   });
 
   test("the account already in use switches nothing and says so", async () => {
     const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
-    expect(await (await w.switchTo({ number: 2, email: "b@fake.test", organizationName: "Fake b@fake.test" })).json()).toEqual({ state: "switched", number: 2 });
+    expect(await (await w.switchTo({ number: 2, email: "b@fake.test", organizationName: "Fake b@fake.test", alias: null })).json()).toEqual({ state: "switched", number: 2 });
     expect(switchCalls(w.bin)).toEqual([]);
   });
 
-  test("a list renumbered since the window read it switches nothing: `changed`", async () => {
+  test("a target that is not the login under that number now switches nothing: `changed`", async () => {
     const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
-    for (const target of [{ ...PERSONAL, email: "b@fake.test" }, { ...PERSONAL, organizationName: "Another" }, { ...PERSONAL, number: 9 }, { number: 3, email: "a@fake.test", organizationName: null }]) {
+    for (const target of [{ ...PERSONAL, email: "b@fake.test" }, { ...PERSONAL, organizationName: "Another" }, { ...PERSONAL, alias: null }, { ...PERSONAL, number: 9 }, { ...KEY, email: "a@fake.test" }, { ...KEY, alias: "build" }]) {
       expect(await (await w.switchTo(target)).json()).toEqual({ state: "failed", reason: "changed" });
     }
     expect(switchCalls(w.bin)).toEqual([]);
@@ -933,7 +941,42 @@ describe.skipIf(process.platform === "win32")("switch", () => {
     expect(JSON.parse(text)).toEqual({ state: "failed", reason: "run_failed" });
     expect(text).not.toContain("words-of-cswap");
     expect(inUse(await w.read())).toBe(2);
-    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json", "list --json"]);
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "list --json", "switch 1 --json", "list --json"]);
+  });
+
+  test("renumbered in a terminal inside the kept answer's time (`cswap swap 1 3`): the old #1 is not switched to, whatever the window last read", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 30_000 });
+    expect(inUse(await w.read())).toBe(2);
+    writeFakeCswap(w.bin, { stdout: SWAPPED }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+    // Still the kept answer for a read: the window can't know.
+    expect(listed(await w.read())[0]!.alias).toBe("personal");
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "failed", reason: "changed" });
+    expect(switchCalls(w.bin)).toEqual([]);
+  });
+
+  test("renumbered between the list before and the switch: `cswap` names another address under that number, and the answer says so", async () => {
+    // As if `cswap swap 1 3` ran in the instant between: it switched to #1, which was by then the API key.
+    const stdout = JSON.stringify({ schemaVersion: 1, switched: true, from: { number: 2, email: "b@fake.test" }, to: { number: 1, email: "api-key-3@token.local" }, reason: "switched" });
+    const w = await world({ cswapSwitch: { stdout } });
+    const text = await (await w.switchTo(PERSONAL)).text();
+    expect(JSON.parse(text)).toEqual({ state: "failed", reason: "renumbered" });
+    expect(text).not.toContain("@");
+  });
+
+  test("a list run going when a switch starts ends first, and never serves as the read after it", async () => {
+    // The run is slow; the kept answer is still fresh when a Refresh elsewhere (another window, a phone, a linked machine) starts another.
+    const w = await world({ cswap: { stdout: LIST, delay: 0.4 }, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 500 });
+    expect(inUse(await w.read())).toBe(2);
+    await Bun.sleep(150);
+    const elsewhere = w.read("?fresh=1");
+    await waitFor("the other read's run to start", () => fakeCswapCalls(w.bin).length === 2);
+    const switched = await (await w.switchTo(PERSONAL)).json();
+    expect(switched).toEqual({ state: "switched", number: 1 });
+    expect(inUse(await elsewhere)).toBe(2);
+    // Its run ended before the switch's own list, and neither overlapped the switch.
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "list --json", "list --json", "switch 1 --json"]);
+    expect(inUse(await w.read())).toBe(1);
+    expect(inUse(await w.read())).toBe(1);
   });
 
   test.each([
@@ -967,11 +1010,25 @@ describe.skipIf(process.platform === "win32")("switch", () => {
     expect(fakeCswapSwitched(w.bin)).toBe(1);
   });
 
+  test("a switch is never killed, past the person's wait and past the hard limit; it stays busy until it exits, then frees", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 1.2 }, timeoutMs: 200, hardLimitMs: 400 });
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "failed", reason: "timed_out" });
+    await Bun.sleep(500);
+    // Past the hard limit: still going, still the one switch.
+    expect(fakeCswapSwitched(w.bin)).toBe(0);
+    expect(await (await w.switchTo(KEY)).json()).toEqual({ state: "failed", reason: "busy" });
+    await waitFor("the switch to finish by itself", () => fakeCswapSwitched(w.bin) === 1);
+    // Exited: free again, and a read shows where it ended.
+    expect(inUse(await w.read())).toBe(1);
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "switched", number: 1 });
+    expect(switchCalls(w.bin)).toEqual(["switch 1 --json"]);
+  });
+
   test("one switch at a time: a second while one runs is busy and runs nothing", async () => {
     const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 0.5 } });
     const first = w.switchTo(PERSONAL);
     await waitFor("the first switch to start", () => switchCalls(w.bin).length === 1);
-    expect(await (await w.switchTo({ number: 3, email: null, organizationName: null })).json()).toEqual({ state: "failed", reason: "busy" });
+    expect(await (await w.switchTo(KEY)).json()).toEqual({ state: "failed", reason: "busy" });
     expect(await (await first).json()).toEqual({ state: "switched", number: 1 });
     expect(switchCalls(w.bin)).toEqual(["switch 1 --json"]);
   });
@@ -988,6 +1045,35 @@ describe.skipIf(process.platform === "win32")("switch", () => {
     const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
     expect((await w.switchTo(null, { method: "GET" })).status).toBe(405);
     expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+
+  test("a page from an earlier Inbox on this address is refused, as every write is", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    const refused = await w.switchTo({ ...PERSONAL, serverSession: "an-earlier-inbox" });
+    expect(refused.status).toBe(409);
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+
+  test("a switch whose spawn throws answers run_failed and frees the next switch", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-throw-")));
+    roots.push(root);
+    const bin = writeFakeCswap(join(root, "bin"), { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+    const base = createAgentEnvironmentFor({ platform: process.platform, homeDir: root, env: { HOME: root, PATH: bin } });
+    // Each run reads `env` once: the list before the switch is the first, the switch's own spawn the second.
+    let reads = 0;
+    const environment = {
+      ...base,
+      get env() {
+        reads += 1;
+        if (reads === 2) throw new Error("spawn failed");
+        return base.env;
+      },
+    };
+    const accounts = createInboxAccounts({ environment, cacheMs: 0 });
+    expect(await accounts.switchTo(PERSONAL)).toEqual({ state: "failed", reason: "run_failed" });
+    expect(switchCalls(bin)).toEqual([]);
+    expect(await accounts.switchTo(PERSONAL)).toEqual({ state: "switched", number: 1 });
+    expect(switchCalls(bin)).toEqual(["switch 1 --json"]);
   });
 });
 
