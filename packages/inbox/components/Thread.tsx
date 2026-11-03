@@ -5465,7 +5465,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: launchMenu.open, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} onChanged={onChanged} />
                   </div>
                 </article>,
               );

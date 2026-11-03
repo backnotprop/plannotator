@@ -334,6 +334,7 @@ export function PermissionCard({
   followUp,
   terminal,
   fullUsed,
+  guest = false,
   onChanged,
 }: {
   message: InboxMessageWire;
@@ -351,6 +352,8 @@ export function PermissionCard({
   terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
+  /** A tailnet guest's page (`tailnetGuest`): no Stop in the header, as the server answers it `owner_only`. */
+  guest?: boolean;
   onChanged: () => void | Promise<void>;
 }) {
   const q = message.questions?.[0] ?? null;
@@ -470,7 +473,7 @@ export function PermissionCard({
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
-        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (
+        {run && !guest && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (
           <button
             type="button"
             className="pc-stop"
