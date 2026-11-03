@@ -16,7 +16,8 @@
  * Temp PLANNOTATOR_DATA_DIR and a temp agent home only.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { inboxId } from "@plannotator/core/inbox-types";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -307,6 +308,44 @@ describe("what the approval opened, by caller", () => {
     expect(w.inbox.tailscale.state().owner).toBeNull();
     expect(await answerOf(await call(w, "guest", { path: "/api/inbox/agents" }))).toEqual(REFUSED);
     expect(((await (await call(w, "guest", { path: "/api/inbox/settings" })).json()) as Json).guest).toBe(true);
+  });
+});
+
+describe("starting an agent is the owner's (a guest's Send never runs code on this computer)", () => {
+  /** Launch on, and the project's folder there: only the agent check (no `claude` in the sandbox) stands before a start. */
+  async function launchWorld() {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    mkdirSync(project.root, { recursive: true });
+    return { ...w, project };
+  }
+  const launchSend = (projectId: string, key: string): Call => ({ path: "/api/inbox/messages", body: { idempotency_key: key, body: "Fix the build.", to: { launch: { agent: "claude-code", project_id: projectId } } } });
+
+  test("New message with to.launch: a guest is refused before the agent check and nothing is written; the owner and this computer reach it", async () => {
+    const w = await launchWorld();
+    expect(await answerOf(await call(w, "guest", launchSend(w.project.id, "k-guest")))).toEqual([403, "owner_only"]);
+    expect(w.inbox.store.launchedRoots()).toEqual([]);
+    // The owner, over the tailnet or here, gets past who they are: only the sandbox's missing `claude` stops the start.
+    expect(await answerOf(await call(w, "owner", launchSend(w.project.id, "k-owner")))).toEqual([409, "agent_unavailable"]);
+    expect(await answerOf(await call(w, "local", launchSend(w.project.id, "k-local")))).toEqual([409, "agent_unavailable"]);
+  });
+
+  test("Try again on a failed launch: a guest is refused and no start runs; the owner starts it again", async () => {
+    const w = await launchWorld();
+    const id = inboxId("lch");
+    const started = w.inbox.store.startPersonThread({
+      project_id: w.project.id,
+      body: "Fix the build.",
+      to: { host: "claude-code", session: `launch:${id}` },
+      idempotency_key: "k-seed",
+      launch: { id, agent: "claude-code", session_ref: null, folder: w.project.root, scratch: false, started_at: new Date().toISOString() },
+    });
+    w.inbox.store.settleLaunch(started.message.id, { error: { code: "failed", text: "It stopped.", at: new Date().toISOString() } });
+    const startLog = join(w.inbox.store.dir, "launch", id);
+    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${id}/retry`, body: {} }))).toEqual([403, "owner_only"]);
+    expect(w.inbox.store.message(started.message.id)!.launch!.error?.text).toBe("It stopped.");
+    expect(existsSync(startLog)).toBe(false);
+    expect((await call(w, "owner", { path: `/api/inbox/launch/${id}/retry`, body: {} })).status).toBe(200);
   });
 });
 
