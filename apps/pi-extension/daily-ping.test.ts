@@ -8,13 +8,13 @@
  * do-not-track convention stop it.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkDailyPing, type DailyPingTool } from "../../packages/shared/daily-ping.ts";
 import { TELEMETRY_CI_VARS } from "./generated/config.ts";
 import { startAnnotateServer, startPlanReviewServer, startReviewServer } from "./server.ts";
-import { piPingVersion, setPiPingVersionForTests } from "./server/daily-ping.ts";
+import { PI_RELEASE_MARK, piPingVersion, piPingVersionAt, setPiPingVersionForTests } from "./server/daily-ping.ts";
 
 const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-a\n+b\n";
@@ -105,6 +105,17 @@ describe("the daily ping on the Pi servers", () => {
 		} finally {
 			server.stop();
 		}
+	});
+
+	test("an installed Pi package without release CI's mark (a local pack, a copied folder) is a dev build", () => {
+		const pkg = join(dataDir, "node_modules", "@plannotator", "pi-extension");
+		mkdirSync(pkg, { recursive: true });
+		writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: "@plannotator/pi-extension", version: "0.28.46" }));
+		expect(piPingVersionAt(pkg)).toBeUndefined();
+		writeFileSync(join(pkg, PI_RELEASE_MARK), JSON.stringify({ version: "0.28.45" }));
+		expect(piPingVersionAt(pkg)).toBeUndefined();
+		writeFileSync(join(pkg, PI_RELEASE_MARK), JSON.stringify({ version: "0.28.46" }));
+		expect(piPingVersionAt(pkg)).toBe("0.28.46");
 	});
 
 	test("a Pi run from this checkout is a dev build: no request", async () => {

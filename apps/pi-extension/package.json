@@ -51,6 +51,7 @@
     "tool-scope.ts",
     "config.ts",
     "plannotator.json",
+    "release.json",
     "server/",
     "todo-providers/",
     "generated/",

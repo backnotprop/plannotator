@@ -54,7 +54,7 @@
  * Only the local Plannotator process sends, never a browser page.
  */
 import { randomBytes } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { parseTelemetryEnvOff, type TelemetryEnvOff } from "./config";
 import { getPlannotatorDataDir } from "./data-dir";
@@ -234,7 +234,7 @@ export function firstUseWeek(dataDir: string, today: string): string {
   let oldest = Date.parse(`${today}T00:00:00Z`);
   const consider = (path: string) => {
     try {
-      const st = statSync(path);
+      const st = lstatSync(path);
       for (const t of [st.birthtimeMs, st.mtimeMs]) if (t > 0 && t < oldest) oldest = t;
     } catch {
       // Gone, or not ours to read.

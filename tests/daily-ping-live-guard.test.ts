@@ -9,12 +9,17 @@
  *  - the preload turns the ping off for every test and every child that
  *    inherits its environment;
  *  - a test or e2e file that spawns with a release version, or runs the e2e
- *    release binary, must also name NO_ANON_PING or PLANNOTATOR_TEST_SANDBOX.
+ *    release binary, must also name NO_ANON_PING or PLANNOTATOR_TEST_SANDBOX;
+ *    so must a script or workflow that runs a binary under `env -i` (which
+ *    drops CI's variables).
+ * And the other way: release.yml still marks every artifact it ships, so
+ * real users' pings are not silently lost.
  */
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { YAML } from "bun";
 import { DAILY_PING_URL } from "../packages/shared/daily-ping";
 
 const repoRoot = resolve(import.meta.dir, "..");
@@ -65,6 +70,7 @@ describe("the live daily ping is out of reach of tests", () => {
     expect(process.env.NO_ANON_PING).toBe("1");
   });
 
+  // Only this file may name the mark: to check release.yml (below) and to build the probe's control.
   test("no test file makes a release-marked build", () => {
     const offenders = files()
       .map((f) => relative(repoRoot, f))
@@ -84,5 +90,75 @@ describe("the live daily ping is out of reach of tests", () => {
       })
       .map((f) => relative(repoRoot, f));
     expect(offenders).toEqual([]);
+  });
+
+  test("a script or workflow that runs under env -i (no CI variables) turns the ping off", () => {
+    const shells = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        if (SKIP_DIRS.has(name)) return [];
+        const full = join(dir, name);
+        return statSync(full).isDirectory() ? shells(full) : name.endsWith(".sh") ? [full] : [];
+      });
+    const offenders = [...shells(join(repoRoot, "scripts")), ...shells(join(repoRoot, "apps")), ...workflowFiles()]
+      .filter((f) => {
+        const text = readFileSync(f, "utf-8");
+        return /\benv -i\b/.test(text) && !text.includes("NO_ANON_PING=1");
+      })
+      .map((f) => relative(repoRoot, f));
+    expect(offenders).toEqual([]);
+  });
+});
+
+const workflowDir = join(repoRoot, ".github", "workflows");
+const workflowFiles = () => readdirSync(workflowDir).map((n) => join(workflowDir, n));
+
+interface Step {
+  name?: string;
+  run?: string;
+}
+const releaseJobs = () => (YAML.parse(readFileSync(join(workflowDir, "release.yml"), "utf-8")) as { jobs: Record<string, { steps?: Step[] }> }).jobs;
+/** A step's `run:` commands, one per line, shell comments dropped. */
+const commands = (step: Step) =>
+  (step.run ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+
+describe("release CI marks every artifact that pings (else real users' pings are silently lost)", () => {
+  test("every compile of the CLI defines __PLANNOTATOR_RELEASE__=true", () => {
+    const compiles = Object.values(releaseJobs())
+      .flatMap((job) => job.steps ?? [])
+      .flatMap(commands)
+      .filter((c) => c.includes("apps/hook/server/index.ts") && c.includes("--compile"));
+    expect(compiles.length).toBeGreaterThanOrEqual(6);
+    expect(compiles.filter((c) => !c.includes("--define __PLANNOTATOR_RELEASE__=true"))).toEqual([]);
+  });
+
+  test("npm-package writes the OpenCode and Pi release.json after the build and before each pack", () => {
+    const steps = releaseJobs()["npm-package"]?.steps ?? [];
+    const at = (pred: (s: Step) => boolean, what: string) => {
+      const i = steps.findIndex(pred);
+      expect(i, what).toBeGreaterThan(-1);
+      return i;
+    };
+    const build = at((s) => commands(s).includes("bun run build:opencode"), "the build step");
+    const markOpenCode = at((s) => commands(s).some((c) => c.endsWith("> apps/opencode-plugin/dist/release.json")), "the OpenCode mark");
+    const markPi = at((s) => commands(s).some((c) => c.endsWith("> apps/pi-extension/release.json")), "the Pi mark");
+    const packOpenCode = at((s) => s.name === "Pack @plannotator/opencode", "the OpenCode pack");
+    const packPi = at((s) => s.name === "Pack @plannotator/pi-extension", "the Pi pack");
+    expect(build).toBeLessThan(markOpenCode);
+    expect(build).toBeLessThan(markPi);
+    expect(markOpenCode).toBeLessThan(packOpenCode);
+    expect(markPi).toBeLessThan(packPi);
+  });
+
+  test("no other workflow marks a build (a CI or e2e binary is never a release)", () => {
+    const marking = workflowFiles().filter((f) => !f.endsWith("/release.yml") && readFileSync(f, "utf-8").includes("__PLANNOTATOR_RELEASE__"));
+    expect(marking).toEqual([]);
+  });
+
+  test("the Pi package ships its release.json", () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, "apps/pi-extension/package.json"), "utf-8")) as { files: string[] };
+    expect(pkg.files).toContain("release.json");
   });
 });

@@ -1377,12 +1377,14 @@ jobs:
           bun run build:dsh
 
       # The daily ping counts only a build release CI marks (packages/shared/daily-ping.ts):
-      # a local `bun run build:opencode` has no mark and is a dev build. The binaries get
+      # a local `bun run build:opencode` or Pi `bun pm pack` has no mark and is a dev build. The binaries get
       # theirs from `--define __PLANNOTATOR_RELEASE__=true` in the build job.
-      - name: Mark @plannotator/opencode as a release build
+      - name: Mark @plannotator/opencode and @plannotator/pi-extension as release builds
         run: |
           jq -n --arg v "$(jq -r .version apps/opencode-plugin/package.json)" '{version: $v}' > apps/opencode-plugin/dist/release.json
           cat apps/opencode-plugin/dist/release.json
+          jq -n --arg v "$(jq -r .version apps/pi-extension/package.json)" '{version: $v}' > apps/pi-extension/release.json
+          cat apps/pi-extension/release.json
 
       - name: Create package artifact directory
         run: mkdir -p npm-packages
