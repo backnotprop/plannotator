@@ -76,6 +76,7 @@ packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
+packages/inbox/replyFootPhone.test.tsx
 packages/inbox/issueRefs.test.tsx
 packages/inbox/attachmentKinds.test.tsx
 packages/inbox/updates.test.tsx
