@@ -752,12 +752,14 @@ export function SettingsPage(props: SettingsPageProps) {
   readStore.current = props.onReadStore;
   const [storeSlow, setStoreSlow] = useState(false);
   const storeWaited = useRef(false);
-  if (!storageShown) storeWaited.current = false;
-  else if (!store) storeWaited.current = true;
+  if (!storageShown) {
+    storeWaited.current = false;
+    // Reset on leaving, not on the next open: an open would draw the last visit's words for a frame first.
+    if (storeSlow) setStoreSlow(false);
+  } else if (!store) storeWaited.current = true;
   useEffect(() => {
     if (!storageShown) return;
     readStore.current?.();
-    setStoreSlow(false);
     const slow = setTimeout(() => setStoreSlow(true), STORE_SLOW_MS);
     return () => clearTimeout(slow);
   }, [storageShown]);
@@ -961,9 +963,9 @@ export function SettingsPage(props: SettingsPageProps) {
             <h2 id="ib-g-store">By project</h2>
             <p>Delete asks twice. A deleted thread or project cannot be brought back.</p>
             {!store ? (
-              <div className="ib-card ib-store-wait" data-store-wait="" aria-busy="true">
+              <div className="ib-card ib-store-wait" data-store-wait="" aria-busy={props.storeError ? undefined : true}>
                 {props.storeError ? (
-                  <span className="ib-store-wait-t" role="alert">
+                  <span className="ib-store-wait-t" role="alert" data-store-error="">
                     The sizes could not be read. {props.storeError}{' '}
                     <button type="button" className="ib-lnk" onClick={() => props.onReadStore?.()}>
                       Try again
@@ -1022,7 +1024,7 @@ export function SettingsPage(props: SettingsPageProps) {
         ) : (
           <span className="ib-store-bar" data-store-bar="" aria-hidden="true" />
         )}{' '}
-        in {tildePath(store?.dir ?? settings.store_dir, settings.home)}: messages, attached files as they were sent, and annotations.
+        in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
       <p className="ib-lede">Browsers on your other devices.</p>

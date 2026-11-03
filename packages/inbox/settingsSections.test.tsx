@@ -331,22 +331,33 @@ test.skipIf(!hasDom)('Storage asks for its sizes only when shown: the card holds
 
   const el = await renderApp('#settings/general');
   await until(() => el.querySelector('[data-settings-notifications]') !== null, 'General');
-  // Settings itself never asks for the walk.
+  // Settings itself never asks for the walk: no storage read, and its own reads carry the marker that leaves it out.
   expect(asked).toBe(0);
+  const settingsReads = requests.filter((r) => /^GET \/api\/inbox\/settings(\?|$)/.test(r));
+  expect(settingsReads.length).toBeGreaterThan(0);
+  expect(settingsReads.every((r) => r === 'GET /api/inbox/settings?store=0')).toBe(true);
 
-  act(() => navLink(el, 'storage').click());
+  // When the words first show, by the page's own clock (an observer, not this test's polling, so a slow machine
+  // cannot make them look early). The clock starts before the click, so it can only make them look later.
+  let wordsAt: number | null = null;
+  const watch = new MutationObserver(() => {
+    if (wordsAt === null && counting(el)) wordsAt = performance.now();
+  });
+  watch.observe(el, { subtree: true, childList: true, characterData: true });
   const opened = performance.now();
+  act(() => navLink(el, 'storage').click());
   await until(() => heading(el) === 'Storage' && asked === 1, 'Storage asking for its sizes');
-  // Before 0.4 s: the card in its place, a bar for the total, no words and no numbers.
-  expect(performance.now() - opened).toBeLessThan(STORE_SLOW_MS);
+  // While the count runs: the card in its place, a bar for the total, no numbers.
   expect(el.querySelector('[data-store-wait]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')!.getAttribute('aria-busy')).toBe('true');
   expect(el.querySelector('[data-store-bar]')).not.toBeNull();
   expect(el.querySelector('[data-store-bytes]')).toBeNull();
-  expect(counting(el)).toBe(false);
   expect(el.querySelector('.ib-lede')?.textContent).toContain('/data/inbox: messages, attached files');
 
   await until(() => counting(el), '"Counting what is stored…"');
-  expect(performance.now() - opened).toBeGreaterThanOrEqual(STORE_SLOW_MS);
+  watch.disconnect();
+  // Not before 0.4 s.
+  expect(wordsAt! - opened).toBeGreaterThanOrEqual(STORE_SLOW_MS);
   expect(el.querySelector('[data-store-bytes]')).toBeNull();
 
   release();

@@ -1365,8 +1365,10 @@ function Inbox() {
   }, []);
 
   // Settings → Storage's sizes (GET /api/inbox/settings/storage): the server walks every file for them, so only that
-  // panel asks, each time it is shown. Kept for the visit. One read at a time; a Delete's answer carries fresh sizes
-  // and wins over a read that started before it.
+  // panel asks, each time it is shown. Kept for the visit. One read at a time, given up after STORAGE_READ_MS so a
+  // held connection never locks Storage; a Delete's answer carries fresh sizes and wins over a read that started
+  // before it. A read starting clears the last error, so Try again shows the wait again. A failed refresh of sizes
+  // already kept leaves them on screen without a word: they are this visit's numbers, read again on the next open.
   const [store, setStore] = useState<InboxStorageModel | null>(null);
   const [storeError, setStoreError] = useState<string | null>(null);
   const storeReading = useRef(false);
@@ -1379,6 +1381,7 @@ function Inbox() {
   const readStore = useCallback(() => {
     if (storeReading.current) return;
     storeReading.current = true;
+    setStoreError(null);
     const turn = storeTurn.current;
     inboxApi
       .storage()

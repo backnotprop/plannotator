@@ -1899,8 +1899,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const ownerOrLocal = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
   const voiceOwnerOnly = () => new InboxError("owner_only", "Only this computer's owner can use voice from this Inbox.");
-  /** What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. */
-  const settingsModel = (via: RequestVia, guest: boolean) => ({
+  /**
+   * What Settings and the connect snippets read. `guest`: a tailnet login other than the owner's. `withStore`: the
+   * Storage sizes too, a walk of every file, for a page older than GET /api/inbox/settings/storage (it reads
+   * `settings.store` and breaks without it); a current page asks with `?store=0` and reads the sizes on their own.
+   */
+  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
@@ -1946,6 +1950,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
     prompts: promptsState(!guest),
+    ...(withStore ? { store: perfPhase("disk", () => store.diskUsage()) } : {}),
     /** Settings → Storage's folder, so its line is drawn before the count. The sizes are their own read: GET /api/inbox/settings/storage. */
     store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
@@ -3082,7 +3087,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(perfPhase("disk", () => store.diskUsage()));
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via), url.searchParams.get("store") !== "0"));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);

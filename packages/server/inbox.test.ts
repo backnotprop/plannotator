@@ -649,14 +649,14 @@ describe("the window's routes: settings, restart, favicon", () => {
       const sent = structured<{ thread_id: string }>(
         await client.callTool({ name: "send_message", arguments: { body: QUESTION_MESSAGE, project_path: gitProject(root) } }),
       );
-      // The settings read never walks the store: the sizes are Settings → Storage's own read.
+      // The window's settings read (`?store=0`) never walks the store: the sizes are Settings → Storage's own read.
       const walk = server.store.diskUsage.bind(server.store);
       let walks = 0;
       server.store.diskUsage = () => {
         walks += 1;
         return walk();
       };
-      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      const settings = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings?store=0`)).json();
       expect(walks).toBe(0);
       expect(settings.store).toBeUndefined();
       expect(settings.store_dir).toBe(join(dataDir, "inbox"));
@@ -673,6 +673,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       // The same numbers the settings read carried before: the store's own count, unchanged.
       expect(store).toEqual(JSON.parse(JSON.stringify(walk())));
       expect(store.dir).toBe(settings.store_dir);
+      // A page older than the storage read asks without the marker and reads `settings.store`: it still gets it whole,
+      // never an empty stand-in (without it that page's Settings throws and the whole window goes blank).
+      const legacy = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json();
+      expect(walks).toBe(2);
+      expect(legacy.store).toEqual(store);
       const project = store.projects[0];
       expect(project.name).toBe("api");
       expect(project.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([sent.thread_id]);
