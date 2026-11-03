@@ -169,6 +169,8 @@ export interface InboxUpdatesOptions {
   /** The binary to probe for "ready"; null: no probe. */
   binaryPath: string | null;
   healthTickMs: number;
+  /** Called on start and on every tick (the daily ping rides this timer: packages/server/inbox.ts). */
+  onTick?: () => void;
   now?: () => number;
   /** The release check's primary source (the "latest release" redirect). Default: GitHub's. */
   fetchReleasePage?: () => Promise<FetchReleaseResult>;
@@ -513,7 +515,13 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
 
   /** `freshForMs`: how young an answer must be to skip asking (start and page loads: 1 min). */
   const tick = async (freshForMs?: number) => {
-    if (ticking || stopped) return;
+    if (stopped) return;
+    try {
+      options.onTick?.();
+    } catch {
+      // Never the update check's problem.
+    }
+    if (ticking) return;
     ticking = true;
     try {
       await probeBinary();

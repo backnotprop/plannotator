@@ -21,7 +21,8 @@ import { parseInboxQuestionBlocks, parseInboxSupersedeRef } from "@plannotator/c
 import { startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_FILLED_ARGUMENTS } from "@plannotator/shared/inbox/connection";
 import { formatTopLevelHelp } from "./cli";
-import { inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_LABELS, inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
+import { INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
 import { formatInboxHelp, INBOX_HELP_CODE_EXAMPLES, INBOX_HELP_MCP_URL, INBOX_QUESTION_EXAMPLE, INBOX_REPLACES_EXAMPLE, TOOL_GUIDE } from "./inbox-help";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
@@ -258,4 +259,21 @@ describe("plannotator inbox --help as a process", () => {
     expect(await run(["inbox", "--help"])).toContain("\n### card\n");
     expect(existsSync(join(dataDir, "inbox"))).toBe(false);
   }, 60_000);
+});
+
+// Each host with Plannotator's own inbox tool must be in the guide an agent reads from every wake
+// ("how it works: plannotator inbox --help"): how to turn the tool on, and that replies arrive by themselves.
+describe("the guide covers every host with Plannotator's inbox tool", () => {
+  const section = (title: string) => help.split(`## ${title}`)[1]!.split("\n## ")[0]!;
+
+  test("Connecting yourself gives each one its own inboxTool key, and the wake line names each one", () => {
+    const connecting = section("Connecting yourself");
+    const wakeLine = help.split("\n").find((line) => line.includes("the person's reply arrives in your session by itself as a new message"))!;
+    for (const host of INBOX_TOOL_HOSTS) {
+      const label = INBOX_AGENT_LABELS[host as keyof typeof INBOX_AGENT_LABELS];
+      expect(connecting).toContain(label === "OpenCode" ? "**OpenCode**" : `**${label}**`);
+      if (host !== "claude-code") expect(connecting).toContain(host === "opencode" ? '`"opencode"`' : `"${host}": true`);
+      expect(wakeLine).toContain(label);
+    }
+  });
 });

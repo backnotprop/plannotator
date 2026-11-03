@@ -600,9 +600,9 @@ describe("resolveReviewProgress env handling", () => {
 describe("resolveAgentTool", () => {
   // The failure this guards: a user who turned the tool on (or off) gets the
   // other answer, so the agent's tool list does not match their setting.
-  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi and OpenCode 2)", () => {
-    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false });
-    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode"] as const) {
+  test("unset: the host's default (owner's call: on for the Claude Code mod and Oh My Pi, off on Pi, OpenCode 2 and DeepSeek Harness)", () => {
+    expect(AGENT_TOOL_DEFAULTS).toEqual({ "claude-code": true, pi: false, "oh-my-pi": true, opencode: false, dsh: false });
+    for (const host of ["claude-code", "pi", "oh-my-pi", "opencode", "dsh"] as const) {
       expect(resolveAgentTool({}, {}, host)).toBe(AGENT_TOOL_DEFAULTS[host]);
       // An empty or unrecognized env value counts as unset.
       expect(resolveAgentTool({}, { PLANNOTATOR_AGENT_TOOL: "" }, host)).toBe(AGENT_TOOL_DEFAULTS[host]);

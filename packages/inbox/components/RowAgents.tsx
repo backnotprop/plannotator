@@ -1,7 +1,7 @@
 import type { InboxParticipant } from '@plannotator/core/inbox-types';
 import { HostMark } from '../icons';
 import { agentName } from '../tags';
-import { Tip } from './Tip';
+import { RowTip } from './RowTip';
 
 /**
  * The agents in a list row, before its project, on the same grey tiles in every list row (the owner, 2026-10-31):
@@ -83,7 +83,7 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
       )}
     </span>
   );
-  return tip ? <Tip content={words}>{marks}</Tip> : marks;
+  return tip ? <RowTip content={words}>{marks}</RowTip> : marks;
 }
 
 /** A three-line or phone row draws at most two tiles; past that, a "+N" tile for the rest. */
@@ -122,5 +122,5 @@ export function RowAgentTiles({ participants, agent, tip = true }: { participant
       )}
     </span>
   );
-  return tip ? <Tip content={words}>{tiles}</Tip> : tiles;
+  return tip ? <RowTip content={words}>{tiles}</RowTip> : tiles;
 }

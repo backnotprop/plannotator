@@ -72,7 +72,7 @@ import type {
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -369,6 +369,8 @@ export interface SettingsModel {
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };
+  /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
+  snooze_intro?: { due: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -415,21 +417,27 @@ export interface SettingsModel {
   prompts?: InboxPromptsSettings;
   /** Settings → Agents' launch switch: present only while `inboxLaunch.enabled`. */
   launch?: InboxLaunchSettings;
-  store: {
-    dir: string;
+  /** The store's folder (Settings → Storage's line). Its sizes are their own read: `inboxApi.storage()`. Absent from an older Inbox. */
+  store_dir?: string;
+  /** The sizes, from an older Inbox only (a current one leaves them out for `?store=0`). */
+  store?: InboxStorageModel;
+}
+
+/** `GET /api/inbox/settings/storage`: what the store holds on disk, for Settings → Storage. A walk of every file: read it only for that panel. */
+export interface InboxStorageModel {
+  dir: string;
+  bytes: number;
+  projects: {
+    id: string;
+    name: string;
+    root: string;
     bytes: number;
-    projects: {
-      id: string;
-      name: string;
-      root: string;
-      bytes: number;
-      threads: { thread_id: string; subject: string | null; bytes: number }[];
-      /** The project this folder was combined into, by name. */
-      combined_into?: string;
-      /** The projects combined into this one, by name: deleting it leaves them. */
-      combined?: string[];
-    }[];
-  };
+    threads: { thread_id: string; subject: string | null; bytes: number }[];
+    /** The project this folder was combined into, by name. */
+    combined_into?: string;
+    /** The projects combined into this one, by name: deleting it leaves them. */
+    combined?: string[];
+  }[];
 }
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
@@ -735,6 +743,9 @@ export class InboxReadTimeout extends Error {
   }
 }
 
+/** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
+export const STORAGE_READ_MS = 20_000;
+
 /** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
 async function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
   const controller = new AbortController();
@@ -763,10 +774,19 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
 }
 
 /** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
-export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps): Record<string, unknown> {
+export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps, recipients?: readonly string[]): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
-  // a save without them is an older page's, which names long pastes only.
-  return { body, base, ...(baseBody !== null ? { base_body: baseBody } : {}), files_add: files.add, files_remove: files.remove, files_place: files.place };
+  // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
+  // once chosen: without it the draft keeps its own.
+  return {
+    body,
+    base,
+    ...(baseBody !== null ? { base_body: baseBody } : {}),
+    files_add: files.add,
+    files_remove: files.remove,
+    files_place: files.place,
+    ...(recipients !== undefined ? { recipients } : {}),
+  };
 }
 
 /** The serverSession every POST carries; set from the first list read. */
@@ -1071,7 +1091,10 @@ export const inboxApi = {
       }
       return { ...model, thread: splitThreadActions(model.thread) };
     }),
-  settings: () => get<SettingsModel>(inboxUrl('/settings')),
+  /** `store=0`: without the Storage sizes (the server sends them only to a page older than `storage()`). */
+  settings: () => get<SettingsModel>(inboxUrl('/settings', 'store=0')),
+  /** Settings → Storage's sizes, asked for only while that panel is shown (the server walks every file for them). Given up after STORAGE_READ_MS. */
+  storage: () => getWithin<InboxStorageModel>(inboxUrl('/settings/storage'), STORAGE_READ_MS),
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */
@@ -1168,7 +1191,7 @@ export const inboxApi = {
       feedback?: string;
       annotation_ids?: string[];
       /** Another live session takes the reply: the session that asked has ended. */
-      to?: { host: string; session: string };
+      to?: { host?: string; session: string };
       /**
        * The open questions the person chose to skip ("Skip them"), on this message or (with
        * `message_id`) another of the same session. A Send never skips anything else.
@@ -1299,7 +1322,7 @@ export const inboxApi = {
         body: image,
       }),
     ),
-  deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(threadUrl(threadId, `/delete`), {}),
+  deleteThread: (threadId: string) => post<{ store: InboxStorageModel }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
   composeSessions: (session?: string | null) =>
@@ -1327,8 +1350,8 @@ export const inboxApi = {
    * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
    * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files)),
+  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS, recipients?: readonly string[]) =>
+    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
@@ -1362,6 +1385,8 @@ export const inboxApi = {
   claimListIntro: () => post<{ show: boolean; list_intro: { due: boolean } }>(inboxUrl('/list-intro'), {}),
   /** The one-time voice announcement, as the list options dialog; the Inbox also checks this computer's Codex login. */
   claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
+  /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
+  claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
@@ -1398,12 +1423,14 @@ export const inboxApi = {
   saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
-  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = []) => {
+  /** `timeoutMs`: given up after it (InboxReadTimeout), for a read a Send waits on. */
+  sessions: (threadId: string, asker?: string | null, recipients: readonly string[] = [], timeoutMs?: number) => {
     const query = [
       ...(asker ? [`asker=${encodeURIComponent(asker)}`] : []),
       ...(recipients.length > 0 ? [`recipients=${recipients.map(encodeURIComponent).join(',')}`] : []),
     ].join('&');
-    return get<LiveSessionsModel>(threadUrl(threadId, `/sessions`, query));
+    const url = threadUrl(threadId, `/sessions`, query);
+    return timeoutMs === undefined ? get<LiveSessionsModel>(url) : getWithin<LiveSessionsModel>(url, timeoutMs);
   },
   /** Who the person can tag with `@` in this thread (approval "inbox-tag-agents"). */
   taggable: (threadId: string) => get<TaggableModel>(threadUrl(threadId, `/taggable`)),
@@ -1459,7 +1486,7 @@ export const inboxApi = {
   askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
-  deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
+  deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */
