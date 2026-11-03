@@ -167,6 +167,8 @@ export function createInboxLaunch(options: {
   selfCommand: readonly string[];
   /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
+  /** A tailnet request from someone other than this computer's owner: never starts an agent (Try again). Absent: nobody is. */
+  isGuest?: (req: Request, via: string) => boolean;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -826,6 +828,8 @@ export function createInboxLaunch(options: {
         }
       }
       case "retry": {
+        // Try again starts the agent: the owner's, as a Send that starts one is (inbox-compose.ts).
+        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
         if (starting.has(launch.id) || respawning.has(launch.id) || trusting.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
         if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
         tryAgain(root, host);
