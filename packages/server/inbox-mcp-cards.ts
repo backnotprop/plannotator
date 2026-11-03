@@ -254,7 +254,7 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
           say: z.string().optional().describe(`Your last word: where the work is, one line. ${INBOX_REF_LINK_POINTER}`),
           you: z.string().optional().describe(`What the person owes, one line. ${INBOX_REF_LINK_POINTER}`),
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),
-          ref: z.string().optional().describe("An issue or PR: owner/repo#123 or its URL (GitHub, GitLab), or a Jira issue URL (https://<site>.atlassian.net/browse/KEY-123, or a Jira Cloud board link with ?selectedIssue=KEY-123; a self-hosted Jira only as https://<host>/browse/KEY-123, the key in capitals)."),
+          ref: z.string().optional().describe("A link: owner/repo#123, or any http(s) URL with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; Jira and YouTrack issue links show their key; any other link shows as a plain link."),
           reason: z.string().optional().describe("Why it is dropped."),
           thread_id: z.string().optional().describe("A thread or message id to link; create takes its subject when no title. Link the thread where the person makes the call."),
           idempotency_key: z.string().optional().describe("Create: the same key answers the first card."),

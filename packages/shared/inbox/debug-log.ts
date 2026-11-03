@@ -84,7 +84,10 @@ const WINDOW_EVENTS = new Set([
   "voice_press",
   "voice_phase",
   "voice_open",
+  "slow_ui",
 ]);
+/** The interactions the window times (packages/inbox/perfMarks.ts) that a `slow_ui` line may name. */
+const PERF_WHATS = new Set(["first-list", "thread-open", "record-refresh", "theme", "theme-settled", "expand-all", "keystroke"]);
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 /** A request's method as the log may hold it: a raw client can send any token, and one off the list is `other`. */
 export function debugMethod(method: string): string {
@@ -138,6 +141,7 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     trouble: listed(record.trouble, VOICE_TROUBLES),
     step: listed(record.step, VOICE_STEPS),
     ok: typeof record.ok === "boolean" ? record.ok : undefined,
+    what: listed(record.what, PERF_WHATS),
     audio: listed(record.audio, AUDIO_STATES),
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));

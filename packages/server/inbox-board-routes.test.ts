@@ -5,16 +5,19 @@
  * refused to another site; a card's history; and the first-visit dialog
  * claimed once per machine. What regresses: a link fetched before the card is
  * opened, a host outside the hover cards' rules being asked, a Jira issue URL
- * refused (or fetched) again, the dialog
+ * refused (or fetched) again, a YouTrack issue or any web link refused,
+ * stored twice or fetched, a favicon fetched for a link an agent added, the dialog
  * showing on every visit (or to two tabs), or a read-only config showing it
  * forever.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { RefCli, RefCommandResult, RefRunner } from "./ref-cards";
+import type { CardFaviconOptions } from "./inbox-card-favicons";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -65,7 +68,7 @@ function merged(number: number, title: string) {
   };
 }
 
-async function world(options: { readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null> } = {}) {
+async function world(options: { readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>; cardFavicons?: CardFaviconOptions } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-board-routes-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -83,6 +86,42 @@ async function world(options: { readProjectRepo?: (root: string) => Promise<Inbo
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
   const post = (path: string, body: Record<string, unknown> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return { dataDir, server, base, project, calls, post };
+}
+
+/** A scripted `tailscale` that serves this Inbox over a tailnet `magic` name, `owner` its login (as inbox-card-marks.test.ts). */
+function scriptedTailscale(magic: string, owner: string): TailscaleRunner {
+  const serve = new Map<number, string>();
+  return (args) => {
+    const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${magic}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: owner } } }));
+    if (args[1] === "status") {
+      if (serve.size === 0) return ok("{}");
+      return ok(
+        JSON.stringify({
+          TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])),
+          Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${magic}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])),
+        }),
+      );
+    }
+    const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+    if (args.includes("off")) serve.delete(httpsPort);
+    else serve.set(httpsPort, args.at(-1)!);
+    return ok(`https://${magic}:${httpsPort}/\n`);
+  };
+}
+
+/** An agent's `card` tool call over `/mcp`, as Claude Code makes it. */
+function agentCardCall(base: string, projectRoot: string) {
+  return async (args: Record<string, unknown>) => {
+    const response = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "card", arguments: { project_path: projectRoot, agent_session: "ses_y", agent_host: "claude-code", ...args } } }),
+    });
+    const text = await response.text();
+    const data = text.split("\n").find((line) => line.startsWith("data:"));
+    return JSON.parse(data ? data.slice(5) : text).result as { isError?: boolean; content: { text: string }[]; structuredContent?: { card?: { refs: unknown[] } } };
+  };
 }
 
 describe("the Board page's routes", () => {
@@ -127,10 +166,11 @@ describe("the Board page's routes", () => {
     const other = { kind: "issue", source: "jira", ref: "DEMO-123", url: "https://jira.acme.corp/browse/DEMO-123", via: "ref" };
     const twoSites = await mcp({ op: "link", card_id: card.id, ref: other.url });
     expect(twoSites.structuredContent?.card?.refs).toEqual([jira, other]);
-    // An ordinary page is still refused, with the accepted forms in the answer.
-    const refused = await mcp({ op: "link", card_id: card.id, ref: "https://example.com/docs/browse/DEMO-123" });
+    // A page that only looks like Jira is a plain web link, never a Jira issue (checked in card-refs.test.ts);
+    // a link that is no web link is refused, with the accepted forms in the answer.
+    const refused = await mcp({ op: "link", card_id: card.id, ref: "javascript:alert(1)" });
     expect(refused.content[0]!.text).toStartWith("validation_error: ref:");
-    expect(refused.content[0]!.text).toContain("atlassian.net/browse/KEY-123");
+    expect(refused.content[0]!.text).toContain("http(s)");
     // Opened, it has no resolver: unsupported, and no gh or glab ran for it.
     const { refs } = (await (await fetch(`${base}/api/inbox/cards/${card.id}/refs`)).json()) as { refs: { ref: unknown; result: { ok: boolean; error?: string } }[] };
     const unsupported = { result: expect.objectContaining({ ok: false, error: "unsupported" }) };
@@ -138,6 +178,139 @@ describe("the Board page's routes", () => {
     expect(calls).toEqual([]);
     // Stored like any ref: the card read back from disk keeps them.
     expect(InboxStore.open(dataDir).card(card.id)!.refs).toEqual([jira, other]);
+  });
+
+  test("a YouTrack issue and any web link link through the agent's card call: stored once each, kept on reopen, never fetched", async () => {
+    const fetched: string[] = [];
+    const { dataDir, server, base, project, calls } = await world({ cardFavicons: { fetch: async (url) => (fetched.push(url), new Response(null, { status: 404 })), lookup: async () => ["93.184.216.34"] } });
+    mkdirSync(project.root, { recursive: true });
+    const mcp = agentCardCall(base, project.root);
+    const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Tickets" });
+    // User feedback #10's case: a YouTrack ticket, as the browser's address bar has it (with the summary slug).
+    const linked = await mcp({ op: "link", card_id: card.id, ref: "https://acme.youtrack.cloud/issue/PROJ-123/Crash-on-save" });
+    expect(linked.isError ?? false).toBe(false);
+    const youtrack = { kind: "issue", source: "youtrack", ref: "PROJ-123", url: "https://acme.youtrack.cloud/issue/PROJ-123", via: "ref" };
+    expect(linked.structuredContent?.card?.refs).toEqual([youtrack]);
+    // The same issue without its slug is the same link.
+    expect((await mcp({ op: "link", card_id: card.id, ref: "https://acme.youtrack.cloud/issue/proj-123" })).structuredContent?.card?.refs).toEqual([youtrack]);
+    // Any other web page: a plain link, once however it is pasted.
+    const notion = { kind: "link", source: "web", ref: "notion.so/acme/Roadmap-2026", url: "https://www.notion.so/acme/Roadmap-2026", via: "ref" };
+    await mcp({ op: "link", card_id: card.id, ref: notion.url });
+    const twice = await mcp({ op: "link", card_id: card.id, ref: "https://WWW.Notion.so:443/acme/Roadmap-2026" });
+    expect(twice.structuredContent?.card?.refs).toEqual([youtrack, notion]);
+    // Opened: no resolver reads either (unsupported), no gh or glab ran, and no favicon was asked for an agent's link.
+    const { refs } = (await (await fetch(`${base}/api/inbox/cards/${card.id}/refs`)).json()) as { refs: { ref: unknown; result: { ok: boolean; error?: string } }[] };
+    const unsupported = { result: expect.objectContaining({ ok: false, error: "unsupported" }) };
+    expect(refs).toEqual([{ ref: youtrack, ...unsupported }, { ref: notion, ...unsupported }]);
+    expect(calls).toEqual([]);
+    expect(fetched).toEqual([]);
+    expect(InboxStore.open(dataDir).card(card.id)!.refs).toEqual([youtrack, notion]);
+  });
+
+  test("a web link's favicon: fetched and served from this origin only for a link the person added, never an agent's", async () => {
+    const fetched: { url: string; init: RequestInit }[] = [];
+    const ico = new Uint8Array(64);
+    ico.set([0, 0, 1, 0, 1, 0]);
+    const { server, base, project, post } = await world({
+      cardFavicons: {
+        fetch: async (url, init) => {
+          fetched.push({ url, init });
+          return new Response(ico, { headers: { "content-type": "image/vnd.microsoft.icon" } });
+        },
+        lookup: async () => ["93.184.216.34"],
+      },
+    });
+    const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Links" });
+    const agentLink = "https://linear.app/acme/issue/ENG-1";
+    const personLink = "https://www.notion.so/acme/Roadmap";
+    server.store.updateCard(card.id, { by: { kind: "agent", host: "codex", session: "s", name: "Codex" }, refs: [agentLink] });
+    expect((await post(`/api/inbox/cards/${card.id}`, { op: "link", ref: personLink })).status).toBe(200);
+    const stored = server.store.card(card.id)!.refs!;
+    expect(stored.find((ref) => ref.url === agentLink)!.by).toBeUndefined();
+    expect(stored.find((ref) => ref.url === personLink)!.by).toBe("person");
+    const favicon = (link: string, headers: Record<string, string> = {}) => fetch(`${base}/api/inbox/cards/${card.id}/favicon?url=${encodeURIComponent(link)}`, { headers });
+
+    // An agent's link: refused before anything is fetched.
+    const refused = await favicon(agentLink);
+    expect(refused.status).toBe(404);
+    expect(((await refused.json()) as { code: string }).code).toBe("favicon_not_yours");
+    expect(fetched).toEqual([]);
+
+    // The person's link: its host's /favicon.ico, no redirects followed blindly, no credentials; served as an image, never a page.
+    const served = await favicon(personLink);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/x-icon");
+    expect(served.headers.get("content-security-policy")).toContain("sandbox");
+    expect(served.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(ico);
+    expect(fetched.map((call) => call.url)).toEqual(["https://www.notion.so/favicon.ico"]);
+    expect(fetched[0]!.init).toMatchObject({ redirect: "manual", credentials: "omit" });
+    // Cached per host: asked again, nothing is fetched.
+    expect((await favicon(personLink)).status).toBe(200);
+    expect(fetched).toHaveLength(1);
+
+    // A link not on the card, another site's page, and a write are refused.
+    expect((await favicon("https://example.org/")).status).toBe(404);
+    expect((await favicon(personLink, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await fetch(`${base}/api/inbox/cards/${card.id}/favicon?url=${encodeURIComponent(personLink)}`, { method: "POST" })).status).toBe(405);
+
+    // The person linking the agent's link makes it theirs.
+    await post(`/api/inbox/cards/${card.id}`, { op: "link", ref: agentLink });
+    expect(server.store.card(card.id)!.refs!.find((ref) => ref.url === agentLink)!.by).toBe("person");
+    expect((await favicon(agentLink)).status).toBe(200);
+    expect(fetched.map((call) => call.url)).toEqual(["https://www.notion.so/favicon.ico", "https://linear.app/favicon.ico"]);
+  });
+
+  test("a favicon is never fetched for a tailnet guest or with the Board off; the owner over the tailnet gets it (review of #2540, P3-2)", async () => {
+    const MAGIC = "macbook-pro.tail0000.ts.net";
+    const OWNER = "ramos@example.com";
+    const GUEST = "guest@example.com";
+    const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    try {
+      const fetched: string[] = [];
+      const ico = new Uint8Array(64);
+      ico.set([0, 0, 1, 0, 1, 0]);
+      const cardFavicons: CardFaviconOptions = {
+        fetch: async (url) => (fetched.push(url), new Response(ico, { headers: { "content-type": "image/x-icon" } })),
+        lookup: async () => ["93.184.216.34"],
+      };
+      const start = async (board: boolean) => {
+        const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-board-favicon-")));
+        roots.push(root);
+        const dataDir = join(root, "data");
+        mkdirSync(dataDir, { recursive: true });
+        process.env.PLANNOTATOR_DATA_DIR = dataDir;
+        writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: board, inboxTailscaleAllow: [GUEST] }));
+        const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, board, cardFavicons, tailscale: scriptedTailscale(MAGIC, OWNER) });
+        servers.push(server);
+        const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
+        const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Links", refs: ["https://linear.app/acme/issue/ENG-1"] });
+        const path = `/api/inbox/cards/${card.id}/favicon?url=${encodeURIComponent("https://linear.app/acme/issue/ENG-1")}`;
+        return { server, path };
+      };
+
+      const on = await start(true);
+      const listener = on.server.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      const through = (login: string) =>
+        fetch(`http://127.0.0.1:${listener}${on.path}`, { headers: { Host: `${MAGIC}:${on.server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${on.server.port}` } });
+      const guest = await through(GUEST);
+      expect(guest.status).toBe(403);
+      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      expect(fetched).toEqual([]);
+      expect((await through(OWNER)).status).toBe(200);
+      expect(fetched).toEqual(["https://linear.app/favicon.ico"]);
+
+      const off = await start(false);
+      const refused = await fetch(`http://127.0.0.1:${off.server.port}${off.path}`);
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { code: string }).code).toBe("board_off");
+      expect(fetched).toHaveLength(1);
+    } finally {
+      if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+      else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
+    }
   });
 
   test("a card and its history, newest first", async () => {

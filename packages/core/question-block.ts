@@ -1335,14 +1335,47 @@ export const findDirectiveBlocks = (
   markdown: string,
   options: { frontmatter?: boolean } = {},
 ): DirectiveBlockLocation[] => {
-  if (typeof markdown !== 'string') return [];
+  const out: DirectiveBlockLocation[] = [];
+  walkTopLevelLines(markdown, options, { directive: (block) => out.push(block) });
+  return out;
+};
+
+/**
+ * Every top-level line of a markdown document that the block splitter reads
+ * as an ordinary line: not inside a code fence, display math, a directive's
+ * body or a raw HTML block, and not a directive's opener (the walk
+ * `findDirectiveBlocks` makes, so the two cannot differ). `lineNumber` is
+ * the line's 1-based line in `markdown`. For a host that checks lines the
+ * parser leaves as text (the Plannotator Inbox's `:::question {#x}` warning).
+ *
+ * `line` is the parser's processed text, not the source line: link
+ * references are resolved, and after a display math block that closes
+ * mid-line it is only the text after the close. Read the source line by
+ * `lineNumber` when the exact text matters.
+ *
+ * @internal Not part of the published grammar; it may change with the walk.
+ */
+export const forEachTopLevelLine = (
+  markdown: string,
+  options: { frontmatter?: boolean } = {},
+  visit: (line: string, lineNumber: number) => void,
+): void => {
+  walkTopLevelLines(markdown, options, { line: visit });
+};
+
+/** The block splitter's top-level walk: directives to `directive`, every other line it reads as one line to `line`. */
+function walkTopLevelLines(
+  markdown: string,
+  options: { frontmatter?: boolean },
+  on: { directive?: (block: DirectiveBlockLocation) => void; line?: (line: string, lineNumber: number) => void },
+): void {
+  if (typeof markdown !== 'string') return;
   const { content, contentStartLine } = options.frontmatter === false
     ? { content: markdown, contentStartLine: 1 }
     : splitFrontmatter(markdown);
   const source = markdown.split('\n');
   const lines = resolveReferenceLinks(content).split('\n');
   const closeCache = new Map<string, TagCloseIndex>();
-  const out: DirectiveBlockLocation[] = [];
 
   // The block splitter's multi-line constructs, in its order. Every other
   // construct it knows (headings, rules, list items, quotes, tables,
@@ -1370,7 +1403,7 @@ export const findDirectiveBlocks = (
       const close = directiveCloseIndex(lines, i);
       const startLine = i + contentStartLine;
       const endLine = Math.min(close, lines.length - 1) + contentStartLine;
-      out.push({
+      on.directive?.({
         directiveKind: directiveOpen[1].toLowerCase(),
         startLine,
         endLine,
@@ -1381,10 +1414,13 @@ export const findDirectiveBlocks = (
       continue;
     }
     const htmlEnd = htmlBlockEndAt(lines, i, closeCache);
-    if (htmlEnd !== -1) i = htmlEnd;
+    if (htmlEnd !== -1) {
+      i = htmlEnd;
+      continue;
+    }
+    on.line?.(lines[i], i + contentStartLine);
   }
-  return out;
-};
+}
 
 // ─────────────────────────────── Answers ───────────────────────────────
 
