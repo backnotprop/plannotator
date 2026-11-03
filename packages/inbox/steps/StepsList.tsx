@@ -53,12 +53,13 @@ export function StepsList({ list, onWaiting, now }: { list: InboxStepsWire; onWa
  * A list's head: "Checklist ◑ 3/6", "· as of 2:40 PM" once its session ended, and what the caller adds at the right
  * (the Board icon, a phone's close). With more than one session's list, each head names its agent instead.
  */
-export function StepsHead({ list, label, children, now, headingId }: { list: InboxStepsWire; label: string; children?: React.ReactNode; now?: Date; headingId?: string }) {
+export function StepsHead({ list, label, named = false, children, now, headingId }: { list: InboxStepsWire; label: string; named?: boolean; children?: React.ReactNode; now?: Date; headingId?: string }) {
   const { done, total, text } = stepsCount(list);
   const asOf = stepsAsOf(list, now);
   return (
     <div className="ib-st-head" data-steps-head="">
-      <span className="ib-st-lbl" id={headingId} title={label} dir="auto">
+      {/* An agent's name (`named`) can be cut: its title has it whole. "Checklist" never is, so it has none. */}
+      <span className="ib-st-lbl" id={headingId} title={named ? label : undefined} dir="auto">
         {label}
       </span>
       <span className="ib-st-plan" aria-label={`${done} of ${total} done`}>
@@ -98,7 +99,7 @@ export function StepsLists({
     <>
       {lists.map((list, index) => (
         <section key={list.id} className={`ib-st-group ${presenceClass(list.presence)}`} data-steps-group={list.agent.session ?? ''} data-presence={list.presence} aria-label={stepsName(labels[index]!, list)}>
-          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} now={now}>
+          <StepsHead list={list} label={lists.length > 1 ? labels[index]! : 'Checklist'} named={lists.length > 1} now={now}>
             {index === 0 ? headExtra : null}
           </StepsHead>
           <StepsList list={list} onWaiting={onWaiting?.(list) ?? null} now={now} />

@@ -302,6 +302,8 @@ test.skipIf(!hasDom)('the panel: "Checklist 3/6", one row per step in its state,
   await openPanel();
   const head = panel()!.querySelector('[data-steps-head]')!;
   expect(head.textContent).toBe('Checklist3/6');
+  // "Checklist" is never cut, so no tooltip repeats it.
+  expect(head.querySelector('.ib-st-lbl')!.hasAttribute('title')).toBe(false);
   expect(panel()!.querySelector('[data-steps-as-of]')).toBeNull();
   expect(rows().map((r) => [r.dataset.stepStatus, r.querySelector('.ib-st-t')!.textContent, r.querySelector('.ib-st-m')?.textContent ?? ''])).toEqual([
     ['done', 'Classify 30 days of failed charges', expect.stringMatching(/^11:05 AM$|^Nov 3$/)],
@@ -344,6 +346,8 @@ test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the butto
   expect(button()!.textContent).toBe('3/6');
   await openPanel();
   expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Claude Code', 'Codex']);
+  // A name can be cut with an ellipsis: its title says it whole.
+  expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.getAttribute('title'))).toEqual(['Claude Code', 'Codex']);
   expect(panel()!.getAttribute('aria-label')).toBe('Checklist');
 });
 
