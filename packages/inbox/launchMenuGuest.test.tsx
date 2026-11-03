@@ -1,17 +1,17 @@
 /**
- * A launched thread's ⋯ on a tailnet guest's page: no Stop and no Delete, as
- * the server answers both `owner_only` (inbox-tailnet-owner.test.ts). The
- * owner's ⋯ keeps both.
+ * A launched thread on a tailnet guest's page: no Stop and no Delete in its ⋯,
+ * and no Stop or Try again on its run line, as the server answers all of them
+ * `owner_only` (inbox-tailnet-owner.test.ts). The owner keeps every one.
  *
- * The failure this catches: a guest pressing Stop or Delete only to get an
- * error, or the owner losing either.
+ * The failure this catches: a guest pressing one only to get an error, or the
+ * owner losing one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -78,8 +78,8 @@ async function press(el: Element) {
   });
 }
 
-/** The launch items of the open thread's ⋯ (`data-launch-item`), top to bottom. */
-async function launchItems(guest: boolean): Promise<string[]> {
+/** Draws the launched thread, on the owner's page or a guest's, with `run` as its run line. */
+async function draw(guest: boolean, run: InboxRun | null) {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json({})) as typeof fetch;
   restore.push(() => {
@@ -100,25 +100,57 @@ async function launchItems(guest: boolean): Promise<string[]> {
         file={null}
         onOpenFile={() => {}}
         onOpenGuide={() => {}}
-        // Resting: the owner's ⋯ offers Stop then too.
-        run={null}
+        run={run}
         remote={true}
         guest={guest}
       />,
     );
   });
   await until(() => !!host!.querySelector('[data-thread-more]'), 'the ⋯ button');
-  await press(host!.querySelector('[data-thread-more]')!);
-  await until(() => !!document.querySelector('[data-thread-menu]'), 'the ⋯ menu');
-  const items = [...document.querySelectorAll('[data-thread-menu] [data-launch-item]')].map((el) => el.getAttribute('data-launch-item')!);
+}
+
+function undraw() {
   act(() => root!.unmount());
   host!.remove();
   root = null;
   host = null;
+}
+
+/** The launch items of the open thread's ⋯ (`data-launch-item`), top to bottom. A resting agent (no run line): the owner's ⋯ offers Stop then too. */
+async function launchItems(guest: boolean): Promise<string[]> {
+  await draw(guest, null);
+  await press(host!.querySelector('[data-thread-more]')!);
+  await until(() => !!document.querySelector('[data-thread-menu]'), 'the ⋯ menu');
+  const items = [...document.querySelectorAll('[data-thread-menu] [data-launch-item]')].map((el) => el.getAttribute('data-launch-item')!);
+  undraw();
   return items;
 }
 
 test.skipIf(!hasDom)("a tailnet guest's ⋯ has no Stop or Delete for a launched agent; the owner's over the tailnet keeps both", async () => {
   expect(await launchItems(false)).toEqual(['stop', 'delete']);
   expect(await launchItems(true)).toEqual([]);
+});
+
+const runOf = (over: Partial<InboxRun>): InboxRun =>
+  ({ state: 'working', launch_id: 'lch_a', agent: 'claude-code', project: 'app', folder: '/work/app', since: '2026-10-20T18:10:00.000Z', again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null, ...over }) as InboxRun;
+
+/** The run line's Stop and Try again (`data-run-stop`, `data-run-retry`) on the drawn page. */
+async function runButtons(guest: boolean, run: InboxRun): Promise<string[]> {
+  await draw(guest, run);
+  await until(() => !!host!.querySelector('[data-run]'), 'the run line');
+  const buttons = [...host!.querySelectorAll('[data-run-stop], [data-run-retry]')].map((el) => (el.hasAttribute('data-run-stop') ? 'stop' : 'retry'));
+  undraw();
+  return buttons;
+}
+
+test.skipIf(!hasDom)("a tailnet guest's run line has no Stop (working, or waiting on a prompt) and no Try again (failed); the owner's keeps them", async () => {
+  const working = runOf({ state: 'working' });
+  const waiting = runOf({ state: 'waiting_terminal' });
+  const failed = runOf({ state: 'failed', cause: 'Claude Code exited.' });
+  expect(await runButtons(false, working)).toEqual(['stop']);
+  expect(await runButtons(false, waiting)).toEqual(['stop']);
+  expect(await runButtons(false, failed)).toEqual(['retry']);
+  expect(await runButtons(true, working)).toEqual([]);
+  expect(await runButtons(true, waiting)).toEqual([]);
+  expect(await runButtons(true, failed)).toEqual([]);
 });
