@@ -199,6 +199,7 @@ import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
+import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -1794,7 +1795,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const claimListIntro = (via: RequestVia): boolean => {
     if (via !== "local" || !listIntroState().due) return false;
     const at = new Date().toISOString();
-    saveConfig({ inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at } });
+    // A one-time announcement: it counts toward the reveals' 48 h spacing (shared/inbox/reveals.ts). A dev build never stamps
+    // that clock.
+    saveConfig({
+      inboxListIntro: { ...loadConfig().inboxListIntro, shownAt: at },
+      ...(normalizeStableVersion(version) !== null ? { inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } } : {}),
+    });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxListIntro?.shownAt === at;
   };
@@ -1820,9 +1826,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
     saveConfig({ inboxSnoozeIntro: { ...(firstUseAt ? { firstUseAt } : {}), ...(store.snoozes().length > 0 ? { snoozedAt: new Date().toISOString() } : {}) } });
   }
-  /** Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. */
+  /**
+   * Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. Its own
+   * rules, and the reveals' queue (shared/inbox/reveals.ts): the 48 h spacing, and the Board going first once Snooze waited
+   * three days for its moment.
+   */
   const snoozeIntroState = (owner: boolean) => ({
-    due: owner && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
+    due: owner && revealNow(owner) === "snooze",
   });
   /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
@@ -1836,7 +1846,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimSnoozeIntro = (owner: boolean): boolean => {
     if (!snoozeIntroState(owner).due) return false;
-    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
+    const at = new Date().toISOString();
+    // One save: the stamp and the reveals' spacing clock.
+    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at }, inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at } });
   };
 
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
@@ -1910,6 +1922,76 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxBoard: on });
     if ((loadConfig().inboxBoard === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     return { on: boardOn() };
+  };
+
+  /**
+   * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/shared/inbox/reveals.ts):
+   * Snooze, then the Board. Read live, like Snooze: the days pass while the Inbox runs. A dev build decides nothing.
+   * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
+   * the person's (or an earlier reveal's), and a test's `board` option decides it too.
+   */
+  const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
+  const revealState = (now: Date): RevealState => {
+    const snooze = snoozeIntroSaved();
+    const config = loadConfig();
+    const reveals = config.inboxReveals;
+    // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
+    const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
+    return {
+      release: snoozeIntroRelease,
+      firstUseAt: snooze?.firstUseAt ?? null,
+      // The spacing clock: the reveals' own stamp, and every announcement shown before this key existed (an upgrade).
+      lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
+      // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
+      threads: store.threadIds().length,
+      open: {
+        snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
+        // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
+        // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
+        board: boardUndecided() && !reveals?.board?.shownAt,
+      },
+      waitingSince: reveals?.waitingSince,
+    };
+  };
+  /**
+   * The reveal this page may arm, or null. The owner's pages only (this computer, their phone over the tailnet, an
+   * allowed login on a tagged machine), never a guest's. The first time an entry is next is kept, for the patience.
+   */
+  const revealNow = (owner: boolean): RevealId | null => {
+    if (!owner || !snoozeIntroRelease) return null;
+    const now = new Date();
+    const state = revealState(now);
+    const next = revealNext(state, now);
+    if (next && !state.waitingSince?.[next]) {
+      const reveals = loadConfig().inboxReveals;
+      saveConfig({ inboxReveals: { ...reveals, waitingSince: { ...reveals?.waitingSince, [next]: now.toISOString() } } });
+    }
+    return next;
+  };
+  /**
+   * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
+   * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. The
+   * Board's claim turns the Board on (unset -> true, its one automatic write), stamps the first-visit dialog (the
+   * reveal shows it, so the Board's first visit does not) and the spacing clock, all in one save. `show`: the page
+   * draws the dialog. Someone who already saw it (before the Board was a switch) gets the Board on and no dialog:
+   * `show: false` with `board.on`, so only the sidebar's row appears, and their old stamp is kept.
+   */
+  const claimReveal = (id: RevealId, owner: boolean): boolean => {
+    if (id === "snooze") return claimSnoozeIntro(owner);
+    if (id !== "board" || !owner || !snoozeIntroRelease) return false;
+    const now = new Date();
+    if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
+    const at = now.toISOString();
+    const config = loadConfig();
+    const seen = Boolean(config.inboxBoardIntro?.shownAt);
+    saveConfig({
+      inboxBoard: true,
+      ...(seen ? {} : { inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at } }),
+      inboxReveals: { ...config.inboxReveals, lastShownAt: at, board: { shownAt: at } },
+    });
+    // Not written (a read-only data dir): showing it anyway would show it on every load.
+    const saved = loadConfig();
+    return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -1995,6 +2077,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     list_intro: listIntroState(),
     /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
     snooze_intro: snoozeIntroState(!guest),
+    /** The reveals for returning users (shared/inbox/reveals.ts): the one this page may arm, or null. Never for a guest. */
+    reveal: { next: revealNow(!guest) },
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -3304,15 +3388,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
       }
 
+      // The reveals for returning users (approval "inbox-feature-reveal"): one compare-and-set over the queue. Only the
+      // reveal that is still next can be claimed; a guest never claims. The Board's claim turns the Board on.
+      if (path === "/api/inbox/reveal") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const id = body.id;
+        if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
+        const owner = ownerOrLocal(req, via);
+        const show = claimReveal(id, owner);
+        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() } });
+      }
+
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
-      // computer to open the Board claims it, once per machine (config.json `inboxBoardIntro.shownAt`);
-      // a page reached over the tailnet never claims it.
+      // computer or the owner's phone to open the Board claims it, once per machine (config.json
+      // `inboxBoardIntro.shownAt`); a tailnet guest never claims it (the owner rule: never inhibit the owner
+      // on their own tailnet).
       if (path === "/api/inbox/board/intro") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         // Only once the Board is on: the dialog introduces a page the person can see.
-        if (via !== "local" || !boardOn() || loadConfig().inboxBoardIntro?.shownAt) return json({ show: false });
+        if (!ownerOrLocal(req, via) || !boardOn() || loadConfig().inboxBoardIntro?.shownAt) return json({ show: false });
         const at = new Date().toISOString();
         saveConfig({ inboxBoardIntro: { shownAt: at } });
         // Not written (a read-only data dir): showing it anyway would show it on every visit.
