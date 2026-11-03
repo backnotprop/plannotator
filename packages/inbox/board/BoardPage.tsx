@@ -56,6 +56,7 @@ import {
   type BoardView,
 } from './model';
 import { newUuid } from '../uuid';
+import { noteOneTimeDialogShown } from '../snoozeIntro';
 
 export type { BoardMove } from './model';
 
@@ -142,7 +143,12 @@ export function BoardPage(props: BoardPageProps) {
     claimed.current = true;
     inboxApi
       .claimBoardIntro()
-      .then((answer) => answer.show && setIntro(true))
+      .then((answer) => {
+        if (!answer.show) return;
+        // Another one-time dialog this load: no Snooze announcement on it (snoozeIntro.ts).
+        noteOneTimeDialogShown();
+        setIntro(true);
+      })
       .catch(() => {});
   }, [props.claimIntro]);
   const promptCopy = useCopyBoardPrompt(props.mcpCommand);
