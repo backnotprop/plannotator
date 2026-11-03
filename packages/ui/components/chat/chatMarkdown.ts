@@ -496,10 +496,77 @@ const personMarkdown = new Marked(
   budgetExtension,
 );
 
+/** The most blank lines kept before a paragraph, as `parseMarkdownToBlocks`'s
+ * `keepBlankLines` keeps: a paste of hundreds does not push the text off screen. */
+const MAX_KEPT_BLANK_LINES = 10;
+
+/** The blank lines typed before each paragraph that follows 2 or more, for
+ * `typedPersonMarkdown`'s paragraph renderer. Filled before each parse. */
+let keptBlankLines = new WeakMap<Token, number>();
+
+/**
+ * The blank lines (2+, capped) typed right before the top-level paragraph at
+ * `index`, or 0. Blank lines before the first block are not kept, as in the
+ * block parser. They sit in a `space` token's raw, or at the end of the raw of
+ * a block that takes its trailing newlines (a heading), so this reads the raw
+ * text back to the last line with anything on it.
+ */
+function blankLinesBefore(tokens: readonly Token[], index: number): number {
+  let before = '';
+  let reachedText = false;
+  for (let at = index - 1; at >= 0 && !reachedText; at -= 1) {
+    before = tokens[at].raw + before;
+    reachedText = tokens[at].type !== 'space';
+  }
+  if (!reachedText) return 0;
+  const lines = before.split('\n');
+  lines.pop();
+  let blank = 0;
+  for (let at = lines.length - 1; at >= 0 && lines[at].trim() === '' && blank < MAX_KEPT_BLANK_LINES; at -= 1) {
+    blank += 1;
+  }
+  return blank >= 2 ? blank : 0;
+}
+
+/**
+ * A person's message as typed (`keepUserBlankLines`): `personMarkdown`, plus
+ * each bare newline is a `<br>` and a paragraph after 2+ blank lines keeps the
+ * run, as the Inbox draws a person's reply (`keepBlankLines` with
+ * `SoftLineBreaksContext`). The run is drawn as one `<br>` per blank line past
+ * the first before the paragraph, the first being the paragraph gap itself: no
+ * `style` or `class` reaches the sanitizer.
+ */
+const typedPersonMarkdown = new Marked(
+  {
+    gfm: true,
+    breaks: true,
+    renderer: {
+      html(token) {
+        return rawHtmlAsText(token);
+      },
+      paragraph(token) {
+        const blank = keptBlankLines.get(token);
+        if (blank === undefined) return false;
+        return `${'<br>'.repeat(blank - 1)}<p>${this.parser.parseInline(token.tokens)}</p>\n`;
+      },
+    },
+  },
+  budgetExtension,
+);
+
 function parseMarkdown(markdown: Marked, source: string, streaming = false): string {
   deadline = Date.now() + MARKDOWN_BUDGET_MS;
   blockLimit = streaming ? MAX_NON_ASCII_IN_SMALL_BLOCK : MAX_NON_ASCII_IN_BLOCK;
-  return markdown.parser(new BoundedLexer(markdown.defaults).lex(source));
+  const tokens = new BoundedLexer(markdown.defaults).lex(source);
+  if (markdown === typedPersonMarkdown) {
+    keptBlankLines = new WeakMap();
+    tokens.forEach((token, index) => {
+      if (token.type !== 'paragraph') return;
+      const blank = blankLinesBefore(tokens, index);
+      if (blank > 0) keptBlankLines.set(token, blank);
+    });
+  }
+  return markdown.parser(tokens);
 }
 
 interface RenderedMessage {
@@ -531,8 +598,8 @@ function renderMessage(
   }
 }
 
-function markdownFor(literalHtml: boolean, rich: boolean): Marked {
-  if (literalHtml) return personMarkdown;
+function markdownFor(literalHtml: boolean, rich: boolean, keepBlankLines = false): Marked {
+  if (literalHtml) return keepBlankLines ? typedPersonMarkdown : personMarkdown;
   return rich ? richAgentMarkdown : agentMarkdown;
 }
 
@@ -561,8 +628,9 @@ const HELD_TEXT_GROWTH = 1.125;
 export function chatTextRenderer(
   literalHtml: boolean,
   rich = false,
+  keepBlankLines = false,
 ): (text: string, streaming: boolean) => string {
-  const markdown = markdownFor(literalHtml, rich);
+  const markdown = markdownFor(literalHtml, rich, keepBlankLines);
   let held: { readonly text: string; readonly html: string } | null = null;
   return (text, streaming) => {
     if (streaming && held !== null && text.startsWith(held.text)) {
