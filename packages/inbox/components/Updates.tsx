@@ -1024,6 +1024,7 @@ export function AboutBlock({
             </div>
           </div>
         </section>
+        <AboutPrivacy />
         {where && <AboutWhere where={where} />}
       </>
     );
@@ -1127,8 +1128,32 @@ export function AboutBlock({
         {failing && details && <CheckFailingCommand command={details.command} />}
         {error && <div className="ib-error">{error}</div>}
       </section>
+      <AboutPrivacy />
       {where && <AboutWhere where={where} />}
     </>
+  );
+}
+
+/**
+ * The daily ping (packages/shared/daily-ping.ts), in words. There is no switch:
+ * NO_ANON_PING is the one way to turn it off, so it is the one named.
+ */
+function AboutPrivacy() {
+  return (
+    <section className="ib-sgroup" aria-labelledby="ib-g-privacy" data-settings-privacy="">
+      <h2 id="ib-g-privacy">Privacy</h2>
+      <p>
+        Once a day, each Plannotator tool you use (Inbox, plan review, code review, annotate, last) sends one anonymous ping: the tool&apos;s name, the
+        version, and how many weeks since this computer first used Plannotator. There&apos;s no ID and nothing about you or your work. It helps us see how many
+        people use Plannotator and where to put our effort.
+      </p>
+      <p>
+        To turn it off, set <code>NO_ANON_PING=1</code> and restart Plannotator.{' '}
+        <a className="ib-lnk" href="https://plannotator.ai/privacy" target="_blank" rel="noreferrer">
+          Privacy policy
+        </a>
+      </p>
+    </section>
   );
 }
 

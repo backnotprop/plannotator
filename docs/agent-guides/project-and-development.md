@@ -30,8 +30,12 @@ plannotator/
 │   │   ├── .factory-plugin/plugin.json
 │   │   ├── commands/             # Slash command entrypoints
 │   │   └── lib/                  # Shared command wrapper helpers
-│   ├── dsh-plugin/               # DeepSeek Harness plugin (@plannotator/dsh): plan review only; review/annotate/last come from the shared skills in ~/.agents/skills
-│   │   ├── index.ts              # Cordis plugin entry (`name` + `apply`); prepends a `user-questions/request` listener
+│   ├── dsh-plugin/               # DeepSeek Harness plugin (@plannotator/dsh): plan review, the Inbox, and the plannotator tool and /plannotator-* commands
+│   │   ├── index.ts              # Cordis plugin entry (`name` + `apply`), delegating to plugin.ts
+│   │   ├── plugin.ts             # Prepends a `user-questions/request` listener; starts the Inbox connection in an inject([agents, tools]) child
+│   │   ├── inbox.ts              # plannotator_inbox tool and the reply wake (followup / steer), over the shared agent-link.ts (relative imports)
+│   │   ├── tool.ts               # The plannotator tool (off by default) and the /plannotator-review, -annotate, -last commands
+│   │   ├── reviews.ts            # Non-blocking CLI children for those; each decision goes back with agent.followup
 │   │   ├── plan-review.ts        # Answers exit_plan_mode's plan-review question via `plannotator dsh-plan`; anything else, or any failure, goes to DSH's own card
 │   │   ├── cli.ts                # Finds the plannotator binary; runs the `dsh-plan` round trip (abort kills the child)
 │   │   └── cordis.patch.yml      # The bundle patch row DSH's plugin manager applies on install

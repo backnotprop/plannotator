@@ -82,12 +82,16 @@ const TurnLiveContext = createContext(true);
  * draws what the transcript's would, without saying so a second time. */
 const RichMarkdownContext = createContext(false);
 
+/** The transcript's `keepUserBlankLines`, for the same reason. */
+const KeepUserBlankLinesContext = createContext(false);
+
 /** One text part as sanitized markdown, memoized on its text. */
 export const ChatMarkdown = memo(function ChatMarkdown({
   text,
   streaming = false,
   literalHtml = false,
   richMarkdown,
+  keepBlankLines,
   messageId,
   role,
   partIndex,
@@ -104,6 +108,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({
    * numbers. Images load remote addresses from this text, so it is off unless a
    * host turns it on. Absent: what `ChatTranscript` was told, or off. */
   richMarkdown?: boolean;
+  /** With `literalHtml`: draw the text as typed. Each line break stays a line
+   * break, and a paragraph after 2 or more blank lines keeps them (up to 10).
+   * No effect on an agent's text. Absent: what `ChatTranscript`'s
+   * `keepUserBlankLines` says, or off. */
+  keepBlankLines?: boolean;
   /** Where this text sits, as scalars so `memo` short-circuits. A host reads
    * them back off the element to anchor a selection. */
   messageId?: string;
@@ -121,7 +130,9 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const shown = live && reducedMotion ? clipAtSentenceBoundary(text) : text;
   const transcriptRich = useContext(RichMarkdownContext);
   const rich = richMarkdown ?? transcriptRich;
-  const render = useMemo(() => chatTextRenderer(literalHtml, rich), [literalHtml, rich]);
+  const transcriptKeep = useContext(KeepUserBlankLinesContext);
+  const keep = literalHtml && (keepBlankLines ?? transcriptKeep);
+  const render = useMemo(() => chatTextRenderer(literalHtml, rich, keep), [literalHtml, rich, keep]);
   const html = useMemo(() => render(shown, live), [render, shown, live]);
   // One `{__html}` object per html string: React re-sets innerHTML whenever
   // that prop's identity changes, which would collapse a live selection.
@@ -189,6 +200,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   renderPart,
   footer,
   richMarkdown,
+  keepUserBlankLines,
 }: {
   message: ChatMessage<Part>;
   agentName: string;
@@ -209,6 +221,9 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   footer?: React.ReactNode;
   /** See `ChatMarkdown`. Absent: what `ChatTranscript` was told, or off. */
   richMarkdown?: boolean;
+  /** `ChatMarkdown`'s `keepBlankLines` for the person's text parts. Absent:
+   * what `ChatTranscript` was told, or off. */
+  keepUserBlankLines?: boolean;
 }) {
   const isUser = message.role === 'user';
   return (
@@ -236,6 +251,7 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
               streaming={part.state === 'streaming'}
               literalHtml={isUser}
               richMarkdown={richMarkdown}
+              keepBlankLines={isUser ? keepUserBlankLines : undefined}
               messageId={message.id}
               role={message.role}
               partIndex={index}
@@ -293,6 +309,12 @@ export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessageP
    * numbers in text parts, a host's own `ChatMarkdown` included. Images load
    * remote addresses from model text, so it is off unless a host turns it on. */
   readonly richMarkdown?: boolean;
+  /** Draw the person's messages as typed, as the Inbox draws a person's reply:
+   * each line break stays a line break, and a paragraph after 2 or more blank
+   * lines keeps them (up to 10) instead of one paragraph gap. A host's own
+   * `ChatMarkdown` with `literalHtml` follows it too. The agent's text is not
+   * affected. Off: the person's text renders as before. */
+  readonly keepUserBlankLines?: boolean;
 }
 
 /**
@@ -345,6 +367,7 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   scrollRef,
   overlay,
   richMarkdown = false,
+  keepUserBlankLines = false,
 }: ChatTranscriptProps<Part>) {
   // `submitted` is set the moment a message is sent, and a stream's start can
   // push an assistant message with no parts without changing the status. The
@@ -457,5 +480,9 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
       )}
     </div>
   );
-  return <RichMarkdownContext.Provider value={richMarkdown}>{pane}</RichMarkdownContext.Provider>;
+  return (
+    <RichMarkdownContext.Provider value={richMarkdown}>
+      <KeepUserBlankLinesContext.Provider value={keepUserBlankLines}>{pane}</KeepUserBlankLinesContext.Provider>
+    </RichMarkdownContext.Provider>
+  );
 }

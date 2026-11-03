@@ -129,7 +129,8 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     const method = init?.method ?? 'GET';
-    if (path === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
+    // The route without its query: the window reads `/api/inbox/settings?store=0`.
+    if (path.split('?')[0] === '/api/inbox/settings' && method === 'GET' && settingsGate) await settingsGate;
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;

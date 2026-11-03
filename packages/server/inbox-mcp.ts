@@ -12,7 +12,7 @@
  */
 
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -517,6 +517,24 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
 }
 
 /**
+ * The project an agent sent from when it is not `project`, the thread's (a
+ * `reply_to` from another folder; approval "inbox-reply-recipient"): its
+ * name as the taggable list names a live session there (the project's, else
+ * its root's folder name). The window names the agent by it once its session
+ * has ended. Null for a send from the thread's project, a folder combined
+ * with it or folded into it, or a root git could not settle. Never makes a
+ * project.
+ */
+async function senderProject(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject): Promise<{ name: string; root: string } | null> {
+  if (!projectPath || !isAbsolute(projectPath) || !context.projectRootOf) return null;
+  const resolved = await context.projectRootOf(projectPath).catch(() => null);
+  if (!resolved || !resolved.settled || resolved.root === project.root) return null;
+  const known = context.store.projectByRoot(resolved.root);
+  if (known && context.store.sameProject(known.id, project.id)) return null;
+  return { name: known?.name ?? (basename(resolved.root) || resolved.root), root: resolved.root };
+}
+
+/**
  * Why an image the body shows will not show in the window, by the code the
  * send-time capture's read refused it with (the message-image route's own
  * rules, message-images.ts). A code not listed (a read that raced a change,
@@ -661,6 +679,7 @@ export async function sendAgentMessage(
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
   const basePath = await sendBasePath(context, here, project, working);
+  const fromProject = await senderProject(context, input.project_path, project);
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -693,6 +712,7 @@ export async function sendAgentMessage(
       inline_images: captured?.images,
       guide: guide ?? null,
       base_path: basePath,
+      from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
       ...(wakes ? { wakes: true } : {}),
@@ -882,7 +902,10 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
       if (message.to.session === caller && !message.delivery) unread = true;
       continue;
     }
-    if ((store.messageCursor(message.id) ?? 0) > checked) unread = true;
+    // A plain reply: after the agent-read mark, not delivered (its recipient's read past a reply the mark
+    // waits at, owed to another session, records its delivery), and one this caller's read settles. A reply
+    // owed to another session is not the caller's to read: it would stay "unread" after every read it makes.
+    if ((store.messageCursor(message.id) ?? 0) > checked && !message.delivery && store.readSettles(message, caller)) unread = true;
   }
   return { unread, last };
 }
@@ -1020,10 +1043,14 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           const url = threadUrl(context.baseUrl(), threadId);
           const reader = input.agent_session?.trim() || null;
           // A session the person only tagged here reads as a guest: what the owner still waits for stays queued.
-          // So does a script that names no session (a raw MCP client's read still settles, as it always has).
+          // So does a script that names no session. A raw MCP client's read that names none settles only the
+          // replies to messages sent without a session; any read settles only what is owed to its reader.
           const guest = store.isTaggedGuest(threadId, reader) || (reader === null && callerPeeks(ctx));
           if (input.format === "full") {
-            if (!guest) store.markAgentChecked(threadId);
+            // Only what this reader is owed: a reply to another session waits for that one (markAgentChecked).
+            if (!guest) store.markAgentChecked(threadId, undefined, undefined, reader);
+            // What this read settles that the mark could not reach (an earlier reply still owed to another session).
+            if (!guest) store.settleReadPast(threadId, reader);
             // The person's 👍 (settled acks) are read now too: the window says the agent saw it.
             if (!guest) store.markAcksSeen(threadId);
             // What this session was owed here and no wake is left to settle.
@@ -1041,7 +1068,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // Built first, so a refused read (a bad expand, before or after) marks nothing read.
           const { result, order, shown, readThrough } = windowedThread(store, threadId, { ...input, caller: input.agent_session?.trim() || null }, url);
           if (!guest) {
-            store.markAgentChecked(threadId, readThrough);
+            store.markAgentChecked(threadId, readThrough, undefined, reader);
+            store.settleReadPast(threadId, reader, shown);
             store.markAcksSeen(threadId, shown);
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.
