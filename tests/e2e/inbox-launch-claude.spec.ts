@@ -648,7 +648,8 @@ test('Stop while it starts again for a reply: "You stopped", never a failure, an
 
 test('Delete while --bg is still running: the session it makes is stopped and removed, never left running', async () => {
   const { page, fake } = world;
-  fake.configure({ bgDelayMs: 2500, startDelayMs: 0, hold: false });
+  // Long enough that the Delete lands while --bg still runs: the window's reload and menu took 2.5 s on CI once main grew.
+  fake.configure({ bgDelayMs: 8000, startDelayMs: 0, hold: false });
   try {
     await page.goto(world.url);
     const threadId = await launchFrom(page, 'Rename the flag to match the docs.');
