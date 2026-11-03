@@ -19,6 +19,8 @@
  *   sentence (it opens above, between the header and the box);
  * - an iPhone 15, keyboard 403 px (257 px left), one match (it opens below);
  * - the keyboard opening after the list is open (it moves with it);
+ * - a phone on its side with the keyboard up (113 and 140 px visible): the
+ *   list is one row that scrolls, and that first row shows whole;
  * - a name wider than a phone's row: the icon, the name (cut with an ellipsis)
  *   and its source stay on one line, the row two lines tall;
  * - full view opening over the reply box while the list is open (desktop):
@@ -180,7 +182,7 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 /** The list, measured: what cuts it, where it is against the visible part and the header, and which shown rows are covered. */
-async function expectWhole(page: Page, name: string): Promise<{ placement: string; shown: number }> {
+async function expectWhole(page: Page, name: string, opts: { overHeader?: boolean } = {}): Promise<{ placement: string; shown: number }> {
   await frames(page);
   const m = await page.evaluate(() => {
     const menu = document.querySelector<HTMLElement>('[data-skill-menu]');
@@ -211,7 +213,9 @@ async function expectWhole(page: Page, name: string): Promise<{ placement: strin
   });
   expect(m, `${name}: the list is open`).not.toBeNull();
   expect.soft(m!.cutBy, `${name}: nothing cuts the list`).toEqual([]);
-  expect.soft(m!.top, `${name}: the list starts under the header`).toBeGreaterThanOrEqual(m!.headBottom - 0.5);
+  // Under the header, but where not even the caret's line leaves one whole row there (a phone on its side, the
+  // keyboard up), the one row may lie over it: a whole row over the header beats a sliver of one.
+  if (!opts.overHeader) expect.soft(m!.top, `${name}: the list starts under the header`).toBeGreaterThanOrEqual(m!.headBottom - 0.5);
   expect.soft(m!.top, `${name}: the list starts on screen`).toBeGreaterThanOrEqual(m!.seenTop - 0.5);
   expect.soft(m!.bottom, `${name}: the list ends above the keyboard`).toBeLessThanOrEqual(m!.seenBottom + 0.5);
   expect.soft(m!.shown, `${name}: a row shows`).toBeGreaterThan(0);
@@ -320,4 +324,38 @@ test('full view opening over the reply box takes the open list away (desktop)', 
   expect(hit).not.toBe('row');
   await expect(field).toHaveValue('Hi /b');
   await context.close();
+});
+
+test('a phone on its side, the keyboard up (113 and 140 px visible): the first row shows whole', async () => {
+  const page = await phone('iPhone 15');
+  await page.setViewportSize({ width: 844, height: 390 });
+  const field = await openReply(page);
+  await field.focus();
+  let left = 390;
+  for (const visible of [140, 113]) {
+    // Down to `visible`, from what the last pass left.
+    await iosKeyboardUp(page, left - visible);
+    left = visible;
+    await typeAtEnd(page, field, 'Yea. ', '/b');
+    await shot(page, `iphone-landscape-keyboard-${visible}`);
+    await expectWhole(page, `${visible} px visible`, { overHeader: true });
+    const m = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('[data-skill-menu-list]')!;
+      const row = list.querySelector<HTMLElement>('[data-skill-item]')!;
+      const vv = window.visualViewport!;
+      const l = list.getBoundingClientRect();
+      const r = row.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + 30, (r.top + r.bottom) / 2);
+      return { rowTop: r.top, rowBottom: r.bottom, listTop: l.top, listBottom: l.bottom, seenTop: vv.offsetTop, seenBottom: vv.offsetTop + vv.height, onTop: hit?.closest('[data-skill-item]') === row, rowHeight: r.height };
+    });
+    // The whole first row: inside the list's scroll box (not a sliver of it), inside what shows, and on top.
+    expect.soft(m.rowTop, `${visible}: the first row starts inside the list`).toBeGreaterThanOrEqual(m.listTop - 0.5);
+    expect.soft(m.rowBottom, `${visible}: the first row ends inside the list`).toBeLessThanOrEqual(m.listBottom + 0.5);
+    expect.soft(m.rowTop, `${visible}: the first row starts on screen`).toBeGreaterThanOrEqual(m.seenTop - 0.5);
+    expect.soft(m.rowBottom, `${visible}: the first row ends above the keyboard`).toBeLessThanOrEqual(m.seenBottom + 0.5);
+    expect.soft(m.onTop, `${visible}: nothing covers the first row`).toBe(true);
+    expect.soft(m.rowHeight, `${visible}: the row keeps its height`).toBeGreaterThanOrEqual(40);
+  }
+  expect((page as Page & { errors?: string[] }).errors).toEqual([]);
+  await page.context().close();
 });

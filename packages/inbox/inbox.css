@@ -1230,6 +1230,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    itself takes no clicks. */
 .ib-skanchor { position: absolute; z-index: 60; pointer-events: none; }
 .ib-skanchor > [data-skill-menu] { pointer-events: auto; }
+/* Never a sliver of a row: at least one whole row and the list's padding (FloatingSkillMenu measures it and picks an
+   anchor with room for it), whatever max-height the room left. */
+.ib-skanchor [data-skill-menu-list] { min-height: var(--ib-skill-list-least, 0px); }
 /* A name longer than the row (an unbroken 40-letter German name in a 380 px comment card) ends in an ellipsis once
    the description has given all its room, so the source column stays in the row. Also ui's comment card on an
    attached page (portaled to the body; this file loads only in the Inbox). */

@@ -273,13 +273,17 @@ const FIELD_GAP_EXTRA = 2;
 const PHONE_FIELD_GAP_EXTRA = 4;
 /** What the menu spends around its list on one side: its 6 px gap, 8 px from the room's edge, its border. */
 const SIDE_CHROME = 16;
-/** The least list worth showing off the box: one 44 px row and its padding. */
+/** The least list ever shown: one whole row and the list's padding (a 44 px phone row, until a row is measured). */
 const MIN_LIST_ROOM = 56;
+/** The list's own padding above and below its rows (SkillReferenceMenu's `p-1.5`). */
+const LIST_PADDING = 12;
 
 interface MenuFrame {
   box: AnchorBox;
   room: VerticalBox | null;
   cap: number | undefined;
+  /** One whole row and the list's padding: the list is never shorter (a sliver of a row is never shown). */
+  least: number;
   /** fieldInSight: the field has focus and nothing covers it. */
   shown: boolean;
 }
@@ -287,6 +291,7 @@ interface MenuFrame {
 // Object.is: a reading that is NaN (a viewport mid-rotation) still equals itself, so the commit loop converges.
 const sameFrame = (a: MenuFrame, b: MenuFrame) =>
   a.shown === b.shown &&
+  a.least === b.least &&
   Object.is(a.box.top, b.box.top) &&
   Object.is(a.box.bottom, b.box.bottom) &&
   Object.is(a.box.left, b.box.left) &&
@@ -334,9 +339,13 @@ function FloatingSkillMenu({
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef(caret);
   caretRef.current = caret;
+  // Set by update() when not even the caret's line leaves one whole row under the thread's header: the room is then
+  // all that is visible, the header included, since a whole row over the header beats a sliver of one.
+  const overHeaderRef = useRef(false);
   const room = useCallback((): VerticalBox | null => {
     const own = caretRef.current;
-    return own ? own.bounds() : skillListRoom(textarea);
+    if (own) return own.bounds();
+    return overHeaderRef.current ? seenBox(textarea.ownerDocument.defaultView ?? window) : skillListRoom(textarea);
   }, [textarea]);
 
   const update = useCallback(() => {
@@ -349,12 +358,33 @@ function FloatingSkillMenu({
       return caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
     };
     let anchor = own ? atCaret() : fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
-    const r = room();
-    // Too little room on both sides of the box for one row (a phone on its side with the keyboard up: ~140 px
-    // visible): hang the list off the caret's line instead, over the rest of the box, so a whole row shows.
-    if (!own && r && Math.max(anchor.top - r.top, r.bottom - anchor.bottom) - SIDE_CHROME < MIN_LIST_ROOM) {
+    // One whole row, as drawn (a phone's row is two lines), and the list's padding.
+    const row = anchorRef.current?.querySelector<HTMLElement>('[data-skill-item]')?.getBoundingClientRect().height ?? 0;
+    const least = row > 0 ? row + LIST_PADDING : MIN_LIST_ROOM;
+    const fits = (a: AnchorBox, r: VerticalBox) => Math.max(a.top - r.top, r.bottom - a.bottom) - SIDE_CHROME >= least;
+    const side = (a: AnchorBox, r: VerticalBox) => Math.max(a.top - r.top, r.bottom - a.bottom);
+    overHeaderRef.current = false;
+    let r = room();
+    let tight = false;
+    // Too little room on both sides of the box for one whole row (a phone on its side with the keyboard up: ~110 to
+    // 140 px visible): hang the list off the caret's line instead, over the rest of the box. Still too little under
+    // the thread's header: the room is all that is visible, over the header, and the list is one row that scrolls.
+    // Too little even then: the list's edge moves onto the caret's line just far enough for that one row.
+    if (!own && r && !fits(anchor, r)) {
       const line = atCaret();
-      if (Math.max(line.top - r.top, r.bottom - line.bottom) > Math.max(anchor.top - r.top, r.bottom - anchor.bottom)) anchor = line;
+      if (side(line, r) > side(anchor, r)) anchor = line;
+      if (!fits(anchor, r)) {
+        const all = seenBox(textarea.ownerDocument.defaultView ?? window);
+        overHeaderRef.current = true;
+        tight = true;
+        r = all;
+        anchor = side(line, all) >= side(anchor, all) ? line : anchor;
+        if (!fits(anchor, all)) {
+          const need = least + SIDE_CHROME;
+          const edge = anchor.top - all.top >= all.bottom - anchor.bottom ? all.top + need : all.bottom - need;
+          anchor = { ...anchor, top: edge, bottom: edge };
+        }
+      }
     }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
@@ -366,9 +396,9 @@ function FloatingSkillMenu({
     };
     const seen = seenBox(textarea.ownerDocument.defaultView ?? window);
     const phoneCap = phone ? phoneSkillListHeight(seen.bottom - seen.top) : undefined;
-    const cap = own ? own.maxListHeight : Number.isFinite(phoneCap) ? phoneCap : undefined;
+    const cap = own ? own.maxListHeight : tight ? least : Number.isFinite(phoneCap) ? phoneCap : undefined;
     const shown = fieldInSight(textarea, textarea.closest('.ib-pfoot, dialog') ?? wrap, host, anchorRef.current);
-    const next: MenuFrame = { box, room: r, cap, shown };
+    const next: MenuFrame = { box, room: r, cap, least, shown };
     setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
   }, [host, textarea, wrap, room]);
 
@@ -438,7 +468,7 @@ function FloatingSkillMenu({
       onMouseDown={(event) => event.preventDefault()}
       className="ib-skanchor"
       data-skill-menu-anchor={caret ? 'caret' : 'field'}
-      style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top) }}
+      style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top), '--ib-skill-list-least': `${frame.least}px` } as React.CSSProperties}
     >
       {children(room, frame.cap)}
     </div>,
