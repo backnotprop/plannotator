@@ -6,9 +6,13 @@
  * host's tool text: the Claude Code mod's builder (its contract copy), the
  * shared builder Pi, OpenCode and DeepSeek Harness use (with the wake, and
  * without it for OpenCode 1), and a raw MCP client's tools/list and server
- * instructions. Each is byte for byte the text built from the bundled
- * default list (INBOX_DEFAULT_TOOLS, which predates steps), and none holds
- * the word. No wake line, no compaction line, no read_thread lines either,
+ * instructions. The list served is the bundled default list
+ * (INBOX_DEFAULT_TOOLS, which has no steps), each host's text is the one its
+ * builder makes from that list, and none holds the word. This is no
+ * pre-steps baseline: the builders are today's, so a builder change that
+ * added the same text in both would pass the equality, and the word check
+ * is the guard. (Review of #2567: measured against the base commit
+ * 73e39b6b, the off text was byte-equal on every host.) No wake line, no compaction line, no read_thread lines either,
  * though the store keeps a list. A `steps` call from a session that listed
  * it while on answers steps_off; a send_message that still carries `steps`
  * is sent without them.
@@ -114,7 +118,7 @@ async function world() {
 }
 
 describe("off, the default: agents get nothing", () => {
-  test("every host's tool text is the bundled pre-steps text, with no word of steps", async () => {
+  test("every host's tool text is the one built from the bundled list, with no word of steps", async () => {
     const w = await world();
     const served = await w.tools();
     expect(JSON.parse(JSON.stringify(served))).toEqual(JSON.parse(JSON.stringify(INBOX_DEFAULT_TOOLS)));
@@ -199,6 +203,32 @@ describe("on", () => {
     const many = await w.call("steps", { ...w.agent, thread_id: w.thread, steps: Array.from({ length: 13 }, (_, i) => ({ step: `s${i}`, status: "todo" })) });
     expect(many.isError).toBe(true);
     expect(w.server.store.cursor()).toBe(before);
+  });
+
+  // Review of #2567, finding 1: the store refuses a list with no agent session; that is checked before the send.
+  test("a send_message with steps and no session is refused, and no message is stored", async () => {
+    const w = await world();
+    await w.setSteps(true);
+    const before = w.server.store.cursor();
+    const messages = w.server.store.threadMessageIds(w.thread).length;
+    const nobody = await w.call("send_message", { project_path: w.project, reply_to: w.thread, body: "Replay done.", steps: PLAN });
+    expect(nobody.isError).toBe(true);
+    expect(nobody.content[0]!.text).toContain("agent_session");
+    expect(w.server.store.threadMessageIds(w.thread)).toHaveLength(messages);
+    expect(w.server.store.cursor()).toBe(before);
+  });
+
+  // Review of #2567, finding 3: a replay answers the first send and never puts back the list it carried.
+  test("a replayed send_message leaves the list the session sent since", async () => {
+    const w = await world();
+    await w.setSteps(true);
+    const send = { ...w.agent, project_path: w.project, reply_to: w.thread, body: "Replay done.", steps: PLAN, idempotency_key: "k-replay" };
+    expect((await w.call("send_message", send)).isError).toBeFalsy();
+    const later = PLAN.map((step) => ({ ...step, status: step.status === "doing" ? "done" : step.status }));
+    expect((await w.call("steps", { ...w.agent, thread_id: w.thread, steps: later })).isError).toBeFalsy();
+    const replay = await w.call("send_message", send);
+    expect(replay.isError).toBeFalsy();
+    expect(w.server.store.stepsOf(w.thread, "ses_a")!.steps.map((step) => step.status)).toEqual(later.map((step) => step.status));
   });
 
   test("read_thread shows the list; the compaction list says steps 2/5; a reply's wake carries the approved line", async () => {
