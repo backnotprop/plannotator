@@ -78,6 +78,7 @@ import { launchPlainEnv, type LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { samePlace } from "./agent-files";
 
 const AVAILABLE_TTL_MS = 30_000;
 const HOST_TTL_MS = 10_000;
@@ -1110,7 +1111,7 @@ export function createInboxLaunch(options: {
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       const runLine = runOfRoot(store.message(threadId)!);
       // The home folder is never trusted: the how-to then says to start in a folder inside it.
-      const line = runLine?.untrusted && resolve(root.launch.folder) === resolve(options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
+      const line = runLine?.untrusted && samePlace(root.launch.folder, options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },

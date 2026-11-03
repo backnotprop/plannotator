@@ -2031,7 +2031,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return { seq: line.seq, kind: line.kind, id: line.id, first: store.messageCursor(line.id) === line.seq, message: shownSubject(line.record) };
       case "question":
         // The store's one question state: a question an agent asked after the archive line is live (notifications, the sound).
-        return { seq: line.seq, kind: line.kind, id: line.id, question: store.questionWire(line.record) };
+        // `thread_id` (additive): its message's thread, so a window re-reads its open thread only for that thread's records.
+        return { seq: line.seq, kind: line.kind, id: line.id, thread_id: store.message(line.record.message_id)?.thread_id ?? null, question: store.questionWire(line.record) };
       case "annotation":
         return { seq: line.seq, kind: line.kind, id: line.id, annotation: line.record };
       case "card":
