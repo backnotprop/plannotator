@@ -330,10 +330,13 @@ export function createInboxCompose(options: {
     return null;
   };
 
-  /** Open threads holding unsent work, the most recently drafted first (each with the reply's first words). */
+  /**
+   * Open threads holding unsent work, the most recently drafted first (each with the reply's first words).
+   * Only the rows of threads that may hold unsent work are built (`unsentRows`), not the whole list.
+   */
   const replyDraftRows = (): InboxReplyDraftRow[] =>
     store
-      .listRows()
+      .unsentRows()
       .filter((row) => inboxHasUnsent(row.unsent) && !inboxRowArchived(row))
       .map((row) => {
         const draft = store.replyDraft(row.thread_id);
