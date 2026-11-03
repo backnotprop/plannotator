@@ -6,6 +6,7 @@
  *   visit): a person who just opened the thread and presses Enter must never allow a prompt.
  * - An answer still goes out where `crypto.randomUUID` does not exist (plain http to an address
  *   other than localhost): its reply's key comes from `newUuid`.
+ * - Its header's Stop is the owner's: a tailnet guest's page has none, as the server answers it `owner_only`.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -139,22 +140,22 @@ async function settle(turns = 4) {
   }
 }
 
-function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
+function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null, guest = false) {
   return (
     <div className="pn-inbox">
-      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} openedWith={openedWith} />
+      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} openedWith={openedWith} guest={guest} />
     </div>
   );
 }
 
-async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
+async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null, guest = false) {
   // As after a click on a row or a reload: nothing in the page holds focus.
   (document.activeElement as HTMLElement | null)?.blur?.();
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane(thread, openedWith));
+    root.render(pane(thread, openedWith, guest));
   });
   await settle();
   return host;
@@ -223,4 +224,16 @@ test.skipIf(!hasDom)('Allow once is sent where crypto.randomUUID does not exist 
     if (original) Object.defineProperty(crypto, 'randomUUID', original);
     else delete (crypto as unknown as Record<string, unknown>).randomUUID;
   }
+});
+
+test.skipIf(!hasDom)("the card's header Stop is the owner's: a tailnet guest's page has none", async () => {
+  const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
+  await render(thread, idsOf(thread));
+  // Compared as booleans (see `focused`).
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+  await render(thread, idsOf(thread), true);
+  expect(!!once(CARD_1)).toBe(true);
+  expect(!!host!.querySelector('[data-run-stop]')).toBe(false);
 });
