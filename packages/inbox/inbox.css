@@ -1230,6 +1230,10 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    itself takes no clicks. */
 .ib-skanchor { position: absolute; z-index: 60; pointer-events: none; }
 .ib-skanchor > [data-skill-menu] { pointer-events: auto; }
+/* A name longer than the row (an unbroken 40-letter German name in a 380 px comment card) ends in an ellipsis once
+   the description has given all its room, so the source column stays in the row. Also ui's comment card on an
+   attached page (portaled to the body; this file loads only in the Inbox). */
+:is(.ib-skanchor, .pn-inbox, [data-comment-popover]) [data-skill-item-part="name"] { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Files pasted into the reply box: compose's tiles, inside the box above its chips. A tile never runs past
    the box: at least 200 px wide in a row, the whole box when that is narrower (a 320 px phone). */
 .ib-rfiles { padding: 0 8px 4px; }

@@ -267,6 +267,10 @@ function skillMenuHost(field: HTMLElement): HTMLElement {
 /** The space the list keeps from the field above it (inbox.css once set it with a margin: 8 px, 10 on a phone); the menu's own gap is 6. */
 const FIELD_GAP_EXTRA = 2;
 const PHONE_FIELD_GAP_EXTRA = 4;
+/** What the menu spends around its list on one side: its 6 px gap, 8 px from the room's edge, its border. */
+const SIDE_CHROME = 16;
+/** The least list worth showing off the box: one 44 px row and its padding. */
+const MIN_LIST_ROOM = 56;
 
 interface MenuFrame {
   box: AnchorBox;
@@ -321,14 +325,19 @@ function FloatingSkillMenu({
   const update = useCallback(() => {
     const own = caretRef.current;
     const phone = isPhone();
-    let anchor: AnchorBox;
-    if (own) {
+    const atCaret = (): AnchorBox => {
       const field = textarea.getBoundingClientRect();
       // Not laid out (a test DOM): the field's top edge, so the menu still renders.
       const line = caretLineRect(textarea) ?? { top: field.top, bottom: field.top };
-      anchor = caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
-    } else {
-      anchor = fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
+      return caretAnchor(line, visibleBox(textarea, host), { left: field.left, width: field.width });
+    };
+    let anchor = own ? atCaret() : fieldAnchor(wrap, host, phone ? PHONE_FIELD_GAP_EXTRA : FIELD_GAP_EXTRA, phone ? 1 : 0);
+    const r = room();
+    // Too little room on both sides of the box for one row (a phone on its side with the keyboard up: ~140 px
+    // visible): hang the list off the caret's line instead, over the rest of the box, so a whole row shows.
+    if (!own && r && Math.max(anchor.top - r.top, r.bottom - anchor.bottom) - SIDE_CHROME < MIN_LIST_ROOM) {
+      const line = atCaret();
+      if (Math.max(line.top - r.top, r.bottom - line.bottom) > Math.max(anchor.top - r.top, r.bottom - anchor.bottom)) anchor = line;
     }
     // In the host's coordinates: an absolute box is placed against its padding box.
     const h = host.getBoundingClientRect();
@@ -341,7 +350,7 @@ function FloatingSkillMenu({
     const seen = seenBox(textarea.ownerDocument.defaultView ?? window);
     const phoneCap = phone ? phoneSkillListHeight(seen.bottom - seen.top) : undefined;
     const cap = own ? own.maxListHeight : Number.isFinite(phoneCap) ? phoneCap : undefined;
-    const next: MenuFrame = { box, room: room(), cap };
+    const next: MenuFrame = { box, room: r, cap };
     setFrame((prev) => (prev && sameFrame(prev, next) ? prev : next));
   }, [host, textarea, wrap, room]);
 
