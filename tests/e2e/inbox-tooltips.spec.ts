@@ -175,8 +175,9 @@ test('no wide title loses a fraction of a pixel to the preview, and a title cut 
     // Force the owner's case: the title's box 0.06 px narrower than its text, both integer widths equal.
     const chip = page.locator('.ib-lbody .ib-row .ib-title', { hasText: 'reconciliation-run' }).first();
     // A row's tooltip mounts on the pointer's first entry and draws its trigger again (RowTip.tsx): enter once
-    // first, so the styles below go on the element the tooltip measures.
+    // first, and wait for it to arm (base-ui's trigger id), so the styles below go on the element the tooltip measures.
     await chip.hover();
+    await expect(chip).toHaveAttribute('id', /.+/);
     await page.mouse.move(700, 880);
     const forced = await chip.evaluate((el) => {
       const range = document.createRange();

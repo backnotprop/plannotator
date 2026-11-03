@@ -5,7 +5,8 @@
  * the same as before; rows drawn again under a pointer at rest (the browser's own mouseenter, no pointer event) open
  * nothing until the pointer moves, then open as before; a Tab from a row onto its hover action keeps focus on the same
  * element (the row armed it) and shows the action's tooltip; a press with no hover before it keeps the element it
- * went down on, and its click opens the row; a pointer gone where the browser sends no mouseleave stops the open at
+ * went down on, over events while it is down included, and its click opens the row; a screen with no hover never
+ * draws a trigger again; a pointer gone where the browser sends no mouseleave stops the open at
  * the first real event elsewhere; a touch, its tap's mouse events included, never draws a trigger again (it would be
  * under the finger mid-tap).
  *
@@ -195,6 +196,67 @@ test.skipIf(!hasDom)("a press with no hover before it (a pen's first contact): t
   await settle();
   expect(openTooltips()).toEqual([]);
   expect(tiles.isConnected).toBe(true);
+});
+
+test.skipIf(!hasDom)('over events while the press is down (onto the next tile; a mouseover sent after the down) draw nothing again, and the click opens the row', async () => {
+  const opened: string[] = [];
+  const el = render(false, (id) => opened.push(id));
+  const pen = (type: string, target: Element, buttons: number) =>
+    target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'pen', buttons, clientX: 10, clientY: 10 }));
+  const mouse = (type: string, target: Element, buttons: number) =>
+    target.dispatchEvent(new MouseEvent(type, { bubbles: true, buttons, clientX: 10, clientY: 10 }));
+  // A: the press, then the pen slides onto the next tile with the button down.
+  const tilesA = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  const tile = tilesA.querySelector('.ib-atile') ?? tilesA;
+  act(() => {
+    pen('pointerover', tilesA, 0);
+    mouse('mouseover', tilesA, 0);
+    pen('pointerdown', tilesA, 1);
+    mouse('mousedown', tilesA, 1);
+  });
+  act(() => {
+    pen('pointerover', tile, 1);
+    mouse('mouseover', tile, 1);
+  });
+  await settle(0);
+  expect(tilesA.isConnected).toBe(true);
+  act(() => {
+    pen('pointerup', tilesA, 0);
+    mouse('mouseup', tilesA, 0);
+    mouse('click', tilesA, 0);
+  });
+  // B: the compatibility mouseover after the down (the Pointer Events spec allows that order).
+  const tilesB = el.querySelector<HTMLElement>(`[data-thread-id="msg_2"] [data-row-agents]`)!;
+  act(() => {
+    pen('pointerover', tilesB, 0);
+    pen('pointerdown', tilesB, 1);
+    mouse('mouseover', tilesB, 1);
+    mouse('mousedown', tilesB, 1);
+  });
+  await settle(0);
+  expect(tilesB.isConnected).toBe(true);
+  act(() => {
+    pen('pointerup', tilesB, 0);
+    mouse('mouseup', tilesB, 0);
+    mouse('click', tilesB, 0);
+  });
+  expect(opened).toEqual(['msg_0', 'msg_2']);
+});
+
+test.skipIf(!hasDom)('a screen with no hover (a tablet and its pen) never draws a trigger again', async () => {
+  const el = render(false);
+  const tiles = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  const real = window.matchMedia;
+  window.matchMedia = ((query: string) => (query === '(hover: none)' ? ({ matches: true, media: query } as MediaQueryList) : real.call(window, query))) as typeof window.matchMedia;
+  try {
+    act(() => {
+      tiles.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    });
+    await settle(0);
+    expect(tiles.isConnected).toBe(true);
+  } finally {
+    window.matchMedia = real;
+  }
 });
 
 test.skipIf(!hasDom)("a press with no hover before it on a trigger that takes focus: the press's focus arms nothing, so its click lands", async () => {

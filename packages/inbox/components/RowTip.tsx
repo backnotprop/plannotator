@@ -12,8 +12,8 @@
  *
  * The trigger arms in the task after the pointer's entry, never inside it: a press with no hover before it (a pen's
  * first touch) brings its own over events, and an element drawn again there would take the press's down and click
- * with it. A press that reaches the unarmed trigger arms nothing, as `Tip` would let it cancel the open; the next entry
- * arms it. The trigger element is drawn again when the tip mounts (another component holds it), so the pointer that
+ * with it. A press that reaches the unarmed trigger arms nothing until the pointer leaves, as `Tip` would let it cancel
+ * the open; the next entry arms it. The trigger element is drawn again when the tip mounts (another component holds it), so the pointer that
  * armed it is already inside: the tip is told so with the mouseenter, and the last move if one came, that the
  * pointer sent the element before (`greet`), and opens as if it had been there all along. A mouseover with no pointer
  * event before it (the browser's own, when the rows were drawn again under a pointer at rest) arms it too, with no
@@ -66,7 +66,8 @@ function LazyTip({ armed: armedByRow, children, ...tip }: TipProps & { armed: bo
   const [armedHere, setArmedHere] = useState(false);
   const node = useRef<HTMLElement | null>(null);
   const entry = useRef<Entry | null>(null);
-  // A press came to the trigger before it armed: its focus arms nothing.
+  // A press came to the trigger before it armed: nothing arms it (its focus, an over event while the button is down,
+  // the compatibility mouseover a browser may send after the down) until the pointer leaves.
   const pressed = useRef(false);
   const ownRef = (children.props as { ref?: Ref<HTMLElement> }).ref;
   // One ref for as long as the child's own: a new one each render would have base-ui drop and register the trigger again.
@@ -94,7 +95,7 @@ function LazyTip({ armed: armedByRow, children, ...tip }: TipProps & { armed: bo
   // Armed in the next task, never inside the event: a press with no hover before it (a pen's first touch) brings its
   // own over events, and a trigger drawn again there would take the press's down and click with the old element.
   const enter = (event: ReactMouseEvent<HTMLElement>) => {
-    pressed.current = false;
+    if (pressed.current) return;
     const at = { x: event.clientX, y: event.clientY };
     if (entry.current) {
       entry.current.at = at;
