@@ -408,21 +408,27 @@ export interface SettingsModel {
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;
-  store: {
-    dir: string;
+  /** The store's folder (Settings → Storage's line). Its sizes are their own read: `inboxApi.storage()`. Absent from an older Inbox. */
+  store_dir?: string;
+  /** The sizes, from an older Inbox only (a current one leaves them out for `?store=0`). */
+  store?: InboxStorageModel;
+}
+
+/** `GET /api/inbox/settings/storage`: what the store holds on disk, for Settings → Storage. A walk of every file: read it only for that panel. */
+export interface InboxStorageModel {
+  dir: string;
+  bytes: number;
+  projects: {
+    id: string;
+    name: string;
+    root: string;
     bytes: number;
-    projects: {
-      id: string;
-      name: string;
-      root: string;
-      bytes: number;
-      threads: { thread_id: string; subject: string | null; bytes: number }[];
-      /** The project this folder was combined into, by name. */
-      combined_into?: string;
-      /** The projects combined into this one, by name: deleting it leaves them. */
-      combined?: string[];
-    }[];
-  };
+    threads: { thread_id: string; subject: string | null; bytes: number }[];
+    /** The project this folder was combined into, by name. */
+    combined_into?: string;
+    /** The projects combined into this one, by name: deleting it leaves them. */
+    combined?: string[];
+  }[];
 }
 
 /**
@@ -712,6 +718,9 @@ export class InboxReadTimeout extends Error {
     this.name = 'InboxReadTimeout';
   }
 }
+
+/** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
+export const STORAGE_READ_MS = 20_000;
 
 /** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
 async function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
@@ -1046,7 +1055,10 @@ export const inboxApi = {
       }
       return { ...model, thread: splitThreadActions(model.thread) };
     }),
-  settings: () => get<SettingsModel>(inboxUrl('/settings')),
+  /** `store=0`: without the Storage sizes (the server sends them only to a page older than `storage()`). */
+  settings: () => get<SettingsModel>(inboxUrl('/settings', 'store=0')),
+  /** Settings → Storage's sizes, asked for only while that panel is shown (the server walks every file for them). Given up after STORAGE_READ_MS. */
+  storage: () => getWithin<InboxStorageModel>(inboxUrl('/settings/storage'), STORAGE_READ_MS),
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
   /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */
@@ -1273,7 +1285,7 @@ export const inboxApi = {
         body: image,
       }),
     ),
-  deleteThread: (threadId: string) => post<{ store: SettingsModel['store'] }>(threadUrl(threadId, `/delete`), {}),
+  deleteThread: (threadId: string) => post<{ store: InboxStorageModel }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
   composeSessions: (session?: string | null) =>
@@ -1428,7 +1440,7 @@ export const inboxApi = {
   askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
-  deleteProject: (projectId: string) => post<{ store: SettingsModel['store'] }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
+  deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */
