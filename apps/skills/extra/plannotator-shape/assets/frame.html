@@ -91,9 +91,7 @@ function show(name,first){const hid=v=>v.hasAttribute('hidden'),hide=(v,h)=>v.to
   hide(to,false);return play(to,1,first?1500:1100)}).then(()=>{busy=false;anims=[]})}
 btns.forEach(b=>b.onclick=()=>show(b.dataset.show));
 addEventListener('keydown',e=>{if(e.key==='Escape')skip()});document.querySelector('.board').addEventListener('click',skip);
-show(q.get('view')==='tech'?'tech':'idea',true);
-const B=document.querySelector('.board');if(matchMedia('(max-width:760px)').matches){const a=views.find(v=>!v.hasAttribute('hidden'))?.querySelector('.acc,.acc-fill,.t-acc');
- if(a){const r=a.getBoundingClientRect(),br=B.getBoundingClientRect();if(r.right>br.right)B.scrollLeft=r.left-br.left-24}}})();
+show(q.get('view')==='tech'?'tech':'idea',true)})();
 </script>
 </body>
 </html>
