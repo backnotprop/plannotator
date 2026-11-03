@@ -14,9 +14,11 @@ import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
-import { type FakeT3, startFakeT3 } from "../../tests/helpers/fake-t3";
+import { t3CeilingOfScope, t3GrantModeOf } from "./inbox-t3-wake";
+import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, t3ScopeOf } from "../../tests/helpers/fake-t3";
 
 const THREAD = "00000000-0000-4000-8000-000000000001";
+const OTHER = "00000000-0000-4000-8000-000000000002";
 const ENDPOINT = new URL("http://127.0.0.1:3773/mcp");
 
 const roots: string[] = [];
@@ -209,24 +211,32 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     for (const fake of fakes.splice(0)) fake.stop();
   });
 
-  async function loopback(options: { token?: string; now?: () => number } = {}) {
-    const t3 = startFakeT3({ threads: [THREAD] });
+  /**
+   * `access` is the mode T3 approved the grant with; `scoped` saves the scope T3 granted for it, as
+   * `plannotator t3 login` does (a grant saved without one is a grant whose mode is learned only from a denial).
+   */
+  async function loopback(options: { token?: string; now?: () => number; access?: T3Access; scoped?: boolean; modes?: Record<string, T3RuntimeMode>; lookupTimeoutMs?: number } = {}) {
+    const t3 = startFakeT3({ threads: [THREAD, OTHER], ...(options.access ? { access: options.access } : {}), ...(options.modes ? { modes: options.modes } : {}) });
     fakes.push(t3);
     const root = mkdtempSync(join(tmpdir(), "plannotator-t3-loopback-"));
     roots.push(root);
     const dataDir = join(root, "data");
     const grant = new T3Credentials(dataDir, t3.endpoint);
-    const login = (epoch: string, token = options.token ?? t3.state.token) => grant.save({ endpoint: t3.endpoint.href, epoch, tokens: { access_token: token, token_type: "Bearer" } });
+    const login = (epoch: string, token = options.token ?? t3.state.token) =>
+      grant.save({ endpoint: t3.endpoint.href, epoch, tokens: { access_token: token, token_type: "Bearer", ...(options.scoped ? { scope: t3ScopeOf(t3.state.access) } : {}) } });
     login("e1");
     const logs: string[] = [];
-    const server = await startInboxServer({ dataDir, t3Wake: { log: (line) => logs.push(line), ...(options.now ? { now: options.now } : {}) } });
+    const server = await startInboxServer({
+      dataDir,
+      t3Wake: { log: (line) => logs.push(line), ...(options.now ? { now: options.now } : {}), ...(options.lookupTimeoutMs ? { lookupTimeoutMs: options.lookupTimeoutMs } : {}) },
+    });
     servers.push(server);
     const client = new Client({ name: "claude-code", version: "2.1.317" });
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
     clients.push(client);
     const base = `http://127.0.0.1:${server.port}`;
-    const send = async (body: string) => {
-      const result = await client.callTool({ name: "send_message", arguments: { body, project_path: root, agent_session: THREAD, agent_host: "t3", agent_name: "T3 Code" } });
+    const send = async (body: string, thread = THREAD) => {
+      const result = await client.callTool({ name: "send_message", arguments: { body, project_path: root, agent_session: thread, agent_host: "t3", agent_name: "T3 Code" } });
       return { ...(result.structuredContent as { message_id: string; thread_id: string }), text: (result.content as { text: string }[])[0]!.text };
     };
     const reply = async (messageId: string, words: string, key: string) => {
@@ -238,7 +248,7 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
       return ((await response.json()) as { reply: { id: string } }).reply.id;
     };
     const thread = async (id: string) => ((await (await fetch(`${base}/api/inbox/threads/${id}`)).json()) as { thread: InboxThread }).thread;
-    return { t3, server, send, reply, thread, logs, login };
+    return { t3, server, send, reply, thread, logs, login, logout: () => grant.forget() };
   }
 
   test("goes in once under the item's request id, and is delivered when T3 takes it", async () => {
@@ -323,5 +333,98 @@ describe("a reply to a T3 Code thread, over T3's MCP on loopback", () => {
     expect(w.t3.sendCalls).toBe(0);
     expect(w.logs.filter((entry) => entry.startsWith(`No T3 grant reaches thread ${THREAD}`) && entry.includes("plannotator t3 login"))).toHaveLength(1);
     expect(await w.server.t3Wake.wakes("t3", THREAD)).toBe(false);
+  });
+
+  test("the grant's mode in a denial line is T3's, an interaction mode named as one", () => {
+    expect(t3GrantModeOf("T3 t3_thread_send: {\"code\":\"interaction_mode_escalation_denied\",\"message\":\"Child interaction mode default is broader than parent mode plan.\"}")).toBe("interaction mode plan");
+    expect(t3GrantModeOf("Child runtime mode full-access is broader than parent mode auto.")).toBe("auto");
+    expect(t3CeilingOfScope(t3ScopeOf("read-only"))).toBe("read-only");
+    expect(t3CeilingOfScope(t3ScopeOf("auto"))).toBe("below-full-access");
+    expect(t3CeilingOfScope(t3ScopeOf("full-access"))).toBe("full-access");
+  });
+
+  test("a Read only sign-in promises no wake, from the first message: nothing is sent and the log says why", async () => {
+    const w = await loopback({ access: "read-only", scoped: true });
+    const sent = await w.send("Which cache?");
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    await w.reply(sent.message_id, "The edge one.", "k1");
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sendCalls).toBe(0);
+    expect(w.server.t3Wake.status(THREAD)).toBeNull();
+    const line = w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`));
+    expect(line).toContain("(read-only)");
+    expect(line).toContain(`plannotator t3 login --url ${w.t3.endpoint.href}`);
+  });
+
+  test("a sign-in below Full access promises no wake into a Full access thread, from the first message", async () => {
+    const w = await loopback({ access: "approval-required", scoped: true, modes: { [THREAD]: "full-access", [OTHER]: "approval-required" } });
+    const sent = await w.send("Which cache?");
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    await w.reply(sent.message_id, "The edge one.", "k1");
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sendCalls).toBe(0);
+    expect(w.logs.find((entry) => entry.includes(`cannot send into thread ${THREAD}`))).toContain("(it runs full-access)");
+    // A thread the sign-in covers still wakes.
+    const other = await w.send("And the TTL?", OTHER);
+    expect(other.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    await w.reply(other.message_id, "An hour.", "k2");
+    await w.server.t3Wake.sweep();
+    expect(w.t3.turns.map((turn) => turn.threadId)).toEqual([OTHER]);
+  });
+
+  test("a sign-in saved without its scope learns its mode from T3's first denial, for every thread under it", async () => {
+    for (const [access, modes] of [["read-only", {}], ["auto", { [THREAD]: "full-access", [OTHER]: "full-access" }]] as const) {
+      const w = await loopback({ access, modes });
+      // Nothing says the grant's mode yet: the first message is promised, and T3 denies the send.
+      const sent = await w.send("Which cache?");
+      expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+      await w.reply(sent.message_id, "The edge one.", "k1");
+      await w.server.t3Wake.sweep();
+      expect(w.t3.sendCalls).toBe(1);
+      // From then on no thread the grant does not cover is promised, the denied one or another.
+      expect((await w.send("Second?", OTHER)).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+      expect((await w.send("Third?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+      await w.server.t3Wake.sweep();
+      expect(w.t3.sendCalls).toBe(1);
+    }
+  });
+
+  test("a T3 error on the lookup (orchestration_error) is not taken for a missing grant: no login line, and tried again", async () => {
+    let clock = Date.now();
+    const w = await loopback({ now: () => clock });
+    const sent = await w.send("Which cache?");
+    w.t3.state.token = "restarting";
+    await w.reply(sent.message_id, "The edge one.", "k1");
+    await w.server.t3Wake.sweep();
+    // T3 answers again, but its lookup fails for a moment.
+    w.t3.state.token = "t3-test-access";
+    w.t3.state.readFailure = { code: "orchestration_error", message: "The operation could not be completed." };
+    clock += 31_000;
+    await w.server.t3Wake.sweep();
+    expect(w.logs.some((entry) => entry.startsWith("No T3 grant reaches thread"))).toBe(false);
+    expect(w.logs.some((entry) => entry.startsWith(`T3 could not be reached for thread ${THREAD}`))).toBe(true);
+    w.t3.state.readFailure = null;
+    clock += 61_000;
+    await w.server.t3Wake.sweep();
+    expect(w.t3.turns.map((turn) => turn.message)).toEqual([expect.stringContaining("The edge one.")]);
+  });
+
+  test("after `plannotator t3 logout`, a thread found before is no longer promised a wake", async () => {
+    const w = await loopback();
+    expect((await w.send("Which cache?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect(w.server.t3Wake.status(THREAD)).toBe("alive");
+    w.logout();
+    expect(w.server.t3Wake.status(THREAD)).toBeNull();
+    expect((await w.send("Still there?")).text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+  });
+
+  test("a T3 that does not answer holds an agent's send_message only a few seconds, and is not promised", async () => {
+    const w = await loopback({ lookupTimeoutMs: 300 });
+    w.t3.state.stallMs = 5_000;
+    const started = Date.now();
+    const sent = await w.send("Which cache?");
+    expect(Date.now() - started).toBeLessThan(2_500);
+    expect(sent.text).toContain(INBOX_REPLY_READ_LATER_TEXT);
+    w.t3.state.stallMs = 0;
   });
 });
