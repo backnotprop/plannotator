@@ -14,7 +14,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxAccounts, createInboxAccountsFor, INBOX_ACCOUNTS_TIMEOUT_MS, INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS } from "./inbox-accounts";
 import { createAgentEnvironmentFor, liveAgentRunCount } from "./inbox-agents";
 import { PEER_LINK_TIMINGS } from "./inbox-peer-link";
-import { fakeCswapCalls, fakeCswapFinished, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer } from "../../tests/helpers/fake-cswap";
+import { fakeCswapCalls, fakeCswapFinished, fakeCswapSwitched, fakeCswapTicks, writeFakeCswap, type FakeCswapAnswer, type FakeCswapSwitch } from "../../tests/helpers/fake-cswap";
 import { waitFor } from "../../tests/helpers/inbox-world";
 
 const FIXTURES = resolve(import.meta.dir, "../../tests/fixtures/cswap");
@@ -42,6 +42,8 @@ afterEach(() => {
 interface WorldOptions {
   /** Null: no `cswap` at all. */
   cswap?: FakeCswapAnswer | null;
+  /** What `cswap switch` answers; without it a switch answers as `cswap` does. */
+  cswapSwitch?: FakeCswapSwitch;
   timeoutMs?: number;
   hardLimitMs?: number;
   /** 0 unless a test is about the kept answer: the others change the fake between reads. */
@@ -56,7 +58,7 @@ interface WorldOptions {
   linkedTo?: string;
 }
 
-async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo }: WorldOptions = {}) {
+async function world({ cswap = { stdout: LIST }, cswapSwitch, timeoutMs, hardLimitMs, cacheMs = 0, tailnet, phones = false, requestMs, accountsMs, linkedTo }: WorldOptions = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-accounts-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -67,7 +69,7 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
   mkdirSync(bin);
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   if (tailnet) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
-  if (cswap) writeFakeCswap(bin, cswap);
+  if (cswap) writeFakeCswap(bin, cswap, cswapSwitch);
   if (linkedTo) {
     const link = { id: FAR, name: "Mini", token: "tok_x", transport: { kind: "tailnet", url: linkedTo }, device_id: null, linked_at: "2026-11-01T00:00:00Z" };
     mkdirSync(join(dataDir, "inbox"));
@@ -111,6 +113,19 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
     fetch(`http://127.0.0.1:${server.tailscale.listenerPort()!}${path}`, {
       headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` },
     });
+  /** A switch, as the window asks for it, or over the tailnet as `login`; `path` for another route. */
+  const switchTo = (body: unknown, init: { login?: string; headers?: Record<string, string>; method?: string; path?: string } = {}) => {
+    const path = init.path ?? "/api/inbox/accounts/switch";
+    const method = init.method ?? "POST";
+    const sent = method === "GET" ? {} : { body: JSON.stringify(body) };
+    return init.login
+      ? fetch(`http://127.0.0.1:${server.tailscale.listenerPort()!}${path}`, {
+          method,
+          headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": init.login, Origin: `https://${MAGIC}:${server.port}`, "Content-Type": "application/json" },
+          ...sent,
+        })
+      : fetch(`${base}${path}`, { method, headers: { "Content-Type": "application/json", ...init.headers }, ...sent });
+  };
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as { cswap: boolean };
   /** A linked machine's read, as the window asks for it. */
   const readOf = async (machine: string, query = "") => {
@@ -118,7 +133,7 @@ async function world({ cswap = { stdout: LIST }, timeoutMs, hardLimitMs, cacheMs
     expect(answer.status).toBe(200);
     return (await answer.json()) as InboxMachineAccountsRead;
   };
-  return { root, bin, dataDir, base, read, readOf, accounts, through, settings };
+  return { root, bin, dataDir, base, read, readOf, accounts, through, settings, switchTo };
 }
 
 /** `from` links one way to `to` over its door, as `plannotator inbox link --one-way` does. Answers `to`'s id. */
@@ -851,6 +866,203 @@ test.skipIf(process.platform === "win32")("a field cswap adds never leaves it: n
     const files = filesUnder(w.dataDir);
     expect(files.length).toBeGreaterThan(0);
     expect(files.filter((file) => readFileSync(file, "latin1").includes(TOKEN))).toEqual([]);
+  } finally {
+    Object.assign(console, { log: saved.log, info: saved.info, warn: saved.warn, error: saved.error, debug: saved.debug });
+    process.stdout.write = saved.out;
+    process.stderr.write = saved.err;
+  }
+  expect(logged.filter((line) => line.includes(TOKEN))).toEqual([]);
+});
+
+// ── Switch (step 3): this computer only ──
+
+const SWITCH_OK = readFileSync(join(FIXTURES, "switch-ok.json"), "utf8");
+const SWITCH_ERROR = readFileSync(join(FIXTURES, "switch-error.json"), "utf8");
+/** The sample list after `cswap switch 1`: account 1 in use. */
+const LIST_AFTER = (() => {
+  const list = JSON.parse(LIST) as { activeAccountNumber: number; accounts: { number: number; active: boolean }[] };
+  return JSON.stringify({ ...list, activeAccountNumber: 1, accounts: list.accounts.map((row) => ({ ...row, active: row.number === 1 })) });
+})();
+/** Account 1 of the sample, as the window showed it. */
+const PERSONAL = { number: 1, email: "a@fake.test", organizationName: "Fake a@fake.test" };
+const inUse = (read: InboxAccountsRead) => listed(read).find((account) => account.active)?.number;
+const switchCalls = (bin: string) => fakeCswapCalls(bin).filter((call) => call.startsWith("switch"));
+
+describe.skipIf(process.platform === "win32")("switch", () => {
+  test("runs `cswap switch <n> --json`, answers the number alone, and the next read runs again and shows it in use, inside the kept answer's time", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER }, cacheMs: 30_000 });
+    expect(inUse(await w.read())).toBe(2);
+    const answer = await w.switchTo(PERSONAL);
+    expect(answer.status).toBe(200);
+    const text = await answer.text();
+    expect(JSON.parse(text)).toEqual({ state: "switched", number: 1 });
+    // No address and none of `cswap`'s words: a door keeps answers on disk.
+    expect(text).not.toContain("@");
+    expect(text).not.toContain("Account-1");
+    // The match used the kept read: no second list before the switch. The read after it is not the kept one.
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json"]);
+    expect(inUse(await w.read())).toBe(1);
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json", "list --json"]);
+  });
+
+  test("an API key switches by its number, with no address to match", async () => {
+    const stdout = JSON.stringify({ schemaVersion: 1, switched: true, from: { number: 2, email: "b@fake.test" }, to: { number: 3, email: "api-key-3@token.local" }, reason: "switched" });
+    const w = await world({ cswapSwitch: { stdout } });
+    expect(await (await w.switchTo({ number: 3, email: null, organizationName: null })).json()).toEqual({ state: "switched", number: 3 });
+    expect(switchCalls(w.bin)).toEqual(["switch 3 --json"]);
+  });
+
+  test("the account already in use switches nothing and says so", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    expect(await (await w.switchTo({ number: 2, email: "b@fake.test", organizationName: "Fake b@fake.test" })).json()).toEqual({ state: "switched", number: 2 });
+    expect(switchCalls(w.bin)).toEqual([]);
+  });
+
+  test("a list renumbered since the window read it switches nothing: `changed`", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    for (const target of [{ ...PERSONAL, email: "b@fake.test" }, { ...PERSONAL, organizationName: "Another" }, { ...PERSONAL, number: 9 }, { number: 3, email: "a@fake.test", organizationName: null }]) {
+      expect(await (await w.switchTo(target)).json()).toEqual({ state: "failed", reason: "changed" });
+    }
+    expect(switchCalls(w.bin)).toEqual([]);
+  });
+
+  test("a failed switch: a fixed code, never its words; the next read runs and shows the account still in use", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_ERROR.replace("Account-9 does not exist", "stdout-words-of-cswap"), stderr: "stderr-words-of-cswap", exit: 1 }, cacheMs: 30_000 });
+    expect(inUse(await w.read())).toBe(2);
+    const text = await (await w.switchTo(PERSONAL)).text();
+    expect(JSON.parse(text)).toEqual({ state: "failed", reason: "run_failed" });
+    expect(text).not.toContain("words-of-cswap");
+    expect(inUse(await w.read())).toBe(2);
+    expect(fakeCswapCalls(w.bin)).toEqual(["list --json", "switch 1 --json", "list --json"]);
+  });
+
+  test.each([
+    ["not JSON", "Traceback (most recent call last):", "bad_output"],
+    ["no `to`", JSON.stringify({ schemaVersion: 1, switched: true }), "bad_output"],
+    ["a schemaVersion this build doesn't know", JSON.stringify({ schemaVersion: 2, switched: true, to: { number: 1 } }), "unknown_schema"],
+    ["another account than the one asked for", JSON.stringify({ schemaVersion: 1, switched: true, to: { number: 3 } }), "run_failed"],
+    ["no switch, for another reason", JSON.stringify({ schemaVersion: 1, switched: false, to: { number: 1 }, reason: "no-valid-target" }), "run_failed"],
+  ])("exit 0 with %s is a failure, never a switch", async (_, stdout, reason) => {
+    const w = await world({ cswapSwitch: { stdout } });
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "failed", reason });
+  });
+
+  test("a read that fails before the switch is its answer, and nothing switches", async () => {
+    const w = await world({ cswap: { stdout: "garbage" }, cswapSwitch: { stdout: SWITCH_OK } });
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "failed", reason: "bad_output" });
+    expect(switchCalls(w.bin)).toEqual([]);
+  });
+
+  test("no cswap: not installed", async () => {
+    const w = await world({ cswap: null });
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "not_installed" });
+  });
+
+  test("a slow switch answers timed_out at the limit and is never killed; a read during it waits for it and shows the account now in use", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 1.4 }, timeoutMs: 1_000 });
+    expect(await (await w.switchTo(PERSONAL)).json()).toEqual({ state: "failed", reason: "timed_out" });
+    expect(fakeCswapSwitched(w.bin)).toBe(0);
+    // Not the list from before the switch, though one was read a second ago.
+    expect(inUse(await w.read())).toBe(1);
+    expect(fakeCswapSwitched(w.bin)).toBe(1);
+  });
+
+  test("one switch at a time: a second while one runs is busy and runs nothing", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 0.5 } });
+    const first = w.switchTo(PERSONAL);
+    await waitFor("the first switch to start", () => switchCalls(w.bin).length === 1);
+    expect(await (await w.switchTo({ number: 3, email: null, organizationName: null })).json()).toEqual({ state: "failed", reason: "busy" });
+    expect(await (await first).json()).toEqual({ state: "switched", number: 1 });
+    expect(switchCalls(w.bin)).toEqual(["switch 1 --json"]);
+  });
+
+  test("a body that is not a target is refused before anything runs", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    for (const body of [{}, { number: "1" }, { number: 1.5 }, { number: -1 }, { number: 1, email: 7 }, { number: 1, email: "x".repeat(2_000) }]) {
+      expect((await w.switchTo(body)).status).toBe(422);
+    }
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+
+  test("only POST", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    expect((await w.switchTo(null, { method: "GET" })).status).toBe(405);
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("who may switch", () => {
+  test("a tailnet guest gets 403 owner_only from the server and runs nothing; the owner switches from a phone's browser", async () => {
+    const w = await world({ tailnet: true, cswapSwitch: { stdout: SWITCH_OK, listAfter: LIST_AFTER } });
+    const refused = await w.switchTo(PERSONAL, { login: GUEST });
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("owner_only");
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+    const owner = await w.switchTo(PERSONAL, { login: OWNER });
+    expect(owner.status).toBe(200);
+    expect(await owner.json()).toEqual({ state: "switched", number: 1 });
+  });
+
+  test("another site gets nothing and runs nothing", async () => {
+    const w = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    for (const headers of [{ Origin: "https://evil.example" }, { "Sec-Fetch-Site": "cross-site" }] as Record<string, string>[]) {
+      const refused = await w.switchTo(PERSONAL, { headers });
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { code: string }).code).toBe("cross_origin");
+    }
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+
+  test("a phone's token doesn't reach it", async () => {
+    const w = await world({ phones: true, cswapSwitch: { stdout: SWITCH_OK } });
+    const made = (await (await fetch(`${w.base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as { offer: { code: string } };
+    const paired = await fetch(`${w.base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+    const { token } = (await paired.json()) as { token: string };
+    const refused = await fetch(`${w.base}/api/inbox/device/accounts/switch`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify(PERSONAL) });
+    expect(refused.status).toBe(404);
+    expect(fakeCswapCalls(w.bin)).toEqual([]);
+  });
+
+  test("a linked machine can't switch this one: not through its door, not through the forward, for anyone, and nothing is held to send later", async () => {
+    const far = await world({ cswapSwitch: { stdout: SWITCH_OK } });
+    const near = await world({ tailnet: true, cswap: null });
+    const machine = await link(near, far);
+    await onlineMachine(near);
+    const door = await fetch(`${far.base}/api/inbox/device/accounts/switch`, { method: "POST", headers: { Authorization: `Bearer ${machineToken(near)}`, "Content-Type": "application/json" }, body: JSON.stringify(PERSONAL) });
+    expect(door.status).toBe(404);
+    for (const route of ["accounts/switch", "%61ccounts/switch", "accounts/x"]) {
+      const path = `/api/inbox/m/${machine}/${route}`;
+      expect((await near.switchTo(PERSONAL, { path })).status).toBe(404);
+      for (const login of [GUEST, OWNER]) expect((await near.switchTo(PERSONAL, { path, login })).status).toBe(404);
+    }
+    expect(fakeCswapCalls(far.bin)).toEqual([]);
+    expect(filesUnder(near.dataDir).filter((file) => readFileSync(file, "latin1").includes("a@fake.test"))).toEqual([]);
+  });
+});
+
+test.skipIf(process.platform === "win32")("a switch's credential fields never leave it: not in the answer, the logs or the data dir", async () => {
+  const TOKEN = "sk-ant-oat01-never-shown-switch-9c1e";
+  const ok = JSON.parse(SWITCH_OK) as Record<string, unknown>;
+  const stdout = JSON.stringify({ ...ok, accessToken: TOKEN, to: { ...(ok.to as object), refreshToken: TOKEN }, warnings: [`token ${TOKEN}`] });
+  const logged: string[] = [];
+  const saved = { log: console.log, info: console.info, warn: console.warn, error: console.error, debug: console.debug, out: process.stdout.write, err: process.stderr.write };
+  const capture = (...args: unknown[]) => {
+    logged.push(args.map(String).join(" "));
+  };
+  console.log = console.info = console.warn = console.error = console.debug = capture;
+  const captureStream = (chunk: unknown) => {
+    logged.push(String(chunk));
+    return true;
+  };
+  process.stdout.write = captureStream as typeof process.stdout.write;
+  process.stderr.write = captureStream as typeof process.stderr.write;
+  try {
+    const w = await world({ cswapSwitch: { stdout, stderr: `token ${TOKEN}`, listAfter: LIST_AFTER } });
+    const text = await (await w.switchTo(PERSONAL)).text();
+    expect(JSON.parse(text)).toEqual({ state: "switched", number: 1 });
+    expect(text).not.toContain(TOKEN);
+    expect(text).not.toContain("Token");
+    expect(filesUnder(w.dataDir).filter((file) => readFileSync(file, "latin1").includes(TOKEN))).toEqual([]);
   } finally {
     Object.assign(console, { log: saved.log, info: saved.info, warn: saved.warn, error: saved.error, debug: saved.debug });
     process.stdout.write = saved.out;

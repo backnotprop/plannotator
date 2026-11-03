@@ -203,7 +203,9 @@ test('Settings: this machine, then each linked one and the account it is using; 
   await expect(useOf(page, 'Mini')).toHaveText('personal');
   await expect(useOf(page, 'Laptop')).toHaveText('work · Northwind');
   await expect(useOf(page, 'Build VM')).toHaveText('');
-  await expect(page.locator('[data-accounts-machines] button')).toHaveCount(0);
+  // Only this machine switches (step 3); a linked machine's row has no control until step 4.
+  await expect(page.locator('[data-accounts-machines] button')).toHaveCount(1);
+  await expect(rowOf(page, 'Studio').locator('button[data-accounts-switch]')).toHaveCount(1);
 
   // `personal` is saved on Studio and Mini, Northwind's `work` on Studio and Laptop: one row each. Mini's newer reading wins.
   await expectEveryRow(page);

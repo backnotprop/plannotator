@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Menu } from '@base-ui/react/menu';
 import type { InboxAccount, InboxMachineAccountsRead, InboxUsageWindow } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
-import { accountsFailure, useAccounts, type AccountsFailure, type AccountsView, type MachineAccounts } from '../useAccounts';
+import { accountsFailure, useAccounts, type AccountsFailure, type AccountSwitch, type AccountsView, type MachineAccounts, type SwitchLine } from '../useAccounts';
 import { CodeBox } from './ConnectPicker';
+import { Modal } from './Updates';
 
 /** The first way claude-swap's README gives. */
 const CSWAP_INSTALL_COMMAND = 'uv tool install claude-swap';
@@ -358,19 +360,156 @@ function MachineUse({ read, rows }: { read: AccountsView | InboxMachineAccountsR
   );
 }
 
-function MachineRow({ name, read, rows }: { name: string; read: AccountsView | InboxMachineAccountsRead | null; rows: ListedAccount[] }) {
+/** A name as the list shows it, number and organization too, so the menu and the list agree on which login is which. */
+const shownName = ({ label, organization, number }: RowName) => {
+  const name = number === null ? label : `${label} #${number}`;
+  return organization ? `${name} · ${organization}` : name;
+};
+
+/** One figure for an account in the switch menu (the mock's `listFig`): any limit at 90% or more, else 5h, else week. */
+function menuFigure(account: InboxAccount): { text: string; high: boolean } {
+  if (account.usageStatus === 'api_key') return { text: 'API key', high: false };
+  const meters = accountMeters(account);
+  const stale = isStale(account);
+  const top = meters.filter((meter) => isHigh(meter.window)).sort((a, b) => b.window.pct - a.window.pct)[0];
+  const meter = top ?? meters.find((m) => m.label === '5h') ?? meters.find((m) => m.week);
+  return meter ? { text: `${meter.label} ${shownPct(meter.window)}%`, high: isHigh(meter.window) && !stale } : { text: 'No reading yet', high: false };
+}
+
+/** Why the last switch did not show in the read after it, in the page's few words. */
+function switchLineText(line: SwitchLine, label: string): string {
+  if (line === 'still_switching') return `Still switching to ${label}. Refresh in a moment.`;
+  if (line === 'unconfirmed') return `Switched to ${label}. Refresh to see it.`;
+  const why: Record<Exclude<SwitchLine, 'still_switching' | 'unconfirmed'>, string> = {
+    run_failed: 'claude-swap failed.',
+    timed_out: 'claude-swap timed out.',
+    bad_output: 'claude-swap gave an unreadable answer.',
+    unknown_schema: 'Update Plannotator and claude-swap.',
+    changed: 'The accounts changed. Pick again.',
+    busy: 'Another switch is going.',
+    not_installed: 'claude-swap is not installed.',
+    owner_only: 'Owner only.',
+    unreachable: 'The Inbox did not answer.',
+  };
+  return `Couldn't switch to ${label}. ${why[line]}`;
+}
+
+/**
+ * This machine's switch (approval "accounts-page", step 3; the mock's machine
+ * pill): the account in use, a menu of this machine's accounts, and a confirm.
+ * Only `cswap`'s own rows go in the menu, with its own numbers: the list's
+ * numbers for other machines' rows are the page's and name nothing to `cswap`.
+ */
+function SwitchControl({ machine, accounts, rows, active, lastSwitch, onSwitch }: { machine: string; accounts: InboxAccount[]; rows: ListedAccount[]; active: InboxAccount; lastSwitch: AccountSwitch | null; onSwitch: (to: InboxAccount, label: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState<InboxAccount | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const [portal, setPortal] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  // The control is disabled while it switches, so focus falls to the page: it comes back to the control after.
+  const going = lastSwitch?.going ?? false;
+  const wasGoing = useRef(going);
+  useEffect(() => {
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (wasGoing.current && !going && lost) anchor.current?.querySelector<HTMLElement>('[data-accounts-switch]')?.focus();
+    wasGoing.current = going;
+  }, [going]);
+  const nameOf = (account: InboxAccount) => listName(rows, accounts, account);
+  const current = shownName(nameOf(active));
+  if (lastSwitch?.going) {
+    return (
+      <span className="ib-acct-ro" data-machine-use="switching" ref={anchor}>
+        <button type="button" className="ib-btn ib-sm ib-acct-sw" disabled data-accounts-switch="">
+          <span className="ib-spin" aria-hidden="true" />
+          <span>Switching…</span>
+        </button>
+      </span>
+    );
+  }
+  const confirmed = confirm ? nameOf(confirm).label : '';
+  return (
+    <span className="ib-acct-ro" data-machine-use="account" ref={anchor}>
+      <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
+        <Menu.Trigger className="ib-btn ib-sm ib-acct-sw" aria-label={`Claude Code account on ${machine}: ${current}`} data-accounts-switch="">
+          <HostMark host="claude-code" />
+          <span>{current}</span>
+          <Icon name="chevD" className="ib-acct-sw-car" />
+        </Menu.Trigger>
+        <Menu.Portal container={portal ?? undefined}>
+          <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={6}>
+            <Menu.Popup className="ib-pm ib-acct-menu" aria-label={`Claude Code accounts on ${machine}`} data-accounts-menu="">
+              {accounts.map((account) => {
+                const figure = menuFigure(account);
+                const name = shownName(nameOf(account));
+                return (
+                  <Menu.Item
+                    key={account.number}
+                    className="ib-pmi ib-acct-pick"
+                    label={name}
+                    onClick={() => {
+                      if (!account.active) setConfirm(account);
+                    }}
+                    data-accounts-pick={account.number}
+                    data-active={account.active ? '' : undefined}
+                  >
+                    <Icon name="check" className="ib-acct-ck" />
+                    <span className="ib-acct-pick-n">{name}</span>
+                    <small data-high={figure.high ? '' : undefined}>{figure.text}</small>
+                  </Menu.Item>
+                );
+              })}
+            </Menu.Popup>
+          </Menu.Positioner>
+        </Menu.Portal>
+      </Menu.Root>
+      {confirm && (
+        <Modal labelledBy="ib-acct-sw-title" testId="accounts-switch" onClose={() => setConfirm(null)} ownKeys className="ib-acct-dlg">
+          <h2 id="ib-acct-sw-title">
+            Switch {machine} to {confirmed}?
+          </h2>
+          {confirm.usageStatus === 'api_key' && <p className="ib-sub">Billed per token.</p>}
+          <div className="ib-acts-row">
+            <button type="button" className="ib-btn ib-ghost" onClick={() => setConfirm(null)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="ib-btn ib-pri"
+              data-accounts-switch-go=""
+              onClick={() => {
+                setConfirm(null);
+                onSwitch(confirm, confirmed);
+              }}
+            >
+              Switch
+            </button>
+          </div>
+        </Modal>
+      )}
+    </span>
+  );
+}
+
+function MachineRow({ name, read, rows, children }: { name: string; read: AccountsView | InboxMachineAccountsRead | null; rows: ListedAccount[]; children?: ReactNode }) {
   return (
     <div className="ib-acct-row ib-acct-machine" data-accounts-machine={name}>
       <span className="ib-acct-who">
         <span className="ib-acct-name">{name}</span>
       </span>
-      <MachineUse read={read} rows={rows} />
+      {children ?? <MachineUse read={read} rows={rows} />}
     </div>
   );
 }
 
-/** Every machine and the account it is using, this one first. Switch comes here in a later step. */
+/**
+ * Every machine and the account it is using, this one first. This machine's
+ * row switches; a linked machine's stays read-only until its own step (4).
+ */
 function MachineGroup({ self, view, linked, rows }: { self: string; view: AccountsView | null; linked: MachineAccounts[]; rows: ListedAccount[] }) {
+  const { lastSwitch, switchTo } = useAccounts();
+  const own = view?.state === 'accounts' ? view.accounts : [];
+  const active = own.find((account) => account.active);
+  const line = lastSwitch && !lastSwitch.going ? lastSwitch.line : null;
   return (
     <section className="ib-sgroup ib-sgroup-first" data-accounts-machines="" aria-labelledby="ib-g-machines">
       <div className="ib-acct-h">
@@ -379,8 +518,24 @@ function MachineGroup({ self, view, linked, rows }: { self: string; view: Accoun
           Machines
         </h2>
       </div>
+      {line && lastSwitch && (
+        <p role="alert" data-accounts-switch-failed={line}>
+          {switchLineText(line, lastSwitch.label)}
+        </p>
+      )}
       <div className="ib-card">
-        <MachineRow name={self} read={view} rows={rows} />
+        <MachineRow name={self} read={view} rows={rows}>
+          {active ? (
+            <SwitchControl
+              machine={self}
+              accounts={own}
+              rows={rows}
+              active={active}
+              lastSwitch={lastSwitch}
+              onSwitch={(to, label) => void switchTo({ number: to.number, email: to.email, organizationName: to.organizationName }, label)}
+            />
+          ) : undefined}
+        </MachineRow>
         {linked.map((machine) => (
           <MachineRow key={machine.id} name={machine.name} read={machine.read} rows={rows} />
         ))}

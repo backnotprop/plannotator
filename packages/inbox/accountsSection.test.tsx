@@ -46,6 +46,10 @@ let phone = false;
 let accountsRoute: (() => Promise<Response>) | null = null;
 /** Set by a test: runs before the window's settings read reaches the server. */
 let settingsRoute: (() => Promise<void>) | null = null;
+/** Set by a test: what the window's switch gets instead of the server. */
+let switchRoute: (() => Promise<Response>) | null = null;
+/** Every switch the window asked for, by body. */
+let switches: Record<string, unknown>[] = [];
 /** Every accounts read the window asked for, by URL. */
 let accountReads: string[] = [];
 let readsAnswered = 0;
@@ -104,6 +108,8 @@ beforeEach(async () => {
   if (!hasDom) return;
   phone = false;
   accountsRoute = null;
+  switchRoute = null;
+  switches = [];
   settingsRoute = null;
   accountReads = [];
   linked = [];
@@ -124,13 +130,16 @@ beforeEach(async () => {
       machineReads.push(String(input));
       return Response.json(await machine.answer());
     }
-    if (String(input).startsWith('/api/inbox/accounts')) {
+    if (String(input) === '/api/inbox/accounts/switch') {
+      switches.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (switchRoute) return switchRoute();
+    } else if (String(input).startsWith('/api/inbox/accounts')) {
       accountReads.push(String(input));
       if (accountsRoute) return accountsRoute();
     }
     if (settingsRoute && String(input) === '/api/inbox/settings') await settingsRoute();
     const answer = await call(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
-    if (String(input).startsWith('/api/inbox/accounts')) readsAnswered += 1;
+    if (String(input).startsWith('/api/inbox/accounts') && String(input) !== '/api/inbox/accounts/switch') readsAnswered += 1;
     if (listNamesNoMachine && String(input).includes('machines=1')) return Response.json({ ...JSON.parse(answer.text), machines: undefined }, { status: answer.status });
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
@@ -218,6 +227,8 @@ const nameOf = (rowEl: Element) => rowEl.querySelector('.ib-acct-name')?.textCon
 const bars = (rowEl: Element) => [...rowEl.querySelectorAll('[data-usage]')].map((bar) => bar.textContent?.replace(/(\d+%)$/, ' $1'));
 
 const machineGroup = (el: ParentNode) => el.querySelector('[data-accounts-machine]');
+/** What the page calls this machine. */
+const machineName = (el: ParentNode) => machineGroup(el)?.getAttribute('data-accounts-machine');
 const toggle = (rowEl: Element) => rowEl.querySelector('button.ib-acct-row') as HTMLButtonElement | null;
 
 test.skipIf(!hasDom)('the sample: alias, else the start of the address, else "API key"; no placeholder address anywhere', async () => {
@@ -229,14 +240,16 @@ test.skipIf(!hasDom)('the sample: alias, else the start of the address, else "AP
   expect(el.textContent).not.toContain('token.local');
 });
 
-test.skipIf(!hasDom)('Machines comes first and says which account this machine is using, with no control on it', async () => {
+test.skipIf(!hasDom)('Machines comes first and says which account this machine is using, on its switch control', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
   const group = machineGroup(el)!;
   expect(group.querySelector('.ib-acct-ro')?.textContent).toBe('b');
   // In document order, before the accounts.
   expect(group.compareDocumentPosition(el.querySelector('[data-settings-accounts]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(group.querySelector('button, select, [role="menu"]')).toBeNull();
+  expect(group.querySelector('[data-accounts-switch]')?.getAttribute('aria-label')).toBe(`Claude Code account on ${machineName(el)}: b`);
+  // Closed until asked: no menu on the page.
+  expect(document.querySelector('[data-accounts-menu]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Machines shows only with an account in use: not when none is active, not when the first read failed', async () => {
@@ -888,14 +901,16 @@ const machineRows = (el: ParentNode) => [...el.querySelectorAll('[data-accounts-
 const nearBlock = () => document.querySelector('[data-usage-machine]') as HTMLButtonElement | null;
 const listNames = (el: ParentNode) => [...el.querySelectorAll('.ib-acct .ib-acct-name')].map((name) => name.textContent);
 
-test.skipIf(!hasDom)('Machines lists this machine first, then each linked one and the account it is using, with no control on any', async () => {
+test.skipIf(!hasDom)('Machines lists this machine first, then each linked one and the account it is using; only this machine switches (a linked one is step 4)', async () => {
   answer({ stdout: listOf({ alias: 'work', active: true }) });
   linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ alias: 'personal', active: true }, { alias: 'build' }) }];
   const el = await open('accounts');
   await until(() => machineRows(el)[1]?.[1] === 'personal', "the other machine's account");
   expect(machineRows(el).map(([, account]) => account)).toEqual(['work', 'personal']);
   expect(machineRows(el)[1]![0]).toBe('Mini');
-  expect(el.querySelector('[data-accounts-machines]')!.querySelector('button, a, input')).toBeNull();
+  const [selfRow, mini] = [...el.querySelectorAll('[data-accounts-machine]')];
+  expect([...selfRow!.querySelectorAll('button')].map((button) => button.hasAttribute('data-accounts-switch'))).toEqual([true]);
+  expect(mini!.querySelector('button, a, input')).toBeNull();
   expect(el.querySelector('[data-accounts-machines]')!.compareDocumentPosition(el.querySelector('[data-settings-accounts]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
@@ -1248,4 +1263,216 @@ test.skipIf(!hasDom)('"Login expired" stays in the peek, with another machine at
   await openPeek(el);
   await until(() => nearBlock() !== null, 'the machine at 91%');
   expect(peek()!.querySelector('.ib-usage-note')?.textContent).toBe('Login expired');
+});
+
+/** Switch (step 3): this machine's row, its menu and confirm, and what the page says after. */
+const SWITCH_OK = hasDom ? readFileSync(join(FIXTURES, 'switch-ok.json'), 'utf8') : '';
+const SWITCH_ERROR = hasDom ? readFileSync(join(FIXTURES, 'switch-error.json'), 'utf8') : '';
+/** The sample list after `cswap switch 1`: account 1 in use. */
+const LIST_AFTER = hasDom
+  ? (() => {
+      const list = JSON.parse(LIST) as { accounts: { number: number; active: boolean }[] };
+      return JSON.stringify({ ...list, activeAccountNumber: 1, accounts: list.accounts.map((account) => ({ ...account, active: account.number === 1 })) });
+    })()
+  : '';
+const switchControl = (el: ParentNode) => el.querySelector('[data-accounts-switch]') as HTMLButtonElement | null;
+const switchMenu = () => document.querySelector('[data-accounts-menu]') as HTMLElement | null;
+const pick = (number: number) => switchMenu()!.querySelector(`[data-accounts-pick="${number}"]`) as HTMLElement;
+const confirmDialog = () => document.querySelector('[data-dialog="accounts-switch"]') as HTMLElement | null;
+const switchFailed = (el: ParentNode) => el.querySelector('[data-accounts-switch-failed]');
+const switchRuns = () => fakeCswapCalls(bin).filter((call) => call.startsWith('switch'));
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+/** Base UI opens on the pointer's press, as a person's click does. */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
+
+/** Picks `number` from this machine's menu and, unless it is in use, presses Switch in the confirm. */
+async function switchTo(el: ParentNode, number: number) {
+  await press(switchControl(el)!);
+  await until(() => switchMenu() !== null, 'the switch menu');
+  await act(async () => pick(number).click());
+  await until(() => confirmDialog() !== null, 'the confirm');
+  await act(async () => (confirmDialog()!.querySelector('[data-accounts-switch-go]') as HTMLButtonElement).click());
+}
+
+test.skipIf(!hasDom)("the switch menu lists this machine's accounts as the list names them, the one in use checked, one figure each; picking it asks nothing", async () => {
+  answer({
+    stdout: listOf(
+      { alias: 'work', active: true, usage: { fiveHour: limit(41), sevenDay: limit(93) } },
+      { alias: 'side', usage: { sevenDay: limit(30) } },
+      { email: 'key@token.local', usageStatus: 'api_key' },
+      { alias: 'new' },
+    ),
+  });
+  const el = await open('accounts');
+  await press(switchControl(el)!);
+  await until(() => switchMenu() !== null, 'the switch menu');
+  const items = [...switchMenu()!.querySelectorAll('[data-accounts-pick]')];
+  expect(items.map((item) => item.querySelector('.ib-acct-pick-n')?.textContent)).toEqual(['work', 'side', 'API key', 'new']);
+  // A limit at 90% or more takes the figure's place, so a near limit never hides behind 5h.
+  expect(items.map((item) => item.querySelector('small')?.textContent)).toEqual(['week 93%', 'week 30%', 'API key', 'No reading yet']);
+  expect(items.map((item) => item.querySelector('small')?.hasAttribute('data-high'))).toEqual([true, false, false, false]);
+  expect(items.map((item) => item.hasAttribute('data-active'))).toEqual([true, false, false, false]);
+  expect(switchMenu()!.textContent).not.toContain('@');
+  await act(async () => pick(1).click());
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  expect(confirmDialog()).toBeNull();
+  expect(switches).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a switch asks first and Cancel switches nothing; Switch says Switching… until the read after it, which puts the new account on the control', async () => {
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER, delay: 0.4 });
+  const el = await open('accounts');
+  expect(switchControl(el)!.textContent).toBe('b');
+  await press(switchControl(el)!);
+  await until(() => switchMenu() !== null, 'the switch menu');
+  await act(async () => pick(1).click());
+  await until(() => confirmDialog() !== null, 'the confirm');
+  expect(confirmDialog()!.querySelector('h2')!.textContent).toBe(`Switch ${machineName(el)} to personal?`);
+  expect(confirmDialog()!.textContent).not.toContain('Billed per token');
+  await act(async () => ([...confirmDialog()!.querySelectorAll('button')].find((button) => button.textContent === 'Cancel') as HTMLButtonElement).click());
+  expect(confirmDialog()).toBeNull();
+  expect(switches).toEqual([]);
+
+  await switchTo(el, 1);
+  await until(() => switchControl(el)?.textContent === 'Switching…', 'Switching…');
+  expect(switchControl(el)!.disabled).toBe(true);
+  await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
+  expect(switches).toHaveLength(1);
+  expect(switches[0]).toMatchObject({ number: 1, email: 'a@fake.test', organizationName: 'Fake a@fake.test' });
+  expect(switchRuns()).toEqual(['switch 1 --json']);
+  expect(switchFailed(el)).toBeNull();
+  // The menu agrees with the control.
+  await press(switchControl(el)!);
+  await until(() => switchMenu() !== null, 'the switch menu');
+  expect(pick(1).hasAttribute('data-active')).toBe(true);
+  expect(pick(2).hasAttribute('data-active')).toBe(false);
+});
+
+test.skipIf(!hasDom)("an API key's confirm says it is billed per token", async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  await press(switchControl(el)!);
+  await until(() => switchMenu() !== null, 'the switch menu');
+  await act(async () => pick(3).click());
+  await until(() => confirmDialog() !== null, 'the confirm');
+  expect(confirmDialog()!.querySelector('h2')!.textContent).toBe(`Switch ${machineName(el)} to API key?`);
+  expect(confirmDialog()!.textContent).toContain('Billed per token.');
+});
+
+test.skipIf(!hasDom)("a failed switch says so above the machines in the page's words, never cswap's, and the control keeps the account the read shows", async () => {
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_ERROR, stderr: 'stderr-words-of-cswap', exit: 1 });
+  const el = await open('accounts');
+  await switchTo(el, 1);
+  await until(() => switchFailed(el) !== null, 'the failure line');
+  expect(switchFailed(el)!.getAttribute('data-accounts-switch-failed')).toBe('run_failed');
+  expect(switchFailed(el)!.textContent).toBe("Couldn't switch to personal. claude-swap failed.");
+  expect(el.textContent).not.toContain('Account-9');
+  expect(el.textContent).not.toContain('words-of-cswap');
+  expect(switchControl(el)!.textContent).toBe('b');
+  expect(switchControl(el)!.disabled).toBe(false);
+  // The next switch starts clean.
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+  await switchTo(el, 1);
+  await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
+  expect(switchFailed(el)).toBeNull();
+});
+
+test.skipIf(!hasDom)('a switch that outlasts the wait: the read after it has the last word', async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+
+  // It ended in the account picked while the window waited: done, nothing to say.
+  switchRoute = async () => {
+    answer({ stdout: LIST_AFTER });
+    return json({ state: 'failed', reason: 'timed_out' });
+  };
+  await switchTo(el, 1);
+  await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
+  expect(switchFailed(el)).toBeNull();
+
+  // It ended, and not there: it did not switch.
+  switchRoute = async () => json({ state: 'failed', reason: 'timed_out' });
+  await switchTo(el, 2);
+  await until(() => switchFailed(el) !== null, 'the failure line');
+  expect(switchFailed(el)!.textContent).toBe("Couldn't switch to b. claude-swap failed.");
+  expect(switchControl(el)!.textContent).toBe('personal');
+
+  // The read after it could not tell either: still switching, and the list stays as it was.
+  accountsRoute = async () => json({ state: 'failed', reason: 'timed_out' });
+  await switchTo(el, 2);
+  await until(() => switchFailed(el)?.getAttribute('data-accounts-switch-failed') === 'still_switching', 'still switching');
+  expect(switchFailed(el)!.textContent).toBe('Still switching to b. Refresh in a moment.');
+  expect(switchControl(el)!.textContent).toBe('personal');
+});
+
+test.skipIf(!hasDom)('a switch that worked, with a read after it that failed, says it switched: never a failure, never a guess on the control', async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  switchRoute = async () => {
+    accountsRoute = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    return json({ state: 'switched', number: 1 });
+  };
+  await switchTo(el, 1);
+  await until(() => switchFailed(el) !== null, 'the line');
+  expect(switchFailed(el)!.getAttribute('data-accounts-switch-failed')).toBe('unconfirmed');
+  expect(switchFailed(el)!.textContent).toBe('Switched to personal. Refresh to see it.');
+  // The control shows what the last good read said, not the pick.
+  expect(switchControl(el)!.textContent).toBe('b');
+});
+
+test.skipIf(!hasDom)('a list renumbered since the page read it switches nothing and says to pick again', async () => {
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  // In a terminal, meanwhile: `cswap swap 1 3`.
+  const swapped = JSON.parse(LIST) as { accounts: { number: number }[] };
+  answer({ stdout: JSON.stringify({ ...swapped, accounts: swapped.accounts.map((account) => ({ ...account, number: account.number === 1 ? 3 : account.number === 3 ? 1 : account.number })) }) });
+  await switchTo(el, 1);
+  await until(() => switchFailed(el) !== null, 'the failure line');
+  expect(switchFailed(el)!.textContent).toBe("Couldn't switch to personal. The accounts changed. Pick again.");
+  expect(switchRuns()).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a tailnet guest is offered no switch; a switch the server refuses says Owner only', async () => {
+  accountsRoute = async () => json({ error: 'refused', code: 'owner_only' }, 403);
+  const guest = await open('owner_only');
+  expect(switchControl(guest)).toBeNull();
+  expect(guest.querySelector('[data-accounts-machines]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+
+  accountsRoute = null;
+  answer({ stdout: LIST });
+  const el = await open('accounts');
+  switchRoute = async () => json({ error: 'refused', code: 'owner_only' }, 403);
+  await switchTo(el, 1);
+  await until(() => switchFailed(el) !== null, 'the failure line');
+  expect(switchFailed(el)!.textContent).toBe("Couldn't switch to personal. Owner only.");
+});
+
+test.skipIf(!hasDom)('the peek stays read-only: no switch in it, before or after a switch', async () => {
+  writeFakeCswap(bin, { stdout: LIST }, { stdout: SWITCH_OK, listAfter: LIST_AFTER });
+  const el = await open('accounts');
+  await switchTo(el, 1);
+  await until(() => switchControl(el)?.textContent === 'personal', 'the account now in use');
+  act(() => root?.unmount());
+  host?.remove();
+  window.location.hash = '';
+  const inbox = await openInbox();
+  await openPeek(inbox);
+  expect(peek()!.querySelector('[data-accounts-switch], [data-accounts-menu], [role="menu"]')).toBeNull();
+  expect(peek()!.textContent).not.toContain('Switch');
+  expect(peek()!.textContent).toContain('personal');
 });

@@ -1658,6 +1658,21 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-acct-use[data-stale] .ib-acct-bar i::after { background: color-mix(in oklch, var(--foreground) 20%, transparent); }
 .ib-acct-note { flex: none; width: 96px; white-space: nowrap; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-acct-why { display: block; margin-top: 1px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); line-height: 1.4; }
+/* This machine's switch (the mock's machine pill, its menu and its confirm). It sits where the account's name would, so the row does not move. */
+.pn-inbox .ib-acct-sw { max-width: 100%; min-width: 0; gap: 7px; color: var(--foreground); }
+.ib-acct-sw > span:not(.ib-spin) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-acct-sw svg { flex: none; width: 14px; height: 14px; }
+.ib-acct-sw .ib-acct-sw-car { width: 12px; height: 12px; stroke-width: 2; color: var(--muted-foreground); }
+.ib-acct-menu { min-width: 230px; max-width: min(360px, calc(100vw - 32px)); }
+.ib-acct-pick { gap: 9px; height: 32px; }
+.ib-acct-pick .ib-acct-ck { width: 14px; height: 14px; stroke-width: 2; color: var(--primary); }
+.ib-acct-pick:not([data-active]) .ib-acct-ck { visibility: hidden; }
+.ib-acct-pick-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-acct-pick small { margin-left: auto; padding-left: 12px; flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-acct-pick small[data-high] { color: color-mix(in oklab, var(--warning) 70%, var(--foreground)); }
+.pn-inbox .ib-acct-dlg, dialog.ib-acct-dlg { width: min(400px, calc(100vw - 32px)); }
+.ib-acct-dlg .ib-sub { margin-top: 6px; line-height: 1.5; }
+.ib-acct-dlg .ib-acts-row { margin-top: 14px; }
 /* The sidebar's Usage row and its peek (Usage.tsx): nothing here has a color of its own until a limit reaches 90%. */
 .ib-nav[data-usage-nav][data-open] { background: var(--ib-side-hover-h, var(--muted)); }
 .ib-usage-fig { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: color-mix(in oklab, var(--warning) 70%, var(--foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -3239,6 +3254,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-acct-bar[data-lone] { grid-column: 1; }
   .ib-acct-note { width: auto; min-width: 76px; }
   .ib-acct-ro { width: auto; max-width: 62%; }
+  .ib-acct-pick { height: 44px; }
   .pn-inbox .ib-acct-h .ib-btn { min-height: 44px; margin-block: -8px; }
   .ib-mpair { flex-direction: column; }
   .ib-mpair > .ib-mdigits { flex: none; }
