@@ -172,6 +172,8 @@ export function createInboxLaunch(options: {
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   /** A tailnet request from someone other than this computer's owner: never starts, stops or deletes an agent (Try again, Stop, Delete). Absent: nobody is. */
   isGuest?: (req: Request, via: string) => boolean;
+  /** The store write being made now is a tailnet guest's request (`isGuest`): its reply is kept and delivered, but never starts a stopped session again. Absent: none is. */
+  writtenByGuest?: () => boolean;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -711,6 +713,33 @@ export function createInboxLaunch(options: {
         stateOf(host).view = null;
       });
   };
+  /**
+   * The replies a tailnet guest wrote to each launched thread. Kept in `launch/<id>/guest-replies` too, so the sweep
+   * after an Inbox restart never starts a session for one either.
+   */
+  const guestReplies = new Map<string, Set<string>>();
+  const guestRepliesOf = (launchId: string): Set<string> => {
+    let ids = guestReplies.get(launchId);
+    if (!ids) {
+      ids = new Set();
+      try {
+        for (const id of readFileSync(join(launchDir(launchId), "guest-replies"), "utf8").split("\n")) if (id) ids.add(id);
+      } catch {
+        // None written yet.
+      }
+      guestReplies.set(launchId, ids);
+    }
+    return ids;
+  };
+  const noteGuestReply = (launchId: string, messageId: string) => {
+    guestRepliesOf(launchId).add(messageId);
+    try {
+      mkdirSync(launchDir(launchId), { recursive: true, mode: 0o700 });
+      appendFileSync(join(launchDir(launchId), "guest-replies"), `${messageId}\n`, { mode: 0o600 });
+    } catch {
+      // Held for this run still.
+    }
+  };
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
@@ -722,7 +751,9 @@ export function createInboxLaunch(options: {
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    const pending = store.pendingReplies(root.to.session, { tags: true });
+    // A tailnet guest's reply waits for the session as any reply does; only the owner's (or this computer's) starts it again.
+    const guests = guestRepliesOf(launch.id);
+    const pending = store.pendingReplies(root.to.session, { tags: true }).filter((reply) => !guests.has(reply.id));
     const newest = pending.at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || holds(memo, pending)) return;
@@ -733,7 +764,10 @@ export function createInboxLaunch(options: {
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
     const root = store.message(message.thread_id);
-    if (root?.launch) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
+    if (!root?.launch) return;
+    // Asked here, inside the write's own request.
+    if (options.writtenByGuest?.()) noteGuestReply(root.launch.id, message.id);
+    queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
   });
 
   // ── Routes ──
