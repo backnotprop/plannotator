@@ -678,6 +678,8 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
+  /** Told the thread whose steps changed (a `steps` record): the open thread's steps button reads them again. */
+  const stepsListeners = useRef(new Set<(threadId: string) => void>());
   /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
   const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
@@ -1676,6 +1678,11 @@ function Inbox() {
           if (event?.kind === 'card') {
             if (cardsTimer) clearTimeout(cardsTimer);
             cardsTimer = setTimeout(() => void refreshCards(), 60);
+            return;
+          }
+          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread read.
+          if (event?.kind === 'steps') {
+            for (const listener of stepsListeners.current) listener(event.thread_id);
             return;
           }
           const now = routeRef.current;

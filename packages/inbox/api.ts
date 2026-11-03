@@ -1522,7 +1522,9 @@ export type InboxEvent =
   | { seq: number; kind: 'question'; id: string; thread_id?: string | null; question: InboxQuestion }
   | { seq: number; kind: 'annotation'; id: string; annotation: InboxAnnotationRecord }
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
-  | { seq: number; kind: 'card'; id: string; card: InboxCardWire };
+  | { seq: number; kind: 'card'; id: string; card: InboxCardWire }
+  /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
+  | { seq: number; kind: 'steps'; id: string; thread_id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {

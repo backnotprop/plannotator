@@ -993,7 +993,15 @@ export function createInboxLiveSessions(options: {
   /** When `session` last went idle, live or not; null when never seen idle (Tidy's "Nothing to change"). */
   const lastIdleOf = (session: string): number | null => sessions.get(session)?.lastIdleSince ?? null;
 
+  /** When `session` was last heard at all: a poll, a state event or an MCP tool call; null when never (thread steps' presence). */
+  const lastHeardOf = (session: string): number | null => {
+    const polled = sessions.get(session)?.lastSeen ?? null;
+    const called = mcpSeen.get(session)?.lastSeen ?? null;
+    return polled === null ? called : called === null ? polled : Math.max(polled, called);
+  };
+
   return {
+    lastHeardOf,
     pollStarted,
     stateChanged,
     seenWakeOnly,

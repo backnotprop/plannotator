@@ -458,6 +458,15 @@ export interface PlannotatorConfig {
    * /api/inbox/settings` `{ board: { on } }`), read on every request.
    */
   inboxBoard?: boolean;
+  /**
+   * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
+   * person turns on, off by default. On: the thread's steps button, the
+   * steps in the Board's opened card, and the agents' `steps` tool, wake
+   * line, compaction line and Tidy rule. Off: none of it, every list kept.
+   * Written by the Inbox's Settings → Capabilities (`POST
+   * /api/inbox/settings` `{ steps: { on } }`), read on every request.
+   */
+  inboxSteps?: boolean;
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
