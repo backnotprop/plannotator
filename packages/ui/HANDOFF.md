@@ -2590,7 +2590,6 @@ The parts in `components/inbox-thread/` draw with the Inbox's `ib-` classes. `pa
 | `html, body, #root` (`@layer base`) | height and margin of the page | dropped |
 | `html:has(.pn-inbox), body:has(.pn-inbox)` (phone block) | the page's background | dropped |
 | `:root[data-ib-keyboard-pin]:has(.pn-inbox)` (phone block) | `overflow: hidden` on the page while the Inbox pins the keyboard | dropped |
-| `html.ib-theme-instant` | transitions on `html` | dropped; its `*` forms are scoped |
 | `body:has(.pn-inbox) :is(input…, textarea, select)` (phone block) | every field on the page at `16px !important` | scoped |
 | `pre code.pn-code`, `[data-local-link="unavailable"]`, `kbd[data-keycap]::after`, `[data-open-in-menu] …`, `[data-comment-popover] …`, `[data-full-view-menu] …`, `[data-thread-owner] b` | ui's own elements and attributes, anywhere on the page | scoped |
 | `.tp`, `.tp-*`, `.pm-*` | unprefixed classes a host may also use | scoped |
@@ -2606,7 +2605,7 @@ Scoping prefixes `:where(.pn-inbox)`, after any leading page element (`:root.lig
 2. Keep `styles.css`. The sheet reads the theme tokens (`--background`, `--card`, `--muted`, `--border`, `--primary`, `--ring`, `--font-sans`, `--font-mono` and the rest) and defines none of them.
 3. Wrap the parts in one root: `<div className="pn-inbox" data-pn-tooltip-root="">`. Both on the same element, or a `Tip` portals outside the root and loses its look. The root sets `height: 100%`, `position: relative`, the type and `background: var(--ib-ground)`. The Inbox's pane paints `--card` over that, so a host matches it with `background: var(--card)` on its root, or uses its panel's own surface. In a scrolling panel `height: 100%` stops the background short of tall content: set `height: auto` on the root, or make the root the scroller.
 4. Load the fonts, as for `styles.css`: Inter and Geist Mono, or your own under `--font-sans` and `--font-mono`. A Tailwind host sets both on its root: Tailwind's `theme` layer defines them too, and it beats `styles.css` in `layer(plannotator)`, so without this the parts draw in the system font.
-5. Set the mode on `<html>` the way `ThemeProvider` does: the light half of the tokens reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount.
+5. Set the mode on `<html>` the way `ThemeProvider` does: the light half of the tokens reads `:root.light`. `styles.css` also holds every transition at 0 s until `<html>` has `.transitions-ready`, which `ThemeProvider` adds after mount, and while `<html>` has `.pn-theme-switching`, which `ThemeProvider` holds for two frames after each theme change so the switch lands in one frame. A host that sets the mode itself can do the same.
 6. Portal into the root. The `ib-` rules match only inside `.pn-inbox`, so a popup a part sends to `document.body` has no look.
 
 **What the Inbox's window owns and a host does not get.** `--ib-vvh`, `--inbox-text-size`, `--sidebar-width`, `data-view`, `data-ib-keyboard` and `.ib-phone` come from the Inbox's own code. Their rules ship, inert, with fallbacks where the source has them. `@container ib-thread` needs the Inbox's `.ib-pbody` around the parts, and `@container ib-ask` its `.ib-askline`; without them those rules do not apply.
