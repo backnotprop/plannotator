@@ -44,6 +44,28 @@ export function oneTimeDialogShownThisLoad(): boolean {
   return otherOneTimeDialog;
 }
 
+/**
+ * What else this load showed or has due (App's state; a stage holds it back unless it is 'none'). Every field is
+ * required, so App cannot leave one out.
+ */
+export interface SnoozeIntroOthers {
+  tour: boolean;
+  updating: boolean;
+  sound: unknown;
+  agentNote: unknown;
+  listIntroWant: boolean;
+  listIntro: unknown;
+  voiceWanted: boolean;
+  voiceStage: unknown;
+  /** The Board intro (`oneTimeDialogShownThisLoad`). */
+  board: boolean;
+}
+
+/** The tour, an update or any other one-time dialog on this load holds the Snooze dialog back for the whole load. */
+export function snoozeIntroBlockedBy(o: SnoozeIntroOthers): boolean {
+  return o.tour || o.updating || o.sound !== 'none' || o.agentNote !== 'none' || o.listIntroWant || o.listIntro !== 'none' || o.voiceWanted || o.voiceStage !== 'none' || o.board;
+}
+
 /** One visit to a thread: which, and when it opened. */
 export interface SnoozeIntroVisit {
   threadId: string;
@@ -56,9 +78,18 @@ export interface SnoozeIntroVisit {
  * so "still waits" is also "left without answering".
  */
 export function snoozeIntroLeaveCounts(visit: SnoozeIntroVisit, now: number, row: InboxListRow | null): boolean {
-  if (!row || now - visit.at < SNOOZE_INTRO_TIMES.readMs) return false;
-  return snoozeIntroWaits(row) && !row.unsent;
+  return now - visit.at >= SNOOZE_INTRO_TIMES.readMs && snoozeIntroTargetHolds(row);
 }
+
+/**
+ * The thread just left, as the list has it now: still there, still waiting on the person, nothing unsent. Checked at
+ * the leave, and again before the claim and before the opening (a reply draft saves 500 ms after the last key, so the
+ * list can learn of it only after the leave).
+ */
+export function snoozeIntroTargetHolds(row: InboxListRow | null | undefined): boolean {
+  return !!row && snoozeIntroWaits(row) && !row.unsent;
+}
+const targetRow = (rows: readonly InboxListRow[], threadId: string | null) => rows.find((r) => r.thread_id === threadId);
 
 /** What one load knows (read once: `due`) and what holds now. */
 export interface SnoozeIntroGate {
@@ -162,7 +193,7 @@ export function useSnoozeIntro(input: SnoozeIntroInput) {
       const now = latest.current;
       if (asked.current) return true;
       if (now.heldBack() || now.toast) return false;
-      if (!snoozeIntroMayClaim({ ...now, pageAge: Date.now() - loadAt.current })) {
+      if (!snoozeIntroMayClaim({ ...now, pageAge: Date.now() - loadAt.current }) || !snoozeIntroTargetHolds(targetRow(now.rows, moment.threadId))) {
         setMoment(null);
         return true;
       }
@@ -181,13 +212,14 @@ export function useSnoozeIntro(input: SnoozeIntroInput) {
     return () => clearInterval(timer);
   }, [ready, moment]);
 
-  // Claimed: it opens once the page is free; never after the page snoozed something itself (it is spent either way).
+  // Claimed: it opens once the page is free; never after the page snoozed something itself, or once the thread just
+  // left took a draft, was answered or went (it is spent either way).
   const claimed = stage === 'claimed';
   useEffect(() => {
     if (!claimed) return;
     const step = () => {
       const now = latest.current;
-      if (now.snoozedHere) {
+      if (now.snoozedHere || !snoozeIntroTargetHolds(targetRow(now.rows, target))) {
         setStage('shown');
         return true;
       }

@@ -1790,21 +1790,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeIntroState = (owner: boolean) => ({
     due: owner && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
   });
-  /** The person snoozed something: the dialog never shows. Once; a release build only. */
+  /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
-    if (!snoozeIntroRelease) return;
     const saved = loadConfig().inboxSnoozeIntro;
     if (saved?.snoozedAt) return;
     saveConfig({ inboxSnoozeIntro: { ...saved, snoozedAt: new Date().toISOString() } });
   };
   /**
    * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
-   * the write, so two claims cannot interleave).
+   * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
    */
   const claimSnoozeIntro = (owner: boolean): boolean => {
     if (!snoozeIntroState(owner).due) return false;
-    saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
-    return true;
+    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
   };
 
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
@@ -2875,17 +2873,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
     }
-    // Snooze, by any route the person has (the window and the phone here, a linked machine's thread through the
-    // forward, a phone app or a linked machine through the door, which hands its write to this same path): the
-    // one-time Snooze announcement never shows after it (approval "inbox-snooze-announce"). snoozes.json cannot say
-    // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
-    if (req.method === "POST" && INBOX_SNOOZE_WRITE.test(path) && ownerOrLocal(req, via)) {
-      const body = (await req
-        .clone()
-        .json()
-        .catch(() => null)) as { until?: unknown } | null;
-      if (typeof body?.until === "string") markSnoozeUsed();
-    }
     // The window's debug records (inbox-debug-log.ts): off, this falls through to the unknown-route 404.
     if (debugLog && path === INBOX_DEBUG_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -3793,7 +3780,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
 
-  const served = debugLog ? debugLog.wrap(handle, debugOwner) : handle;
+  // Snooze, by any route the person has (the window and the phone here, a linked machine's thread through the
+  // forward, a phone app or a linked machine through the door, which hands its write to this same path): once it went
+  // through, the one-time Snooze announcement never shows (approval "inbox-snooze-announce"). snoozes.json cannot say
+  // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
+  const handleMarkingSnoozes = async (req: Request, via: RequestVia): Promise<Response> => {
+    const ask = req.method === "POST" && INBOX_SNOOZE_WRITE.test(new URL(req.url, "http://127.0.0.1").pathname) && ownerOrLocal(req, via) ? req.clone() : null;
+    const response = await handle(req, via);
+    if (ask && response.ok) {
+      const body = (await ask.json().catch(() => null)) as { until?: unknown } | null;
+      if (typeof body?.until === "string") markSnoozeUsed();
+    }
+    return response;
+  };
+  const served = debugLog ? debugLog.wrap(handleMarkingSnoozes, debugOwner) : handleMarkingSnoozes;
 
   /**
    * The window's own port: everything here came from this computer. A

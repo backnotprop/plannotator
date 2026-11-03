@@ -106,7 +106,7 @@ import { VoiceIntro } from './components/VoiceIntro';
 import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
-import { oneTimeDialogShownThisLoad, useSnoozeIntro } from './snoozeIntro';
+import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -3824,16 +3824,17 @@ function Inbox() {
     due: snoozeIntroLatch.current?.due ?? false,
     listLoaded: snoozeIntroLatch.current !== null,
     firstRun,
-    blocked:
-      tourThisLoad.current ||
-      updatingThisLoad.current ||
-      soundDialog !== 'none' ||
-      agentNote !== 'none' ||
-      listIntroWant ||
-      listIntro !== 'none' ||
-      voiceIntro.wanted ||
-      voiceIntro.stage !== 'none' ||
-      oneTimeDialogShownThisLoad(),
+    blocked: snoozeIntroBlockedBy({
+      tour: tourThisLoad.current,
+      updating: updatingThisLoad.current,
+      sound: soundDialog,
+      agentNote,
+      listIntroWant,
+      listIntro,
+      voiceWanted: voiceIntro.wanted,
+      voiceStage: voiceIntro.stage,
+      board: oneTimeDialogShownThisLoad(),
+    }),
     snoozedHere: snoozedThisLoad.current,
     rows: snoozeIntroRows,
     toast: toast !== null,

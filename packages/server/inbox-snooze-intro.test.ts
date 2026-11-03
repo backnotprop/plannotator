@@ -75,7 +75,11 @@ interface Options {
   tailnet?: boolean;
   /** Phones on (the door a phone app pairs with). */
   phones?: boolean;
+  /** A linked machine with this id, offline (a closed port). */
+  linked?: string;
 }
+
+const LINKED = "ibx_01J00000000000000000000001";
 
 async function world(options: Options = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-zi-")));
@@ -100,6 +104,12 @@ async function world(options: Options = {}) {
     thread = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "Which index?" }).message.thread_id;
     if (options.snoozeRunning) store.setSnooze(thread, new Date(Date.now() + DAY).toISOString());
   }
+  if (options.linked) {
+    // Port 9 on loopback: nothing listens, so the machine is offline.
+    const link = { id: options.linked, name: "Mini", token: "tok_x", transport: { kind: "tailnet", url: "http://127.0.0.1:9" }, device_id: null, linked_at: "2026-10-30T00:00:00Z" };
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01J00000000000000000000000" }, links: [link] }), { mode: 0o600 });
+  }
   const home = join(root, "home");
   mkdirSync(home);
   const server = await startInboxServer({
@@ -107,7 +117,8 @@ async function world(options: Options = {}) {
     binaryPath: null,
     phones: options.phones ?? false,
     version: options.version ?? RELEASE,
-    ...(options.tailnet ? { tailscale: fakeTailscale() } : {}),
+    // A link publishes the door: the scripted tailscale, never the real one.
+    ...(options.tailnet || options.linked ? { tailscale: fakeTailscale() } : {}),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: {} }),
   });
   servers.push(server);
@@ -185,11 +196,13 @@ describe("who gets the Snooze announcement", () => {
     }
   });
 
-  test("a dev build decides nothing: no backfill, never due", async () => {
+  test("a dev build decides nothing: no backfill, never due; its snooze still marks it, for the release after", async () => {
     const w = await world({ version: "0.0.0-dev", logDaysAgo: 30 });
     expect(w.saved()).toBeUndefined();
     expect(await w.due()).toBe(false);
     expect(await w.claim()).toBe(false);
+    expect((await w.post(`/api/inbox/threads/${w.thread}/snooze`, { until: tomorrow() })).status).toBe(200);
+    expect(w.saved()!.snoozedAt).toMatch(/^\d{4}-/);
   });
 });
 
@@ -228,8 +241,9 @@ describe("every snooze route marks it used", () => {
   test("the window's snooze", async () => {
     const w = await world({ logDaysAgo: 3 });
     expect(await w.due()).toBe(true);
-    // Unsnooze is no snooze.
+    // Unsnooze is no snooze, and a snooze refused (a time that is no time) is none either.
     await w.post(`/api/inbox/threads/${w.thread}/snooze`, { until: null });
+    expect((await w.post(`/api/inbox/threads/${w.thread}/snooze`, { until: "not a time" })).ok).toBe(false);
     expect(w.saved()!.snoozedAt).toBeUndefined();
     expect((await w.post(`/api/inbox/threads/${w.thread}/snooze`, { until: tomorrow() })).status).toBe(200);
     expect(w.saved()!.snoozedAt).toMatch(/^\d{4}-/);
@@ -265,11 +279,14 @@ describe("every snooze route marks it used", () => {
     expect(await w.due()).toBe(false);
   });
 
-  test("a linked machine's thread, snoozed through the forward, marks it here", async () => {
-    const w = await world({ logDaysAgo: 3 });
-    // The window names the machine; this one is not linked, so the forward answers 404, but the person snoozed.
-    const forwarded = await w.post("/api/inbox/m/ibx_01J00000000000000000000000/threads/msg_01J00000000000000000000000/snooze", { until: tomorrow() });
-    expect(forwarded.status).toBe(404);
+  test("a linked machine's thread, snoozed through the forward, marks it here; a forward refused does not", async () => {
+    const w = await world({ logDaysAgo: 3, linked: LINKED });
+    const snooze = (machine: string) => w.post(`/api/inbox/m/${machine}/threads/msg_01J00000000000000000000000/snooze`, { until: tomorrow(), idempotency_key: crypto.randomUUID() });
+    // A machine that is not linked: 404, no snooze made.
+    expect((await snooze("ibx_01J00000000000000000000009")).status).toBe(404);
+    expect(w.saved()!.snoozedAt).toBeUndefined();
+    // The linked machine is offline: the snooze is held for it (202), as made.
+    expect((await snooze(LINKED)).status).toBe(202);
     expect(w.saved()!.snoozedAt).toMatch(/^\d{4}-/);
     expect(await w.due()).toBe(false);
   });

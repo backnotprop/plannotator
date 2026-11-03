@@ -6888,12 +6888,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* The bottom sheet's width (the shared phone rule loses to the 520 px width above, which comes later). */
   dialog.ib-dlg.ib-lo.ib-zx.ib-lo-phone { width: calc(100vw - 16px); }
   .ib-lo-phone.ib-zx .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-zx .ib-lo-art { padding: 14px 14px 12px; }
-  /* A picture of the sheet, not the sheet: its rows drawn compact (the real sheet's are 48 px touch rows). */
-  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; font-size: var(--ib-fs-15, 15px); }
-  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 20px 0; }
+  /* A picture of the sheet, not the sheet: flat, its rows drawn compact (the real sheet's are 48 px touch rows). */
+  .ib-zx-pos[data-phone] .ib-pm { box-shadow: none; }
+  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; padding: 0 6px; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 22px 0; }
   .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
-  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-14, 14px); }
-  .ib-lo-phone .ib-zx-chip { width: 24px; height: 24px; }
+  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
 }
 /* Settings → Voice. */
 .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }

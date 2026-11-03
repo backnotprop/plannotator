@@ -33,6 +33,8 @@ let savedTimes: typeof intro.SNOOZE_INTRO_TIMES;
 let posts: string[] = [];
 /** What the Inbox answers a claim: the first one shows it, as the compare-and-set does. */
 let stamped = false;
+/** Holds the claim's answer back until it settles (a slow Inbox), when a test sets it. */
+let claimHeld: Promise<void> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -41,12 +43,14 @@ beforeEach(() => {
   savedFetch = globalThis.fetch;
   posts = [];
   stamped = false;
+  claimHeld = null;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if ((init?.method ?? 'GET') === 'POST') posts.push(path.replace(/^https?:\/\/[^/]+/, ''));
     if (path.endsWith('/api/inbox/snooze-intro')) {
       const show = !stamped;
       stamped = true;
+      if (claimHeld) await claimHeld;
       return new Response(JSON.stringify({ show, snooze_intro: { due: false } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     return new Response(JSON.stringify({ error: 'not in this test' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
@@ -194,6 +198,47 @@ describe('the calm moment', () => {
       expect(dialog()).toBeNull();
     });
   }
+
+  test('App\'s "another one-time dialog this load": each one alone holds it back', () => {
+    const none = { tour: false, updating: false, sound: 'none', agentNote: 'none', listIntroWant: false, listIntro: 'none', voiceWanted: false, voiceStage: 'none', board: false };
+    expect(intro.snoozeIntroBlockedBy(none)).toBe(false);
+    const each = { tour: true, updating: true, sound: 'open', agentNote: 'open', listIntroWant: true, listIntro: 'open', voiceWanted: true, voiceStage: 'open', board: true };
+    for (const key of Object.keys(each) as (keyof typeof each)[]) {
+      expect([key, intro.snoozeIntroBlockedBy({ ...none, [key]: each[key] })]).toEqual([key, true]);
+    }
+  });
+
+  // A reply draft saves 500 ms after the last key, so the list can learn of it only after the person left the thread.
+  const DRAFTED = [row('msg_a', { unsent: { reply_at: new Date().toISOString(), picks: 0, comments: 0 } as never }), ROWS[1]!, ROWS[2]!];
+  async function leaveClean() {
+    const set = mount({ ...BASE, thread: null });
+    await wait(TIMES.pageAgeMs + 20);
+    set({ thread: 'msg_a' });
+    await wait(TIMES.readMs + 20);
+    set({ thread: null });
+    return set;
+  }
+
+  test('a draft that reaches the list after the leave: never claimed', async () => {
+    const set = await leaveClean();
+    await wait(20);
+    set({ rows: DRAFTED });
+    await wait(TIMES.settledMs + 200);
+    expect(claims()).toBe(0);
+    expect(dialog()).toBeNull();
+  });
+
+  test('a draft that reaches the list while the claim is on its way: never drawn', async () => {
+    let answer = () => {};
+    claimHeld = new Promise<void>((resolve) => (answer = resolve));
+    const set = await leaveClean();
+    await wait(TIMES.settledMs + 60);
+    expect(claims()).toBe(1);
+    set({ rows: DRAFTED });
+    await act(async () => answer());
+    await wait(100);
+    expect(dialog()).toBeNull();
+  });
 
   test('blocked until the list settles: a list still changing keeps it waiting', async () => {
     const set = mount({ ...BASE });
