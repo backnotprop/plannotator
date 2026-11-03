@@ -148,8 +148,9 @@ export function SnoozeIntro({ rows, projectNames, phone, onTry, onClose }: Snooz
         )}
       </div>
       <div className="ib-lo-text">
-        <h2 id="ib-zx-title">Not now? Snooze it.</h2>
-        <p id="ib-zx-desc">Later today, Tomorrow, In 3 days, Next week, or a time you choose. The thread waits in Snoozed and comes back on time. Changed your mind? Undo.</p>
+        <div className="ib-zx-new">New</div>
+        <h2 id="ib-zx-title">Snooze a thread until later</h2>
+        <p id="ib-zx-desc">Pick later today, tomorrow, in 3 days, next week, or a time you choose. The thread waits in Snoozed and comes back on its own. Undo puts it back at once.</p>
         <p className="ib-zx-hint">
           <span className="ib-zx-chip" aria-hidden="true">
             <Icon name={phone ? 'dots' : 'clock'} size={phone ? 16 : 14} />

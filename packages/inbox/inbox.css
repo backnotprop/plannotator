@@ -6891,6 +6891,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-zx-menu .ib-pmi { position: relative; }
 .ib-zx-pointer { position: absolute; left: 76px; top: 7px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
 .ib-toast.ib-zx-toast { position: absolute; left: 0; top: 224px; bottom: auto; transform: none; z-index: auto; animation: none; max-width: 300px; text-align: left; }
+/* "New" above the title: quiet accent text, no fill or border. */
+.ib-zx-new { margin: 0 0 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--primary); }
 .ib-lo-text .ib-zx-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--foreground); }
 .ib-zx-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); }
 .ib-zx-pos[data-phone] { position: static !important; transform: none !important; width: auto !important; }

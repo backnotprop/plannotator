@@ -247,6 +247,11 @@ test('a 390 px phone layout, light: the ⋯ sheet picture; Try it opens the thre
   await expect(page.locator('html')).not.toHaveClass(/(^|\s)light(\s|$)/);
   await shot(page, 'phone-dark');
   await page.emulateMedia({ colorScheme: 'light' });
+  // The narrowest phone (an iPhone SE's 320 px): the same sheet, every button still a 44 px target.
+  await page.setViewportSize({ width: 320, height: 568 });
+  for (const sel of ['[data-snooze-intro-try]', '[data-snooze-intro-close]']) expect((await page.locator(sel).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await shot(page, 'phone-light-320');
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('[data-snooze-intro-try]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect(page.locator('section.ib-pane')).toBeVisible();
