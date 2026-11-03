@@ -99,6 +99,16 @@ describe("the permission route", () => {
     expect(store.threadMessageIds(root.id)).toHaveLength(2);
   });
 
+  test("a permission prompt wakes a snoozed launch thread: the agent is blocked until the person answers", async () => {
+    const { store, root, clock, call } = setup();
+    store.setSnooze(root.id, new Date(clock.now + 3 * 60 * 60 * 1000).toISOString());
+    expect(store.snoozedThreads().has(root.id)).toBe(true);
+    const { body } = await call({ key: KEY, request_id: "req-00000009", event: EVENT });
+    expect(body.status).toBe("waiting");
+    expect(store.snoozedThreads().has(root.id)).toBe(false);
+    expect(store.snoozes().some((s) => s.thread_id === root.id)).toBe(false);
+  });
+
   test("Allow for this session hands the hook the choice only, records the delivery, and is never a turn for the session", async () => {
     const { store, root, call, answer } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000002", event: EVENT });
