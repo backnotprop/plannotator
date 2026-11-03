@@ -256,11 +256,28 @@ describe("the Board reveal at day 4", () => {
     expect(await w.next()).toBe("board");
   });
 
-  test("someone who already saw the Board's first-visit dialog (before the Board was a switch) never sees it again", async () => {
-    const w = await world({ config: { inboxBoardIntro: { shownAt: new Date(Date.now() - 20 * DAY).toISOString() } } });
+  test("someone who already saw the Board's first-visit dialog (before the Board was a switch): the claim turns the Board on, no dialog", async () => {
+    const seen = new Date(Date.now() - 20 * DAY).toISOString();
+    const w = await world({ config: { inboxBoardIntro: { shownAt: seen } } });
+    expect(await w.next()).toBe("board");
+    const answer = await w.claim();
+    expect(answer.show).toBe(false);
+    expect(answer.board.on).toBe(true);
+    const saved = w.saved();
+    expect(saved.inboxBoard).toBe(true);
+    expect(saved.inboxBoardIntro.shownAt).toBe(seen);
+    expect(saved.inboxReveals.board.shownAt).toBe(saved.inboxReveals.lastShownAt);
+    // Spent: never claimed again.
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
-    expect(w.saved().inboxBoard).toBeUndefined();
+  });
+
+  test("the same person with the Board switched off: never claimed, false stays false", async () => {
+    const w = await world({ config: { inboxBoard: false, inboxBoardIntro: { shownAt: new Date(Date.now() - 20 * DAY).toISOString() } } });
+    expect(await w.next()).toBeNull();
+    expect((await w.claim()).show).toBe(false);
+    expect(w.saved().inboxBoard).toBe(false);
+    expect(w.saved().inboxReveals?.board).toBeUndefined();
   });
 
   test("a dev build's list options claim does not stamp the spacing clock", async () => {

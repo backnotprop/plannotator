@@ -1946,9 +1946,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       threads: store.threadIds().length,
       open: {
         snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
-        // Someone who already saw the Board's first-visit dialog (from before the Board was a switch) met the Board:
-        // the reveal is that dialog, and it never shows twice. The switch stays in Settings → Capabilities.
-        board: boardUndecided() && !reveals?.board?.shownAt && !config.inboxBoardIntro?.shownAt,
+        // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
+        // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
+        board: boardUndecided() && !reveals?.board?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
     };
@@ -1972,7 +1972,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
    * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. The
    * Board's claim turns the Board on (unset -> true, its one automatic write), stamps the first-visit dialog (the
-   * reveal shows it, so the Board's first visit does not) and the spacing clock, all in one save.
+   * reveal shows it, so the Board's first visit does not) and the spacing clock, all in one save. `show`: the page
+   * draws the dialog. Someone who already saw it (before the Board was a switch) gets the Board on and no dialog:
+   * `show: false` with `board.on`, so only the sidebar's row appears, and their old stamp is kept.
    */
   const claimReveal = (id: RevealId, owner: boolean): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
@@ -1981,14 +1983,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
     const at = now.toISOString();
     const config = loadConfig();
+    const seen = Boolean(config.inboxBoardIntro?.shownAt);
     saveConfig({
       inboxBoard: true,
-      inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at },
+      ...(seen ? {} : { inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at } }),
       inboxReveals: { ...config.inboxReveals, lastShownAt: at, board: { shownAt: at } },
     });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     const saved = loadConfig();
-    return saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
+    return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
