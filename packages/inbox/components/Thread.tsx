@@ -5473,7 +5473,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             if (message === last && runLine && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={runLine} phone={phone} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -5785,7 +5785,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} onChanged={() => onRunChanged?.()} />}
+                {message === last && runLine && !runInCard && <RunLine run={runLine} phone={phone} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />}
                 {message === last && !runLine && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
