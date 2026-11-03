@@ -134,7 +134,7 @@ import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxTidyBodyStepsOff } from "@plannotator/shared/inbox/tidy";
+import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
@@ -1940,6 +1940,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * kept are never deleted by it.
    */
   const stepsOn = () => options.steps ?? loadConfig().inboxSteps === true;
+  /**
+   * A Tidy wake that listed only steps, not yet delivered, once steps are off: withdrawn, so no turn goes out
+   * (amendment 2: turning the switch off stops a Tidy that is already running). Recorded delivered by the Inbox
+   * itself (`INBOX_TIDY_WITHDRAWN_HOST`): no connection, wake or next call hands it, and the run reads "nothing".
+   * Every such wake when the switch turns off; and one at a time (`withdrawnTidy`) as a poll or an MCP next call is
+   * about to hand it (a switch turned off in config.json by hand), so the off state scans nothing more per poll.
+   */
+  const withdraw = (note: InboxMessage) => {
+    try {
+      store.recordDelivery(note.id, { host: INBOX_TIDY_WITHDRAWN_HOST, session: note.to!.session });
+    } catch {
+      // Gone or no longer this session's: nothing to withdraw.
+    }
+  };
+  const withdrawStepsOnlyTidies = () => {
+    if (!stepsOn()) for (const note of inboxTidyStepsOnlyWakes(store)) withdraw(note);
+  };
+  /** Whether a pending item is a steps-only Tidy wake with steps off; if so, it is withdrawn now. */
+  const withdrawnTidy = (item: InboxMessage): boolean => {
+    if (!item.tidy?.wake || !inboxTidyIsStepsOnly(item.body) || stepsOn()) return false;
+    withdraw(item);
+    return true;
+  };
   const saveSteps = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "steps: { on: boolean }.", { field: "steps" });
@@ -1951,6 +1974,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if ((loadConfig().inboxSteps === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Every window follows at once (its Settings switch, the thread's steps button).
     if (was !== stepsOn()) for (const listener of capabilityListeners) listener();
+    if (was && !stepsOn()) withdrawStepsOnlyTidies();
     return { on: stepsOn() };
   };
   const experimentalState = () => ({
@@ -2459,7 +2483,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A busy session that can take an item mid-turn: what has waited long enough goes in now.
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
-    const commands = () => store.pendingReplies(session, { tags }).map((reply) => replyCommand(reply, sendNow, session));
+    const commands = () =>
+      store
+        .pendingReplies(session, { tags })
+        .filter((reply) => !withdrawnTidy(reply))
+        .map((reply) => replyCommand(reply, sendNow, session));
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     const now = commands();

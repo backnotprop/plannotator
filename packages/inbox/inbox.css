@@ -5328,7 +5328,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-crdp-phone .ib-crdp-steps .ib-st-gl { margin-top: 4px; }
 .ib-crdp-phone .ib-crdp-steps .ib-st-t { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .ib-crdp-phone .ib-crdp-steps .ib-st-m { line-height: 22px; }
-.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -11px 0; }
+.ib-crdp-phone .ib-crdp-steps .ib-st-jump { margin: -9px 0; }
 .pn-inbox .ib-st-card { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: none; color: var(--ib-st-mut); margin-right: -6px; cursor: pointer; }
 @media (hover: hover) { .pn-inbox .ib-st-card:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }

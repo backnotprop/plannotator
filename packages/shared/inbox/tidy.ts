@@ -339,6 +339,29 @@ export function inboxTidyBodyStepsOff(body: string): string {
     .join("\n\n");
 }
 
+/** Whether a stored Tidy body, its steps lines dropped (`inboxTidyBodyStepsOff`), still lists anything. */
+export function inboxTidyBodyListsAny(body: string): boolean {
+  return body.split("\n\n").some((part) => /^\d+\. /.test(part));
+}
+
+/**
+ * The host a Tidy wake is recorded delivered to when the Inbox withdrew it
+ * itself: the person turned steps off before delivery and the wake listed only
+ * steps, so no turn goes out (amendment 2: "turning the switch off stops a Tidy
+ * that is already running"). The run reads that session "nothing" to change.
+ */
+export const INBOX_TIDY_WITHDRAWN_HOST = "plannotator-inbox";
+
+/** Whether a Tidy body lists steps lines and nothing else (it lists nothing once they are dropped). */
+export function inboxTidyIsStepsOnly(body: string): boolean {
+  return body.includes(`\n${TIDY_STEPS_BODY_LINE}`) && !inboxTidyBodyListsAny(inboxTidyBodyStepsOff(body));
+}
+
+/** The undelivered Tidy wakes that list only steps (withdrawn when steps turn off). */
+export function inboxTidyStepsOnlyWakes(store: InboxStore): InboxMessage[] {
+  return store.tidyNotes().filter((note) => note.tidy?.wake && note.to && !note.delivery && inboxTidyIsStepsOnly(note.body));
+}
+
 /** The body of a session's Tidy notes: the instruction, what tidying can mean, then the numbered list. */
 export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
   const items = agent.items.map((item, i) => {
@@ -419,7 +442,7 @@ export function inboxTidyRun(
           : "waiting"
         : wroteAny || cardWrite
           ? "tidied"
-          : idle !== null && idle > Date.parse(at)
+          : note.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST || (idle !== null && idle > Date.parse(at))
             ? "nothing"
             : // Delivered, then gone without a write (closed mid-turn, or the Inbox restarted): it never will.
               reach === null

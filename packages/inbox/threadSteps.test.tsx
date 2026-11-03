@@ -241,7 +241,7 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType<typeof createStepsBus>; boardCard?: { title: string; onOpen: () => void } | null } = {}) {
+async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType<typeof createStepsBus>; boardCard?: { title: string; onOpen: () => void } | null; thread?: InboxThread; onAck?: () => void } = {}) {
   const bus = options.bus ?? createStepsBus();
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -250,7 +250,8 @@ async function render(options: { on?: boolean; phone?: boolean; bus?: ReturnType
     root = createRoot(host!);
     root.render(
       <ThreadPane
-        thread={THREAD}
+        thread={options.thread ?? THREAD}
+        onAck={options.onAck}
         threadSteps={{ on: options.on ?? true, subscribe: bus.subscribe, boardCard: options.boardCard ?? null }}
         sent={null}
         lookSeq={3}
@@ -486,6 +487,52 @@ test.skipIf(!hasDom)('a step\'s time keeps its width; only a note gives way', as
     // The step's own words read in their own direction (an Arabic step starts at its right).
     expect(rows()[0]!.querySelector('.ib-st-t')!.getAttribute('dir')).toBe('auto');
   } finally {
+    style.remove();
+  }
+});
+
+// The crowded phone foot (amendment 3, approved as shown): 👍 Looks good sits before the checklist.
+test.skipIf(!hasDom)('the foot: 👍 Looks good comes before the checklist', async () => {
+  const quiet: InboxThread = { ...THREAD, messages: [message(1, A, 'Starting the retry worker.')] };
+  await render({ thread: quiet, onAck: () => {} });
+  await until(() => !!button(), 'the steps button');
+  const buttons = [...document.querySelector('[data-foot-buttons]')!.children];
+  const ack = buttons.findIndex((el) => el.matches('[data-ack]') || !!el.querySelector('[data-ack]'));
+  const steps = buttons.findIndex((el) => el.matches('[data-steps-button]'));
+  expect(ack).toBeGreaterThanOrEqual(0);
+  expect(steps).toBeGreaterThan(ack);
+});
+
+// Amendment 3: the checklist gives way first (its chevron), from the row's `steps` step or the buttons' own fit; on
+// a phone a step's words wrap to two lines, in the sheet and the opened card. Checked with the window's stylesheet.
+test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron goes at the steps fit, and phone steps wrap to two lines', async () => {
+  const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
+  const style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+  const box = document.createElement('div');
+  box.className = 'pn-inbox';
+  const chev = '<button class="ib-btn ib-st-btn"><span class="ib-oq-chev">v</span></button>';
+  box.innerHTML = [
+    `<div class="ib-footrow" data-k="plain"><div class="ib-footbtns">${chev}</div></div>`,
+    `<div class="ib-footrow" data-fit="keys skip edit steps" data-k="row"><div class="ib-footbtns">${chev}</div></div>`,
+    `<div class="ib-footrow" data-k="own"><div class="ib-footbtns" data-steps-fit="">${chev}</div></div>`,
+    '<div class="ib-oq-pos" data-phone=""><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="sheet">A long step</span></li></ul></div>',
+    '<div class="ib-crdp-phone"><div class="ib-crdp-steps"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="card">A long step</span></li></ul></div></div>',
+    '<div class="ib-oq-pos"><ul class="ib-sts"><li class="ib-st-row"><span class="ib-st-t" data-k="desk">A long step</span></li></ul></div>',
+  ].join('');
+  document.body.appendChild(box);
+  try {
+    const chevOf = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"] .ib-oq-chev`)!).display;
+    expect(chevOf('plain')).not.toBe('none');
+    expect(chevOf('row')).toBe('none');
+    expect(chevOf('own')).toBe('none');
+    const text = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"]`)!);
+    // (happy-dom computes no line clamp: the wrap is what it can read.)
+    for (const k of ['sheet', 'card']) expect(text(k).whiteSpace).toBe('normal');
+    expect(text('desk').whiteSpace).toBe('nowrap');
+  } finally {
+    box.remove();
     style.remove();
   }
 });

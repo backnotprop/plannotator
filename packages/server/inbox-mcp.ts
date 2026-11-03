@@ -25,7 +25,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
-import { inboxTidyBodyStepsOff } from "@plannotator/shared/inbox/tidy";
+import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
@@ -345,13 +345,17 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   const host = typeof input.agent_host === "string" ? input.agent_host : undefined;
   if (await senderWakes(context, ctx, { agent_host: host, agent_session: session })) return result;
   if (note.to && context.bridgePolls?.(note.to.host, session)) return result;
+  // Written when the run started: with steps turned off since, it goes without its steps lines, and a wake that
+  // listed only steps is withdrawn (recorded delivered by the Inbox itself) with nothing added to the result.
+  const stepsOff = !context.stepsOn?.();
+  const withdrawn = stepsOff && inboxTidyIsStepsOnly(note.body);
   try {
-    context.store.recordDelivery(note.id, { host: note.to?.host ?? host ?? "agent", session });
+    context.store.recordDelivery(note.id, { host: withdrawn ? INBOX_TIDY_WITHDRAWN_HOST : (note.to?.host ?? host ?? "agent"), session });
   } catch {
     return result;
   }
-  // Written when the run started: with steps turned off since, it goes without its steps lines.
-  const body = context.stepsOn?.() ? note.body : inboxTidyBodyStepsOff(note.body);
+  if (withdrawn) return result;
+  const body = stepsOff ? inboxTidyBodyStepsOff(note.body) : note.body;
   const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${body}`;
   const content = [...result.content];
   const last = content.length - 1;

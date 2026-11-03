@@ -4736,10 +4736,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
-  // So does the checklist button ("3/6"), which arrives after its own read and changes width as steps tick.
+  // So does the checklist button ("3/6"), which arrives after its own read and changes width as steps tick, or as
+  // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : ''].join('|');
+  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {

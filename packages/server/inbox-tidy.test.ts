@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxQuestion, InboxThread, InboxTidyPlan, InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxTidyBody, inboxTidyBodyStepsOff, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
+import { inboxTidyBody, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
 import { INBOX_TIDY_HOW, INBOX_TIDY_INSTRUCTION, parseInboxSessionRef } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -181,7 +181,7 @@ describe("Tidy: a checklist step left in progress", () => {
     { step: "Ship it behind a flag", status: "todo" },
   ];
   /** ses-a's thread with a step doing, written 3 h ago; its connection says it has been idle since `idleFor` ago. */
-  async function quietStep(steps: boolean, idleFor: number, plan: { step: string; status: string }[] = PLAN) {
+  async function quietStep(steps: boolean | "file", idleFor: number, plan: { step: string; status: string }[] = PLAN) {
     const w = await setup({ steps });
     w.clock.behind = 3 * HOUR;
     await poll(w.server, "ses-a", w.billing, { busy: true });
@@ -251,6 +251,11 @@ describe("Tidy: a checklist step left in progress", () => {
       "2. Retry worker · billing (reply_to msg_a)\n   - Action item open since 3 h ago: msg_a/a-1  Rotate the key\n   - Your steps here: 0 of 2 done; doing: Y, unchanged for 3 h. Update them if that changed (the steps action, thread_id msg_a).",
     ].join("\n\n");
     expect(inboxTidyBodyStepsOff(body)).toBe([INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, "1. Retry worker · billing (reply_to msg_a)\n   - Action item open since 3 h ago: msg_a/a-1  Rotate the key"].join("\n\n"));
+    // Only steps listed: nothing is left, so the wake is withdrawn, not handed over empty.
+    expect(inboxTidyIsStepsOnly(body)).toBe(false);
+    const stepsOnly = body.split("\n\n").slice(0, 3).join("\n\n");
+    expect(inboxTidyIsStepsOnly(stepsOnly)).toBe(true);
+    expect(inboxTidyIsStepsOnly([INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, "1. Ledger · billing (reply_to msg_b)\n   - Action item open since 3 h ago: msg_b/a-1  X"].join("\n\n"))).toBe(false);
   });
 
   test("on when the run starts, off before delivery: the wake goes without its steps lines, by a poll and by a next read", async () => {
@@ -269,8 +274,9 @@ describe("Tidy: a checklist step left in progress", () => {
 
     // A next read: the bridge stopped polling, so the session's next Inbox call carries the note.
     const read = await quietWork("file");
-    await poll(read.server, "ses-a", read.billing, { busy: true });
     expect((await tidy(read.server, { sessions: ["ses-a"], idempotency_key: "t-flip-read" })).status).toBe(200);
+    // The stored wake has the steps line (what the next call must hold back).
+    expect((await thread(read.server, read.asked.thread_id)).messages.find((m) => m.tidy)!.body).toContain("Your steps here: ");
     expect((await post(read.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
     setSystemTime(new Date(Date.now() + 31_000));
     try {
@@ -282,6 +288,32 @@ describe("Tidy: a checklist step left in progress", () => {
       expect(JSON.stringify(result.structuredContent.tidy)).not.toContain("Your steps here");
     } finally {
       setSystemTime();
+    }
+  });
+
+  // Amendment 2: "turning the switch off stops a Tidy that is already running". A wake that listed only steps has
+  // nothing left to say: no turn goes out, by a poll or by a next read, and the run reads Nothing to change.
+  test("on when the run starts, off before delivery, only steps listed: no wake at all, and the run reads nothing", async () => {
+    // Off from Settings (the switch withdraws it), or by hand in config.json (the poll or the read withdraws it).
+    for (const [off, via] of [["settings", "poll"], ["file", "poll"], ["file", "read"]] as const) {
+      const w = await quietStep("file", 3 * HOUR);
+      expect((await plan(w.server)).agents[0]!.items.map((i) => i.reasons)).toEqual([["step in progress, 3 h"]]);
+      expect((await tidy(w.server, { sessions: ["ses-a"], idempotency_key: `t-only-${off}-${via}` })).status).toBe(200);
+      if (off === "settings") expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+      else writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
+      if (via === "poll") {
+        expect(await poll(w.server, "ses-a", w.billing)).toEqual([]);
+      } else {
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const result = await call(w.client, "read_thread", { thread_id: w.lane.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(result.content.map((c) => c.text).join("\n")).not.toContain(INBOX_TIDY_INSTRUCTION);
+          expect(result.structuredContent.tidy).toBeUndefined();
+        } finally {
+          setSystemTime();
+        }
+      }
+      expect(await stateOf(w.server, "ses-a")).toBe("nothing");
     }
   });
 
