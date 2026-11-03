@@ -41,6 +41,7 @@ test.describe.configure({ mode: 'serial' });
 
 let world: ListWorld;
 let thread = '';
+let serverSession = '';
 
 test.beforeAll(async () => {
   world = await startWorld({ agentName: LONG_NAME });
@@ -56,7 +57,20 @@ test.beforeAll(async () => {
   });
   // The mic on, as the owner has it.
   const settings = (await (await fetch(new URL('/api/inbox/settings', world.url))).json()) as { serverSession: string };
-  await post('/api/inbox/settings', { serverSession: settings.serverSession, voice: { on: true } });
+  serverSession = settings.serverSession;
+  await post('/api/inbox/settings', { serverSession, voice: { on: true } });
+});
+
+/**
+ * Every test starts from a thread with no draft. A test leaves its two files in the box, and the box keeps its files
+ * as the thread's draft (approval "inbox-reply-drafts"); a thread opened with a draft opens its box by itself, holding
+ * it, so the next test would find no Reply to press.
+ */
+test.beforeEach(async () => {
+  const discard = await fetch(new URL(`/api/inbox/threads/${thread}/draft/delete`, world.url), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serverSession }) });
+  expect(discard.status).toBe(200);
+  const left = (await (await fetch(new URL(`/api/inbox/threads/${thread}/draft`, world.url))).json()) as { draft: unknown };
+  expect(left.draft, 'no draft left by the test before').toBeNull();
 });
 
 test.afterAll(async () => {
