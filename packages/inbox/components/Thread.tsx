@@ -118,6 +118,7 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
+import { ReactionBadge } from './ReactionBadge';
 import { threadChipName } from '../threadChip';
 import { OpenQuestionsButton, type OpenQuestionsDecide } from './OpenQuestions';
 import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutChildren, pillHitsButtons, type OpenQuestionsLabelForm } from '../footFit';
@@ -5425,6 +5426,16 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     live={pendingLive}
                     onReload={loadPendingLive}
                     onMoved={onChanged}
+                  />
+                )}
+                {/* The emoji the Inbox put on the person's reply as its agent received it (approval "inbox-emoji-reactions"):
+                    last in the message, placed on the words by ReactionBadge. */}
+                {!isAgent && message.reaction && (
+                  <ReactionBadge
+                    messageId={message.id}
+                    reaction={message.reaction}
+                    agent={message.to ? toName(message, message.to) : recipientName(askedBy(message))}
+                    phone={phone}
                   />
                 )}
               </div>

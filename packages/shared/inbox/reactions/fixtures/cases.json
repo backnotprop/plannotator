@@ -1,0 +1,328 @@
+[
+ {
+  "kind": "plain praise",
+  "text": "Perfect, that's exactly what I wanted.",
+  "expect": "positive"
+ },
+ {
+  "kind": "one-word praise",
+  "text": "Beautiful.",
+  "expect": "positive"
+ },
+ {
+  "kind": "thanks",
+  "text": "thanks, appreciate it",
+  "expect": "positive"
+ },
+ {
+  "kind": "win",
+  "text": "It works now! Finally.",
+  "expect": "positive"
+ },
+ {
+  "kind": "praise + request",
+  "text": "Great work. Now add the same toggle to the settings page.",
+  "expect": "positive"
+ },
+ {
+  "kind": "praise + question",
+  "text": "This looks amazing. Where does the config live?",
+  "expect": "positive"
+ },
+ {
+  "kind": "swearing as praise",
+  "text": "this is so fucking good",
+  "expect": "positive"
+ },
+ {
+  "kind": "swearing as praise",
+  "text": "holy shit, it works",
+  "expect": "positive"
+ },
+ {
+  "kind": "swearing as praise",
+  "text": "hell yes, ship it",
+  "expect": "positive"
+ },
+ {
+  "kind": "not bad",
+  "text": "not bad at all, let's keep it",
+  "expect": "positive"
+ },
+ {
+  "kind": "all caps joy",
+  "text": "YES IT WORKS",
+  "expect": "positive"
+ },
+ {
+  "kind": "joke",
+  "text": "lol that's great, the cat icon is perfect",
+  "expect": "positive"
+ },
+ {
+  "kind": "sarcastic thanks",
+  "text": "thanks for nothing, it's still broken",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "sarcastic praise",
+  "text": "great job breaking the build again",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "sarcastic praise",
+  "text": "oh great, another blank page",
+  "expect": [
+   "frustrated",
+   "error",
+   "unsure"
+  ]
+ },
+ {
+  "kind": "praise then critique",
+  "text": "Looks good, but the header is way too tall now",
+  "expect": [
+   "unsure",
+   "error"
+  ]
+ },
+ {
+  "kind": "praise then bug",
+  "text": "Nice! But now the sidebar doesn't render on mobile.",
+  "expect": "error"
+ },
+ {
+  "kind": "product name",
+  "text": "Can we use Beautiful Mermaid for the diagrams?",
+  "expect": "neutral"
+ },
+ {
+  "kind": "product name",
+  "text": "Swap the canvas for Perfect Freehand strokes",
+  "expect": "neutral"
+ },
+ {
+  "kind": "quoted praise",
+  "text": "Change the button text from \"Looks great\" to \"Approve\"",
+  "expect": "neutral"
+ },
+ {
+  "kind": "conditional praise",
+  "text": "Make sure it works on Windows before we merge",
+  "expect": "neutral"
+ },
+ {
+  "kind": "request with nice",
+  "text": "It would be nice if the toast faded out slower",
+  "expect": "neutral"
+ },
+ {
+  "kind": "praise word in question",
+  "text": "is it working on staging?",
+  "expect": "neutral"
+ },
+ {
+  "kind": "go-ahead",
+  "text": "yes, go ahead and merge it",
+  "expect": "neutral"
+ },
+ {
+  "kind": "go-ahead",
+  "text": "sounds good, do it",
+  "expect": [
+   "neutral",
+   "positive"
+  ]
+ },
+ {
+  "kind": "plain request",
+  "text": "Rename the config file and update the docs.",
+  "expect": "neutral"
+ },
+ {
+  "kind": "plain question",
+  "text": "Where do we store the session tokens?",
+  "expect": "neutral"
+ },
+ {
+  "kind": "error without the word error",
+  "text": "zsh: command not found: bunx",
+  "expect": "error"
+ },
+ {
+  "kind": "error without the word error",
+  "text": "GET /api/items 404 (Not Found)",
+  "expect": "error"
+ },
+ {
+  "kind": "stack trace",
+  "text": "TypeError: x is undefined\n    at render (app.tsx:12:5)",
+  "expect": "error"
+ },
+ {
+  "kind": "calm bug report",
+  "text": "Clicking the save button does nothing on the second try.",
+  "expect": [
+   "error",
+   "neutral"
+  ]
+ },
+ {
+  "kind": "calm bug report",
+  "text": "the tooltip flickers when I hover the icon",
+  "expect": "error"
+ },
+ {
+  "kind": "venting, swearing",
+  "text": "why the fuck is this still broken",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "venting, no swearing",
+  "text": "I told you three times, stop adding borders.",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "venting, caps",
+  "text": "IT IS STILL NOT WORKING",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "venting, repeat",
+  "text": "still broken. same thing as before",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "venting about jargon",
+  "text": "speak plainly, I can't read this wall of text",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "venting, question marks",
+  "text": "did you even run it???",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "error then venting",
+  "text": "TypeError: cannot read properties of null. this is a terrible mess",
+  "expect": "frustrated"
+ },
+ {
+  "kind": "error resolved",
+  "text": "No more errors, everything works now. Thanks!",
+  "expect": "positive"
+ },
+ {
+  "kind": "sad tone, no words",
+  "text": "I'm exhausted and nothing feels right about this release",
+  "expect": [
+   "unsure",
+   "error"
+  ]
+ },
+ {
+  "kind": "mixed signals",
+  "text": "Love the colors, hate the spacing",
+  "expect": [
+   "unsure",
+   "frustrated"
+  ]
+ },
+ {
+  "kind": "ack + but (bug)",
+  "text": "Okay, but now there's a big empty gap under the header.",
+  "expect": [
+   "neutral",
+   "error"
+  ],
+  "not_kind": "goahead"
+ },
+ {
+  "kind": "ack + except",
+  "text": "ok, everything is correct except for the settings page",
+  "expect": [
+   "neutral",
+   "error"
+  ],
+  "not_kind": "goahead"
+ },
+ {
+  "kind": "ack + though",
+  "text": "Sure, though I'd rather keep the old name for now",
+  "expect": "neutral",
+  "not_kind": "goahead"
+ },
+ {
+  "kind": "ack + however",
+  "text": "Yes. However, the docs page still needs the new flag.",
+  "expect": [
+   "neutral",
+   "error",
+   "frustrated"
+  ],
+  "not_kind": "goahead"
+ },
+ {
+  "kind": "ack + apart from",
+  "text": "Alright, apart from the color it matches the mock",
+  "expect": "neutral",
+  "not_kind": "goahead"
+ },
+ {
+  "kind": "plain go-ahead (control)",
+  "text": "Okay, go ahead and merge it.",
+  "expect": "neutral",
+  "expect_kind": "goahead"
+ },
+ {
+  "kind": "plain go-ahead (control)",
+  "text": "yep, ship it",
+  "expect": "neutral",
+  "expect_kind": "goahead"
+ },
+ {
+  "kind": "praise then but problem",
+  "text": "the sidebar is the right width now, that works, but the list is still empty while it loads",
+  "expect": [
+   "neutral",
+   "unsure",
+   "error",
+   "frustrated"
+  ]
+ },
+ {
+  "kind": "praise then though problem",
+  "text": "the new header looks great, though the logo is clipped on mobile",
+  "expect": [
+   "neutral",
+   "unsure",
+   "error",
+   "frustrated"
+  ]
+ },
+ {
+  "kind": "praise then except problem",
+  "text": "perfect, except the footer jumps when the page loads",
+  "expect": [
+   "neutral",
+   "unsure",
+   "error",
+   "frustrated"
+  ]
+ },
+ {
+  "kind": "win then however problem",
+  "text": "it works now. however the spinner never goes away",
+  "expect": [
+   "neutral",
+   "unsure",
+   "error",
+   "frustrated"
+  ]
+ },
+ {
+  "kind": "but before praise stays positive",
+  "text": "Took a while, but it works now 🎉",
+  "expect": "positive"
+ }
+]

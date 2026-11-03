@@ -473,6 +473,13 @@ export interface InboxMessage {
    */
   delivery?: InboxDelivery | null;
   /**
+   * On a person's reply or New message: the emoji the Inbox put on it when
+   * its agent received it (approval "inbox-emoji-reactions"), written with
+   * `delivery` in the same line, so every device shows the same one. Absent
+   * when it got none, and on older records. Never shown to agents.
+   */
+  reaction?: InboxReaction | null;
+  /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers
    * it at once, into the running turn when one runs, instead of waiting for
@@ -856,6 +863,13 @@ export interface InboxDelivery {
    * held the turn, so it went in when the turn ended). Absent otherwise.
    */
   into_turn?: boolean;
+}
+
+/** The emoji on a person's reply (`InboxMessage.reaction`). */
+export interface InboxReaction {
+  emoji: string;
+  /** When it lands: 0.8 to 2.5 s after the delivery. A page that shows the thread then draws it arriving. */
+  at: string;
 }
 
 // ─────────────────────────────── Guided reviews (step 5) ───────────────────────────────
@@ -1617,6 +1631,26 @@ export interface InboxSoundSettings {
   dialog_shown_for: string | null;
   /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
   dialog_due?: boolean;
+}
+
+/**
+ * Emoji reactions (approval "inbox-emoji-reactions", config.json
+ * `inboxReactions`, through GET and POST /api/inbox/settings `reactions`):
+ * how often the Inbox puts an emoji on the person's reply when an agent
+ * receives it, and whether it plays the reaction sound as it lands. One
+ * choice for every device that opens this Inbox.
+ */
+export type InboxReactionLevel = "off" | "sometimes" | "often";
+export const INBOX_REACTION_LEVELS: readonly InboxReactionLevel[] = ["off", "sometimes", "often"];
+export interface InboxReactionsSettings {
+  /** Off, Now and then (`sometimes`, the default) or Often. */
+  level: InboxReactionLevel;
+  /** The reaction sound, on by default; it plays at the question sound's volume. */
+  sound: boolean;
+}
+export const INBOX_REACTIONS_DEFAULT: InboxReactionsSettings = { level: "sometimes", sound: true };
+export function isInboxReactionLevel(value: unknown): value is InboxReactionLevel {
+  return value === "off" || value === "sometimes" || value === "often";
 }
 
 export const INBOX_SOUND_DEFAULT_VOLUME = 60;

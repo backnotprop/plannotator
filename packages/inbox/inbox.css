@@ -1154,6 +1154,44 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-message + .ib-message { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--ib-hair); }
 /* The body lines up with the head row's name: the 24 px mark and its 10 px gap (inbox-polish, item 5). */
 .ib-msg { padding-left: 34px; }
+/* Emoji reactions (approval "inbox-emoji-reactions", placement D): a 22 px tapback ON the person's words, at the
+   top-right of the text, placed by components/ReactionBadge.tsx. Its surface is a raised neutral, a touch lighter at
+   the top, a hairline, an inner highlight, a soft two-step shadow in the palette's shadow ink, and a 2 px ring in the
+   pane's colour, so it cuts out of the letters it overlaps. No colour of its own. The words get 8 px more air above
+   them while it is there (12 on a phone, below), so it never reaches the head row. */
+.pn-inbox, .ib-lightscope {
+  --ib-rx-cut: var(--card);
+  --ib-rx-top: color-mix(in oklch, var(--muted) 78%, var(--foreground) 8%);
+  --ib-rx-bot: color-mix(in oklch, var(--muted) 92%, var(--card));
+  --ib-rx-edge: color-mix(in oklch, var(--foreground) 9%, transparent);
+  --ib-rx-lift: color-mix(in oklch, white 7%, transparent);
+  --ib-rx-sh1: color-mix(in oklch, var(--ib-shadow-ink) 45%, transparent);
+  --ib-rx-sh2: color-mix(in oklch, var(--ib-shadow-ink) 55%, transparent);
+}
+:root.light .pn-inbox, .ib-lightscope.light {
+  --ib-rx-top: color-mix(in oklch, var(--muted) 62%, var(--card));
+  --ib-rx-bot: color-mix(in oklch, var(--muted) 96%, var(--foreground));
+  --ib-rx-edge: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --ib-rx-lift: color-mix(in oklch, white 90%, transparent);
+  --ib-rx-sh1: color-mix(in oklch, var(--ib-shadow-ink) 14%, transparent);
+  --ib-rx-sh2: color-mix(in oklch, var(--ib-shadow-ink) 16%, transparent);
+}
+.ib-message[data-reaction] { position: relative; }
+.ib-message[data-reaction] > .ib-msg { padding-top: 8px; }
+.ib-rx { position: absolute; z-index: 2; width: 22px; height: 22px; cursor: default; }
+.ib-rx-body {
+  position: absolute; inset: 0; border-radius: 999px; display: grid; place-items: center; transform-origin: 25% 85%;
+  background: linear-gradient(180deg, var(--ib-rx-top), var(--ib-rx-bot));
+  box-shadow: inset 0 0 0 0.5px var(--ib-rx-edge), inset 0 1px 0 var(--ib-rx-lift), 0 0 0 2px var(--ib-rx-cut),
+    0 2.5px 1.5px -0.5px var(--ib-rx-sh1), 0 5px 9px -3px var(--ib-rx-sh2);
+}
+.ib-rx-e { grid-area: 1 / 1; font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif; font-size: 13px; line-height: 1; display: block; transform-origin: 50% 60%; opacity: 0; }
+.ib-rx-e[data-on] { opacity: 1; }
+.ib-rx-dots { grid-area: 1 / 1; display: flex; align-items: center; justify-content: center; gap: 2px; opacity: 0; }
+.ib-rx-dots[data-on] { opacity: 1; }
+.ib-rx-dots i { width: 2.5px; height: 2.5px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.5; }
+/* Settings → Capabilities → Emoji reactions: the Sound row greys out while reactions are Off. */
+.ib-prow[data-off] > .ib-txt, .ib-prow[data-off] > .ib-ctl { opacity: 0.5; }
 .ib-attach-h { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
 .ib-atts { display: flex; flex-wrap: wrap; gap: 8px; }
 .ib-atts.ib-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
@@ -3074,6 +3112,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .pn-inbox .ib-hcount::after { content: ""; position: absolute; inset: -11px -2px; }
   .ib-hatts { margin-bottom: 14px; }
   .ib-fline.ib-is-open + .ib-msg { padding-top: 6px; }
+  /* a reaction on the words: 6 px more air above them on a phone, after the 6 px above */
+  .ib-message[data-reaction] > .ib-fline.ib-is-open + .ib-msg, .ib-message[data-reaction] > .ib-msg { padding-top: 12px; }
   .pn-inbox .ib-fl-tm > button.ib-mut { width: 44px; height: 44px; margin: -12px -10px -12px -6px; }
   .pn-inbox .ib-mfold-b { height: 44px; }
   .ib-tmeta { margin-top: -6px; }

@@ -31,6 +31,11 @@ interface Note {
   dur: number;
   type: OscillatorType;
   vol: number;
+  /** An exponential pitch glide from `freq` to `to` over `glide` seconds (the reaction sound's swoop). */
+  to?: number;
+  glide?: number;
+  /** Seconds to full volume; 5 ms unless given. */
+  attack?: number;
 }
 
 /** Semitones from C4 (0 = C4), as the sound picker computes them. */
@@ -47,6 +52,24 @@ export const DING_DONG: readonly Note[] = [
 /** How long the sound lasts, for "Playing…". */
 export const DING_DONG_MS = 1100;
 
+/**
+ * The emoji reaction's sound (approval "inbox-emoji-reactions", item 5):
+ * "Deeper", u2 of `sound/sounds.json`, unchanged. Up-chirp's two quick
+ * upward steps an octave down and a fourth lower (G4, then D5), each swooping
+ * up from 0.7 of its note, with a faint octave over each. Its `vol` values are
+ * loudness-matched: through the same master gain as Ding-dong (the Inbox's
+ * sound volume), it sits about 11 dB under it.
+ */
+export const REACTION_DEEPER: readonly Note[] = [
+  { freq: 274.4, to: 392, glide: 0.03, t: 0, dur: 0.075, type: 'sine', vol: 0.1156, attack: 0.006 },
+  { freq: 548.8, to: 784, glide: 0.03, t: 0, dur: 0.0375, type: 'sine', vol: 0.0139, attack: 0.006 },
+  { freq: 411.1, to: 587.3, glide: 0.03, t: 0.06, dur: 0.11, type: 'sine', vol: 0.1444, attack: 0.006 },
+  { freq: 822.3, to: 1174.7, glide: 0.03, t: 0.06, dur: 0.055, type: 'sine', vol: 0.0173, attack: 0.006 },
+];
+
+/** How long the reaction sound's preview shows "Playing…". */
+export const REACTION_DEEPER_MS = 300;
+
 const ATTACK = 0.005;
 
 function scheduleNote(ctx: AudioContext, master: GainNode, note: Note): void {
@@ -55,8 +78,9 @@ function scheduleNote(ctx: AudioContext, master: GainNode, note: Note): void {
   const gain = ctx.createGain();
   osc.type = note.type;
   osc.frequency.setValueAtTime(note.freq, now);
+  if (note.to) osc.frequency.exponentialRampToValueAtTime(note.to, now + (note.glide ?? note.dur));
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(note.vol, now + ATTACK);
+  gain.gain.exponentialRampToValueAtTime(note.vol, now + (note.attack ?? ATTACK));
   gain.gain.exponentialRampToValueAtTime(0.0001, now + note.dur);
   osc.connect(gain).connect(master);
   osc.start(now);
@@ -83,12 +107,12 @@ class InboxAudio {
   }
 
   /** Play the sound at `volume` (10–100). Without a context yet, nothing (a ring before the first gesture is lost). */
-  play(volume: number, options: { create: boolean }): boolean {
+  play(volume: number, options: { create: boolean; notes?: readonly Note[] }): boolean {
     const ctx = options.create ? this.ensure() : this.ctx;
     if (!ctx || !this.master) return false;
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     this.master.gain.value = Math.max(0, Math.min(1, volume / 100));
-    for (const note of DING_DONG) scheduleNote(ctx, this.master, note);
+    for (const note of options.notes ?? DING_DONG) scheduleNote(ctx, this.master, note);
     return true;
   }
 
@@ -234,6 +258,17 @@ export interface InboxSound {
   questionsArrived: () => void;
   /** Another Inbox tab said it is in front (within the last 15 s): it handles what arrives (notify.ts). */
   otherTabInFront: () => boolean;
+  /**
+   * An emoji reaction landed on a reply in the thread on screen (approval
+   * "inbox-emoji-reactions"): "Deeper" at the Inbox's sound volume. Only once
+   * the tab has had a click (a browser drops it before). The question sound's
+   * switch has no say: the reaction's own Sound switch is the caller's.
+   */
+  reactionLanded: () => void;
+  /** Settings → Capabilities → Sound's ▶: plays "Deeper" now. */
+  previewReaction: () => void;
+  /** The reaction sound's preview is playing ("Playing…"). */
+  reactionPlaying: boolean;
   /** Save the switch; false when the Inbox did not keep it (the switch goes back). */
   setEnabled: (next: boolean) => Promise<boolean>;
   setVolume: (next: number) => Promise<boolean>;
@@ -416,6 +451,28 @@ export function useInboxSound(options: {
     playingTimer.current = setTimeout(() => setPlaying(false), DING_DONG_MS);
   }, []);
 
+  const [reactionPlaying, setReactionPlaying] = useState(false);
+  const reactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (reactionTimer.current) clearTimeout(reactionTimer.current);
+    },
+    [],
+  );
+  const reactionLanded = useCallback(() => {
+    if (!armedRef.current) return;
+    audio.current?.play(settingsRef.current.volume, { create: true, notes: REACTION_DEEPER });
+  }, []);
+  const previewReaction = useCallback(() => {
+    // Play is a click: it arms the sound too.
+    audio.current?.arm();
+    setArmed(true);
+    audio.current?.play(settingsRef.current.volume, { create: true, notes: REACTION_DEEPER });
+    setReactionPlaying(true);
+    if (reactionTimer.current) clearTimeout(reactionTimer.current);
+    reactionTimer.current = setTimeout(() => setReactionPlaying(false), REACTION_DEEPER_MS);
+  }, []);
+
   const save = useCallback(async (change: { enabled?: boolean; volume?: number }) => {
     const before = settingsRef.current;
     onSettingsRef.current({ ...before, ...change });
@@ -431,5 +488,5 @@ export function useInboxSound(options: {
   const setEnabled = useCallback((next: boolean) => save({ enabled: next }), [save]);
   const setVolume = useCallback((next: number) => save({ volume: next }), [save]);
 
-  return { settings, armed, playing, preview, questionsArrived, otherTabInFront, setEnabled, setVolume };
+  return { settings, armed, playing, preview, questionsArrived, otherTabInFront, reactionLanded, previewReaction, reactionPlaying, setEnabled, setVolume };
 }

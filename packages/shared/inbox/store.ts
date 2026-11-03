@@ -103,7 +103,9 @@ import {
   type InboxDeliverNowBy,
   type InboxQuestionState,
   type InboxRowDelivery,
+  type InboxReaction,
 } from "@plannotator/core/inbox-types";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
@@ -563,10 +565,27 @@ export interface InboxDeliveryPresence {
   waitOf?(session: string, itemId: string): { since: string; autoSince: string | null } | null;
 }
 
+/** What an emoji reaction's decision reads (`InboxStore.setReactor`; reactions/index.ts `ReactionInput` less the level). */
+export interface InboxReactorInput {
+  /** The person's own words (no skills block), when its agent received it (ms). */
+  reply: { id: string; thread: string; text: string; at: number };
+  /** The replies delivered in the last day before it, oldest first, with whether each got one. */
+  history: { id: string; thread: string; text: string; at: number; reacted: boolean }[];
+  /** The latest reactions' emoji, oldest first. */
+  recent: string[];
+}
+export type InboxReactor = (input: InboxReactorInput) => InboxReaction | null;
+/** How far back the pacing replays deliveries: its day resets after 6 h without one, and caps per day. */
+const INBOX_REACTION_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+/** How many of the latest reactions the picker sees (it rests the last 8). */
+const INBOX_REACTION_RECENT = 16;
+
 export class InboxStore {
   readonly dir: string;
   /** The live sessions, for the rows' delivery; null (tests, tools): not known, every session counts as there. */
   private deliveryPresence: InboxDeliveryPresence | null = null;
+  /** Emoji reactions' decision (`setReactor`); null: no reactions. */
+  private reactor: InboxReactor | null = null;
   private seq = 0;
   private readonly latest = new Map<string, InboxLine>();
   private readonly projectsById = new Map<string, InboxProject>();
@@ -1810,6 +1829,50 @@ export class InboxStore {
   }
 
   /**
+   * Emoji reactions (approval "inbox-emoji-reactions"): what decides whether
+   * a reply its agent just received gets one (the server's, which reads the
+   * setting; reactions/index.ts `decideReaction`). Null (tests, tools): none.
+   */
+  setReactor(reactor: InboxReactor | null): void {
+    this.reactor = reactor;
+  }
+
+  /**
+   * The reaction for a person's reply its owner session receives now (`at`),
+   * or null: none for the Inbox's own notes, an action item's report, or
+   * without a reactor. The reactor reads the last day's deliveries and the
+   * latest reactions, from the log, so a restart changes nothing. A reactor
+   * that throws never holds up the delivery.
+   */
+  private reactionFor(reply: InboxMessage, at: string): InboxReaction | null {
+    const reactor = this.reactor;
+    if (!reactor || isInboxNote(reply) || isInboxActionReport(reply) || reply.handoff) return null;
+    const now = Date.parse(at);
+    const since = now - INBOX_REACTION_LOOKBACK_MS;
+    const history: InboxReactorInput["history"][number][] = [];
+    const reactions: InboxReaction[] = [];
+    for (const message of this.messages.values()) {
+      if (message.reaction) reactions.push(message.reaction);
+      if (message.id === reply.id || message.author.kind !== "person" || !message.delivery) continue;
+      if (isInboxNote(message) || isInboxActionReport(message)) continue;
+      const delivered = Date.parse(message.delivery.at);
+      if (!(delivered >= since && delivered <= now)) continue;
+      history.push({ id: message.id, thread: message.thread_id, text: withoutInboxSkillsBlock(message.body), at: delivered, reacted: !!message.reaction });
+    }
+    history.sort((a, b) => a.at - b.at);
+    reactions.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    try {
+      return reactor({
+        reply: { id: reply.id, thread: reply.thread_id, text: withoutInboxSkillsBlock(reply.body), at: now },
+        history,
+        recent: reactions.slice(-INBOX_REACTION_RECENT).map((r) => r.emoji),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Where the person's latest sent item in the thread is, for its list row:
    * the same inputs, gathered the same way, as the thread's delivery line
    * (packages/inbox/components/Thread.tsx, `deliveryLine` and `ackPillLine`),
@@ -2867,8 +2930,13 @@ export class InboxStore {
       ...thread,
       messages: thread.messages.map((message) => {
         let out: InboxMessageWire = message;
+        // The emoji the Inbox put on a reply is the person's view, never the agent's.
+        if (message.reaction !== undefined) {
+          const { reaction: _reaction, ...rest } = out;
+          out = rest as InboxMessageWire;
+        }
         if (message.ack !== undefined) {
-          const { ack, ...rest } = message;
+          const { ack, ...rest } = out;
           out = { ...rest, ack: ack && ack.settled_seq != null && !ack.not_sent ? { label: ack.label, at: ack.at } : null } as InboxMessageWire;
         }
         // Who a reply tagged (approval "inbox-tag-agents"), as an agent reads it: the agents and, for
@@ -5264,7 +5332,13 @@ export class InboxStore {
     }
     if (reply.delivery) return reply;
     const at = this.stamp();
-    const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
+    // The agent received the person's reply: the moment an emoji reaction is decided, written in the same line.
+    const reaction = this.reactionFor(reply, at);
+    const delivered: InboxMessage = {
+      ...reply,
+      delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) },
+      ...(reaction ? { reaction } : {}),
+    };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);

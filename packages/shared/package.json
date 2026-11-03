@@ -143,6 +143,7 @@
     "./inbox/ask": "./inbox/ask.ts",
     "./inbox/debug-log": "./inbox/debug-log.ts",
     "./inbox/store": "./inbox/store.ts",
+    "./inbox/reactions": "./inbox/reactions/index.ts",
     "./inbox/board-seen": "./inbox/board-seen.ts",
     "./inbox/card-refs": "./inbox/card-refs.ts",
     "./inbox/list": "./inbox/list.ts",
