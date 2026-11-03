@@ -180,7 +180,7 @@ describe('the host gets the Inbox\'s cascade', () => {
 
   test('only a rule that ends on the page itself is dropped', () => {
     expect(generated.dropped.map(({ selector }) => selector).sort()).toEqual(
-      ['#root', ':root[data-ib-keyboard-pin]:has(.pn-inbox)', 'body', 'body:has(.pn-inbox)', 'html', 'html.ib-theme-instant', 'html:has(.pn-inbox)'].sort(),
+      ['#root', ':root[data-ib-keyboard-pin]:has(.pn-inbox)', 'body', 'body:has(.pn-inbox)', 'html', 'html:has(.pn-inbox)'].sort(),
     );
   });
 });

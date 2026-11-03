@@ -109,6 +109,15 @@ describe("the permission route", () => {
     expect(store.snoozes().some((s) => s.thread_id === root.id)).toBe(false);
   });
 
+  test("a replayed call (the same request again) does not wake a thread the person snoozed after the question", async () => {
+    const { store, root, clock, call } = setup();
+    const first = await call({ key: KEY, request_id: "req-00000010", event: EVENT });
+    store.setSnooze(root.id, new Date(clock.now + 3 * 60 * 60 * 1000).toISOString());
+    const again = await call({ key: KEY, request_id: "req-00000010", event: EVENT });
+    expect(again.body.message_id).toBe(first.body.message_id);
+    expect(store.snoozedThreads().has(root.id)).toBe(true);
+  });
+
   test("Allow for this session hands the hook the choice only, records the delivery, and is never a turn for the session", async () => {
     const { store, root, call, answer } = setup();
     const { body } = await call({ key: KEY, request_id: "req-00000002", event: EVENT });

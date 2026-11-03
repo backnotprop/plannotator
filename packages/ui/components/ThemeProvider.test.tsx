@@ -502,6 +502,60 @@ describe('ThemeProvider', () => {
     expect(paletteNames()).toContain('Kanagawa Lotus');
   });
 
+  // The switch lands in one frame (owner, 2026-11-02): theme.css's 150 ms `*`
+  // colour transition is held at 0 s while `pn-theme-switching` is on <html>.
+  // What regresses: one path that changes what is shown (Settings' mode
+  // buttons, a palette pick, Match system following the OS) swapping the
+  // classes without the hold, so every element fades again and the page
+  // freezes first; or the hold staying, so hovers stop fading for good.
+  test.skipIf(!hasDom)('every change of what is shown lands without the colour fade, and the hold then goes', async () => {
+    stored.set('plannotator-theme', 'dark');
+    stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
+    stored.set('plannotator-dark-theme', DEFAULT_COLOR_THEME);
+    const media = installMatchMedia(false);
+    const html = document.documentElement;
+    const held = () => html.classList.contains('pn-theme-switching');
+    const afterTwoFrames = () => act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 120));
+    });
+
+    await mountTheme(<ThemeTab />);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // Settings' mode buttons.
+    await act(async () => clickButton(button('Light')));
+    expect(html.classList.contains('light')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // A palette for the half on screen.
+    await act(async () => clickButton(palette('Tinacious')));
+    expect(html.classList.contains('theme-tinacious')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+
+    // A palette for the half not on screen changes nothing shown, so nothing is held.
+    await act(async () => clickButton(button('Dark theme')));
+    await act(async () => clickButton(palette('Dracula')));
+    expect(themeState().darkTheme).toBe('dracula');
+    expect(held()).toBe(false);
+
+    // Match system, then the computer turning dark at sunset.
+    await act(async () => clickButton(button('System')));
+    expect(html.classList.contains('theme-dracula')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+    await act(async () => media.setMatches(true));
+    expect(html.classList.contains('light')).toBe(true);
+    expect(held()).toBe(true);
+    await afterTwoFrames();
+    expect(held()).toBe(false);
+  });
+
   test.skipIf(!hasDom)('honors a host\'s own storage keys when migrating to a pair', async () => {
     stored.set('host-mode', 'system');
     stored.set('host-palette', 'kanagawa-wave');
