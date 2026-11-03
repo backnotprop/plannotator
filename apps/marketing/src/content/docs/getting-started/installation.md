@@ -376,7 +376,7 @@ plannotator t3 login --url <T3 MCP URL>
 claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3
 ```
 
-The MCP URL is in T3 Settings → Connections and ends in `/mcp`. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. With `--t3`, that server shows its tools only inside T3 threads. If `claude mcp get plannotator-inbox` already finds one, with or without `--t3`, keep it and skip the second line: it works in T3 threads as it is. Only Claude threads in T3 wake; other agents in T3 read the reply when they next check the Inbox. `plannotator t3 --help` has the details.
+For the MCP URL, open T3 **Settings → Environments**, open the environment's menu and choose **Copy MCP URL**. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. With `--t3`, that server shows its tools only inside T3 threads. If `claude mcp get plannotator-inbox` already finds one, with or without `--t3`, keep it and skip the second line: it works in T3 threads as it is. Only Claude threads in T3 wake; other agents in T3 read the reply when they next check the Inbox. `plannotator t3 --help` has the details.
 
 ## Kilo Code
 

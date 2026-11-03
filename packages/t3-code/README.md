@@ -2,7 +2,7 @@
 
 Claude keeps using ordinary Plannotator commands. An optional installer-managed Claude hook connects supported review launches to the originating T3 conversation automatically, after one-time authorization. **Ask this session** sends a question into that conversation and displays its answer in the review.
 
-This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. It requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill.
+This is a Plannotator-only integration. It uses T3's existing external MCP API as a client. Ask this session requires no T3 code change, provider-side Plannotator MCP server, or change to the Plannotator skill.
 
 The Plannotator Inbox uses the same sign-in: after `plannotator t3 login`, a reply the person sends to an agent in a T3 Claude thread arrives in that thread as a new turn. Its setup is in `plannotator t3 --help`: the login, then `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (that entry lists its tools only inside a T3 thread). See "T3 Code" in `docs/agent-guides/inbox-notifications-and-agents.md`.
 
@@ -35,7 +35,7 @@ For local testing, the same settings helper can register the built binary direct
 
 `t3-hook` is an internal installer/helper command; agents do not invoke it. The commands below use `plannotator` for that build (`packages/t3-code/dist/plannotator`). A running Claude provider session needs to restart to load changed hooks. The normal Claude plugin is unchanged and is not needed to register the T3 hook; its plan-review integration remains separate. The live routing verification used an equivalent command hook in isolated project settings. Installer tests use isolated profiles rather than changing a person's installed configuration.
 
-In T3 Settings → Connections, copy the environment's MCP URL. A person authorizes once:
+In T3 Settings → Environments, open the environment's menu and choose **Copy MCP URL**. A person authorizes once:
 
 ```sh
 plannotator t3 login --url http://127.0.0.1:3773/mcp
