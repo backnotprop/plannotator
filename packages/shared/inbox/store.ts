@@ -5283,13 +5283,6 @@ export class InboxStore {
   }
 
   /**
-   * A connection delivered a reply into a session as a turn: the reply
-   * records it (`delivery` for its owner, the tag's own `delivery` for a
-   * tagged session), and, for the owner, the thread counts as read by the
-   * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
-   * session's delivery marks nothing for the owner. Idempotent per session.
-   */
-  /**
    * A Tidy wake the Inbox withdrew before any hand-off (steps turned off, the
    * wake listed only steps): recorded delivered under `host` (the Inbox's own
    * marker) so nothing hands it, and nothing else. Unlike `recordDelivery` it
@@ -5306,6 +5299,13 @@ export class InboxStore {
     return withdrawn;
   }
 
+  /**
+   * A connection delivered a reply into a session as a turn: the reply
+   * records it (`delivery` for its owner, the tag's own `delivery` for a
+   * tagged session), and, for the owner, the thread counts as read by the
+   * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
+   * session's delivery marks nothing for the owner. Idempotent per session.
+   */
   recordDelivery(replyId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
     const reply = this.messages.get(replyId);
     if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
