@@ -22,20 +22,26 @@
  *   also name a new session ("New Claude Code session ▾ in <project> ▾"); Send
  *   writes the thread, then the Inbox starts the agent in the project's folder.
  *   A folder that is gone turns Send off and says so (UX screen 13).
+ * - Trust and start (approval "inbox-launch-trust-compose"): for a folder the
+ *   agent does not trust that the owner can trust from here, Send reads "Trust
+ *   and start" and the press is the consent: there is no confirm step. A question
+ *   circle beside it opens the facts, when there are any.
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
+import { InboxApiError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { FolderMenu } from './FolderMenu';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
+import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
-import { useComposeSessions } from './useComposeSessions';
+import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
+import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
 import { useVoiceSession } from '../voice';
 import { Tip } from '../components/Tip';
@@ -112,7 +118,7 @@ export interface ComposeSent {
  * draft is gone; `uploads: false`: no paperclip, drop or paste).
  */
 export interface ComposeTransport {
-  sessions: () => Promise<ComposeSessionsModel>;
+  sessions: ComposeSessionsLoader;
   startThread: (input: StartThreadInput) => Promise<{ thread_id: string; project?: { id: string; name: string; root: string } }>;
   drafts: boolean;
   uploads: boolean;
@@ -198,7 +204,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
-  const { model, load } = useComposeSessions(true, transport?.sessions);
+  const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
+  const { model, load } = useComposeSessions(true, transport?.sessions, startPick ? { agent: startPick.agent, project: startPick.projectId } : null);
   const voice = useVoiceSession();
   const projects = model?.projects ?? [];
   const target = findTarget(projects, chosen);
@@ -207,7 +214,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
   const launch = model?.launch;
   const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
-  const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
   const start: ComposeStart | null = useMemo(() => {
     const agent = startPick && launch?.agents.find((a) => a.agent === startPick.agent);
     // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
@@ -216,6 +222,27 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return agent && project ? { agent: agent.agent, name: agent.name, project } : null;
   }, [startPick, launch]);
   const [folderMenu, setFolderMenu] = useState(false);
+  const startAgent = start ? launch?.agents.find((a) => a.agent === start.agent) : undefined;
+  // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
+  // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
+  const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
+  const trustFacts = trust?.facts ?? [];
+  // The question circle's details.
+  const [trustInfo, setTrustInfo] = useState(false);
+  const trustInfoOpen = trustInfo && trustFacts.length > 0;
+  const trustCircleRef = useRef<HTMLButtonElement>(null);
+  // A press made on a reading that had gone stale: when its details opened on the new one.
+  const trustChangedAt = useRef(0);
+  useEffect(() => setTrustInfo(false), [start?.agent, start?.project.id]);
+  useEffect(() => {
+    if (!trustInfoOpen) return;
+    const onDown = (event: PointerEvent) => {
+      const at = event.target as Element | null;
+      if (at && !at.closest('[data-compose-trust-ask], [data-compose-trust-circle]')) setTrustInfo(false);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [trustInfoOpen]);
 
   // To is never filled by itself. Focus that started on To moves to the message when the
   // first read finds no live agent (To is then a line of text, not a button).
@@ -306,6 +333,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   }, []);
 
   const requestClose = () => {
+    if (trustInfoOpen) {
+      setTrustInfo(false);
+      if (document.activeElement !== textRef.current) trustCircleRef.current?.focus();
+      return;
+    }
     if (picker || folderMenu) {
       setPicker(false);
       setFolderMenu(false);
@@ -329,6 +361,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const send = async () => {
     // Still reading the live sessions: nothing to say yet, the status line says it. Dictation still running: the words are not in yet.
     if (busy || !model || voice.busy) return;
+    // The details just opened on a changed folder: a double press or a held key never answers what it hasn't shown.
+    if (Date.now() - trustChangedAt.current < ARM_MS) return;
     setError(null);
     if (start && !start.project.exists) {
       setError('Nothing sent: pick a folder to start in.');
@@ -361,7 +395,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
       const skills = transport ? null : await inboxSkillsBlock([body], INBOX_MESSAGE_SKILL_AUDIENCE);
       const result = await (transport ? transport.startThread : inboxApi.startThread)({
         to: start
-          ? { launch: start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id } }
+          ? {
+              launch: {
+                ...(start.scratch ? { agent: start.agent, scratch: true as const } : { agent: start.agent, project_id: start.project.id }),
+                // The press is the consent, to what it was offered: the server refuses a folder that changed since.
+                ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
+              },
+            }
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(body, skills) : body,
         idempotency_key: sendKey.current,
@@ -388,6 +428,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
       } else if (cause instanceof InboxApiError && (cause.code === 'folder_missing' || cause.code === 'agent_unavailable')) {
         // Checked before anything is written: nothing was sent. The re-read strikes the folder through, or drops the agent's row.
         void load();
+        setError(cause.message);
+      } else if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') {
+        // The folder changed since its reading: nothing was trusted or sent. The new reading, shown; the next press is on it.
+        await load();
+        trustChangedAt.current = Date.now();
+        setTrustInfo(true);
         setError(cause.message);
       } else if (cause instanceof InboxApiError && cause.code === 'thread_name_taken') {
         setNameError('Another open thread in this project has this name.');
@@ -513,8 +559,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !question) {
       event.preventDefault();
-      void send();
+      if (!event.repeat) void send();
+      return;
     }
+    // A key held on the focused button clicks it again and again: a held key never presses it twice.
+    if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
   const sendable = !!target || (!!start && start.project.exists);
@@ -527,8 +576,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const title = draft ? 'Draft' : 'New message';
   // A scratch start names the folder a Send would make now (from the thread's name).
   const scratchFolder = launch?.scratch ? scratchFolderOf(launch.scratch.root, threadName.trim() || suggested) : null;
+  const sendLabel = trust ? 'Trust and start' : 'Send';
+  // The details cover the error line, and on a phone the whole footer: open, they say it.
+  const errorInDetails = trustInfoOpen && !conflict;
   const status = start
-    ? startStatusLine(start, tildePath(start.scratch && scratchFolder ? scratchFolder : start.project.root, home))
+    ? startStatusLine(start)
     : statusLine({ target, anyLive: anyLive || canStart, ended: endedTo, projectName: target?.project.name ?? projectName, loading: loading && !target });
   const endedNote = endedTo ?? (lost && !target ? { host: lost.host, session: lost.session, project_root: lost.project.root, project_name: lost.project.name, started_at: lost.started_at } : null);
 
@@ -719,8 +771,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
               ? {
                   folder: tildePath(scratchFolder, home),
                   root: tildePath(launch.scratch.root, home),
-                  // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it.
-                  trusted: launch.agents.find((a) => a.agent === start.agent)?.scratch_trusted !== false,
+                  // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it. Trust and
+                  // start says it at the button, so the row speaks only where a press can't (a guest, a root at home).
+                  trusted: startAgent?.scratch_trusted !== false || !!startAgent.untrusted?.[SCRATCH_PICK],
                   agentName: start.name,
                 }
               : null
@@ -866,7 +919,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         />
       </div>
       {error && (
-        <div className="ib-cp-error" role="alert" data-compose-error="">
+        // Kept, unseen, while the details say it: the button under a press that closes them must not move.
+        <div className="ib-cp-error" role={errorInDetails ? undefined : 'alert'} data-compose-error={errorInDetails ? undefined : ''} data-in-details={errorInDetails ? '' : undefined}>
           {error}
           {conflict && (
             <span className="ib-cp-conflict">
@@ -907,6 +961,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         </div>
       ) : (
         <div className="ib-cp-foot">
+          {trust && trustInfoOpen && <TrustDetails folder={tildePath(trust.folder, home)} facts={trustFacts} said={errorInDetails ? error : null} />}
           {takesFiles ? (
             // On a phone what the picker hands over is named as a paste is (`image.jpg` -> `pasted-image-<stamp>.jpg`).
             <AttachFilesButton className="ib-cp-clip" iconSize={17} phone={phone} inputData="data-compose-attach" onFiles={(list) => (phone ? files.attach : files.add)(list)} />
@@ -953,6 +1008,22 @@ export function ComposeDialog(props: ComposeDialogProps) {
               </button>
             )}
           </VoiceFoot>
+          {trustFacts.length > 0 && (
+            <button
+              type="button"
+              ref={trustCircleRef}
+              className="ib-iconbtn ib-cp-trustcircle"
+              aria-label="What trusting this folder means"
+              aria-haspopup="dialog"
+              aria-expanded={trustInfoOpen}
+              aria-controls={trustInfoOpen ? 'ib-cp-trust-pop' : undefined}
+              onClick={() => setTrustInfo((open) => !open)}
+              data-compose-trust-circle=""
+              data-warning={trust?.warns ? '' : undefined}
+            >
+              <Icon name="question" size={18} />
+            </button>
+          )}
           <button
             type="button"
             className={`ib-btn ib-pri${phone ? ' ib-cp-send' : ''}${sendable ? '' : ' ib-dis'}`}
@@ -963,7 +1034,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             data-compose-send=""
           >
             <Icon name="send" size={15} />
-            {phone ? <span className="ib-cp-sendl">Send</span> : 'Send'}
+            {phone ? <span className="ib-cp-sendl">{sendLabel}</span> : sendLabel}
             <ShortcutHint scope={inboxThreadShortcuts} action="send" />
           </button>
         </div>

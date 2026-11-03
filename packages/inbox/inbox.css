@@ -3951,6 +3951,18 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-startin { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .ib-cp-in { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
+/* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
+   its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
+.ib-cp-foot { position: relative; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle { flex: none; }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[data-warning]:hover { color: var(--warning, oklch(0.75 0.15 85)); }
+.pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"], .pn-inbox .ib-iconbtn.ib-cp-trustcircle[aria-expanded="true"]:hover { background: var(--muted); color: var(--foreground); }
+.ib-cp-trustask { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12px; width: 440px; }
+.ib-cp-trustask p span { display: block; }
+.ib-state.ib-cp-trustask p { line-height: 1.45; margin-bottom: 0; }
+.ib-state.ib-cp-trustask p.ib-cp-trustsaid { margin-top: 6px; color: var(--destructive); }
+.ib-cp-error[data-in-details] { visibility: hidden; }
 /* The folder menu: under "in <project>", the picker's look; folder icon, name, path, check. */
 .ib-cp-picker.ib-cp-folders { left: 200px; width: min(480px, calc(100% - 210px)); }
 .ib-cp-folders .ib-cp-list { grid-template-columns: auto minmax(0, max-content) minmax(min(12ch, 30%), 1fr) 16px; }
@@ -4288,7 +4300,8 @@ svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke
 .ib-run-main > svg { flex: none; margin-top: 2px; color: var(--warning); }
 .ib-run[data-run="waiting_terminal"], .ib-run[data-run="failed"], .ib-run[data-run="missing"] { color: var(--foreground); flex-direction: column; align-items: flex-start; }
 .ib-run b { font-weight: 600; color: var(--foreground); }
-.ib-run-text { min-width: 0; line-height: 1.5; }
+.ib-run-text { min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.ib-run .ib-error { overflow-wrap: anywhere; }
 .ib-run-sub { display: block; color: var(--muted-foreground); }
 .ib-run-acts { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ib-run[data-run="waiting_terminal"] .ib-run-acts, .ib-run[data-run="failed"] .ib-run-acts { padding-left: 21px; }
@@ -5808,6 +5821,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* A narrow page: tighter gaps, so the links stay whole beside the Tidy ⋮ (the Project chip has its own row). */
 .ib-bhead[data-narrow] { gap: 8px; }
 .ib-bhead[data-narrow] .ib-blinks { gap: 4px; }
+/* A phone's Done fold ends in All done when older cards are done (its lane holds the last seven days). */
+.pn-inbox .ib-bdoneall { margin: 2px 14px 12px; }
 .ib-blinks { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); white-space: nowrap; }
 .ib-blinks a { color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; font-variant-numeric: tabular-nums; }
 .ib-blinks a:hover { color: var(--foreground); background: var(--ib-hover); }
@@ -6259,6 +6274,55 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-tour-coach.ib-tc-wide { width: auto; }
   .pn-inbox .ib-tour-coach .ib-tc-next { min-height: 44px; padding: 0 16px; }
   .pn-inbox .ib-tour-coach .ib-tc-ff { min-height: 44px; padding: 0 12px; }
+}
+/* A coach card's title takes focus when the card changes (screen readers read it); a ring only after a key (Tour.tsx's focusTitle). */
+.ib-tour-coach h2[data-quiet-focus]:focus-visible { outline: none; }
+/* "Make it yours" (tour/TourSettings.tsx), step 10: the theme, three colour sets and the text size, as tiles over the tour's Inbox. */
+.ib-tour-coach.ib-tc-settings { width: 420px; }
+.ib-tset { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.ib-tset-grp { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ib-tset-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
+.ib-tset-l { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--foreground); }
+.ib-tset-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ib-tset-tile { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; padding: 6px; border: 1px solid var(--ib-line, var(--border)); border-radius: 10px; color: var(--muted-foreground); cursor: pointer; }
+.ib-tset-tile:hover { background: var(--ib-hover-s, var(--ib-hover)); color: var(--foreground); }
+.ib-tset-tile[data-on] { border-color: color-mix(in oklch, var(--primary) 70%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--primary) 70%, transparent); color: var(--foreground); }
+.ib-tset-tile input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.ib-tset-tile:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.pn-inbox .ib-tset-tile input:focus-visible { outline: none; }
+.ib-tset-cap { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; font-size: var(--ib-fs-12, 12px); line-height: 1.25; text-align: center; }
+.ib-tset-cap > span { min-width: 0; overflow-wrap: anywhere; }
+.ib-tset-tile[data-on] .ib-tset-cap { font-weight: 600; }
+.ib-tset-pic, .ib-tset-split { position: relative; display: block; height: 52px; }
+.ib-tset-win { position: absolute; inset: 0; display: flex; border-radius: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 14%, transparent); }
+.ib-tset-split > .ib-tset-win:last-child { clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.ib-tset-side { width: 26%; display: flex; flex-direction: column; padding: 6px 4px; }
+.ib-tset-side > span { height: 5px; border-radius: 3px; opacity: 0.75; }
+.ib-tset-lines { flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 7px 6px; }
+.ib-tset-lines > span { height: 4px; border-radius: 2px; }
+.ib-tset-lines > .ib-tset-btn { width: 34%; height: 7px; margin-top: auto; border-radius: 4px; }
+.ib-tset-pal { align-items: center; justify-content: center; padding: 10px 6px 8px; }
+.ib-tset-ck { position: absolute; top: 4px; right: 4px; color: var(--primary); }
+/* Until the first settings read answers (a moment), the controls wait: dimmed, not pickable. */
+.ib-tset[data-waiting] .ib-tset-tiles, .ib-tset[data-waiting] .ib-seg { opacity: 0.55; cursor: progress; }
+.ib-tset[data-waiting] label { cursor: progress; }
+.ib-tset-more { margin: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-tset-more a { color: var(--primary); font-weight: 550; text-decoration: underline; text-underline-offset: 2px; }
+/* The card's Next says what comes next ("Connect agents next →"): one line, the arrow after the words. */
+.ib-tc-settings .ib-tc-next { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+@media (forced-colors: active) {
+  .ib-tset-tile[data-on] { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+/* Phones: the bottom sheet; the three tiles stay one row down to 320 px (the mode's caption stacks under its icon). */
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-tour-coach.ib-tc-settings { width: auto; max-height: calc(100dvh - var(--ib-tour-bar-h, 52px) - 18px); overflow-y: auto; overscroll-behavior: contain; }
+  .ib-tset { gap: 10px; margin-top: 8px; }
+  .ib-tset-tiles { gap: 6px; }
+  .ib-tset-tile { min-height: 44px; padding: 5px; }
+  .ib-tset-pal { padding: 10px 4px 8px; }
+  .ib-tset-mode .ib-tset-cap { flex-direction: column; gap: 2px; }
+  .ib-tset-pic, .ib-tset-split { height: 44px; }
+  .ib-tset .ib-seg-o { height: 44px; min-width: 44px; justify-content: center; padding: 0 12px; }
 }
 /* Full screen in the tour starts under the tour bar, so Exit tour and the file's own toolbar both stay in reach. */
 .pn-inbox[data-tour] .ib-view.ib-full { top: var(--ib-tour-bar-h, 45px); }

@@ -141,12 +141,12 @@ export interface ThreadSnoozeProps {
 }
 
 /**
- * A launched thread's items on top of ⋯ (UX screen 07): Open in Terminal, Copy attach command, Stop <agent>,
- * and Delete session (it asks first, in the thread). Each is absent where it cannot work.
+ * A launched thread's items on top of ⋯ (UX screen 07): Copy attach command, Stop <agent>, and Delete session
+ * (it asks first, in the thread). Each is absent where it cannot work. Open in Terminal is not here: it shows
+ * on the run line, only when a session waits on Terminal or can't start.
  */
 export interface ThreadMoreLaunch {
   name: string;
-  open: (() => void) | null;
   copyAttach: (() => void) | null;
   stop: (() => void) | null;
   remove: (() => void) | null;
@@ -299,14 +299,8 @@ export function ThreadMore(
                 <div className="ib-pm-title" dir="auto" aria-hidden="true">
                   {thread.subject ?? '(no subject)'}
                 </div>
-                {launch && (launch.open || launch.copyAttach || launch.stop || launch.remove) && (
+                {launch && (launch.copyAttach || launch.stop || launch.remove) && (
                   <>
-                    {launch.open && (
-                      <Menu.Item className="ib-pmi" label="Open in Terminal" onClick={launch.open} data-launch-item="open">
-                        <Icon name="terminal" size={15} />
-                        Open in Terminal
-                      </Menu.Item>
-                    )}
                     {launch.copyAttach && (
                       <Menu.Item className="ib-pmi" label="Copy attach command" onClick={launch.copyAttach} data-launch-item="attach">
                         <Icon name="copy" size={15} />
