@@ -1473,3 +1473,16 @@ test('a window with its own stream (no Web Locks): the same watch reopens it fro
     jest.useRealTimers();
   }
 });
+
+// Review of #2565, finding 6: a linked machine's threads show no steps here, so its steps line must not reach the
+// window (onMachine rings a live record and re-reads the open thread when it is that machine's).
+test("a linked machine's steps line never reaches the window; its other records still do", () => {
+  const got: unknown[] = [];
+  const handlers: InboxEventHandlers = { onRecord: () => {}, onStatus: () => {}, onMachine: (frame) => void got.push(frame.record) };
+  const machineFrame = (record: unknown): InboxEventFrame => ({ name: 'machine', id: null, data: JSON.stringify({ machine: 'mac_far', seq: 9, live: true, record }) });
+  dispatchInboxFrame(machineFrame({ seq: 9, kind: 'steps', id: 'stp_x', thread_id: 'msg_far' }), handlers);
+  expect(got).toEqual([]);
+  const read = { seq: 10, kind: 'read', message_id: 'msg_far' };
+  dispatchInboxFrame(machineFrame(read), handlers);
+  expect(got).toEqual([read]);
+});
