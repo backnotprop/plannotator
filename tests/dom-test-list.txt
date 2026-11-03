@@ -122,6 +122,7 @@ packages/inbox/fullScreenComposer.test.tsx
 packages/inbox/sideBySide.test.tsx
 packages/inbox/attachmentSteppingSave.test.tsx
 packages/inbox/listColumn.test.tsx
+packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
@@ -173,6 +174,7 @@ packages/inbox/clickToRefresh.test.tsx
 packages/inbox/ask/askWindow.test.tsx
 packages/inbox/pullToRefresh.test.tsx
 packages/inbox/threadReadRetry.test.tsx
+packages/inbox/openThreadReadsWiring.test.tsx
 packages/inbox/tabCountWindow.test.tsx
 packages/inbox/phoneList.test.tsx
 packages/inbox/listHeaderPath.test.tsx
