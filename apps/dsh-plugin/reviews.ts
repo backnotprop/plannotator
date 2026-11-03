@@ -14,7 +14,8 @@
  * Each review has a folder `<data dir>/dsh/<pn-id>/` (0700) for its ready and
  * result files, removed once the decision is delivered. `list` and `close`
  * see only the reviews the asking session opened. Close stops the plugin's own
- * child with SIGTERM (the CLI keeps the reviewer's draft): the CLI's host
+ * child with SIGTERM, then SIGKILL a second later (the CLI keeps the
+ * reviewer's draft), whether its page is up or still starting: the CLI's host
  * close needs the session-bridge token, which comes with "Ask this session".
  *
  * No key or token is involved: these launches carry no session bridge yet.
@@ -97,6 +98,8 @@ export interface DshReviewsOptions {
 const READY_WAIT_MS = { review: 45_000, other: 15_000 };
 const STDOUT_LIMIT = 4 * 1024 * 1024;
 const STDERR_LIMIT = 16 * 1024;
+/** How long a child has after SIGTERM before SIGKILL (OpenCode's `requestTermination`). */
+const KILL_AFTER_MS = 1000;
 
 interface Review {
   readonly id: string;
@@ -104,13 +107,19 @@ interface Review {
   readonly dir: string;
   readonly child: ChildProcess;
   readonly startedAt: number;
+  /** Settles once the child has exited (or never started). */
+  readonly gone: Promise<void>;
   subject: string;
   baseSubject: string;
   url?: string;
   port?: number;
   target?: PlannotatorTarget;
+  /** The call that opened it has answered (ready, starting, failed or aborted). */
+  answered: boolean;
   /** The call that opened it answered "starting". */
   answeredStarting: boolean;
+  /** Its decision was delivered (or logged) when the child exited. */
+  decided: boolean;
   closedByAgent: boolean;
   exited: boolean;
   startError?: Error;
@@ -200,6 +209,16 @@ export function dshLateFailureText(subject: string, id: string, message: string)
     plannotatorDecisionHeading(subject, id, "Did not open"),
     "",
     `Plannotator could not start: ${message}`,
+    `Nothing more arrives for ${id}; do not wait for it.`,
+  ].join("\n");
+}
+
+/** The message a review whose page opened sends when its CLI stops without a decision. */
+export function dshEndedText(subject: string, id: string, detail: string): string {
+  return [
+    plannotatorDecisionHeading(subject, id, "Ended with no decision"),
+    "",
+    `Plannotator stopped before the reviewer decided: ${detail}`,
     `Nothing more arrives for ${id}; do not wait for it.`,
   ].join("\n");
 }
@@ -299,15 +318,21 @@ export class DshReviews {
       return { state: "failed", message: error instanceof Error ? error.message : String(error) };
     }
 
+    let markGone!: () => void;
     const review: Review = {
       id,
       request,
       dir,
       child,
       startedAt: this.now(),
+      gone: new Promise<void>((resolve) => {
+        markGone = resolve;
+      }),
       subject: request.subject,
       baseSubject: request.subject,
+      answered: false,
       answeredStarting: false,
+      decided: false,
       closedByAgent: false,
       exited: false,
       stdout: "",
@@ -324,36 +349,64 @@ export class DshReviews {
     });
     child.once("error", (error) => {
       review.startError = error;
+      // A child that never started emits no `close`.
+      if (child.pid === undefined) markGone();
     });
     child.once("close", (code) => {
       review.exited = true;
+      markGone();
       this.settle(review, code);
     });
 
     const waits = this.options.readyWaitMs ?? READY_WAIT_MS;
     const deadline = this.now() + (request.kind === "review" ? waits.review : waits.other);
     const pollMs = this.options.pollMs ?? 100;
-    while (!review.url) {
+    for (;;) {
       this.readReady(review);
-      if (review.url) break;
       if (review.exited || review.startError) {
-        // Forgotten here too: a child that never started may not emit `close`.
+        review.answered = true;
         this.reviews.delete(id);
         if (!review.exited) rmSync(dir, { recursive: true, force: true });
+        // Gone already: a page that came up and went with a decision was answered by that decision;
+        // one that went without a decision did not open for the agent (`settle` sent nothing, since this call had not answered).
+        if (review.decided && review.url) return this.readyStart(review, review.url);
         return { state: "failed", message: this.failureOf(review) };
       }
+      if (review.url) {
+        review.answered = true;
+        return this.readyStart(review, review.url);
+      }
       if (signal?.aborted) {
+        review.answered = true;
         review.closedByAgent = true;
-        child.kill("SIGTERM");
+        this.stop(review);
+        // Settled only once the child is gone (DSH's tool contract: a tool settles after its own work is quiet).
+        await review.gone;
         throw abortReason(signal);
       }
       if (this.now() >= deadline) {
+        review.answered = true;
         review.answeredStarting = true;
         return { state: "starting", id, subject: review.subject };
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
-    return { state: "ready", id, subject: review.subject, url: review.url, ...(review.target !== undefined && { target: review.target }) };
+  }
+
+  private readyStart(review: Review, url: string): DshReviewStart {
+    return { state: "ready", id: review.id, subject: review.subject, url, ...(review.target !== undefined && { target: review.target }) };
+  }
+
+  /** SIGTERM the plugin's own child, then SIGKILL if it is still there a second later. False when it is already gone. */
+  private stop(review: Review): boolean {
+    if (review.exited || review.child.pid === undefined) return false;
+    review.child.kill("SIGTERM");
+    const timer = setTimeout(() => {
+      if (!review.exited) review.child.kill("SIGKILL");
+    }, KILL_AFTER_MS);
+    (timer as { unref?: () => void }).unref?.();
+    void review.gone.then(() => clearTimeout(timer));
+    return true;
   }
 
   /** Read the ready file once: the url, port and full target, once the CLI wrote them. */
@@ -418,19 +471,22 @@ export class DshReviews {
     const record = existsSync(resultPath) ? readHostResult(resultPath) : null;
     let message: { send: boolean; text: string };
     if (record) {
+      review.decided = true;
       message = dshDecision(record, { kind: request.kind, subject: review.subject, id, gate: request.gate, ...(review.target !== undefined && { target: review.target }) });
+    } else if (!review.answered || (!review.url && !review.answeredStarting)) {
+      // The call that opened it reports this failure itself (it has not answered yet, or answered "failed").
+      rmSync(review.dir, { recursive: true, force: true });
+      return;
     } else if (!review.url) {
-      // The call that opened it already reported the failure, unless it answered "starting".
-      if (!review.answeredStarting) {
-        rmSync(review.dir, { recursive: true, force: true });
-        return;
-      }
+      // It answered "starting": the agent waits, so say it did not open.
       message = { send: true, text: dshLateFailureText(review.subject, id, this.failureOf(review)) };
     } else if (review.stdout.trim()) {
       // A CLI older than this plugin writes no result file here: its stdout is the feedback.
       message = { send: true, text: `${plannotatorDecisionHeading(review.subject, id, "Feedback", review.target)}\n\n${review.stdout.trim()}` };
     } else {
-      message = { send: false, text: `${review.subject} (${id}) ended with no decision (exit code ${code ?? "unknown"}); nothing was sent.` };
+      // The page opened and the CLI went without a decision (it crashed, or was killed): the agent was told to wait.
+      const detail = review.stderr.trim().split(/\r?\n/).slice(-6).join("\n") || `it exited with code ${code ?? "unknown"}`;
+      message = { send: true, text: dshEndedText(review.subject, id, detail) };
     }
     if (!message.send) {
       this.options.log(message.text);
@@ -478,8 +534,8 @@ export class DshReviews {
     const outcomes: PlannotatorCloseOutcome[] = targets.map((review) => {
       const { id, subject } = review;
       if (existsSync(join(review.dir, "result.json"))) return { id, subject, closed: false, reason: "decided" };
-      if (!review.url) return { id, subject, closed: false, reason: "failed", detail: "its server has not started yet; try again in a moment" };
-      if (review.exited || !review.child.kill("SIGTERM")) return { id, subject, closed: false, reason: "failed", detail: "its server process is gone" };
+      // Still starting or open, the child is the plugin's own: stop it (SIGTERM, then SIGKILL; the CLI keeps the draft).
+      if (!this.stop(review)) return { id, subject, closed: false, reason: "failed", detail: "its server process is gone" };
       review.closedByAgent = true;
       return { id, subject, closed: true, unsent: null };
     });
@@ -490,9 +546,7 @@ export class DshReviews {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const review of this.reviews.values()) {
-      if (!review.exited) review.child.kill("SIGTERM");
-    }
+    for (const review of this.reviews.values()) this.stop(review);
   }
 
   /** How many reviews are open (tests). */

@@ -77,6 +77,8 @@ export interface DshNativeDeps {
   command?: string[];
   /** How often a launch looks for the page (tests). */
   pollMs?: number;
+  /** How long a call waits for the page before answering "starting" (tests). */
+  readyWaitMs?: { review: number; other: number };
 }
 
 function service<T>(ctx: DshInboxContext, name: string): T | undefined {
@@ -224,11 +226,14 @@ export function createDshNative(
     deliver: (owner, text) => deliverTo(agentsServiceOf(ctx), owner, text),
     log: (message) => warn("plannotator: %s", message),
     ...(deps.pollMs !== undefined && { pollMs: deps.pollMs }),
+    ...(deps.readyWaitMs && { readyWaitMs: deps.readyWaitMs }),
   });
 
+  // The decision and `list`/`close` belong to the top-level session; the review runs in the CALLER's
+  // folder (a DSH subagent can have its own working directory, e.g. a worktree).
   const owning = (agents: DshAgentsService, agent: DshInboxAgent) => {
     const root = rootAgentOf(agents, agent);
-    return { root, subagent: root !== agent, cwd: sessionCwd(ctx as DshContext, root as never) };
+    return { root, subagent: root !== agent, cwd: sessionCwd(ctx as DshContext, agent as never) };
   };
 
   const request = (root: DshInboxAgent, cwd: string | undefined, review: { kind: DshReviewKind; args: string[]; subject: string; gate: boolean }): DshReviewRequest => ({

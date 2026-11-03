@@ -334,7 +334,9 @@ tests, which use a fake `ctx`).
   call): `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` turns it on,
   read once when the plugin loads. The `parameters` are
   `PLANNOTATOR_TOOL_INPUT_SCHEMA` as is (DSH checks only the `output`
-  schema against its JSON Schema subset).
+  schema against its JSON Schema subset). In DSH's code-execution (PTC)
+  mode the tool's arguments show as `unknown`: that mode's types use the
+  same subset, which has no `anyOf` or `minItems`. Native mode is unaffected.
 - **`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`**
   are registered with `ctx.commands.register` (`inject(['agents',
   'commands'])`) whatever the tool switch says. DSH runs a registered
@@ -349,12 +351,19 @@ tests, which use a fake `ctx`).
   The call answers once the page is up (15 s, 45 s for a review; then
   "starting"). On exit the plugin sends the decision to the top-level session
   with `agent.followup`, headed as on the other hosts; a bare approval and a
-  close send nothing unless the review was gated. A subagent's review goes to
-  the session it works for; `last` from a subagent is refused.
+  close send nothing unless the review was gated. A CLI that stops without a
+  decision after the call answered sends "Did not open" (it answered
+  "starting") or "Ended with no decision" (the page was up), so the agent
+  never waits forever. A subagent's review runs in the subagent's own
+  working directory, and its decision goes to the session it works for;
+  `last` from a subagent is refused.
 - **`list` and `close`** see only the asking session's reviews. Close stops
-  the plugin's own child (SIGTERM, the draft kept) and `unsent` is unknown:
-  host close needs the session-bridge token, which comes with Ask this
-  session. Unloading the plugin stops every open review.
+  the plugin's own child, open or still starting (SIGTERM, then SIGKILL a
+  second later; the draft is kept), and `unsent` is unknown: host close
+  needs the session-bridge token, which comes with Ask this session.
+  Cancelling a call while its page is starting stops the child the same way,
+  and the call settles once the child has exited. Unloading the plugin stops
+  every open review.
 - Not in the `headless`, `sdk`, `sdk-minimal` or `acp` profiles; there the
   shared skills run the CLI. Tests: `apps/dsh-plugin/tool.test.ts` (a fake CLI,
   `fixtures/fake-cli.ts`).

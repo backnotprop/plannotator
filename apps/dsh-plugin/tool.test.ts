@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
@@ -54,8 +54,38 @@ class FakeAgent implements DshInboxAgent {
   }
 }
 
+interface FakeCall {
+  subcommand: string;
+  args: string[];
+  pid: number;
+  cwd: string;
+  env: Record<string, string | undefined>;
+}
+
+function readCalls(logDir: string): FakeCall[] {
+  const path = join(logDir, "calls.jsonl");
+  return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line) as FakeCall) : [];
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** A fake DSH process with one project, the services the plugin uses, and the plugin loaded into it. */
-function loadPlugin(options: { config?: PlannotatorConfig; env?: NodeJS.ProcessEnv; profile?: string; mode?: "fail" } = {}) {
+function loadPlugin(options: {
+  config?: PlannotatorConfig;
+  env?: NodeJS.ProcessEnv;
+  profile?: string;
+  mode?: "fail" | "hang" | "late-fail" | "crash";
+  /** The CLI ignores SIGTERM: only SIGKILL stops it. */
+  ignoreTerm?: boolean;
+  readyWaitMs?: { review: number; other: number };
+} = {}) {
   const root = scratch();
   const dataDir = join(root, "data");
   const logDir = join(root, "log");
@@ -88,16 +118,30 @@ function loadPlugin(options: { config?: PlannotatorConfig; env?: NodeJS.ProcessE
     NO_ANON_PING: "1",
     FAKE_CLI_LOG_DIR: logDir,
     ...(options.mode && { FAKE_CLI_MODE: options.mode }),
+    ...(options.ignoreTerm && { FAKE_CLI_IGNORE_TERM: "1" }),
     ...options.env,
   };
   void applyPlannotator(ctx as never, undefined, {
     env,
     dataDir,
-    native: { config: options.config ?? {}, command: [process.execPath, FAKE_CLI], pollMs: 20 },
+    native: {
+      config: options.config ?? {},
+      command: [process.execPath, FAKE_CLI],
+      pollMs: 20,
+      ...(options.readyWaitMs && { readyWaitMs: options.readyWaitMs }),
+    },
   });
-  unloads.push(() => {
+  const unload = () => {
     for (const dispose of effects.splice(0)) dispose();
-  });
+  };
+  // Unloading stops every child the plugin still owns (SIGTERM, then SIGKILL).
+  unloads.push(unload);
+  if (options.ignoreTerm) {
+    // A broken SIGKILL path must fail the test, not leave this test's own SIGTERM-proof children running.
+    unloads.push(() => {
+      for (const call of readCalls(logDir)) if (alive(call.pid)) process.kill(call.pid, "SIGKILL");
+    });
+  }
   const add = (agent: FakeAgent) => {
     agents.set(agent.id, agent);
     return agent;
@@ -108,11 +152,10 @@ function loadPlugin(options: { config?: PlannotatorConfig; env?: NodeJS.ProcessE
     tools,
     commands,
     warnings,
+    root,
     add,
-    calls: (): { subcommand: string; args: string[]; env: Record<string, string | undefined> }[] =>
-      existsSync(join(logDir, "calls.jsonl"))
-        ? readFileSync(join(logDir, "calls.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line))
-        : [],
+    unload,
+    calls: () => readCalls(logDir),
     decide: (id: string, record: Record<string, unknown>) => writeFileSync(join(logDir, `decide-${id}.json`), JSON.stringify({ v: 1, ...record })),
     /** Review folders still on disk. */
     folders: () => (existsSync(join(dataDir, "dsh")) ? readdirSync(join(dataDir, "dsh")) : []),
@@ -202,6 +245,105 @@ describe("non-blocking reviews", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(main.followups).toEqual([]);
     expect(((await tool.execute({ action: "list" }, { agent: main })) as { text: string }).text).toBe("No open Plannotator reviews from this conversation.");
+  }, 15_000);
+});
+
+describe("whose review it is", () => {
+  // The failure: a subagent working in its own folder (a worktree) has the parent's folder reviewed instead.
+  test("a subagent's review runs in the subagent's folder; its decision still goes to the top-level session", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true } });
+    const worktree = join(dsh.root, "worktree");
+    mkdirSync(worktree);
+    writeFileSync(join(worktree, "notes.md"), "# Worktree notes\n");
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const sub = dsh.add(new FakeAgent("session-sub", worktree, { parentSession: "session-main", origin: "subagent" }));
+    const opened = (await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: sub })) as { text: string };
+    const [call] = dsh.calls();
+    expect(realpathSync(call!.cwd)).toBe(realpathSync(worktree));
+    expect(call!.env.DSH_SESSION_ID).toBe("session-main");
+    dsh.decide(sessionOf(opened.text), { surface: "annotate", decision: "annotated", message: "Shorter.", noop: false, annotationCount: 1 });
+    await until(() => main.followups.length > 0);
+    expect(sub.followups).toEqual([]);
+  }, 15_000);
+
+  // The failure: one session lists, or closes, a review another session is waiting on.
+  test("another session can neither list nor close a review", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const other = dsh.add(new FakeAgent("session-other", dsh.project));
+    const tool = dsh.tool("plannotator")!;
+    const text = async (agent: FakeAgent, args: Record<string, unknown>) => ((await tool.execute(args, { agent })) as { text: string }).text;
+    const id = sessionOf(await text(main, { action: "annotate", target: "notes.md" }));
+    expect(await text(other, { action: "list" })).toBe("No open Plannotator reviews from this conversation.");
+    expect(await text(other, { action: "close", session: id })).toContain(`No open Plannotator review ${id} from this conversation.`);
+    expect(await text(other, { action: "close", session: "all" })).toBe("No open Plannotator reviews from this conversation to close.");
+    expect(alive(dsh.calls()[0]!.pid)).toBe(true);
+    expect(await text(main, { action: "list" })).toContain(id);
+  }, 15_000);
+});
+
+describe("stopping a review", () => {
+  // The failure: a cancelled call leaves a CLI running that nobody owns (it ignored SIGTERM), or the call
+  // settles while its child still runs.
+  test("cancelling the call while the page is starting stops the child (SIGKILL when SIGTERM is ignored) before the call settles", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "hang", ignoreTerm: true });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const cancel = new AbortController();
+    const call = dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main, signal: cancel.signal });
+    await until(() => dsh.calls().length === 1);
+    cancel.abort(new Error("turn cancelled"));
+    await expect(call).rejects.toThrow("turn cancelled");
+    expect(alive(dsh.calls()[0]!.pid)).toBe(false);
+    expect(main.followups).toEqual([]);
+  }, 15_000);
+
+  // The failure: a plugin reload or DSH quitting leaves review servers running with nothing to deliver to.
+  test("unloading the plugin stops an open review (SIGKILL when SIGTERM is ignored) and sends nothing", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, ignoreTerm: true });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main });
+    const { pid } = dsh.calls()[0]!;
+    dsh.unload();
+    await until(() => !alive(pid));
+    await until(() => dsh.folders().length === 0);
+    expect(main.followups).toEqual([]);
+  }, 15_000);
+
+  // The failure: a review whose page never comes up cannot be closed, and lists as "starting" forever.
+  test("close stops a review still starting", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "hang", readyWaitMs: { review: 100, other: 100 } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const tool = dsh.tool("plannotator")!;
+    const opened = ((await tool.execute({ action: "annotate", target: "notes.md" }, { agent: main })) as { text: string }).text;
+    expect(opened).toContain("Plannotator is starting for notes.md");
+    const id = sessionOf(opened);
+    expect(((await tool.execute({ action: "close", session: id }, { agent: main })) as { text: string }).text).toContain(`Closed notes.md (${id})`);
+    await until(() => !alive(dsh.calls()[0]!.pid));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(main.followups).toEqual([]);
+  }, 15_000);
+});
+
+describe("no decision coming", () => {
+  // The failure: the agent was told to end its turn and wait, and the review died: it waits forever.
+  test("a review that answered 'starting' and then fails sends a 'Did not open' turn", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "late-fail", readyWaitMs: { review: 100, other: 100 } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const opened = ((await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main })) as { text: string }).text;
+    expect(opened).toContain("Plannotator is starting for notes.md");
+    await until(() => main.followups.length > 0);
+    expect(main.followups[0]).toStartWith(`Plannotator: notes.md (${sessionOf(opened)}) — Did not open.`);
+    expect(main.followups[0]).toContain("Port in use");
+  }, 15_000);
+
+  test("a CLI that exits after its page opened, with no decision, sends an 'Ended with no decision' turn", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "crash" });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const opened = ((await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main })) as { text: string }).text;
+    expect(opened).toContain("Opened notes.md in Plannotator");
+    await until(() => main.followups.length > 0);
+    expect(main.followups[0]).toStartWith(`Plannotator: notes.md (${sessionOf(opened)}) — Ended with no decision.`);
+    expect(main.followups[0]).toContain("do not wait for it");
   }, 15_000);
 });
 
