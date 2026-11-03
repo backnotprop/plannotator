@@ -481,10 +481,10 @@ function CapabilitiesSection({
   return (
     <>
       {(boardRow || stepsRow) && (
-        <section className="ib-sgroup" data-settings-board="" aria-label="Capabilities">
+        <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
-              <div className="ib-prow">
+              <div className="ib-prow" data-settings-board="">
                 <span className="ib-txt">
                   <span className="ib-l" id="ib-board-label">
                     Board

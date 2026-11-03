@@ -416,9 +416,12 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   };
   const el = await renderApp('#settings/capabilities');
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
-  const group = el.querySelector('[data-settings-board]')!;
+  const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   expect(rows).toEqual(['Board', 'Checklist']);
+  // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
+  expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
+  expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
   expect(switchNamed(el, 'Checklist')!.getAttribute('aria-checked')).toBe('false');
   try {
     act(() => switchNamed(el, 'Checklist')!.click());
