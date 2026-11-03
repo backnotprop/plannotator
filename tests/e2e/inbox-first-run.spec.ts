@@ -292,7 +292,7 @@ test('which agents a reply wakes: said once on the first-run screen, and per age
   const page = await openWindow(browser, c, errors);
   await expect(listItems(page, 'Already connected')).toHaveText(['Claude Code plugin', 'Codex MCP · sees replies when it checks']);
   await expect(page.locator('[data-wake-note]')).toHaveText(
-    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi, OpenCode 2 and DeepSeek Harness, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
+    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
   );
   const out = resolve(process.env.PLANNOTATOR_WAKE_SHOTS ?? shots);
   mkdirSync(out, { recursive: true });

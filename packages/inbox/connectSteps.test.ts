@@ -113,7 +113,9 @@ test("DeepSeek Harness through Plannotator's plugin: ready with the tool on, a s
   // A person turned it off: left alone, not offered as a step.
   const chosen = { ...off, tool: { on: false, locked: false, chosen_off: true } };
   expect(connectPlan({ ...agentsModel({}), agents: [chosen] }).next).toBeNull();
-  expect(WAKE_LINE).toContain('DeepSeek Harness');
+  // The owner's call (#2529): the first-run wake line stays main's words and names no DeepSeek Harness, here or not.
+  expect(WAKE_LINE).not.toContain('DeepSeek Harness');
+  expect(wakeLine(['codex'])).not.toContain('DeepSeek Harness');
 });
 
 test('the cost the screen states is the measured one', () => {
@@ -202,13 +204,13 @@ test('the plugin turned off by managed settings: said so, and claude plugin enab
 // Deliberately pinned (owner's ask, "say plainly which agents a reply wakes"): the hosts named are exactly the ones whose
 // connection wakes a session. OpenCode 1 has the tool but no wake, so the line says OpenCode 2.
 test('the wake line names the hosts a reply wakes, and what other agents do instead', () => {
-  expect(WAKE_LINE).toContain("Claude Code, Pi, OpenCode 2 and DeepSeek Harness");
+  expect(WAKE_LINE).toContain('Claude Code, Pi and OpenCode 2');
   expect(WAKE_LINE).toContain('the next time they check the Inbox');
   // Deliberately pinned: without Codex on this computer the lines are #2168's, word for word; Codex adds its clause only when its row is here.
-  expect(WAKE_LINE).toBe("With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi, OpenCode 2 and DeepSeek Harness. Other agents see your reply the next time they check the Inbox.");
+  expect(WAKE_LINE).toBe("With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2. Other agents see your reply the next time they check the Inbox.");
   expect(MCP_WAKE_LINE).toBe("These reach the Inbox through MCP: they see your reply the next time they check it, and can't be woken.");
   expect(wakeLine(['codex'])).toBe(
-    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi, OpenCode 2 and DeepSeek Harness, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
+    "With Plannotator's connection, your replies arrive as a new turn on their own in Claude Code, Pi and OpenCode 2, and in Codex 0.149 or later through MCP. Other agents see your reply the next time they check the Inbox.",
   );
   expect(mcpWakeLine(['codex'])).toBe(
     "These reach the Inbox through MCP: Codex 0.149 or later gets your reply as a new turn on its own; the others see it the next time they check the Inbox, and can't be woken.",

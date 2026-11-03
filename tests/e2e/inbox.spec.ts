@@ -224,7 +224,7 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   const gaps = boxes.slice(1).map((box, i) => Math.round(box.top - boxes[i]!.bottom));
   expect(gaps.length).toBe(5);
   expect(new Set(gaps).size).toBe(1);
-  await expect(empty.locator('[data-wake-note]')).toContainText('Claude Code, Pi, OpenCode 2 and DeepSeek Harness');
+  await expect(empty.locator('[data-wake-note]')).toContainText('Claude Code, Pi and OpenCode 2');
 
   // Every other agent or editor, folded at the end: the picker without Plannotator's three hosts.
   const byHand = empty.getByRole('button', { name: 'Another agent or editor', exact: true });

@@ -251,7 +251,10 @@ export function mcpWakeName(host: string): string {
   const min = INBOX_MCP_WAKE_MIN_VERSIONS[host];
   return min ? `${INBOX_HOST_NAMES[host] ?? host} ${min.replace(/\.0$/, '')} or later` : (INBOX_HOST_NAMES[host] ?? host);
 }
-const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host));
+// The first-run line names no DeepSeek Harness (the owner, #2529): it keeps its words whether DSH is here or not,
+// though a reply does wake a DSH session through Plannotator's plugin.
+const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh']);
+const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host) && !WAKE_LINE_UNNAMED.has(host));
 
 /**
  * Which agents a reply wakes, built from the one list (INBOX_WAKING_HOSTS).
