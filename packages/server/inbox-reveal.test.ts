@@ -250,6 +250,23 @@ describe("over the tailnet", () => {
     expect(w.saved().inboxBoard).toBe(true);
   });
 
+  test("the Board's first-visit dialog: a guest never claims it, the owner's phone does, once", async () => {
+    const w = await world({ tailnet: "owner", config: { inboxBoard: true } });
+    const intro = async (who: string) => ((await (await w.viaTailnet(who, "/api/inbox/board/intro", {})).json()) as Json).show;
+    expect(await intro(GUEST)).toBe(false);
+    // The guest's ask spent nothing.
+    expect(w.saved().inboxBoardIntro).toBeUndefined();
+    expect(await intro(OWNER)).toBe(true);
+    expect(w.saved().inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
+    expect(await intro(OWNER)).toBe(false);
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
+  });
+
+  test("a tagged machine: an allowed login claims the Board's first-visit dialog", async () => {
+    const tagged = await world({ tailnet: "tagged", config: { inboxBoard: true } });
+    expect(((await (await tagged.viaTailnet(OWNER, "/api/inbox/board/intro", {})).json()) as Json).show).toBe(true);
+  });
+
   test("a tagged machine: the login the owner allowed counts as the owner for the reveal", async () => {
     const w = await world({ tailnet: "tagged" });
     const settings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;

@@ -1980,8 +1980,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const saved = loadConfig();
     return saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
   };
-  /** A page that may arm a reveal: this computer, the owner over the tailnet, or an allowed login on a tagged machine. */
-  const revealOwner = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers, { taggedAllowed: true });
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
   });
@@ -2040,7 +2038,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Storage sizes too, a walk of every file, for a page older than GET /api/inbox/settings/storage (it reads
    * `settings.store` and breaks without it); a current page asks with `?store=0` and reads the sizes on their own.
    */
-  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean, revealPage = !guest) => ({
+  const settingsModel = (via: RequestVia, guest: boolean, withStore: boolean) => ({
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
@@ -2065,9 +2063,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
     /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
-    snooze_intro: snoozeIntroState(revealPage),
+    snooze_intro: snoozeIntroState(!guest),
     /** The reveals for returning users (inbox-reveals.ts): the one this page may arm, or null. Never for a guest. */
-    reveal: { next: revealNow(revealPage) },
+    reveal: { next: revealNow(!guest) },
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via, guest),
     /** Settings → About: update notices and automatic updates. */
@@ -3238,7 +3236,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json(perfPhase("disk", () => store.diskUsage()));
       }
       if (path === "/api/inbox/settings") {
-        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via), url.searchParams.get("store") !== "0", revealOwner(req, via)));
+        if (req.method === "GET") return json(settingsModel(via, !ownerOrLocal(req, via), url.searchParams.get("store") !== "0"));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
@@ -3373,7 +3371,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const owner = revealOwner(req, via);
+        const owner = ownerOrLocal(req, via);
         return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
       }
 
@@ -3385,20 +3383,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const id = body.id;
         if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
-        const owner = revealOwner(req, via);
+        const owner = ownerOrLocal(req, via);
         const show = claimReveal(id, owner);
         return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() } });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
-      // computer to open the Board claims it, once per machine (config.json `inboxBoardIntro.shownAt`);
-      // a page reached over the tailnet never claims it.
+      // computer or the owner's phone to open the Board claims it, once per machine (config.json
+      // `inboxBoardIntro.shownAt`); a tailnet guest never claims it (the owner rule: never inhibit the owner
+      // on their own tailnet).
       if (path === "/api/inbox/board/intro") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         // Only once the Board is on: the dialog introduces a page the person can see.
-        if (via !== "local" || !boardOn() || loadConfig().inboxBoardIntro?.shownAt) return json({ show: false });
+        if (!ownerOrLocal(req, via) || !boardOn() || loadConfig().inboxBoardIntro?.shownAt) return json({ show: false });
         const at = new Date().toISOString();
         saveConfig({ inboxBoardIntro: { shownAt: at } });
         // Not written (a read-only data dir): showing it anyway would show it on every visit.
@@ -4136,6 +4135,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       json,
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
+      isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
       timings: options.machineLinkTimings,
     });
     if (phonesOn) {

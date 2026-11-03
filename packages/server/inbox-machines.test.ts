@@ -26,7 +26,7 @@
  *     contact.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -1175,6 +1175,231 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(tailscale.serve.get(8443)).toBe(theirs);
     } finally {
       inbox.stop();
+    }
+  }, 60_000);
+});
+
+describe("the forward takes no write from a tailnet guest", () => {
+  const MAGIC = "laptop.tail0000.ts.net";
+  const OWNER = "owner@example.com";
+  const GUEST = "guest@example.com";
+  const roots: string[] = [];
+  const restore: (() => void)[] = [];
+  afterAll(() => {
+    for (const undo of restore.splice(0)) undo();
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  const tomorrow = () => new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+
+  /** Tailscale as a script: who owns this machine (`status --json`; a tagged device has no owner), and serve on, off and status. */
+  function ownedTailscale(tagged = false) {
+    const serve = new Map<number, string>();
+    const run: TailscaleRunner = (args) => {
+      const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+      if (args[0] === "status") {
+        return ok(
+          JSON.stringify({
+            Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) },
+            User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER, DisplayName: "Owner" } },
+          }),
+        );
+      }
+      if (args[1] === "status") {
+        if (serve.size === 0) return ok("{}");
+        const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
+        const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
+        return ok(JSON.stringify({ TCP, Web }));
+      }
+      const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+      if (args.includes("off")) {
+        serve.delete(httpsPort);
+        return ok();
+      }
+      serve.set(httpsPort, args.at(-1)!);
+      return ok(`Available within your tailnet:\n\nhttps://${MAGIC}:${httpsPort}/\n|-- proxy ${args.at(-1)}\n`);
+    };
+    return { serve, run };
+  }
+
+  /**
+   * A (the MacBook, `tagged`: a tagged Tailscale device with no owner) linked both ways to B (the Mini) on loopback,
+   * A's window published on the tailnet with GUEST in `inboxTailscaleAllow`, and an agent's question waiting on B.
+   */
+  async function linkedPair(prefix: string, tagged: boolean) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    roots.push(root);
+    const dataA = join(root, "macbook");
+    const dataB = join(root, "mini");
+    // config.json (read from PLANNOTATOR_DATA_DIR) lets GUEST onto A's window over the tailnet.
+    mkdirSync(dataA, { recursive: true });
+    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataA;
+    restore.push(() => {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    });
+    const tsB = ownedTailscale();
+    const a = await startInboxServer({ dataDir: dataA, binaryPath: null, phones: false, tailscale: ownedTailscale(tagged).run });
+    const b = await startInboxServer({ dataDir: dataB, binaryPath: null, phones: false, tailscale: tsB.run });
+    const client = new Client({ name: "inbox-forward-owner", version: "1.0.0" });
+    const stop = async () => {
+      await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    };
+    try {
+      const sessionOf = async (port: number) => ((await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as Json).serverSession as string;
+      const post = async (port: number, path: string, body: Json) =>
+        fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", body: JSON.stringify({ serverSession: await sessionOf(port), ...body }) });
+      // B publishes its door and offers; A links to it both ways.
+      const offered = (await (await post(b.port, "/api/inbox/machines/offer", { tailscale: true })).json()) as Json;
+      const linked = await post(a.port, "/api/inbox/machines/link", { link: offered.link, address: tsB.serve.get(8443)!, back: `http://127.0.0.1:${a.port}` });
+      expect(linked.status).toBe(201);
+      const mini = offered.machine.id as string;
+      // An agent on B asks a question.
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${b.port}/mcp`)));
+      const asked = (
+        (await client.callTool({
+          name: "send_message",
+          arguments: { project_path: root, agent_session: "ses_forward_owner", agent_name: "Claude Code", agent_host: "claude-code", body: QUESTION(1) },
+        })) as { structuredContent: { thread_id: string; message_id: string } }
+      ).structuredContent;
+      await waitFor("B's thread in A's merged list", async () => {
+        const model = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/threads?machines=1`)).json()) as Json;
+        return (model.sections as Json[]).flatMap((s) => s.threads as Json[]).some((r) => r.thread_id === asked.thread_id && r.machine === mini);
+      });
+      // A's window over the tailnet.
+      expect((await post(a.port, "/api/inbox/settings", { tailscale: { on: true } })).status).toBe(200);
+      const listener = a.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      expect(a.tailscale.state().owner).toBe(tagged ? null : OWNER);
+      const page = `https://${MAGIC}:${a.port}`;
+      const tailnetHeaders = (login: string, type: string) => ({ Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login, "Content-Type": type, Origin: page, "Sec-Fetch-Site": "same-origin" });
+      /** A read or a JSON write through serve, as that login's browser sends it. */
+      const throughServe = async (login: string, path: string, body?: Json) =>
+        fetch(`http://127.0.0.1:${listener}${path}`, {
+          method: body ? "POST" : "GET",
+          headers: body ? tailnetHeaders(login, "application/json") : { Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login },
+          ...(body ? { body: JSON.stringify({ serverSession: await sessionOf(a.port), ...body }) } : {}),
+        });
+      /** A file through serve to B (an upload is never held). */
+      const uploadThroughServe = async (login: string, key: string) =>
+        fetch(`http://127.0.0.1:${listener}/api/inbox/m/${mini}/uploads?name=${key}.txt&idempotency_key=${key}&serverSession=${await sessionOf(a.port)}`, {
+          method: "POST",
+          headers: tailnetHeaders(login, "text/plain"),
+          body: `from ${login}`,
+        });
+      const thread = async () => (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/threads/${asked.thread_id}`)).json()) as Json;
+      const onB = async () => ((await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/threads/${asked.thread_id}`)).json()) as Json).thread as Json;
+      const personOnB = async () => ((await onB()).messages as Json[]).filter((m) => m.author.kind === "person");
+      /** The question's pick, at the revision the thread shows now. */
+      const pickBody = async (key: string, selected: string) => {
+        const question = ((await thread()).thread.messages[0].questions as Json[])[0]!;
+        return { idempotency_key: key, questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: [selected] } }] };
+      };
+      return { a, b, dataA, mini, asked, listener, sessionOf, throughServe, uploadThroughServe, thread, onB, personOnB, pickBody, stop };
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+  }
+
+  const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
+
+  test("a tailnet guest of this machine never writes to a linked machine, though it reads; the owner writes from every path: this window, another device, a plain local call", async () => {
+    const w = await linkedPair("plannotator-machines-forward-owner-", false);
+    try {
+      const { a, mini, asked } = w;
+      // Reads through the forward stay as they are, for the guest too.
+      const read = await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
+      expect(read.status).toBe(200);
+      const cursor = ((await read.json()) as Json).cursor as number;
+
+      // The guest, from A's own page: every write to B is refused, and none reaches B.
+      for (const [route, body] of [
+        [`messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor }],
+        [`messages/${asked.message_id}/picks`, await w.pickBody("guest-pick", "Retry")],
+        [`threads/${asked.thread_id}/read`, { idempotency_key: "guest-read" }],
+        [`threads/${asked.thread_id}/snooze`, { idempotency_key: "guest-snooze", until: tomorrow() }],
+      ] as const) {
+        const answer = await w.throughServe(GUEST, `/api/inbox/m/${mini}/${route}`, body);
+        expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 403, "owner_only"]);
+      }
+      const upload = await w.uploadThroughServe(GUEST, "guest-up");
+      expect([upload.status, ((await upload.json()) as Json).code]).toEqual([403, "owner_only"]);
+      expect(await w.personOnB()).toHaveLength(0);
+      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("open");
+      expect(existsSync(join(w.dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
+
+      // The owner keeps everything through the forward, each answer delivered to B once.
+      // The owner's window on this machine.
+      const local = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${a.port}` },
+        body: JSON.stringify({ serverSession: await w.sessionOf(a.port), idempotency_key: "owner-local", words: "From the MacBook's window.", seen_through_seq: (await w.thread()).cursor }),
+      });
+      expect(await delivered(local)).toEqual([200, "delivered"]);
+      // The owner's window on another of their devices over the tailnet (the same login): a reply, a mark read, a file.
+      const remote = await w.throughServe(OWNER, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        idempotency_key: "owner-tailnet",
+        words: "From the owner's phone browser.",
+        seen_through_seq: (await w.thread()).cursor,
+      });
+      expect(await delivered(remote)).toEqual([200, "delivered"]);
+      expect(await delivered(await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-tailnet-read" }))).toEqual([200, "delivered"]);
+      expect((await w.uploadThroughServe(OWNER, "owner-up")).status).toBe(200);
+      // A plain local call with no Origin and no page session (an agent, a script, the CLI on this machine): a reply and a file.
+      const bare = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotency_key: "owner-bare", words: "From a script on the MacBook.", seen_through_seq: (await w.thread()).cursor }),
+      });
+      expect(await delivered(bare)).toEqual([200, "delivered"]);
+      const bareUpload = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/uploads?name=bare.txt&idempotency_key=owner-bare-up`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: "from a script",
+      });
+      expect(bareUpload.status).toBe(200);
+      const landed = (await w.personOnB()).map((m) => m.body as string);
+      expect(landed).toHaveLength(3);
+      expect(landed[0]).toStartWith("From the MacBook's window.");
+      expect(landed[1]).toStartWith("From the owner's phone browser.");
+      expect(landed[2]).toStartWith("From a script on the MacBook.");
+    } finally {
+      await w.stop();
+    }
+  }, 60_000);
+
+  test("on a tagged machine (no Tailscale owner), the login its allowlist names is the owner: it picks, replies, snoozes and uploads through the forward", async () => {
+    const w = await linkedPair("plannotator-machines-forward-tagged-", true);
+    try {
+      const { mini, asked } = w;
+      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
+        200,
+        "delivered",
+      ]);
+      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("picked");
+      const reply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        idempotency_key: "tagged-reply",
+        words: "From the tagged machine's only user.",
+        seen_through_seq: (await w.thread()).cursor,
+      });
+      expect(await delivered(reply)).toEqual([200, "delivered"]);
+      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
+        200,
+        "delivered",
+      ]);
+      expect((await w.uploadThroughServe(GUEST, "tagged-up")).status).toBe(200);
+      const landed = await w.personOnB();
+      expect(landed).toHaveLength(1);
+      expect(landed[0]!.body).toStartWith("From the tagged machine's only user.");
+      // A login the allowlist does not name is still refused at the listener.
+      const stranger = await w.throughServe("someone@example.com", `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "stranger-read" });
+      expect(stranger.status).toBe(403);
+    } finally {
+      await w.stop();
     }
   }, 60_000);
 });
