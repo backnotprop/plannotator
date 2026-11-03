@@ -85,11 +85,11 @@ const nativeTitles = (el: HTMLElement) => [...el.querySelectorAll('[title]')].ma
 test.skipIf(!hasDom)('a cut project label in a wide row opens the component tooltip; one that fits opens none; neither has a native title', async () => {
   const el = list(false);
   expect(nativeTitles(el)).toEqual([]);
-  const fits = armTip(() => label(el, SHORT.thread_id));
+  const fits = await armTip(() => label(el, SHORT.thread_id));
   sized(fits, 30, 30);
   expect(await tooltipOf(fits)).toBeNull();
   unhover(fits);
-  const cut = armTip(() => label(el, LONG.thread_id));
+  const cut = await armTip(() => label(el, LONG.thread_id));
   sized(cut, 260, 120);
   expect(await tooltipOf(cut)).toBe(LONG_PROJECT);
   expect(cut.hasAttribute('title')).toBe(false);
@@ -102,11 +102,11 @@ test.skipIf(!hasDom)('a cut project label in a wide row opens the component tool
   // Beside a thread the project never wraps (approval "inbox-list-row-v2"): cut, it opens the tooltip with the whole
   // name; one that fits opens none.
   const narrow = list(true);
-  const short = armTip(() => label(narrow, SHORT.thread_id));
+  const short = await armTip(() => label(narrow, SHORT.thread_id));
   sized(short, 30, 30);
   expect(await tooltipOf(short)).toBeNull();
   unhover(short);
-  const long = armTip(() => label(narrow, LONG.thread_id));
+  const long = await armTip(() => label(narrow, LONG.thread_id));
   expect(long.textContent).toBe(LONG_PROJECT);
   sized(long, 260, 120);
   expect(await tooltipOf(long)).toBe(LONG_PROJECT);
@@ -120,7 +120,7 @@ test.skipIf(!hasDom)('a cut project label in a wide row opens the component tool
 
 test.skipIf(!hasDom)('a preview cut by a fraction of a pixel counts as cut: three-line row, scrollWidth equal to clientWidth, the ellipsis painted', async () => {
   const el = list(true);
-  const chip = armTip(() => el.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-pv`)!);
+  const chip = await armTip(() => el.querySelector<HTMLElement>(`[data-thread-id="${LONG.thread_id}"] .ib-pv`)!);
   expect(chip.textContent).toBe(LONG.subject!);
   // What Chromium measured at a device scale of 2 beside an open thread: the box 97.546875 px, the text 97.61 px,
   // and both integer widths 98.

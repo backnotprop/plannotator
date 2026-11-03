@@ -16,6 +16,8 @@
  *   a 0.06 px overflow), and a title cut by a fraction of a pixel still opens
  *   its tooltip;
  * - Escape with a tooltip open still closes the thread;
+ * - a press with no hover before it (a mouse's or a pen's first contact) on a
+ *   row's tooltip trigger still opens the row (RowTip.tsx);
  * - a disabled control still shows its tooltip (the pointer reaches its
  *   wrapper).
  *
@@ -233,6 +235,35 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await expect(tooltip(page)).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a press with no hover before it opens the row: a mouse's and a pen's first contact on a row's agent tiles", async ({ browser }) => {
+  // A row's tooltips mount on first use (RowTip.tsx). The press brings its own over events; a trigger drawn again in
+  // them took the press's down with the old element, and no click reached the row.
+  const { context, page } = await openPage(browser);
+  try {
+    const cdp = await context.newCDPSession(page);
+    for (const pointerType of ['mouse', 'pen'] as const) {
+      const id = await page.evaluate(
+        (open) =>
+          [...document.querySelectorAll<HTMLElement>('.ib-lbody button[data-thread-id]')]
+            .filter((row) => row.querySelector('[data-row-agents]'))
+            .map((row) => row.dataset.threadId!)
+            .find((row) => row !== open && !location.hash.includes(row))!,
+        threadId,
+      );
+      const box = (await page.locator(`.ib-lbody button[data-thread-id="${id}"] [data-row-agents]`).boundingBox())!;
+      const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      // The pointer away from the list, then a press with no move between.
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5, pointerType });
+      await page.waitForTimeout(300);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1, pointerType });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1, pointerType });
+      await expect(page.locator(`section.ib-pane[data-thread-id="${id}"]`), `${pointerType}: the press opens the row`).toHaveCount(1);
+    }
   } finally {
     await context.close();
   }

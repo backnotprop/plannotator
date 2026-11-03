@@ -3,8 +3,11 @@
  * tooltips with the rows was most of the cost of opening a thread from a long list. What is proved: drawing the rows
  * adds no hover listener; the pointer's first entry still opens the tooltip after the delay, from a trigger drawn
  * the same as before; rows drawn again under a pointer at rest (the browser's own mouseenter, no pointer event) open
- * nothing until the pointer moves, then open as before; a Tab from a row onto its hover action keeps focus there and
- * shows the action's tooltip; a touch never draws a trigger again (it would be under the finger mid-tap).
+ * nothing until the pointer moves, then open as before; a Tab from a row onto its hover action keeps focus on the same
+ * element (the row armed it) and shows the action's tooltip; a press with no hover before it keeps the element it
+ * went down on, and its click opens the row; a pointer gone where the browser sends no mouseleave stops the open at
+ * the first real event elsewhere; a touch, its tap's mouse events included, never draws a trigger again (it would be
+ * under the finger mid-tap).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -17,6 +20,7 @@ import { hover, openTooltips, settle, unhover } from './testing/tooltip';
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
+const { LazyRowTips, RowTip } = (hasDom ? await import('./components/RowTip') : {}) as typeof import('./components/RowTip');
 
 function row(id: string, read: boolean): InboxListRow {
   return {
@@ -59,7 +63,7 @@ afterEach(() => {
   host = null;
 });
 
-function render(narrow: boolean): HTMLElement {
+function render(narrow: boolean, onOpen: (id: string) => void = () => {}): HTMLElement {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -79,7 +83,7 @@ function render(narrow: boolean): HTMLElement {
             selectedThreadId={null}
             notice={null}
             onShowNew={() => {}}
-            onOpen={() => {}}
+            onOpen={(opened) => onOpen(opened.thread_id)}
             onMarkUnread={() => {}}
             phone={false}
           />
@@ -149,27 +153,107 @@ test.skipIf(!hasDom)('rows drawn again under a pointer at rest: the browser\'s m
   expect(openTooltips()).toEqual(['Claude Code']);
 });
 
-test.skipIf(!hasDom)("a Tab from a row onto its hover action keeps focus on the action, and the action's tooltip shows", async () => {
+test.skipIf(!hasDom)("a Tab from a row onto its hover action keeps focus on the action, the same element, and the action's tooltip shows", async () => {
   const el = render(false);
   const rowButton = el.querySelector<HTMLElement>('[data-row="msg_1"] [data-thread-id]')!;
   act(() => rowButton.focus());
   expect(document.activeElement).toBe(rowButton);
+  // The row armed its action when focus came in: the Tab's handler holds the element it moves focus to.
+  const before = el.querySelector<HTMLElement>('[data-row="msg_1"] [data-row-mark-unread]')!;
   act(() => {
     rowButton.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
   });
   const action = el.querySelector<HTMLElement>('[data-row="msg_1"] [data-row-mark-unread]')!;
+  expect(action).toBe(before);
   expect(document.activeElement).toBe(action);
+  expect(el.querySelector('[data-row="msg_1"]')!.hasAttribute('data-action-focus')).toBe(true);
   await settle();
   expect(openTooltips().some((t) => t.startsWith('Mark unread'))).toBe(true);
   expect(document.activeElement).toBe(action);
 });
 
-test.skipIf(!hasDom)('a touch never draws a trigger again, and opens no tooltip', async () => {
+test.skipIf(!hasDom)("a press with no hover before it (a pen's first contact): the trigger stays the element pressed, and the click opens the row", async () => {
+  const opened: string[] = [];
+  const el = render(false, (id) => opened.push(id));
+  const tiles = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  // What the browser sends the element under a press that came with no move: its over events, then the press.
+  act(() => {
+    tiles.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+  });
+  await settle(0);
+  expect(tiles.isConnected).toBe(true);
+  act(() => {
+    tiles.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+  });
+  expect(opened).toEqual(['msg_0']);
+  // As `Tip` let the press cancel its open: nothing opens until the pointer comes back.
+  await settle();
+  expect(openTooltips()).toEqual([]);
+  expect(tiles.isConnected).toBe(true);
+});
+
+test.skipIf(!hasDom)("a press with no hover before it on a trigger that takes focus: the press's focus arms nothing, so its click lands", async () => {
+  const clicks: string[] = [];
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  act(() => {
+    root!.render(
+      <LazyRowTips.Provider value={true}>
+        <RowTip content="Pin">
+          <button type="button" data-probe="" onClick={() => clicks.push('pin')}>
+            Pin
+          </button>
+        </RowTip>
+      </LazyRowTips.Provider>,
+    );
+  });
+  const button = host.querySelector<HTMLElement>('[data-probe]')!;
+  act(() => {
+    button.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'pen', clientX: 10, clientY: 10 }));
+    button.focus();
+  });
+  expect(button.isConnected).toBe(true);
+  act(() => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+  });
+  expect(clicks).toEqual(['pin']);
+});
+
+test.skipIf(!hasDom)("the pointer gone where the browser never says it left: the first real event elsewhere stops the tip's open", async () => {
+  const el = render(false);
+  const tiles = () => el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  hover(tiles());
+  await settle(0);
+  // The tip waits out its delay. The pointer is now on something else (a row's hover action that showed over it),
+  // and the drawn-again trigger gets no mouseleave: only the browser's over event, on that something else.
+  const elsewhere = el.querySelector<HTMLElement>('[data-row="msg_1"]')!;
+  const over = new MouseEvent('mouseover', { bubbles: true, clientX: 600, clientY: 10 });
+  Object.defineProperty(over, 'isTrusted', { value: true });
+  act(() => {
+    elsewhere.dispatchEvent(over);
+  });
+  await settle();
+  expect(openTooltips()).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a touch never draws a trigger again, its tap's mouse events included, and opens no tooltip", async () => {
   const el = render(false);
   const tiles = el.querySelector<HTMLElement>(`[data-thread-id="msg_0"] [data-row-agents]`)!;
+  // A tap: its pointer event, then the mouse events a browser sends for it (`sourceCapabilities.firesTouchEvents`).
+  const tap = new MouseEvent('mouseover', { bubbles: true, clientX: 10, clientY: 10 });
+  Object.defineProperty(tap, 'sourceCapabilities', { value: { firesTouchEvents: true } });
   act(() => {
     tiles.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'touch', clientX: 10, clientY: 10 }));
+    tiles.dispatchEvent(tap);
   });
+  await settle(0);
   expect(tiles.isConnected).toBe(true);
   await settle();
   expect(openTooltips()).toEqual([]);

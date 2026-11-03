@@ -133,8 +133,8 @@ test.skipIf(!hasDom)('the name is the title and the subject the preview; an unna
 
 test.skipIf(!hasDom)('a cut preview shows the whole text in a tooltip on hover; one that fits shows none; the title is never a cut line', async () => {
   const el = render(false);
-  const preview = armTip(() => rowEl(el, OTHER.thread_id).querySelector<HTMLElement>('.ib-pv')!);
-  const fits = armTip(() => rowEl(el, PREFIX.thread_id).querySelector<HTMLElement>('.ib-pv')!);
+  const preview = await armTip(() => rowEl(el, OTHER.thread_id).querySelector<HTMLElement>('.ib-pv')!);
+  const fits = await armTip(() => rowEl(el, PREFIX.thread_id).querySelector<HTMLElement>('.ib-pv')!);
   for (const node of [preview, fits]) {
     expect(node.hasAttribute('title')).toBe(false);
     expect(node.hasAttribute('data-clip')).toBe(false);
