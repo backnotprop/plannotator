@@ -12,7 +12,7 @@
  */
 
 import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { basename, isAbsolute } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
@@ -517,6 +517,24 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
 }
 
 /**
+ * The project an agent sent from when it is not `project`, the thread's (a
+ * `reply_to` from another folder; approval "inbox-reply-recipient"): its
+ * name as the taggable list names a live session there (the project's, else
+ * its root's folder name). The window names the agent by it once its session
+ * has ended. Null for a send from the thread's project, a folder combined
+ * with it or folded into it, or a root git could not settle. Never makes a
+ * project.
+ */
+async function senderProject(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject): Promise<{ name: string; root: string } | null> {
+  if (!projectPath || !isAbsolute(projectPath) || !context.projectRootOf) return null;
+  const resolved = await context.projectRootOf(projectPath).catch(() => null);
+  if (!resolved || !resolved.settled || resolved.root === project.root) return null;
+  const known = context.store.projectByRoot(resolved.root);
+  if (known && context.store.sameProject(known.id, project.id)) return null;
+  return { name: known?.name ?? (basename(resolved.root) || resolved.root), root: resolved.root };
+}
+
+/**
  * Why an image the body shows will not show in the window, by the code the
  * send-time capture's read refused it with (the message-image route's own
  * rules, message-images.ts). A code not listed (a read that raced a change,
@@ -661,6 +679,7 @@ export async function sendAgentMessage(
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
   const basePath = await sendBasePath(context, here, project, working);
+  const fromProject = await senderProject(context, input.project_path, project);
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
@@ -693,6 +712,7 @@ export async function sendAgentMessage(
       inline_images: captured?.images,
       guide: guide ?? null,
       base_path: basePath,
+      from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
       ...(wakes ? { wakes: true } : {}),
