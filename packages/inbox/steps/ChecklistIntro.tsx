@@ -36,8 +36,8 @@ export function ChecklistIntro({ phone, onClose, onSettings }: { phone: boolean;
   );
 }
 
-/** The picture's steps: the seeded thread's work, short enough for a phone's line. */
-const STEPS = ['Reproduce the double tax line', 'Find where the line is added', 'Fix the PDF template', 'Run the invoice tests'];
+/** The picture's steps: an invoice fix, each short enough for one line at 320 px. */
+const STEPS = ['Reproduce the bug', 'Find the extra line', 'Fix the PDF template', 'Run the invoice tests'];
 /** When each step was ticked: minutes past 2 PM today. */
 const DONE_AT = [8, 14, 21, 26];
 
