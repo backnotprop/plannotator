@@ -330,12 +330,12 @@ export interface PlannotatorConfig {
   /**
    * The `plannotator` agent tool (packages/shared/plannotator-tool.ts) on the
    * hosts that register it: the Claude Code mod, Pi (and the Pi extension in
-   * Oh My Pi) and OpenCode 2. `true` puts it in the agent's tool list, `false`
-   * keeps it out (the slash commands are unchanged either way). Read once when
-   * a session starts, so a change applies to the next session.
-   * PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's default,
-   * AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off on Pi
-   * and OpenCode 2).
+   * Oh My Pi), OpenCode 2 and DeepSeek Harness. `true` puts it in the agent's
+   * tool list, `false` keeps it out (the slash commands are unchanged either
+   * way). Read once when a session starts, so a change applies to the next
+   * session. PLANNOTATOR_AGENT_TOOL wins over this key. Unset: the host's
+   * default, AGENT_TOOL_DEFAULTS (on for the Claude Code mod and Oh My Pi, off
+   * on Pi, OpenCode 2 and DeepSeek Harness).
    */
   agentTool?: boolean;
   /**
@@ -1359,7 +1359,7 @@ export function resolveClaudeCodeMod(
  * from plain Pi itself (`apps/pi-extension/pi-host.ts`): it is the same
  * extension and the same session bridge (host `pi`), with its own default.
  */
-export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
+export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode" | "dsh";
 
 /**
  * Whether each host registers the `plannotator` agent tool when nothing is
@@ -1367,8 +1367,10 @@ export type AgentToolHost = "claude-code" | "pi" | "oh-my-pi" | "opencode";
  * mod (the tool is deferred behind tool search there, so it costs only its
  * name until used) and for Oh My Pi (owner's call 2026-10-12: OMP lists an
  * extension tool as one line in its system prompt, about 50 tokens, and loads
- * the schema only when the model reads it); off on Pi and OpenCode 2 (a full
- * tool definition, about 800 tokens, in every request). The mod's mirror
+ * the schema only when the model reads it); off on Pi, OpenCode 2 and
+ * DeepSeek Harness (`dsh`, the `@plannotator/dsh` plugin; owner's call
+ * 2026-11-02): a full tool definition, about 800 tokens, in every request,
+ * and DSH keeps its tool list fixed for request caching. The mod's mirror
  * (`apps/hook/hooks/mod/enabled.ts`) is kept equal to the claude-code entry by
  * `enabled.test.ts`.
  */
@@ -1377,6 +1379,7 @@ export const AGENT_TOOL_DEFAULTS: Readonly<Record<AgentToolHost, boolean>> = {
   pi: false,
   "oh-my-pi": true,
   opencode: false,
+  dsh: false,
 };
 
 /**
@@ -1435,14 +1438,13 @@ export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh";
  * nothing is set: the agent tool's rule (on for the Claude Code mod, where
  * tools are deferred behind tool search; off on Pi, OpenCode 2 and DeepSeek
  * Harness, which send every tool's full definition with each request; DSH
- * also keeps its tool list fixed for request caching). DSH has no
- * `plannotator` agent tool yet, so its entry is its own, off like Pi's.
+ * also keeps its tool list fixed for request caching).
  */
 export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   "claude-code": AGENT_TOOL_DEFAULTS["claude-code"],
   pi: AGENT_TOOL_DEFAULTS.pi,
   opencode: AGENT_TOOL_DEFAULTS.opencode,
-  dsh: false,
+  dsh: AGENT_TOOL_DEFAULTS.dsh,
 };
 
 export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh"];
