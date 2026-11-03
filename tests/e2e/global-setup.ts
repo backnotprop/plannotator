@@ -4,6 +4,8 @@
  *  - Never the live feedback Worker (its table is append-only). Every spec and
  *    every binary started with this env sends feedback to a closed loopback
  *    port (tests/setup/feedback-archive-off.ts).
+ *  - Never the live daily ping: NO_ANON_PING=1 for every spec and every binary
+ *    started with this env (tests/daily-ping-live-guard.test.ts).
  *  - Never a real agent CLI: recording stubs go first on the runner's PATH, and
  *    the returned teardown fails the run when any stub was called
  *    (agent-cli-stubs.ts).
@@ -14,5 +16,6 @@ import guardAgentClis from './agent-cli-stubs';
 
 export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env.PLANNOTATOR_FEEDBACK_URL = 'http://127.0.0.1:9/feedback';
+  process.env.NO_ANON_PING = '1';
   return guardAgentClis();
 }

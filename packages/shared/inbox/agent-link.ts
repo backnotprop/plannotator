@@ -508,6 +508,20 @@ export interface InboxLoadedPluginReport {
 }
 
 /**
+ * A `deliver` failure for a reason that passes (DeepSeek Harness: the session
+ * closed and cleared its queue before a turn read the reply). The wake gives
+ * the claim back instead of reporting the reply lost, so it waits and a later
+ * wake of the session delivers it.
+ */
+export class InboxDeliverLater extends Error {
+  readonly deliverLater = true;
+}
+
+function isInboxDeliverLater(error: unknown): boolean {
+  return error instanceof InboxDeliverLater || (typeof error === "object" && error !== null && (error as { deliverLater?: unknown }).deliverLater === true);
+}
+
+/**
  * The reply wake for one agent session: polls the bridge, waits for idle,
  * delivers each reply once, acknowledges it. Never interrupts a turn.
  */
@@ -813,6 +827,16 @@ export class InboxWake {
     try {
       await this.target.deliver(inboxWakeText(command), command);
     } catch (error) {
+      if (isInboxDeliverLater(error)) {
+        // Lost for a reason that passes (the session closed with it queued): give the claim back, so the
+        // reply waits, as after a failed Send now, and a later wake of this session delivers it.
+        try {
+          rmSync(claim, { recursive: true, force: true });
+        } catch {
+          // A leftover claim: another process reports it.
+        }
+        return;
+      }
       this.settle(command.id);
       writeQuietly(join(claim, "reported"), "1");
       this.target.notify(

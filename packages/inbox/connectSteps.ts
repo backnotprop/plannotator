@@ -80,6 +80,11 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
     return { ...base, state: 'missing' };
   }
   if (!row.detected) return null;
+  // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
+  if (row.reach.kind === 'tool') {
+    if (live || row.reach.on) return { ...base, state: 'ready' };
+    return { ...base, state: 'tool-off', locked: row.reach.locked, chosenOff: row.tool?.chosen_off === true };
+  }
   if (row.reach.on) return { ...base, state: 'mcp' };
   if (row.reach.kind === 'manual') return { ...base, state: 'manual' };
   // Not connected yet; one the person turned off, removed, or holds an entry of their own is theirs to decide.
@@ -246,7 +251,10 @@ export function mcpWakeName(host: string): string {
   const min = INBOX_MCP_WAKE_MIN_VERSIONS[host];
   return min ? `${INBOX_HOST_NAMES[host] ?? host} ${min.replace(/\.0$/, '')} or later` : (INBOX_HOST_NAMES[host] ?? host);
 }
-const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host));
+// The first-run line names no DeepSeek Harness (the owner, #2529): it keeps its words whether DSH is here or not,
+// though a reply does wake a DSH session through Plannotator's plugin.
+const WAKE_LINE_UNNAMED: ReadonlySet<string> = new Set(['dsh']);
+const BRIDGE_HOSTS = INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host) && !WAKE_LINE_UNNAMED.has(host));
 
 /**
  * Which agents a reply wakes, built from the one list (INBOX_WAKING_HOSTS).
@@ -290,7 +298,7 @@ export function mcpFoldHint(label: string): string {
 /** What the "Already connected" line says after the name. */
 export function doneNote(row: ConnectRow, opts: { live: boolean; turnedOn: boolean }): string {
   if (row.state === 'ready') {
-    if (opts.turnedOn) return 'next session';
+    if (opts.turnedOn) return row.id === 'dsh' ? 'when DeepSeek Harness next starts' : 'next session';
     const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
     return opts.live ? `${word} · running now` : word;
   }

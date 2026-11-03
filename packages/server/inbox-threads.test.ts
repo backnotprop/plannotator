@@ -320,8 +320,8 @@ describe("the list: per-thread sections across projects", () => {
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads?project=nope`)).status).toBe(422);
     expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads?project=prj_01ARZ3NDEKTSV4RRFFQ69G5FAV`)).status).toBe(404);
 
-    // The agent reads the reply: Sent moves to Quiet.
-    await client.callTool({ name: "read_thread", arguments: { thread_id: sentRow.thread_id } });
+    // The agent reads the reply (its own session: only the recipient's read settles it): Sent moves to Quiet.
+    await client.callTool({ name: "read_thread", arguments: { thread_id: sentRow.thread_id, agent_session: "s5" } });
     // The person opens the news: it leaves "New since you looked"...
     const seen = await post(server, `/api/inbox/threads/${news.thread_id}/seen`, {});
     expect(seen.status).toBe(200);

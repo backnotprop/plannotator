@@ -11,7 +11,7 @@ import type { ReactNode } from 'react';
 import type { InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { rowDeliveryLine, rowDeliverySpoken } from '../rowDelivery';
-import { Tip } from './Tip';
+import { RowTip } from './RowTip';
 
 /** Two offset checks: delivered (messaging apps' double tick). */
 function DoubleCheck() {
@@ -44,11 +44,11 @@ function Glyph({ state }: { state: InboxRowDelivery['state'] }) {
 
 export function DeliveryTick({ delivery }: { delivery: InboxRowDelivery }) {
   return (
-    <Tip content={rowDeliveryLine(delivery)}>
+    <RowTip content={rowDeliveryLine(delivery)}>
       <span className="ib-tick" data-tick={delivery.state} role="img" aria-label={`${rowDeliverySpoken(delivery)},`}>
         <Glyph state={delivery.state} />
       </span>
-    </Tip>
+    </RowTip>
   );
 }
 

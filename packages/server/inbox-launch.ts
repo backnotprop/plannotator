@@ -144,7 +144,7 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
-  /** A tailnet request from someone other than this computer's owner: never starts an agent (Try again). Absent: nobody is. */
+  /** A tailnet request from someone other than this computer's owner: never starts, stops or deletes an agent (Try again, Stop, Delete). Absent: nobody is. */
   isGuest?: (req: Request, via: string) => boolean;
   now?: () => number;
   log?: (line: string) => void;
@@ -753,6 +753,8 @@ export function createInboxLaunch(options: {
     const launch = root.launch!;
     switch (match[2]) {
       case "stop": {
+        // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
+        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can stop an agent from this Inbox.");
         if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
         const memo = memoOf(launch);
         const result = await host.stop(launch.session_ref);
@@ -783,6 +785,8 @@ export function createInboxLaunch(options: {
         return json({ ok: true, command });
       }
       case "delete": {
+        // Delete stops and removes the owner's agent: never a guest's to do.
+        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can delete an agent from this Inbox.");
         // A Delete under way (a double click): the same answer, once it is done.
         const under = deleting.get(launch.id);
         if (under) return json(await under);

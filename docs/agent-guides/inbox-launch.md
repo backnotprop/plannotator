@@ -85,7 +85,7 @@ The folder menu ends, under a line, with **New scratch folder** and the folder a
 
 ### Window routes
 
-Same origin and `serverSession`, like every window write. Open and the settings route are refused over the tailnet. Starting an agent is the owner's: a Send with `to.launch` and Try again answer a tailnet login from `inboxTailscaleAllow` `403 owner_only` (as Ask AI does), and the owner over the tailnet as on the computer (`inbox-tailnet-owner.test.ts`, "starting an agent is the owner's").
+Same origin and `serverSession`, like every window write. Open and the settings route are refused over the tailnet. Starting an agent is the owner's: a Send with `to.launch` and Try again answer a tailnet login from `inboxTailscaleAllow` `403 owner_only` (as Ask AI does), and the owner over the tailnet as on the computer (`inbox-tailnet-owner.test.ts`, "starting an agent is the owner's"). So are Stop and Delete: a guest gets `403 owner_only` and the session runs on ("stopping or deleting an agent is the owner's").
 
 - `POST /api/inbox/launch/:id/stop`: `claude stop`.
 - `POST /api/inbox/launch/:id/open`: macOS Terminal through `osascript`, running `claude attach <short>` in the folder (plain `claude` in an untrusted folder, so its trust prompt shows).
@@ -97,7 +97,7 @@ Same origin and `serverSession`, like every window write. Open and the settings 
 ### The window
 
 - Compose's To picker (`ToPicker.tsx`) lists start rows after the running sessions under the caption "Start a new session in <project>", one per available agent (`startBlock` in `compose/model.ts`). Picking one makes the To sentence "New Claude Code session ▾ in <project> ▾"; the folder button opens `FolderMenu.tsx` (recent projects; a missing folder is struck through). A missing folder shows a note and keeps Send off; Save draft keeps the words and the project.
-- The thread header says "You started Claude Code in <project>" (and "Full permissions"). `RunLine.tsx` replaces the delivery line while `run` is not null. The thread ⋯ adds Open in Terminal, Copy attach command, Stop Claude Code, and Delete Claude Code session… (asks first, in the thread). Copy attach command is there while the agent rests too (no line): the thread read carries the host's `attach_command` beside `run`. A phone gets Copy attach command and Stop only. A stopped session's reply head reads "Reply to Claude Code in <project> · starts it again".
+- The thread header says "You started Claude Code in <project>" (and "Full permissions"). `RunLine.tsx` replaces the delivery line while `run` is not null. The thread ⋯ adds Open in Terminal, Copy attach command, Stop Claude Code, and Delete Claude Code session… (asks first, in the thread). Copy attach command is there while the agent rests too (no line): the thread read carries the host's `attach_command` beside `run`. A phone gets Copy attach command and Stop only. A stopped session's run line says a reply starts it again; the reply box has no "Reply to" head since main's approval "inbox-reply-recipient", and the stopped launch never opens the ended-session choice.
 - No new keyboard shortcuts.
 
 ### Tests

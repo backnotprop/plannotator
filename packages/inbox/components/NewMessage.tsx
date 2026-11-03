@@ -99,6 +99,7 @@ export function NewMessagePopover({
   thread,
   asker,
   askerHost,
+  replyTo = asker,
   live,
   mode,
   onPick,
@@ -108,6 +109,8 @@ export function NewMessagePopover({
   thread: InboxThread;
   asker: string;
   askerHost: string | null;
+  /** Whom "Reply instead" goes to (the session the box's words answer): `asker` in a thread with one agent. */
+  replyTo?: string;
   live: LiveSessionsModel | null;
   mode: NewMessageMode;
   onPick: (session: LiveSession) => void;
@@ -164,8 +167,8 @@ export function NewMessagePopover({
         <h5>{connected ? `${asker} is not running in ${thread.project.name}` : `No agent is running in ${thread.project.name}`}</h5>
         <p>
           {connected
-            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`
-            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`}
+            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`
+            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`}
         </p>
         <div className="ib-acts">
           <button type="button" className="ib-btn ib-sm" onClick={onReplyInstead}>
