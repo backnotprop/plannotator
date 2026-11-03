@@ -316,3 +316,45 @@ widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 all items when there are 10 or fewer, else 10 items ending on the first open
 one (the first 10 until it is past them), and the last 10 once everything is
 done. `setWidget` only; the status line keeps the full count.
+
+### DeepSeek Harness: plan review, the `plannotator` tool and commands
+
+`@plannotator/dsh` (`apps/dsh-plugin/`, a Cordis plugin; DSH is never run in
+tests, which use a fake `ctx`).
+
+- **Plan review still blocks.** `exit_plan_mode` asks on the
+  `user-questions/request` waterfall, and the plugin answers it by waiting for
+  `plannotator dsh-plan` (`plan-review.ts`). The session waits inside that tool
+  call until the person decides. A non-blocking plan review (answer at once,
+  then `ctx.planMode.set(agent, false)` and `agent.followup` on approval)
+  changes shipped behavior and is a later step.
+- **The `plannotator` tool** is the shared contract, registered with
+  `ctx.tools.register` in the `inject(['agents', 'tools'])` child
+  (`tool.ts`). It is off by default (`AGENT_TOOL_DEFAULTS.dsh`, owner's
+  call): `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` turns it on,
+  read once when the plugin loads. The `parameters` are
+  `PLANNOTATOR_TOOL_INPUT_SCHEMA` as is (DSH checks only the `output`
+  schema against its JSON Schema subset).
+- **`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`**
+  are registered with `ctx.commands.register` (`inject(['agents',
+  'commands'])`) whatever the tool switch says. DSH runs a registered
+  command instead of sending the line to the model, so the shared skill of
+  the same name no longer runs (and blocks a bash call) for these lines.
+- **Neither waits for the person** (`reviews.ts`). Each review is a CLI child
+  the plugin owns, with `PLANNOTATOR_ORIGIN=dsh`, the top-level session's
+  `DSH_SESSION_ID` and `PLANNOTATOR_SESSION_TAG=dsh:<id>` set explicitly
+  (DSH's process env is shared by every session), `DSH_HOME` from
+  `profileContext.home` (for `last`), and a ready file and host result file
+  under `<data dir>/dsh/<pn-id>/` (`isAllowedHostResultPath` allows `dsh/`).
+  The call answers once the page is up (15 s, 45 s for a review; then
+  "starting"). On exit the plugin sends the decision to the top-level session
+  with `agent.followup`, headed as on the other hosts; a bare approval and a
+  close send nothing unless the review was gated. A subagent's review goes to
+  the session it works for; `last` from a subagent is refused.
+- **`list` and `close`** see only the asking session's reviews. Close stops
+  the plugin's own child (SIGTERM, the draft kept) and `unsent` is unknown:
+  host close needs the session-bridge token, which comes with Ask this
+  session. Unloading the plugin stops every open review.
+- Not in the `headless`, `sdk`, `sdk-minimal` or `acp` profiles; there the
+  shared skills run the CLI. Tests: `apps/dsh-plugin/tool.test.ts` (a fake CLI,
+  `fixtures/fake-cli.ts`).
