@@ -1303,8 +1303,12 @@ if exist "!PREFS_FILE!" (
 
 REM Extras already on disk? Then the extras question is moot - they still
 REM count toward the picker list, and we never launch the npx flow over them.
+REM Only the extras the one-time migration above removes count here:
+REM plannotator-shape was never default-installed, so the migration keeps it,
+REM and on its own it must not hide the extras offer from someone whose other
+REM extras the migration has just removed.
 set "EXTRAS_PRESENT=0"
-for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer plannotator-shape) do (
+for %%S in (plannotator-compound plannotator-setup-goal plannotator-visual-explainer) do (
     if exist "!CLAUDE_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
     if exist "!AGENTS_SKILLS_DIR!\%%S" set "EXTRAS_PRESENT=1"
 )

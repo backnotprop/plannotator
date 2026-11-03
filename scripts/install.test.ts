@@ -252,8 +252,11 @@ describe("install.sh", () => {
     expect(script).toContain(
       "for skill in plannotator-review plannotator-annotate plannotator-last plannotator-compound plannotator-setup-goal; do",
     );
-    // Extras stop being managed in the Claude and shared-agent scopes.
-    expect(script).toContain("plannotator-compound plannotator-setup-goal plannotator-visual-explainer");
+    // Extras stop being managed in the Claude and shared-agent scopes: the
+    // loop inside the one-time migration, not the extras list further down.
+    expect(
+      extractRegion(script, 'if [ ! -f "$EXTRAS_MIGRATION" ]; then', ': > "$EXTRAS_MIGRATION"', "install.sh extras migration"),
+    ).toContain("for skill in plannotator-compound plannotator-setup-goal plannotator-visual-explainer; do");
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
@@ -654,10 +657,17 @@ describe("install.ps1", () => {
     // Codex cleanup includes the per-command skills now.
     expect(script).toContain("staleCodexSkillsDir");
     expect(script).toContain('"plannotator-review", "plannotator-annotate", "plannotator-last", "plannotator-compound", "plannotator-setup-goal"');
-    // Extras removed from Claude + shared-agent scopes, once, via the ledger.
-    expect(script).toContain('"plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"');
+    // Extras removed from Claude + shared-agent scopes, once, via the ledger:
+    // the loop inside the migration, not the $extraSkillNames list.
     expect(script).toContain("2026-06-extras-default-install-removed");
-    expect(script).toContain("if (-not (Test-Path $extrasMigration))");
+    expect(
+      extractRegion(
+        script,
+        "if (-not (Test-Path $extrasMigration)) {",
+        "New-Item -ItemType File -Force -Path $extrasMigration",
+        "install.ps1 extras migration",
+      ),
+    ).toContain('foreach ($skill in @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer")) {');
     // plannotator-archive no longer ships as a skill — a stale installed copy
     // is removed unconditionally from every skill scope.
     expect(script).toContain(
@@ -949,7 +959,7 @@ describe("install.cmd", () => {
   });
 
   test("suggests installing extras via npx skills add", () => {
-    expect(script).toContain("Optional skills");
+    expect(script).toContain("echo Optional skills ^(compound planning, setup-goal, visual explainer, shape^):");
     expect(script).toContain("npx skills add backnotprop/plannotator/apps/skills/extra --global");
   });
 
@@ -5661,4 +5671,119 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 always leaves a plannotator
       expect(existsSync(tmpFile)).toBe(false);
     }, QWEN_PS_TIMEOUT_MS);
   }
+});
+
+// plannotator-shape joined the extras after the 2026-06 one-time migration,
+// which deletes the three extras the installers used to install by default.
+// Shape was never installed by default, so the migration must keep it; and
+// because it survives the migration, it must not count as "extras already
+// installed", or a reinstall after `uninstall --purge` (which forgets the
+// migration ledger) silently loses the other three without an offer to get
+// them back.
+describe("extras: plannotator-shape and the one-time migration", () => {
+  const LEGACY_EXTRAS = ["plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer"];
+  const names = (region: string) => [...region.matchAll(/plannotator-[a-z-]+/g)].map((m) => m[0]);
+  const regions: Record<string, { text: () => string; migration: [string, string]; present: [string, string] }> = {
+    "install.sh": {
+      text: () => readScript("install.sh"),
+      migration: ['if [ ! -f "$EXTRAS_MIGRATION" ]; then', ': > "$EXTRAS_MIGRATION"'],
+      present: ["extras_present=0\n", "\ndone\n"],
+    },
+    "install.ps1": {
+      text: () => readScript("install.ps1"),
+      migration: ["if (-not (Test-Path $extrasMigration)) {", "New-Item -ItemType File -Force -Path $extrasMigration"],
+      present: ["$extrasPresent = $false", "$extrasPresent = $true"],
+    },
+    "install.cmd": {
+      text: () => readScript("install.cmd"),
+      migration: ['if not exist "!EXTRAS_MIGRATION!" (', 'type nul > "!EXTRAS_MIGRATION!"'],
+      present: ['set "EXTRAS_PRESENT=0"', 'set "EXTRAS_PRESENT=1"'],
+    },
+  };
+
+  test("every installer offers plannotator-shape with the other extras", () => {
+    // The extras list feeds the model-invocable picker. cmd numbers its
+    // picker, so shape is entry 7 and entries 4-6 keep their numbers.
+    expect(readScript("install.sh")).toContain(
+      'EXTRA_SKILL_NAMES="plannotator-compound plannotator-setup-goal plannotator-visual-explainer plannotator-shape"',
+    );
+    expect(readScript("install.ps1")).toContain(
+      '$extraSkillNames = @("plannotator-compound", "plannotator-setup-goal", "plannotator-visual-explainer", "plannotator-shape")',
+    );
+    const picker = extractRegion(
+      readScript("install.cmd"),
+      'if "!EXTRAS_CHOICE!"=="yes" (\n    set "SKILL_COUNT=',
+      "\n)",
+      "install.cmd extras picker",
+    );
+    expect(picker).toContain('set "SKILL_COUNT=7"');
+    LEGACY_EXTRAS.forEach((skill, i) => expect(picker).toContain(`set "SKILL_${i + 4}=${skill}"`));
+    expect(picker).toContain('set "SKILL_7=plannotator-shape"');
+  });
+
+  for (const [installer, r] of Object.entries(regions)) {
+    test(`${installer}: the migration removes only the three old default extras, never shape`, () => {
+      const migration = extractRegion(r.text(), r.migration[0], r.migration[1], `${installer} extras migration`);
+      expect(names(migration)).toEqual(LEGACY_EXTRAS);
+    });
+
+    test(`${installer}: "extras already installed" counts only what the migration removes`, () => {
+      const present = extractRegion(r.text(), r.present[0], r.present[1], `${installer} extras-present check`);
+      expect(present).not.toMatch(/EXTRA_SKILL_NAMES|\$extraSkillNames/);
+      expect(names(present)).toEqual(LEGACY_EXTRAS);
+    });
+  }
+
+  // install.sh's own migration and check, run in bash against sandbox skill
+  // folders. HOME is not changed: the block's $HOME is pointed at the sandbox.
+  describe.skipIf(process.platform === "win32")("install.sh, run", () => {
+    const block = extractRegion(
+      readScript("install.sh"),
+      "# Extras are no longer installed by this script anywhere except Kiro.",
+      "# A wizard needs a real human at the keyboard.",
+      "install.sh migration and extras check",
+    ).replaceAll("$HOME", "$SANDBOX_HOME");
+    const roots: string[] = [];
+    afterAll(() => roots.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
+    function run(opts: { ledger: boolean; claude: string[]; agents?: string[] }) {
+      const root = mkdtempSync(join(tmpdir(), "plannotator-extras-present-"));
+      roots.push(root);
+      const home = join(root, "home");
+      const claude = join(root, "claude");
+      const data = join(root, "data");
+      for (const s of opts.claude) mkdirSync(join(claude, "skills", s), { recursive: true });
+      for (const s of opts.agents ?? []) mkdirSync(join(home, ".agents", "skills", s), { recursive: true });
+      if (opts.ledger) {
+        mkdirSync(join(data, "migrations"), { recursive: true });
+        writeFileSync(join(data, "migrations", "2026-06-extras-default-install-removed"), "");
+      }
+      const r = Bun.spawnSync(["bash", "-c", `set -eu\n${block}\necho "extras_present=$extras_present"`], {
+        env: { PATH: "/usr/bin:/bin", SANDBOX_HOME: home, CLAUDE_CONFIG_DIR: claude, _config_dir: data },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+      const left = (dir: string) => (existsSync(dir) ? readdirSync(dir).sort() : []);
+      return {
+        present: r.stdout.toString().match(/extras_present=(\d)/)?.[1],
+        claude: left(join(claude, "skills")),
+        agents: left(join(home, ".agents", "skills")),
+      };
+    }
+
+    test("after the migration removes the old extras, shape alone does not hide the extras offer", () => {
+      // uninstall --purge forgets the ledger but leaves npx-installed extras.
+      const r = run({ ledger: false, claude: [...LEGACY_EXTRAS, "plannotator-shape"], agents: [...LEGACY_EXTRAS] });
+      expect(r.claude).toEqual(["plannotator-shape"]);
+      expect(r.agents).toEqual([]);
+      expect(r.present).toBe("0");
+    });
+
+    test("extras installed after the migration ran still count as installed", () => {
+      const r = run({ ledger: true, claude: [...LEGACY_EXTRAS, "plannotator-shape"] });
+      expect(r.claude).toEqual([...LEGACY_EXTRAS, "plannotator-shape"].sort());
+      expect(r.present).toBe("1");
+    });
+  });
 });

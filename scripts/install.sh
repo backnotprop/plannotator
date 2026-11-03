@@ -2084,9 +2084,12 @@ fi
 
 # Extras already on disk (pre-existing or previously npx-installed)? Then the
 # extras question is moot — they still count toward the checkbox list, and we
-# never launch the npx flow over them.
+# never launch the npx flow over them. Only the extras the one-time migration
+# above removes count here: plannotator-shape was never default-installed, so
+# the migration keeps it, and on its own it must not hide the extras offer
+# from someone whose other extras the migration has just removed.
 extras_present=0
-for skill in $EXTRA_SKILL_NAMES; do
+for skill in plannotator-compound plannotator-setup-goal plannotator-visual-explainer; do
     if [ -d "$CLAUDE_SKILLS_DIR/$skill" ] || [ -d "$AGENTS_SKILLS_DIR/$skill" ]; then
         extras_present=1
         break
