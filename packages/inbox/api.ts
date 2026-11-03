@@ -752,10 +752,19 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
 }
 
 /** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
-export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps): Record<string, unknown> {
+export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps, recipients?: readonly string[]): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
-  // a save without them is an older page's, which names long pastes only.
-  return { body, base, ...(baseBody !== null ? { base_body: baseBody } : {}), files_add: files.add, files_remove: files.remove, files_place: files.place };
+  // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
+  // once chosen: without it the draft keeps its own.
+  return {
+    body,
+    base,
+    ...(baseBody !== null ? { base_body: baseBody } : {}),
+    files_add: files.add,
+    files_remove: files.remove,
+    files_place: files.place,
+    ...(recipients !== undefined ? { recipients } : {}),
+  };
 }
 
 /** The serverSession every POST carries; set from the first list read. */
@@ -1158,7 +1167,7 @@ export const inboxApi = {
       feedback?: string;
       annotation_ids?: string[];
       /** Another live session takes the reply: the session that asked has ended. */
-      to?: { host: string; session: string };
+      to?: { host?: string; session: string };
       /**
        * The open questions the person chose to skip ("Skip them"), on this message or (with
        * `message_id`) another of the same session. A Send never skips anything else.
@@ -1308,8 +1317,8 @@ export const inboxApi = {
    * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
    * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files)),
+  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS, recipients?: readonly string[]) =>
+    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),

@@ -530,6 +530,15 @@ export interface InboxMessage {
    */
   base_path?: string | null;
   /**
+   * On an agent's message sent into a thread of another project (`reply_to`
+   * from another folder): the project its `project_path` is in, by name
+   * (approval "inbox-reply-recipient"). The window names the agent by it
+   * ("in plannotator", "Claude Code (plannotator)") after its session ends.
+   * Absent for a send from the thread's own project (or a project combined
+   * with it), and on older records.
+   */
+  from_project?: { name: string; root: string } | null;
+  /**
    * On an agent's message: it was sent through a connection that wakes its
    * session with the person's reply (the Claude Code mod, Pi, OpenCode 2;
    * `INBOX_WAKES_META_KEY`). Only such a session can be said to have ended
@@ -2337,7 +2346,19 @@ export interface InboxReplyDraft {
    * yet with where it goes back in `body`. Absent: none (and on a draft an older Inbox wrote).
    */
   files?: InboxDraftFile[];
+  /**
+   * Who the reply goes to, as the person chose it in the reply box's recipient pill (approval
+   * "inbox-reply-recipient"): session ids, the first the one whose message the words answer, the rest
+   * sent as tags. Absent: not chosen (the thread's last writer), and on a draft an older Inbox wrote.
+   */
+  recipients?: string[];
 }
+
+/** The most sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes. */
+export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
+
+/** A session id as a tag (and a reply draft's recipient) names it. */
+export const INBOX_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
 /**
  * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the

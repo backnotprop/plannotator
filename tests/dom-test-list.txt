@@ -38,6 +38,7 @@ packages/ui/components/chat/ChatComposer.dom.test.tsx
 packages/ui/components/chat/ChatTranscript.dom.test.tsx
 packages/ui/components/chat/chatSanitizer.dom.test.ts
 packages/ui/components/chat/chatRichMarkdown.dom.test.tsx
+packages/ui/components/chat/chatKeepBlankLines.dom.test.tsx
 packages/review-editor/hooks/useAIChat.newChat.test.tsx
 packages/ui/hooks/useAgentSettings.dom.test.tsx
 packages/ui/utils/codeHighlight.test.ts
@@ -126,6 +127,7 @@ packages/inbox/listColumn.test.tsx
 packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/multiAgentNames.test.tsx
+packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
