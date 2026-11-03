@@ -94,7 +94,17 @@ function isReferencedByContext(url: URL, metadata: PRMetadata, context: PRContex
   }
   return contextMarkdown(context).some((markdown) => {
     const decodedEntities = decodeHtmlEntities(markdown);
-    return needles.some((needle) => decodedEntities.includes(needle));
+    if (needles.some((needle) => decodedEntities.includes(needle))) return true;
+    // Compare absolute references using the same normalization as the requested URL.
+    return [...decodedEntities.matchAll(/https?:\/\/[^\s<>"'`\)\]]+/gi)].some(([reference]) => {
+      try {
+        const candidate = new URL(reference);
+        candidate.hash = '';
+        return candidate.href === url.href;
+      } catch {
+        return false;
+      }
+    });
   });
 }
 

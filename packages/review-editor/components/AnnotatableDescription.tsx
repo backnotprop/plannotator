@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
+import { resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
 
 /**
@@ -57,7 +58,7 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
 
   return (
     <div ref={containerRef}>
-      <RenderedMarkdown markdown={markdown} className={className} />
+      <RenderedMarkdown markdown={markdown} className={className} resolveImage={resolvePRImage} preserveVideos />
 
       {hook.commentPopover &&
         createPortal(

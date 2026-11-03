@@ -1,9 +1,9 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
-import { UNAVAILABLE_IMAGE_CLASS, useImageResolver, type ImageResolver } from "../ImageResolverContext";
+import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 
 interface HtmlBlockProps {
@@ -32,10 +32,11 @@ function unavailableMedia(doc: Document, label: string, title: string): HTMLSpan
  *   the host never saw.
  * - `<picture><source>` is dropped; the `<img>` inside is the fallback.
  * - `<video>` (with its `src`, `poster` and `<source>`s) becomes a
- *   placeholder: the resolver speaks for images only.
+ *   placeholder unless the host explicitly preserves videos: the resolver speaks
+ *   for images only.
  */
-function resolveHostMedia(root: DocumentFragment, doc: Document, resolveImage: ImageResolver): void {
-  root.querySelectorAll('video').forEach((video) => {
+function resolveHostMedia(root: DocumentFragment, doc: Document, resolveImage: ImageResolver, preserveVideos: boolean): void {
+  if (!preserveVideos) root.querySelectorAll('video').forEach((video) => {
     video.replaceWith(unavailableMedia(doc, 'Video', 'Videos are not shown here'));
   });
   root.querySelectorAll('picture source').forEach((source) => source.remove());
@@ -200,6 +201,7 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
   const ref = useRef<HTMLDivElement>(null);
   const resolveLocalLink = useLocalLinkResolver();
   const resolveImage = useImageResolver();
+  const preserveVideos = useContext(PreserveResolvedVideosContext);
   const sanitized = React.useMemo(
     () => sanitizeBlockHtml(block.content),
     [block.content],
@@ -211,14 +213,14 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
       // there), then insert the result.
       const template = ref.current.ownerDocument.createElement('template');
       template.innerHTML = sanitized;
-      resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage);
+      resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage, preserveVideos);
       ref.current.replaceChildren(template.content);
     } else if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
     const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage);
     return cleanup;
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage]);
+  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos]);
   return (
     <div
       ref={ref}
