@@ -158,7 +158,7 @@ export function RunLine({ run, canOpen, canReaddress = false, onChanged }: { run
           ) : null}
           {run.untrusted && !run.trust ? (
             <span className="ib-run-sub" data-run-trust-howto="">
-              To trust it, run {name} here in a terminal on the Inbox's computer. Your home folder can't be trusted: start in a folder inside it.
+              {run.home_folder ? "Your home folder can't be trusted. Start in a folder inside it." : <>To trust it, run {name} here in a terminal on the Inbox's computer.</>}
             </span>
           ) : null}
         </>

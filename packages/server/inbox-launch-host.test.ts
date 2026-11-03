@@ -85,7 +85,7 @@ function setup() {
       via,
       owner,
     );
-  return { store, clock, project, fake, launch, post, logins, context: () => context! };
+  return { store, clock, project, home, fake, launch, post, logins, context: () => context! };
 }
 
 /** An offer whose reading is one line, and no facts. */
@@ -360,9 +360,10 @@ describe("a second agent behind LaunchHost", () => {
 
 describe("Trust folder (`trustOffer`)", () => {
   /** A launch whose start was refused for trust, and an offer that counts its writes and starts the host trusting. */
-  async function refused() {
+  async function refused(options: { atHome?: boolean } = {}) {
     const world = setup();
-    const { store, project, fake, launch } = world;
+    const { store, fake, launch } = world;
+    const project = options.atHome ? store.ensureProject({ name: "home", root: world.home }) : world.project;
     fake.faults.untrusted = true;
     const accepts = { count: 0 };
     fake.faults.offer = offerOf("This folder has 1 hook that will run once you trust it.", async () => {
@@ -445,6 +446,8 @@ describe("Trust folder (`trustOffer`)", () => {
   test("the owner alone: a guest's read has no offer and the route refuses it; the owner over the tailnet clicks like the window", async () => {
     const { store, post, launch, root, id, accepts } = await refused();
     expect((await launch.runOf(root.id, false))!.trust).toBeUndefined();
+    // Not the home folder: the guest's how-to says to run the agent there.
+    expect((await launch.runOf(root.id, false))!.home_folder).toBeUndefined();
     expect(await refusal(post(id, "trust", "tailnet", false))).toMatchObject({ code: "owner_only" });
     // The default for a tailnet request is no owner, too.
     expect(await refusal(post(id, "trust", "tailnet"))).toMatchObject({ code: "owner_only" });
@@ -521,9 +524,12 @@ describe("Trust folder (`trustOffer`)", () => {
   });
 
   test("a folder the host can't trust (the home folder) shows no button and refuses the route", async () => {
-    const { fake, post, launch, root, id } = await refused();
+    const { fake, post, launch, root, id } = await refused({ atHome: true });
     fake.faults.offer = null;
     expect((await launch.runOf(root.id, true))!.trust).toBeUndefined();
+    // The how-to then says the home folder can't be trusted, for the owner and a guest alike.
+    expect(await launch.runOf(root.id, true)).toMatchObject({ untrusted: true, home_folder: true });
+    expect(await launch.runOf(root.id, false)).toMatchObject({ untrusted: true, home_folder: true });
     expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed" });
     expect(startsOf(fake.calls)).toBe(1);
   });
