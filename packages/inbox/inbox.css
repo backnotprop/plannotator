@@ -1980,7 +1980,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
 /* Full screen (approval "inbox-one-fullscreen", Drawer): one mode. The file fills the window; what floats over it is
-   one toolbar (it tucks into a corner handle), the changed chip (a fact about the file: it does not tuck), the step
+   one toolbar (it gathers into the corner control, "inbox-fullscreen-gather"), the changed chip (it stays), the step
    chip and the question row. The comments are a drawer beside the page: the page narrows, it is not covered (no width
    animation: the page reflows once). On a phone the drawer is the bottom sheet (its rules are in the phone query). */
 .ib-view.ib-full.ib-fullview { grid-template-rows: minmax(0, 1fr); }
@@ -2026,10 +2026,9 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 /* The peek from the toolbar's N/M: under it, at its right edge. */
 .ib-fvpeek { position: absolute; top: calc(100% + 8px); right: 0; z-index: 30; white-space: normal; }
 /* The corner control: all that is left while the tools are gathered. Small and quiet: the double chevron, "Draft" while a
-   reply draft waits, the comment count, an amber dot when the file changed since it was sent. Bottom right, or bottom
-   left with `?variant=corner-left`; above a foot that stays (an image's comment row without the composer). */
+   reply draft waits, the comment count, an amber dot when the file changed since it was sent. Bottom right (approval
+   "inbox-fullscreen-gather"); above a foot that stays (an image's comment row without the composer). */
 .pn-inbox .ib-fvhandle { position: absolute; bottom: calc(16px + var(--ib-fvfoot, 0px)); right: calc(16px + env(safe-area-inset-right)); height: 32px; min-width: 32px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 94%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: var(--muted-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: auto; transition: opacity 180ms ease-out 220ms, transform 300ms cubic-bezier(0.22, 1, 0.36, 1) 200ms, visibility 0s linear 0s; }
-.pn-inbox .ib-fvdock.ib-corner-left .ib-fvhandle { right: auto; left: calc(16px + env(safe-area-inset-left)); }
 .pn-inbox .ib-view.ib-fullview:has(:is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-fvhandle { bottom: calc(16px + env(safe-area-inset-bottom)); }
 :root.light .ib-fvhandle { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
 .pn-inbox .ib-fvhandle:hover { background: var(--popover); color: var(--foreground); }
@@ -2080,7 +2079,6 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-fvdock-phone .ib-fvbar { top: auto; right: calc(12px + env(safe-area-inset-right)); bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); padding: 4px; border-radius: 14px; }
 .pn-inbox .ib-fvdock-phone .ib-fvb { height: 44px; min-width: 44px; border-radius: 10px; font-size: var(--ib-fs-14, 14px); padding: 0 8px; }
 .pn-inbox .ib-fvdock-phone .ib-fvhandle { bottom: calc(14px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); right: calc(12px + env(safe-area-inset-right)); height: 44px; min-width: 44px; padding: 0 12px; border-radius: 14px; font-size: var(--ib-fs-14, 14px); }
-.pn-inbox .ib-fvdock-phone.ib-corner-left .ib-fvhandle { right: auto; left: calc(12px + env(safe-area-inset-left)); }
 .pn-inbox .ib-view.ib-fullview:has(:is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-fvdock-phone .ib-fvhandle { bottom: calc(14px + env(safe-area-inset-bottom)); }
 .ib-view.ib-fullview.ib-phone.ib-panel-open .ib-fvdock { visibility: hidden; }
 .ib-view.ib-fullview.ib-phone .ib-fvchip { bottom: calc(80px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }

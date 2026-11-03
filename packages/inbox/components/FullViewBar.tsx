@@ -27,8 +27,8 @@ import { Tip as HoverTip } from './Tip';
  *
  * Hide gathers every floating control of full screen (this toolbar, the
  * composer or its pill, the image's size bar, a text file's toolstrip and
- * Contents button) into one small control in a bottom corner (`corner`:
- * right by default). The composer's own ⌄ does the same (FullScreenComposer.tsx),
+ * Contents button) into one small control in the bottom right corner
+ * (approval "inbox-fullscreen-gather"). The composer's own ⌄ does the same (FullScreenComposer.tsx),
  * so either bar's minimize does one thing. The corner control carries what
  * waits (the comment count, "Draft" while a reply draft waits, an amber dot
  * when the file changed since it was sent); one press brings everything back.
@@ -37,14 +37,6 @@ import { Tip as HoverTip } from './Tip';
  * full screen starts with the tools showing.
  */
 export type ToolbarState = 'pinned' | 'tucked';
-
-/** Which bottom corner the gathered tools go to (a review switch, `?variant=corner-left`; right by default). */
-export type ToolsCorner = 'right' | 'left';
-
-/** The corner the page asks for: `?variant=corner-left` (or `corner-right`) in the address, else right. */
-export function toolsCornerFromLocation(search = typeof location === 'undefined' ? '' : location.search): ToolsCorner {
-  return new URLSearchParams(search).get('variant') === 'corner-left' ? 'left' : 'right';
-}
 
 export interface FullViewBarProps {
   phone: boolean;
@@ -70,8 +62,6 @@ export interface FullViewBarProps {
   changed: boolean;
   /** A reply draft waits in full screen's composer (words or files): the corner control says "Draft". */
   draft?: boolean;
-  /** The bottom corner the tools gather into. */
-  corner?: ToolsCorner;
   /** Where focus goes when the tools come back from the corner; absent or null: » (where Hide was pressed). */
   restoreTarget?: () => HTMLElement | null;
   /**
@@ -153,10 +143,11 @@ function Tip({ text, note, keys, phone, passEscape, children }: { text: string; 
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** What the live region says when the tools gather. */
+const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
 
 export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(function FullViewBar(props, ref) {
   const { phone, comments, position, state } = props;
-  const corner = props.corner ?? 'right';
   const barId = `ib-fvbar-${useId().replace(/:/g, '')}`;
   const barRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
@@ -168,7 +159,6 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
   stateRef.current = state;
   const restoreRef = useRef(props.restoreTarget);
   restoreRef.current = props.restoreTarget;
-  const hiddenSaying = `Tools hidden. They are in the bottom ${corner} corner.`;
 
   const set = (next: ToolbarState, focus: 'handle' | 'bar' | null = null, saying?: string) => {
     pendingFocus.current = focus;
@@ -203,12 +193,12 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     ref,
     () => ({
       toggle: () => {
-        if (stateRef.current === 'pinned') setRef.current('tucked', barRef.current?.contains(document.activeElement) ? 'handle' : null, hiddenSaying);
+        if (stateRef.current === 'pinned') setRef.current('tucked', barRef.current?.contains(document.activeElement) ? 'handle' : null, HIDDEN_SAYING);
         else setRef.current('pinned', null, 'Tools shown.');
       },
-      hide: () => setRef.current('tucked', 'handle', hiddenSaying),
+      hide: () => setRef.current('tucked', 'handle', HIDDEN_SAYING),
     }),
-    [hiddenSaying],
+    [],
   );
 
   /** The peek closed from the keyboard or by a choice: focus back on the position (not after a press elsewhere). A phone's sheet is the pane's, which puts focus back itself. */
@@ -260,10 +250,9 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
 
   return (
     <div
-      className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}${props.shifted ? ' ib-shift' : ''} ib-corner-${corner}`}
+      className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}${props.shifted ? ' ib-shift' : ''}`}
       data-full-view-dock=""
       data-bar={state}
-      data-corner={corner}
     >
       <HoverTip content="Show tools">
         <button
@@ -394,12 +383,12 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
             </button>
           </Tip>
         )}
-        <Tip text="Hide tools" note={`Into the bottom ${corner} corner`} keys={props.chord ? TOOLS_KEYS : null} phone={phone}>
+        <Tip text="Hide tools" note="Into the bottom right corner" keys={props.chord ? TOOLS_KEYS : null} phone={phone}>
           <button
             type="button"
             ref={hideRef}
             className="ib-fvb ib-fvhide"
-            onClick={() => set('tucked', 'handle', hiddenSaying)}
+            onClick={() => set('tucked', 'handle', HIDDEN_SAYING)}
             aria-label="Hide tools"
             aria-description={props.chord ? `Shortcut: ${formatShortcutBindingText(props.chord)}` : undefined}
             data-full-view-hide="hide"

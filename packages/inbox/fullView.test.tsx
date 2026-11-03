@@ -8,8 +8,8 @@
  * comments drawer beside the page, remembered and never opened by itself.
  *
  * What is proved here, on the pane as the thread drives it: the single mode
- * and focus both ways; the gather and its way back, with focus never lost; the
- * corner variant; the drawer and its remembered state; a new comment only
+ * and focus both ways; the gather and its way back, with focus never lost; no
+ * hover reveal; the drawer and its remembered state; a new comment only
  * bumping the count; the toolbar always starting out; ⌘⇧X on HTML only; the
  * ⋯ menu; the peek and a step keeping full screen with its chip; Escape's
  * ladder (one thing per press, full screen last; typed words never lost); the changed chip and dot; a phone and a stacked window. The
@@ -337,20 +337,6 @@ test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, foc
   await click(handle());
   expect(barState()).toBe('pinned');
   expect(document.activeElement).not.toBe(handle());
-});
-
-test.skipIf(!hasDom)('?variant=corner-left gathers into the bottom left corner instead', async () => {
-  const win = window as unknown as { happyDOM: { setURL: (url: string) => void } };
-  win.happyDOM.setURL('http://localhost:4000/?variant=corner-left');
-  try {
-    stubViews();
-    await render(<Pane start={notes} harness={harnessOf()} />);
-    expect(dock()!.getAttribute('data-corner')).toBe('left');
-    await click(hideButton());
-    expect(live()).toBe('Tools hidden. They are in the bottom left corner.');
-  } finally {
-    win.happyDOM.setURL('http://localhost:4000/');
-  }
 });
 
 test.skipIf(!hasDom)('every opening of full screen starts with the toolbar showing', async () => {

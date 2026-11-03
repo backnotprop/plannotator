@@ -60,7 +60,7 @@ import { showsContents, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
-import { FullViewBar, toolsCornerFromLocation, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
 import { useHtmlPageComment } from './HtmlPageComment';
@@ -467,8 +467,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
    */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
   const barRef = useRef<FullViewBarHandle>(null);
-  /** The bottom corner the tools gather into (`?variant=corner-left` to compare; right by default). */
-  const [toolsCorner] = useState(toolsCornerFromLocation);
   /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
   const gatheredFrom = useRef<'bar' | 'composer'>('bar');
   /**
@@ -1809,7 +1807,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
-          corner={toolsCorner}
           draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
           restoreTarget={restoreTarget}
           announce={announce}
