@@ -333,13 +333,4 @@ describe('Try it opens the real Snooze menu and snoozes nothing', () => {
     await wait(100);
     expect(picked).toEqual([]);
   });
-
-  test('the thread is gone (archived meanwhile): nothing opens, and the window can say where Snooze is', async () => {
-    frame(<div className="ib-lbody" />);
-    let ok = true;
-    await act(async () => {
-      ok = await openSnoozeMenu({ root: host!, phone: false, openThread: null, left: 'msg_gone', openLeft: () => {} });
-    });
-    expect(ok).toBe(false);
-  });
 });

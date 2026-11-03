@@ -8,7 +8,7 @@
  *  - No thread open, on a phone: the thread just left opens again, then its ⋯ sheet, swapped to its times.
  *
  * It presses the same buttons a person does (Base UI opens a menu on the pointer's press), so a change to those menus
- * reaches it. False: nothing to open (the thread was archived or answered meanwhile); the window says where Snooze is.
+ * reaches it. True when a Snooze menu is on screen.
  */
 
 export interface SnoozeTryTarget {

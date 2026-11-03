@@ -33,13 +33,11 @@ export interface SnoozeIntroSaved {
 
 /**
  * Whether the Inbox has the dialog due: a release build, first use at least `SNOOZE_INTRO_TENURE_MS` ago, never
- * snoozed, never shown. A first use in the future (a clock that moved back) is not tenure.
+ * snoozed, never shown.
  */
 export function snoozeIntroDue(saved: SnoozeIntroSaved | undefined, now: Date, release: boolean): boolean {
-  if (!release || !saved || saved.snoozedAt || saved.shownAt) return false;
-  const first = saved.firstUseAt ? Date.parse(saved.firstUseAt) : Number.NaN;
-  if (Number.isNaN(first)) return false;
-  return now.getTime() - first >= SNOOZE_INTRO_TENURE_MS;
+  if (!release || !saved?.firstUseAt || saved.snoozedAt || saved.shownAt) return false;
+  return now.getTime() - Date.parse(saved.firstUseAt) >= SNOOZE_INTRO_TENURE_MS;
 }
 
 /**

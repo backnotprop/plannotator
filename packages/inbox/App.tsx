@@ -3855,8 +3855,6 @@ function Inbox() {
         openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
         left,
         openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, thread: threadId }),
-      }).then((opened) => {
-        if (!opened) showToast({ icon: 'clock', lead: phone ? 'Open a thread, tap ⋯, then Snooze.' : 'Right-click any thread and pick Snooze.' }, 6000);
       });
     }, 0);
   };

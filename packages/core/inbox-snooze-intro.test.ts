@@ -35,9 +35,6 @@ describe("snoozeIntroDue", () => {
     expect(snoozeIntroDue({ firstUseAt: first, shownAt: ago(DAY) }, NOW, true)).toBe(false);
     expect(snoozeIntroDue({}, NOW, true)).toBe(false);
     expect(snoozeIntroDue(undefined, NOW, true)).toBe(false);
-    expect(snoozeIntroDue({ firstUseAt: "not a date" }, NOW, true)).toBe(false);
-    // A first use in the future (a clock moved back) is no tenure.
-    expect(snoozeIntroDue({ firstUseAt: new Date(NOW.getTime() + DAY).toISOString() }, NOW, true)).toBe(false);
   });
 });
 

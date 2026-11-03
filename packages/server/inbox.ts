@@ -1799,13 +1799,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
-   * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
+   * the write, so two claims cannot interleave).
    */
   const claimSnoozeIntro = (owner: boolean): boolean => {
     if (!snoozeIntroState(owner).due) return false;
-    const at = new Date().toISOString();
-    saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: at } });
-    return loadConfig().inboxSnoozeIntro?.shownAt === at;
+    saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
+    return true;
   };
 
   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
