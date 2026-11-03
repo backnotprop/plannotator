@@ -25,6 +25,7 @@ import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly } from "@plannotator/shared/inbox/tidy";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
@@ -35,6 +36,8 @@ import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, 
 import { registerInboxSearchTool } from "./inbox-mcp-search";
 import { registerInboxCardTool } from "./inbox-mcp-cards";
 export { INBOX_BOARD_OFF_TEXT } from "./inbox-mcp-cards";
+import { checkStepsInput, INBOX_STEPS_OFF_TEXT, registerInboxStepsTool, rowSteps, STEPS_FIELD, stepsAgent, stepsProgressText, threadStepsText } from "./inbox-mcp-steps";
+export { INBOX_STEPS_OFF_TEXT } from "./inbox-mcp-steps";
 import { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResult } from "./inbox-mcp-result";
 
 // The result helpers live in inbox-mcp-result.ts (no import cycle for the tool modules); re-exported for older importers.
@@ -42,20 +45,26 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "get_guide_brief", "submit_guide", "card"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
- * The tools this Inbox serves with the Board on: every one, except `card`
- * while INBOX_CARD_ACTION_ON holds it back in the code.
+ * The tools this Inbox serves with the Board on (and steps off): every one,
+ * except `card` while INBOX_CARD_ACTION_ON holds it back in the code.
  */
-export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "card" || INBOX_CARD_ACTION_ON);
+export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "steps" && (name !== "card" || INBOX_CARD_ACTION_ON));
 
 /**
  * The tools an Inbox serves by default: the Board is off until the person
  * turns it on (config.json `inboxBoard`, approval "inbox-board" 2026-10-26),
- * so `card` is not in its tools/list.
+ * so `card` is not in its tools/list, and so are thread steps
+ * (config.json `inboxSteps`, approval "inbox-thread-steps"), so `steps` is not.
  */
 export const INBOX_DEFAULT_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_SERVED_TOOLS.filter((name) => name !== "card");
+
+/** The tools an Inbox serves for the person's switches, in tools/list order. */
+export function inboxServedTools(switches: { board: boolean; steps: boolean }): (typeof INBOX_MCP_TOOLS)[number][] {
+  return [...(switches.board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS), ...(switches.steps ? (["steps"] as const) : [])];
+}
 
 
 /**
@@ -262,6 +271,13 @@ export interface InboxMcpContext {
    * Absent: on, as before the switch.
    */
   boardOn?: () => boolean;
+  /**
+   * Whether thread steps are on (config.json `inboxSteps`, read on every
+   * request; approval "inbox-thread-steps"). Off: no `steps` in tools/list,
+   * no `steps` field on send_message, nothing about steps in read_thread, and
+   * a `steps` call answers `steps_off` with nothing written. Absent: off.
+   */
+  stepsOn?: () => boolean;
 }
 
 
@@ -329,17 +345,25 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   const host = typeof input.agent_host === "string" ? input.agent_host : undefined;
   if (await senderWakes(context, ctx, { agent_host: host, agent_session: session })) return result;
   if (note.to && context.bridgePolls?.(note.to.host, session)) return result;
+  // Written when the run started: with steps turned off since, it goes without its steps lines, and a wake that
+  // listed only steps is withdrawn (recorded delivered by the Inbox itself) with nothing added to the result.
+  const stepsOff = !context.stepsOn?.();
+  const withdrawn = stepsOff && inboxTidyIsStepsOnly(note.body);
   try {
-    context.store.recordDelivery(note.id, { host: note.to?.host ?? host ?? "agent", session });
+    // Withdrawn: settles nothing else in the thread (the person's earlier replies stay owed).
+    if (withdrawn) context.store.recordTidyWithdrawn(note.id, INBOX_TIDY_WITHDRAWN_HOST);
+    else context.store.recordDelivery(note.id, { host: note.to?.host ?? host ?? "agent", session });
   } catch {
     return result;
   }
-  const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${note.body}`;
+  if (withdrawn) return result;
+  const body = stepsOff ? inboxTidyBodyStepsOff(note.body) : note.body;
+  const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${body}`;
   const content = [...result.content];
   const last = content.length - 1;
   if (last >= 0) content[last] = { ...content[last]!, text: `${content[last]!.text}${tidy}` };
   else content.push({ type: "text", text: tidy.trimStart() });
-  return { ...result, content, ...(result.structuredContent ? { structuredContent: { ...result.structuredContent, tidy: { id: note.id, text: note.body } } } : {}) };
+  return { ...result, content, ...(result.structuredContent ? { structuredContent: { ...result.structuredContent, tidy: { id: note.id, text: body } } } : {}) };
 }
 
 /** The send tools' last sentence for a caller whose reply arrives by itself. */
@@ -843,6 +867,8 @@ export interface InboxAgentThreadRow {
   thread_id: string;
   subject: string | null;
   thread_name: string | null;
+  /** The reader's steps there, done of total (approval "inbox-thread-steps"): only while the person has steps on. */
+  steps?: { done: number; total: number };
   /** Where the thread sits in the person's list (`stopped`, `holding`, `waiting`, `new`, `sent`, `quiet`). */
   section: InboxListRow["section"];
   message_count: number;
@@ -925,6 +951,7 @@ export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true }):
   if (row.unread) parts.push("unread: the person wrote something you have not read");
   // The person tagged the reader in this thread (approval "inbox-tag-agents"), in any project.
   if (row.tagged_you) parts.push("the person tagged you here");
+  if (row.steps) parts.push(`steps ${row.steps.done}/${row.steps.total}`);
   if (row.resolved_at) parts.push(`resolved ${shortTime(row.resolved_at)}`);
   return parts.join(" · ");
 }
@@ -975,15 +1002,33 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             .describe(
               `Files to show the person beside your message, e.g. ["docs/plan.md", "proto/admin.html", "src/retry.mjs"]: absolute (anywhere you can read) or relative to project_path. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML (its relative images and frames load from its folder) open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time and the paused frame's path); source code, scripts and other text open as code with line comments; PDFs and anything else are offered as a download. Folders and .env files are refused. The Inbox keeps the version you sent and shows the file as it is now, saying when it changed. The person's annotations, including comments on images and code lines, come back in their reply. Each attachment's kind in the result is markdown, text, html, mermaid, graphviz, code, image, video, pdf or file; treat any other as file. A markdown link to an attached file in the body, e.g. [the mock](proto/admin.html), opens it beside the thread.`,
             ),
+          // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
+          ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async (input, ctx) =>
       guarded(async () => {
+        // A list that does not read is refused before anything is sent, so a message never lands without its steps.
+        const withSteps = (input as { steps?: unknown }).steps;
+        if (withSteps !== undefined) {
+          if (!context.stepsOn?.()) throw new InboxError("steps_off", INBOX_STEPS_OFF_TEXT.replace(/^steps_off: /, ""));
+          checkStepsInput(withSteps, stepsAgent(input));
+        }
         const project = await sendProject(context, input);
         const wakes = await senderWakes(context, ctx, input);
-        const sent = await sendAgentMessage(context, project, { ...input, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        const { steps: _steps, ...message } = input as typeof input & { steps?: unknown };
+        const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
+        // since (the steps action) is never put back to this older one.
+        const stepsLine =
+          withSteps === undefined || sent.replayed
+            ? ""
+            : (() => {
+                const { record } = store.setThreadSteps({ thread_id: String(sent.structured.thread_id), agent: stepsAgent(input), steps: withSteps });
+                return record && record.steps.length > 0 ? ` Steps saved: ${stepsProgressText(record)}.` : " Steps cleared.";
+              })();
         // Named a thread (reply_to, or a thread name) this session has not looked at for hours (or ever):
         // one line naming its subject. Not for a message routed to the session's own thread by default,
         // never on a replay (the first answer stands), and it never blocks the send.
@@ -1007,7 +1052,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
@@ -1075,7 +1120,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // What this session was owed in the messages it was shown, and no wake is left to settle.
           if (reader) store.recordOwnRead(threadId, reader, shown);
           noteSessionRead(store, reader, threadId, clock());
-          return okComplete(windowedThreadText(result, order, naming?.line ?? ""), { ...result, ...(naming?.structured ?? {}) });
+          // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
+          const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader) : [];
+          const lists = steps.length > 0 ? { steps: store.threadSteps(threadId).map(({ agent, steps: list, updated_at }) => ({ agent, steps: list, updated_at })) } : {};
+          return okComplete(windowedThreadText(result, order, naming?.line ?? "", steps), { ...result, ...(naming?.structured ?? {}), ...lists });
         }
         if (input.expand || input.before !== undefined || input.after !== undefined) {
           throw new InboxError("validation_error", "expand, before and after read one thread: pass thread_id (or message_id).");
@@ -1111,7 +1159,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const limit = input.limit ?? 20;
         const total = threads.length;
         // One short row per thread: the window's row is the person's view (and its `ack` shows a 👍 before it settles).
-        const rows = threads.slice(0, limit).map((row) => ({ ...agentThreadRow(store, row, session), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}) }));
+        const rows = threads.slice(0, limit).map((row) => {
+          const steps = rowSteps(context, row.thread_id, session);
+          return { ...agentThreadRow(store, row, session), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
+        });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
         if (!peek) for (const row of rows) noteSessionRead(store, session, row.thread_id, clock());
         const head = `${total} thread${total === 1 ? "" : "s"}${project ? ` in ${project.name}` : ""}${total > limit ? `, showing ${limit}` : ""}.`;
@@ -1160,6 +1211,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   // The Board's cards (approval "inbox-board"): packages/server/inbox-mcp-cards.ts. Held back in the code with
   // INBOX_CARD_ACTION_ON, and served only while the person has the Board on (the server is made per request).
   if (INBOX_CARD_ACTION_ON && (context.boardOn?.() ?? true)) registerInboxCardTool(server, context);
+  // Thread steps (approval "inbox-thread-steps"): packages/server/inbox-mcp-steps.ts. Served only while the person has them on.
+  if (context.stepsOn?.()) registerInboxStepsTool(server, context);
 
   return server;
 }

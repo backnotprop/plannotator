@@ -57,6 +57,9 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
+import { cardStepLists, presenceClass, stepsCount, stepsDoneWords } from '../steps/model';
+import { StepsPie } from '../steps/StepsMarks';
+import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
 
@@ -409,6 +412,8 @@ export function BoardPage(props: BoardPageProps) {
     const mark = marks.get(card.id);
     return mark && mark.url === ref.url ? mark : { kind: ref.kind === 'issue' ? 'issue' : 'pr', ref: ref.ref, url: ref.url, state: 'unknown', title: null };
   };
+  // The checklist (approval "inbox-thread-steps", part 4): the lists of the card's threads, while the switch is on.
+  const stepsOf = (card: InboxCardWire) => cardStepLists(card.threads, model?.steps);
 
   const common: CardCommon = {
     visitLook: props.visitLook,
@@ -420,6 +425,7 @@ export function BoardPage(props: BoardPageProps) {
     menuKeys,
     rowOf: props.rowOf,
     markOf,
+    stepsOf,
     onOpen: (card) => props.onOpenCard(card.id),
     onOpenThread: props.onOpenThread,
   };
@@ -485,6 +491,7 @@ export function BoardPage(props: BoardPageProps) {
       phone={phone}
       now={now}
       rowOf={props.rowOf}
+      steps={stepsOf(open)}
       onClose={() => props.onOpenCard(null)}
       onMove={async (change, fromMenu) => void (await move(open, change, fromMenu))}
       dropAsk={dropAsk?.id === open.id ? dropAsk.n : 0}
@@ -660,6 +667,8 @@ interface CardCommon {
   rowOf: (threadId: string) => InboxListRow | null;
   /** The card's lane mark (its linked PR or issue), null when it links neither. */
   markOf: (card: InboxCardWire) => InboxCardMark | null;
+  /** The card's checklists, the latest first (none while the switch is off): the first one's pie is on the card. */
+  stepsOf: (card: InboxCardWire) => InboxStepsWire[];
   onOpen: (card: InboxCardWire) => void;
   /** The "You: …" line's way in: the thread where the person makes the call (`youThread`). */
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
@@ -816,6 +825,7 @@ function BoardCard({
   menuKeys,
   rowOf,
   markOf,
+  stepsOf,
   onOpen,
   onOpenThread,
   draggable = false,
@@ -829,7 +839,11 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '');
+  // The checklist's mark (approval "inbox-thread-steps", part 4): the pie alone, no count; the opened card has the number.
+  const plan = stepsOf(card)[0] ?? null;
+  const planCount = plan ? stepsCount(plan) : null;
+  const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
+  const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
   const waiting = line?.you ? null : waitingThread(card, rowOf);
@@ -842,6 +856,13 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
+      {plan && planCount && planWords && (
+        <Tip content={planWords}>
+          <span className={`ib-bc-plan ${presenceClass(plan.presence)}`} data-card-steps={planCount.text}>
+            <StepsPie done={planCount.done} total={planCount.total} size={13} />
+          </span>
+        </Tip>
+      )}
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
           {card.agent ? <AuthorMark author={card.agent} /> : <span className="ib-lane-dot ib-bc-yourdot" data-col="backlog" aria-hidden="true" />}
@@ -1190,6 +1211,7 @@ function OpenedCard({
   phone,
   now,
   rowOf,
+  steps,
   onClose,
   onMove,
   dropAsk,
@@ -1206,6 +1228,7 @@ function OpenedCard({
   phone: boolean;
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
+  steps: readonly InboxStepsWire[];
   onClose: () => void;
   /** `fromMenu`: a Drop… the card's right-click menu started (its toast). */
   onMove: (move: BoardMove, fromMenu?: boolean) => Promise<void>;
@@ -1297,6 +1320,7 @@ function OpenedCard({
           : null
       }
       rowOf={rowOf}
+      steps={steps}
       phone={phone}
       now={now}
       onClose={onClose}

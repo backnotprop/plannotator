@@ -59,8 +59,8 @@ function sandbox() {
   const project = join(root, "code", "billing");
   mkdirSync(project, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
-  // The Board is something the person turns on: on here.
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+  // The Board and thread steps are things the person turns on: on here, so every action the command takes is served.
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true, inboxSteps: true }));
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: join(root, "home"),
@@ -81,7 +81,7 @@ type Box = ReturnType<typeof sandbox>;
 async function world() {
   const box = sandbox();
   const clock = { behind: 0 };
-  const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null, board: true, storeNow: () => new Date(Date.now() - clock.behind) });
+  const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null, board: true, steps: true, storeNow: () => new Date(Date.now() - clock.behind) });
   servers.push(server);
   const client = new Client({ name: "inbox-call-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -149,6 +149,16 @@ describe("what a script gets", () => {
     const unknown = await cli(box, ["resolve_message", '{"message_id":"x","nope":1}']);
     expect(unknown).toMatchObject({ code: 1, stdout: "" });
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
+  });
+
+  // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
+  // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
+  test("an unknown action's list never names steps; steps itself is an action", () => {
+    const unknown = parseCallCommand(["blorp"]);
+    expect(unknown).toMatchObject({ ok: false, code: "unknown_action" });
+    expect((unknown as { error: string }).error).toContain("send_message");
+    expect((unknown as { error: string }).error).not.toMatch(/\bsteps\b/);
+    expect(parseCallCommand(["steps", "{}"])).toMatchObject({ ok: true, action: "steps" });
   });
 
   test("bad JSON, a non-object, an unknown action, wait_for_reply and a named identity are usage errors, sent nowhere", async () => {

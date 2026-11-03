@@ -170,12 +170,14 @@ import {
   type InboxCardPr,
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
+import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
   LEGACY_DECISIONS_FILE,
   INBOX_PROJECTS_DIR,
   SEQ_FLOOR_FILE,
+  STEPS_FILE,
   InboxError,
   inboxDir,
   MESSAGES_FILE,
@@ -649,6 +651,15 @@ export class InboxStore {
   private readonly cards = new Map<string, InboxCard>();
   /** The seq of the line that last wrote to each card (a drop's seen mark is not a write): the Board's unread rule. */
   private readonly cardHeardSeq = new Map<string, number>();
+  /**
+   * Each agent session's steps per thread, by record id (approval
+   * "inbox-thread-steps"), and the id of each (thread, session)'s record.
+   * Read by nothing that routes, lists, counts unread or notifies.
+   */
+  private readonly stepsById = new Map<string, InboxSteps>();
+  private readonly stepsIdOf = new Map<string, string>();
+  /** Each thread's steps record ids (a thread's read never scans every list). */
+  private readonly stepsIdsByThread = new Map<string, Set<string>>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -697,7 +708,7 @@ export class InboxStore {
       // left on disk and never applied, but its seqs still count, so a seq is
       // never handed out twice.
       this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) {
         const path = join(folder, name);
         let text: string;
         try {
@@ -813,6 +824,16 @@ export class InboxStore {
           else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
+        }
+        break;
+      case "steps":
+        // Steps are their own records: nothing here touches routing, the list, unread or notifications.
+        if (isInboxStepsRecord(line.record)) {
+          this.stepsById.set(line.record.id, line.record);
+          this.stepsIdOf.set(`${line.record.thread_id}\0${line.record.agent.session}`, line.record.id);
+          let ids = this.stepsIdsByThread.get(line.record.thread_id);
+          if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
+          ids.add(line.record.id);
         }
         break;
     }
@@ -3101,7 +3122,7 @@ export class InboxStore {
         perThread.set(threadId, threadBytes);
       }
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE]) {
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) {
         let text: string;
         try {
           text = readFileSync(join(folder, name), "utf8");
@@ -3116,7 +3137,13 @@ export class InboxStore {
           const line = parseInboxLine(raw);
           if (!line) continue;
           const messageId =
-            line.kind === "message" ? line.record.id : line.kind === "question" || line.kind === "annotation" ? line.record.message_id : null;
+            line.kind === "message"
+              ? line.record.id
+              : line.kind === "question" || line.kind === "annotation"
+                ? line.record.message_id
+                : line.kind === "steps"
+                  ? line.record.thread_id
+                  : null;
           const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
           if (!threadId) continue;
           perThread.set(threadId, (perThread.get(threadId) ?? 0) + Buffer.byteLength(raw) + 1);
@@ -5055,7 +5082,7 @@ export class InboxStore {
     const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepSeqFloor();
-    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE]) {
+    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE]) {
       const path = join(folder, name);
       let text: string;
       try {
@@ -5069,6 +5096,7 @@ export class InboxStore {
         if (line.kind === "message") return line.record.thread_id !== threadId;
         if (line.kind === "question") return !messageIds.has(line.record.message_id);
         if (line.kind === "annotation") return line.record.thread_id !== threadId;
+        if (line.kind === "steps") return line.record.thread_id !== threadId;
         return true;
       });
       const temp = `${path}.${process.pid}.tmp`;
@@ -5122,6 +5150,9 @@ export class InboxStore {
     this.unsentAnnotations.clear();
     this.cards.clear();
     this.cardHeardSeq.clear();
+    this.stepsById.clear();
+    this.stepsIdOf.clear();
+    this.stepsIdsByThread.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -5249,6 +5280,23 @@ export class InboxStore {
     // agent's read; so is a reply that tags agents.
     if (!message.to && !hasTags(message) && (this.messages.get(message.thread_id)?.agent_checked_seq ?? 0) >= seq) return false;
     return true;
+  }
+
+  /**
+   * A Tidy wake the Inbox withdrew before any hand-off (steps turned off, the
+   * wake listed only steps): recorded delivered under `host` (the Inbox's own
+   * marker) so nothing hands it, and nothing else. Unlike `recordDelivery` it
+   * settles nothing in the thread: the person's earlier replies to that
+   * session stay owed (no `markAgentChecked`), and no 👍 reads seen.
+   */
+  recordTidyWithdrawn(noteId: string, host: string): InboxMessage {
+    const note = this.messages.get(noteId);
+    if (!note || !note.tidy?.wake || !note.to) throw new InboxError("message_not_found", `No Tidy wake ${noteId}.`);
+    if (note.delivery) return note;
+    const at = this.stamp();
+    const withdrawn: InboxMessage = { ...note, delivery: { state: "delivered", host, session: note.to.session, at } };
+    this.appendMessage(withdrawn, at);
+    return withdrawn;
   }
 
   /**
@@ -5844,6 +5892,88 @@ export class InboxStore {
       out.set(session, { id: message.thread_id, subject: this.threadSubject(message.thread_id), at: message.created_at, project_id: message.project_id });
     }
     return out;
+  }
+
+  // ─────────────────────────── thread steps ───────────────────────────
+  //
+  // Approval "inbox-thread-steps" (2026-11-03). One record per (thread, agent
+  // session) in its project's steps.jsonl, on the store's one seq: each line
+  // the session's whole list, which replaces the last one. Silent: no message,
+  // no unread, no notification, and nothing that routes or lists threads
+  // reads it. Whether agents may send steps (the person's switch) is the
+  // server's to check; the store keeps whatever was written.
+
+  /** The session's steps in `threadId` (a thread or message id), or null when it sent none. */
+  stepsOf(threadId: string, session: string): InboxSteps | null {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const id = this.stepsIdOf.get(`${root}\0${session}`);
+    return id ? (this.stepsById.get(id) ?? null) : null;
+  }
+
+  /** A thread's lists that hold steps, one per agent session, the latest first. */
+  threadSteps(threadId: string): InboxSteps[] {
+    const root = this.messages.get(threadId)?.thread_id ?? threadId;
+    const out: InboxSteps[] = [];
+    for (const id of this.stepsIdsByThread.get(root) ?? []) {
+      const record = this.stepsById.get(id);
+      if (record && record.steps.length > 0) out.push(record);
+    }
+    return out.sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id));
+  }
+
+  /** Every list that holds steps, in threads that still exist (Tidy reads them). */
+  allSteps(): InboxSteps[] {
+    const out: InboxSteps[] = [];
+    for (const record of this.stepsById.values()) {
+      if (record.steps.length > 0 && this.messages.get(record.thread_id)?.thread_id === record.thread_id) out.push(record);
+    }
+    return out;
+  }
+
+  /**
+   * Set an agent session's steps in a thread: `steps` is the whole list (an
+   * empty one clears it). Refused with a validation_error, nothing written,
+   * when the list does not read (inboxSteps limits) or the caller has no
+   * session; thread_not_found for an unknown thread. A list that reads the
+   * same as the last one writes nothing (`changed` false). `record` is the
+   * session's record after the call: null only when it never sent a list and
+   * this one is empty (there is no record to name).
+   */
+  setThreadSteps(input: { thread_id: string; agent: InboxAuthor; steps: unknown }): { record: InboxSteps | null; changed: boolean } {
+    const agent = input.agent;
+    if (agent.kind !== "agent" || !agent.session?.trim()) {
+      throw new InboxError("validation_error", "agent_session: steps belong to an agent session (the connection fills it).", { field: "agent_session" });
+    }
+    const message = this.messages.get(input.thread_id?.trim?.() ?? "");
+    if (!message) throw new InboxError("thread_not_found", `No thread or message ${input.thread_id}.`, { field: "thread_id" });
+    const root = this.messages.get(message.thread_id);
+    if (!root) throw new InboxError("thread_not_found", `No thread ${message.thread_id}.`, { field: "thread_id" });
+    const session = agent.session.trim();
+    const previous = this.stepsOf(root.id, session);
+    const at = this.now().toISOString();
+    const checked = normalizeInboxSteps(input.steps, previous?.steps ?? [], at);
+    if ("error" in checked) throw new InboxError("validation_error", checked.error, { field: checked.field });
+    if (previous ? sameInboxSteps(previous.steps, checked.steps) : checked.steps.length === 0) {
+      return { record: previous, changed: false };
+    }
+    const record: InboxSteps = {
+      id: previous?.id ?? inboxId("stp"),
+      project_id: root.project_id,
+      thread_id: root.id,
+      agent: { kind: "agent", host: agent.host, session, name: agent.name },
+      steps: checked.steps,
+      updated_at: at,
+    };
+    const project = this.projectsById.get(root.project_id);
+    if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
+    this.write(join(this.projectFolder(project), STEPS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "steps", id: record.id, record });
+    // An older Inbox never reads steps.jsonl: the floor keeps it from handing out this seq again.
+    try {
+      this.keepSeqFloor();
+    } catch {
+      // Best effort: the line is written; only a downgrade would read the floor.
+    }
+    return { record, changed: true };
   }
 
   // ─────────────────────────── the Board's cards ───────────────────────────
