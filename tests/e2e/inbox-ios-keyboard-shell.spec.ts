@@ -360,7 +360,8 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const pane = page.locator('section.ib-pane');
     await pane.locator('fieldset[data-question-key] [data-question-option]').filter({ hasText: 'Yes' }).first().click();
     const field = await openReply(page, world.reply);
-    await expect(pane.locator('[data-picks-chip]')).toBeVisible();
+    // A phone's box draws no "1 pick" chip: the answers list says it (approval "inbox-reply-foot-phone").
+    await expect(pane.locator('.ib-rbox [data-reply-answers]')).toBeVisible();
     const attach = pane.locator('.ib-rbox .ib-rfoot [data-reply-attach]');
     await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
     await expect(pane.locator('.ib-rbox [data-compose-file="done"]')).toHaveCount(1);
