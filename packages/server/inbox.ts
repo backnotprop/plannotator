@@ -39,6 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -2675,6 +2676,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** A tailnet login the allow list let in that is not this computer's owner: never starts, stops or deletes an agent (as Ask AI's own check below). */
   const isGuest = (req: Request, via: string) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers);
+  /** Whether the request being handled is a guest's (`isGuest`), for what its store writes set off (a launched session's respawn). */
+  const guestRequest = new AsyncLocalStorage<boolean>();
   // Launch: compose starts Claude Code in a project, behind `inboxLaunch.enabled` (packages/server/inbox-launch.ts).
   // A start gets the person's login-shell env (read for that start only); a sandboxed test Inbox reads no shell and finds no CLI.
   const launch = createInboxLaunch({
@@ -2703,6 +2706,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The permission hook runs this Plannotator.
     selfCommand,
     isGuest,
+    writtenByGuest: () => guestRequest.getStore() === true,
   });
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
@@ -4029,7 +4033,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
   const handleMarkingSnoozes = async (req: Request, via: RequestVia): Promise<Response> => {
     const ask = req.method === "POST" && INBOX_SNOOZE_WRITE.test(new URL(req.url, "http://127.0.0.1").pathname) && ownerOrLocal(req, via) ? req.clone() : null;
-    const response = await handle(req, via);
+    const response = await guestRequest.run(isGuest(req, via), () => handle(req, via));
     if (ask && response.ok) {
       const body = (await ask.json().catch(() => null)) as { until?: unknown } | null;
       if (typeof body?.until === "string") markSnoozeUsed();
