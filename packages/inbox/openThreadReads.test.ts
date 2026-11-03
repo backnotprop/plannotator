@@ -11,7 +11,7 @@
  * (packages/server) checks the map against every write that changes a thread.
  */
 import { describe, expect, test } from 'bun:test';
-import type { InboxListRow } from '@plannotator/core/inbox-types';
+import { INBOX_REPO_TTL_MS, type InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from './api';
 import { listsThread, newRecordBatch, noteRecord, openThreadRead, type OpenThreadState } from './openThreadReads';
 
@@ -31,6 +31,8 @@ const settledOpen = (over: Partial<OpenThreadState> = {}): OpenThreadState => ({
   threadId: OPEN,
   remote: false,
   loaded: { thread_id: OPEN, project: { repo: { display: 'acme/web', host: 'github.com' } } },
+  loadedAt: 1_000_000,
+  now: 1_000_000 + 60_000,
   settled: true,
   listed: true,
   ...over,
@@ -99,6 +101,11 @@ describe('an open thread whose view does not come from records alone is read on 
 
   test('not in the list (archived): its header reads its own row, which live sessions, snoozes and drafts change with no record', () => {
     expect(readFor(another, settledOpen({ listed: false }))).toBe('thread');
+  });
+
+  test("its last read is older than the repo's freshness: a changed git origin reaches its links, as when every record read it", () => {
+    expect(readFor(another, settledOpen({ loadedAt: 0, now: INBOX_REPO_TTL_MS + 1 }))).toBe('thread');
+    expect(readFor(another, settledOpen({ loadedAt: 0, now: INBOX_REPO_TTL_MS }))).toBe('files');
   });
 
   test("its project's repo not known yet (the server resolves it off the record path)", () => {

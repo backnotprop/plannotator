@@ -744,6 +744,8 @@ function Inbox() {
   const threadReadApplied = useRef(0);
   /** The open thread as last read, for the open effect when another read (the event stream's) landed first. */
   const threadLoaded = useRef<InboxThread | null>(null);
+  /** When `threadLoaded` landed (Date.now()): an old read is read again on the next record (openThreadReads.ts). */
+  const threadLoadedAt = useRef(0);
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
   /**
@@ -1295,6 +1297,7 @@ function Inbox() {
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
         threadLoaded.current = next.thread;
+        threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
         setThread(next.thread);
@@ -1589,6 +1592,8 @@ function Inbox() {
             threadId: open,
             remote: machineOf(open) !== null,
             loaded: threadLoaded.current,
+            loadedAt: threadLoadedAt.current,
+            now: Date.now(),
             settled: load === null || load.threadId !== open,
             listed: listsThread(latestRef.current, open),
           });

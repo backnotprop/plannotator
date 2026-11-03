@@ -10,7 +10,9 @@
  *  - its project (name, label, the project it was combined into): any project
  *    record, of any project (a new project can change another's label);
  *  - its project's repo, which the server learns off the record path: while
- *    it is not known yet, every record reads the thread, as before;
+ *    it is not known yet, every record reads the thread, as before; and once
+ *    the last read is older than the repo's freshness (`INBOX_REPO_TTL_MS`),
+ *    the next record reads it, as before, so a changed `origin` reaches its links;
  *  - its row (delivery, snooze, unsent work), which the window shows only
  *    when the list has no row for it (an archived thread): then every record
  *    reads the thread, as before;
@@ -24,7 +26,7 @@
  * a later read), and once the list read lands, the thread is read after all
  * when that list no longer has it (it was deleted elsewhere: no record says so).
  */
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { INBOX_REPO_TTL_MS, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from './api';
 import { listGroups } from './held';
 
@@ -77,6 +79,9 @@ export interface OpenThreadState {
   remote: boolean;
   /** Its last read that landed, or null (none yet since it opened). */
   loaded: { thread_id: string; project: { repo?: unknown } } | null;
+  /** When that read landed (ms, the window's clock), and now. */
+  loadedAt: number;
+  now: number;
   /** That read stands: no failure, wait or refusal shown for it. */
   settled: boolean;
   /** The latest list has its row (the header reads the list's row, not the thread read's). */
@@ -90,5 +95,7 @@ export function openThreadRead(batch: RecordBatch, open: OpenThreadState): OpenT
   if (batch.any || batch.threads.has(open.threadId)) return 'thread';
   if (open.remote || !open.settled || !open.listed) return 'thread';
   if (open.loaded?.thread_id !== open.threadId || open.loaded.project.repo == null) return 'thread';
+  // The server refreshes a repo only when a read asks for it after this long: read, as every record did before.
+  if (open.now - open.loadedAt > INBOX_REPO_TTL_MS) return 'thread';
   return 'files';
 }

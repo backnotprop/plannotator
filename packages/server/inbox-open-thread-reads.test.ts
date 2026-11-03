@@ -96,7 +96,7 @@ async function recordsSince(server: InboxServer, cursor: number): Promise<InboxE
 function decide(records: InboxEvent[], threadId: string): OpenThreadRead {
   const batch = newRecordBatch();
   for (const record of records) noteRecord(batch, record);
-  return openThreadRead(batch, { threadId, remote: false, loaded: { thread_id: threadId, project: { repo: { display: "acme/web", host: "github.com" } } }, settled: true, listed: true });
+  return openThreadRead(batch, { threadId, remote: false, loaded: { thread_id: threadId, project: { repo: { display: "acme/web", host: "github.com" } } }, loadedAt: 0, now: 0, settled: true, listed: true });
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
