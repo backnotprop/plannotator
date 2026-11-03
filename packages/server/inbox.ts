@@ -2683,7 +2683,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   (deliveryWatch as { unref?: () => void }).unref?.();
 
   const tagsRoute = createInboxTagsRoute({ store, serverSession, live, json });
-  const stepsRoute = createInboxStepsRoute({ store, serverSession, live, stepsOn, bridged: (host) => host !== null && BRIDGE_WAKING_HOSTS.has(host), json });
+  const stepsRoute = createInboxStepsRoute({ store, serverSession, live, stepsOn, json });
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
   const compose = createInboxCompose({

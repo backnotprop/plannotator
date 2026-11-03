@@ -198,8 +198,6 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^threads\/([^/]+)\/sessions$/, window: (m) => `/api/inbox/threads/${m[1]}/sessions` },
   // Tags (7.60): who the person can tag with `@`; the tags ride the reply's `tags`, forwarded unchanged.
   { method: "GET", route: /^threads\/([^/]+)\/taggable$/, window: (m) => `/api/inbox/threads/${m[1]}/taggable` },
-  // Thread steps (approval "inbox-thread-steps"), read only: the phone's steps sheet.
-  { method: "GET", route: /^threads\/([^/]+)\/steps$/, window: (m) => `/api/inbox/threads/${m[1]}/steps` },
   { method: "POST", route: /^threads\/([^/]+)\/message$/, window: (m) => `/api/inbox/threads/${m[1]}/message` },
   // Compose (7.39, 7.40): every live session, and a thread the person starts (the body's key is also the store's own).
   { method: "GET", route: /^sessions$/, window: () => "/api/inbox/sessions" },

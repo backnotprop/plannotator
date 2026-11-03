@@ -1000,8 +1000,21 @@ export function createInboxLiveSessions(options: {
     return polled === null ? called : called === null ? polled : Math.max(polled, called);
   };
 
+  /**
+   * Evidence that `session` ended (thread steps' presence): it polled in this run and no longer does, or the
+   * Inbox wakes it itself and knows its thread is gone. A session never seen polling is never ended here,
+   * whatever host it names: it may read the thread at any time (inbox-compose.md, "Replying when the asking
+   * session has ended").
+   */
+  const endedOf = (session: string): boolean => {
+    if (options.wakeOnlyStatus?.(session) === "dead") return true;
+    const entry = sessions.get(session);
+    return !!entry && entry.wakeOnly === undefined && !isLive(entry);
+  };
+
   return {
     lastHeardOf,
+    endedOf,
     pollStarted,
     stateChanged,
     seenWakeOnly,

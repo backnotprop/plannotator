@@ -208,6 +208,7 @@ const OPENED: { name: string; call: (w: World) => Call; ok?: number; guest?: [nu
   { name: "POST agents/notes: the note in a real file", call: () => ({ path: "/api/inbox/agents/notes", body: { add: ["codex"] } }), did: (w) => existsSync(join(w.fake.env.CODEX_HOME ?? join(w.fake.home, ".codex"), "AGENTS.md")) },
   { name: "POST agents/seen", call: () => ({ path: "/api/inbox/agents/seen", body: {} }) },
   { name: "settings board", call: () => ({ path: "/api/inbox/settings", body: { board: { on: true } } }), did: (w) => w.config().inboxBoard === true },
+  { name: "settings steps", call: () => ({ path: "/api/inbox/settings", body: { steps: { on: true } } }), did: (w) => w.config().inboxSteps === true },
   { name: "settings prompts: the reminder", call: () => ({ path: "/api/inbox/settings", body: { prompts: { inbox: { reminder: "Mine." } } } }), did: (w) => w.config().prompts?.inbox?.reminder === "Mine." },
   { name: "POST cards/marks", call: (w) => ({ path: "/api/inbox/cards/marks", body: { cards: [w.card.id] } }), did: (w) => w.forgeCalls.some((args) => args[0] === "api"), world: { board: true } },
   { name: "POST voice/key", call: () => ({ path: "/api/inbox/voice/key", body: { key: KEY } }), guest: [403, "owner_only"], did: (w) => existsSync(join(w.dataDir, "inbox", "voice-key")) },
