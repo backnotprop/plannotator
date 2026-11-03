@@ -816,6 +816,8 @@ const ReviewApp: React.FC = () => {
   const [sourceKind, setSourceKind] = useState<ReviewSourceKind>('vcs');
   const isStaticPatch = sourceKind === 'patch';
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
+  // `plannotator review --title` (#2289): the whole tab title, in place of `<repo> · Code Review`.
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
 
@@ -825,8 +827,8 @@ const ReviewApp: React.FC = () => {
   const repoName = repoInfo ? repoLabel(repoInfo.display, hideRepoOwner) : null;
 
   useEffect(() => {
-    document.title = repoName ? `${repoName} · Code Review` : "Code Review";
-  }, [repoName]);
+    document.title = sessionTitle ?? (repoName ? `${repoName} · Code Review` : "Code Review");
+  }, [repoName, sessionTitle]);
 
   const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, prPatchIncomplete, prPatchUpgradeAvailable, updatePRSession } = usePRSession();
   const { status: reviewProgressStatus, persistViewed, flush: flushReviewProgress } = useReviewProgress({
@@ -2864,6 +2866,7 @@ const ReviewApp: React.FC = () => {
         diagramEngine?: unknown;
         sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
+        title?: string;
         prMetadata?: PRMetadata;
         prStackInfo?: PRStackInfo | null;
         prStackTree?: PRStackTree | null;
@@ -2957,6 +2960,7 @@ const ReviewApp: React.FC = () => {
         // the demo. A card shows only when the forge answered (`onlyWithData` below).
         setRefCardTransport(refCardRouteTransport('/api/ref'));
         if (data.repoInfo) setRepoInfo(data.repoInfo);
+        if (typeof data.title === 'string' && data.title) setSessionTitle(data.title);
         updatePRSession({
           ...(data.prMetadata && { prMetadata: data.prMetadata }),
           ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),

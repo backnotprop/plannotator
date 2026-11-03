@@ -114,6 +114,48 @@ export function parseStrictAnnotateOptions(
   return { requireApproval, resultFile, remainingArgs };
 }
 
+/** The subcommands that take `--title`: the ones that open a page in a tab. */
+export const TITLE_COMMANDS: ReadonlySet<string> = new Set(["review", "annotate", "annotate-last", "last"]);
+
+export interface ParsedTitleOption {
+  /** The tab title the caller chose, whitespace collapsed; absent when not given or blank. */
+  title?: string;
+  remainingArgs: string[];
+}
+
+/**
+ * Take `--title <text>` out of the arguments (#2289). The text becomes the
+ * whole tab title, as given: runs of whitespace (a newline included) collapse
+ * to one space, the ends are trimmed, and nothing is cut, so the browser
+ * truncates a long title the way it truncates any other. A blank title is the
+ * same as none. Throws on a missing value, a second `--title`, or a command
+ * that opens no page.
+ */
+export function parseTitleOption(args: string[]): ParsedTitleOption {
+  let title: string | undefined;
+  let seen = false;
+  const remainingArgs: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg !== "--title") {
+      remainingArgs.push(arg);
+      continue;
+    }
+    if (seen) throw new Error("--title may only be specified once");
+    seen = true;
+    const value = args[index + 1];
+    // Like --result-file: a following flag is a forgotten value, not a title.
+    if (value === undefined || value.startsWith("--")) throw new Error("Missing value for --title");
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (collapsed) title = collapsed;
+    index += 1;
+  }
+  if (seen && !TITLE_COMMANDS.has(remainingArgs[0] ?? "")) {
+    throw new Error("--title is only supported with: plannotator review, annotate, annotate-last (last)");
+  }
+  return title === undefined ? { remainingArgs } : { title, remainingArgs };
+}
+
 /** True when any token is a help flag (`--help` / `-h`). */
 export function hasHelpFlag(args: string[]): boolean {
   return args.some((arg) => HELP_FLAGS.has(arg));
@@ -156,9 +198,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
@@ -443,7 +485,7 @@ export const UPDATE_COMMAND_USAGE = [
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
     "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
     "",
@@ -465,6 +507,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                stays what local refs resolve to; Fetch still works. Useful when",
     "                SSH auth costs a hardware-key touch. Also PLANNOTATOR_GIT_REMOTE_CHECK=0",
     "                or { \"gitRemoteCheck\": false } in the data dir's config.json.",
+    "  --title <text>",
+    "                Name the browser tab this, in place of \"<repo> · Code Review\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        You wait for the sign-off: a bare Approve reaches you too. The approval",
     "                is printed either way; an agent host that only logs a bare Approve",
@@ -497,7 +541,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "Several existing file paths (plannotator annotate spec.md mock.html notes.md) open",
@@ -506,6 +550,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
     "  --no-jina     Fetch URLs with fetch+Turndown instead of Jina Reader",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of the file",
+    "                or folder name, whichever document is open",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
@@ -518,13 +565,15 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
     "Options:",
     "  --stdin       Read the message content from stdin instead of session logs",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of \"Last message\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",

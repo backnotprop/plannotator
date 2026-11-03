@@ -109,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -232,6 +232,7 @@ import {
   isTopLevelHelpInvocation,
   isVersionInvocation,
   parseStrictAnnotateOptions,
+  parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
 } from "./cli";
@@ -434,6 +435,19 @@ if (browserIdx !== -1 && args[browserIdx + 1]) {
   args.splice(browserIdx, 2);
 }
 
+// Session flag: --title <text> (review / annotate / annotate-last) — the whole
+// tab title, and the annotate header's name, chosen by the caller (#2289).
+// Before the boolean flags, so a title can never be read as one of them.
+let sessionTitle: string | undefined;
+try {
+  const parsedTitle = parseTitleOption(args);
+  sessionTitle = parsedTitle.title;
+  args.splice(0, args.length, ...parsedTitle.remainingArgs);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(annotateStartupFailureExitCode({ requireApproval: requireApprovalFlag, resultFile }));
+}
+
 // Transport flag: --tailscale (review / annotate / annotate-last) — publish
 // the session over the user's tailnet via `tailscale serve`. The server stays
 // LOOPBACK-bound: serve provides reachability plus TLS, so remote mode's wide
@@ -445,14 +459,28 @@ const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last
 // `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
 // a long-lived, owner-only publication, never this per-session transport.
 const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
-const tailscaleFlag = tailscaleIdx !== -1;
-if (tailscaleFlag) {
+if (tailscaleIdx !== -1) {
   args.splice(tailscaleIdx, 1);
   if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
     console.error(
       "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
     );
     process.exit(1);
+  }
+}
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" make the flag the default
+// for the same subcommands (every other subcommand ignores them), so a host
+// or agent need not pass it on every call.
+const tailscaleResolved = TAILSCALE_COMMANDS.has(args[0] ?? "")
+  ? resolveSessionTailscale(loadConfig(), process.env, tailscaleIdx !== -1)
+  : { on: false, source: "default" as const };
+const tailscaleFlag = tailscaleResolved.on;
+const tailscaleOptOut = sessionTailscaleOptOut(tailscaleResolved.source);
+if (tailscaleFlag) {
+  if (tailscaleResolved.source !== "flag") {
+    process.stderr.write(
+      `[plannotator] Publishing over your tailnet (${tailscaleResolved.source === "env" ? "PLANNOTATOR_TAILSCALE" : 'config.json "tailscale"'}).\n`,
+    );
   }
   if (isRemoteSession()) {
     process.stderr.write(
@@ -516,7 +544,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.stderr.write("To keep working on this computer, run the same command without --tailscale.\n");
+    process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -1540,6 +1568,8 @@ if (args[0] === "sessions") {
     error: diffError,
     origin: detectedOrigin,
     project: reviewProject,
+    // `--title`: the tab names what the caller chose (#2289).
+    title: sessionTitle,
     includeReviewDirectory: !!reviewDirectory,
     diffType: workspace ? (initialDiffType ?? workspace.diffType) : gitContext ? (initialDiffType ?? "unstaged") : initialDiffType,
     gitContext,
@@ -1809,7 +1839,7 @@ if (args[0] === "sessions") {
   // terminal treats tailnet publication; the server throw backstops this.
   if (liveAppResolved && tailscaleFlag) {
     exitAnnotateStartupFailure(
-      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+      `Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). To annotate it live, ${tailscaleOptOut}; or use --static to annotate a converted snapshot of the page.`,
     );
   }
 
@@ -1837,6 +1867,8 @@ if (args[0] === "sessions") {
     bundleFiles,
     sourceInfo,
     sourceConverted,
+    // `--title`: the tab and the header name what the caller chose (#2289).
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
@@ -2164,6 +2196,7 @@ if (args[0] === "sessions") {
     filePath: "last-message",
     origin: copilotDetected ? "copilot-cli" : detectedOrigin,
     mode: "annotate-last",
+    title: sessionTitle,
     sharingEnabled,
     shareBaseUrl,
     pasteApiUrl,
