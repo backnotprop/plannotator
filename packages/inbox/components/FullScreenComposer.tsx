@@ -445,7 +445,7 @@ export function FullScreenComposer({
               state.setMinimized(true);
             }}
             aria-label={value.onGather ? 'Hide tools' : 'Hide the composer'}
-            aria-expanded={true}
+            aria-expanded={value.onGather ? undefined : true}
             data-fcomp-minimize=""
           >
             <Icon name="chevsD" size={phone ? 18 : 15} />

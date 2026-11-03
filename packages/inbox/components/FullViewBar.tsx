@@ -145,6 +145,14 @@ function Tip({ text, note, keys, phone, passEscape, children }: { text: string; 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** What the live region says when the tools gather. */
 const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
+/**
+ * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
+ * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip and Contents button.
+ * The changed chip is not here: it is a fact about the file.
+ */
+export const GATHERED = '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open';
+/** Focus sits in something that is about to gather (and go inert or hidden). */
+const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
 export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(function FullViewBar(props, ref) {
   const { phone, comments, position, state } = props;
@@ -181,7 +189,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (!pendingFocus.current && active && active !== document.body) {
-      if (state === 'tucked' && barRef.current?.contains(active)) pendingFocus.current = 'handle';
+      if (state === 'tucked' && active.closest(GATHERED)) pendingFocus.current = 'handle';
       else if (state !== 'tucked' && active === handleRef.current) pendingFocus.current = 'bar';
     }
     if (barRef.current) barRef.current.inert = state === 'tucked';
@@ -193,7 +201,8 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     ref,
     () => ({
       toggle: () => {
-        if (stateRef.current === 'pinned') setRef.current('tucked', barRef.current?.contains(document.activeElement) ? 'handle' : null, HIDDEN_SAYING);
+        // Focus in anything that gathers (the toolbar, a button of the card, the size bar) goes to the corner control, never to the body.
+        if (stateRef.current === 'pinned') setRef.current('tucked', focusGathers() ? 'handle' : null, HIDDEN_SAYING);
         else setRef.current('pinned', null, 'Tools shown.');
       },
       hide: () => setRef.current('tucked', 'handle', HIDDEN_SAYING),

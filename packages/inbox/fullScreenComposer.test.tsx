@@ -32,6 +32,7 @@ import { NO_BROWSER } from '../../tests/helpers/no-browser';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { resetComposerState } = (hasDom ? await import('./fullScreenComposer') : {}) as typeof import('./fullScreenComposer');
+const { getShortcutPlatform } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
 
 setDefaultTimeout(30_000);
 
@@ -66,7 +67,7 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
   });
 }
 
-const TESTS = 13;
+const TESTS = 14;
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000020000000308060000009d74c6e10000000d49444154789c636060000000040001f61738550000000049454e44ae426082', 'hex');
 const image = (name: string) => new File([PNG], name, { type: 'image/png' });
@@ -388,6 +389,39 @@ test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until
   expect(document.activeElement).toBe(host!.querySelector('[data-full-view-hide]'));
 });
 
+/** The platform's own ⌘⇧X (the html-annotate scope's Hide / Show tools). */
+const toolsChord = (): KeyboardEventInit =>
+  getShortcutPlatform() === 'mac' ? { key: 'X', code: 'KeyX', metaKey: true, shiftKey: true } : { key: 'X', code: 'KeyX', ctrlKey: true, shiftKey: true };
+
+test.skipIf(!hasDom)('⌘⇧X with focus on a button of the card: focus goes to the corner control, never to the body; a later » comes back to », not to the field', async () => {
+  await renderFull('page.html');
+  const minimize = card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!;
+  act(() => minimize.focus());
+  expect(document.activeElement).toBe(minimize);
+  await act(async () => {
+    minimize.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...toolsChord() }));
+  });
+  expect(toolsState()).toBe('tucked');
+  expect(card()!.inert).toBe(true);
+  expect(document.activeElement).toBe(corner());
+
+  // Gathered by ⌄, then brought back by the chord from the page (focus not on the corner control): that gather is
+  // forgotten, so » and a press on the corner control put focus back on », not in the card's field.
+  await click(corner()!);
+  await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
+  expect(toolsState()).toBe('tucked');
+  await act(async () => (document.activeElement as HTMLElement | null)?.blur());
+  await act(async () => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...toolsChord() }));
+  });
+  expect(toolsState()).toBe('pinned');
+  const hide = host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!;
+  await click(hide);
+  expect(toolsState()).toBe('tucked');
+  await click(corner()!);
+  expect(document.activeElement).toBe(hide);
+});
+
 test.skipIf(!hasDom)('Send from the card refuses as the thread’s Send does: nothing to send, or the server refusing; the words stay, full screen stays', async () => {
   await renderFull('shot.png');
   await click(radio('reply'));
@@ -576,6 +610,15 @@ for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
     expect(radio('comment').getAttribute('aria-checked')).toBe('true');
     expect(commentField()!.closest('[hidden]')).toBeNull();
     expect(commentField()!.value).toBe('Too much padding.');
+    if (away === 'gathered into the corner') {
+      // Keep writing brought the tools back, so the ⌄ that gathered them is forgotten: » and the corner control put
+      // focus back on », not in a field (on a phone that would raise the keyboard).
+      expect(toolsState()).toBe('pinned');
+      const hide = host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!;
+      await click(hide);
+      await click(corner()!);
+      expect(document.activeElement).toBe(hide);
+    }
   });
 }
 

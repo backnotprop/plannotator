@@ -60,7 +60,7 @@ import { showsContents, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
-import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
 import { useHtmlPageComment } from './HtmlPageComment';
@@ -132,8 +132,6 @@ export function fileFootRow(section: ParentNode): HTMLElement | null {
 
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
-/** What floats over a file in full screen and gathers into the corner control with the toolbar (inbox.css). */
-const GATHERED = '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open';
 
 /**
  * Composers that close on Escape and would drop what was typed: a comment
@@ -470,10 +468,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
   const gatheredFrom = useRef<'bar' | 'composer'>('bar');
   /**
-   * Before the tools gather: how far each floating control is from the corner control, and how small it must get to
-   * match it (`--ib-gx`, `--ib-gy`, `--ib-gs`, read by inbox.css). Measured while they still sit where they rest.
+   * How far each floating control is from the corner control, and how small it must get to match it (`--ib-gx`,
+   * `--ib-gy`, `--ib-gs`, read by inbox.css): measured where they rest, before the tools gather and again after a
+   * resize or a rotation. Gathered (`gathered`), each is read with its flight's transform taken off for the moment
+   * (no transition), so the way back starts from where it rests now.
    */
-  const measureGather = () => {
+  const measureGather = (gathered = false) => {
     const section = sectionRef.current;
     const target = section?.querySelector<HTMLElement>('[data-full-view-handle]');
     if (!section || !target) return;
@@ -481,15 +481,46 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     const tx = to.left + to.width / 2;
     const ty = to.top + to.height / 2;
     const size = Math.max(target.offsetWidth, 32);
-    for (const el of section.querySelectorAll<HTMLElement>(GATHERED)) {
-      const at = el.getBoundingClientRect();
-      if (!at.width || !at.height) continue;
+    const floating = [...section.querySelectorAll<HTMLElement>(GATHERED)];
+    if (gathered) {
+      for (const el of floating) {
+        el.style.setProperty('transition', 'none');
+        el.style.setProperty('transform', 'none');
+      }
+    }
+    const boxes = floating.map((el) => el.getBoundingClientRect());
+    if (gathered) {
+      for (const el of floating) el.style.removeProperty('transform');
+      // The flight's transform is back before the transition is, so it does not animate.
+      void section.offsetWidth;
+      for (const el of floating) el.style.removeProperty('transition');
+    }
+    floating.forEach((el, i) => {
+      const at = boxes[i]!;
+      if (!at.width || !at.height) return;
       el.style.setProperty('--ib-gx', `${Math.round(tx - (at.left + at.width / 2))}px`);
       el.style.setProperty('--ib-gy', `${Math.round(ty - (at.top + at.height / 2))}px`);
       el.style.setProperty('--ib-gs', Math.min(0.6, Math.max(0.05, size / at.width)).toFixed(3));
-    }
+    });
   };
-  /** ⋯ is open (a popover of the toolbar: it does not tuck while open). */
+  /** The tools as drawn now (the pinch's tuck included), for the listeners below. */
+  const shownToolbarRef = useRef<ToolbarState>('pinned');
+  // A resize or a rotation (or a phone's keyboard closing as ⌄ takes focus out of the field) moves where things rest.
+  useEffect(() => {
+    if (!full) return;
+    const remeasure = () => measureGather(shownToolbarRef.current === 'tucked');
+    const first = requestAnimationFrame(remeasure);
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('orientationchange', remeasure);
+    window.visualViewport?.addEventListener('resize', remeasure);
+    return () => {
+      cancelAnimationFrame(first);
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('orientationchange', remeasure);
+      window.visualViewport?.removeEventListener('resize', remeasure);
+    };
+  }, [full, attachment.id]);
+  /** ⋯ is open (a popover in the toolbar). */
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
   const folded = !full && (phone || narrowPane);
@@ -1575,6 +1606,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [pinched]);
   const pinchTucks = pinched && !pinchShown && !htmlComment.open;
   const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
+  shownToolbarRef.current = shownToolbar;
+  // Every way back to showing (the corner control, Keep writing, ⌘⇧X, leaving full screen, a pinch let go) forgets
+  // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
+  useEffect(() => {
+    if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
+  }, [shownToolbar]);
+  // A pinch's tuck does not pass through the toolbar's state: measured where they rest as it starts (this render runs
+  // before the tuck is drawn).
+  const pinchMeasured = useRef(false);
+  if (pinchTucks && toolbar === 'pinned' && !pinchMeasured.current) {
+    pinchMeasured.current = true;
+    measureGather();
+  } else if (!pinchTucks) pinchMeasured.current = false;
   // A zoom does not follow the person to the next file, where the browser lets go of it.
   useEffect(() => {
     if (phoneHtml) return releaseWindowZoom;

@@ -6599,18 +6599,21 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 
 /* The comment row's band is gone in full screen: the image or the film fills the pane under the floating card. */
 .ib-view.ib-fullview .ib-imgview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) { grid-template-rows: minmax(0, 1fr); }
-/* A film keeps its own controls clear: the stage ends above the card or the pill (not once Hide took them away). */
+/* A film keeps its own controls clear: the stage ends above the card or the pill. Gathered, it keeps 60 px clear of
+   the corner control, with or without a composer (a resolved thread has none: the corner control then sits above
+   the comment row, over the stage's foot). */
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
-.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: 60px; }
+.ib-view.ib-fullview[data-tools="tucked"] .ib-vidview .ib-vidstage { padding-bottom: 60px; box-sizing: border-box; }
 
 /* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
-   its pill, the image's size bar, a text file's toolstrip and Contents button (inert as well, or hidden: nothing
-   invisible takes focus). Each comes back the same way. The changed chip stays: it is a fact about the file. */
-.ib-view.ib-fullview :is(.ib-imgbar, .ib-toolstrip, .ib-contents-open) { transition: var(--ib-gather-back); }
-.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
+   its pill, the image's size bar and "Your marked-up copy" chip, a text file's toolstrip and Contents button (inert as
+   well, or hidden: nothing invisible takes focus). Each comes back the same way. The changed chip stays: it is a fact
+   about the file. GATHERED in FullViewBar.tsx is the same list. */
+.ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open) { transition: var(--ib-gather-back); }
+.ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
 @media (prefers-reduced-motion: reduce) {
-  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open) { transform: none; }
+  .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open) { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
 }
 
