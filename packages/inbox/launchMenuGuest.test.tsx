@@ -154,3 +154,18 @@ test.skipIf(!hasDom)("a tailnet guest's run line has no Stop (working, or waitin
   expect(await runButtons(true, waiting)).toEqual([]);
   expect(await runButtons(true, failed)).toEqual([]);
 });
+
+/** The stopped run line's words on the drawn page. */
+async function stoppedLine(guest: boolean): Promise<string> {
+  await draw(guest, runOf({ state: 'stopped', stopped_by_person: true }));
+  await until(() => !!host!.querySelector('[data-run="stopped"]'), 'the stopped line');
+  const text = host!.querySelector('[data-run="stopped"] .ib-run-text')!.textContent ?? '';
+  undraw();
+  return text;
+}
+
+test.skipIf(!hasDom)("a stopped session: the owner's line says their reply starts it again; a guest's never does, nor that the guest stopped it", async () => {
+  expect(await stoppedLine(false)).toContain('Your reply starts it again.');
+  const guests = await stoppedLine(true);
+  expect(guests).toBe('Claude Code stopped. Your reply waits for it.');
+});
