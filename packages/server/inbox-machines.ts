@@ -106,6 +106,8 @@ export interface InboxMachinesContext {
    * whose thread, message, file, comment or project is this machine's: whatever a window believes, it never goes to a peer.
    */
   holds: (kind: HeldKind, id: string) => boolean;
+  /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
+  isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -571,7 +573,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The forward: /api/inbox/m/<machine>/<door route> ──
 
-  const forward = async (req: Request, url: URL, machine: string, route: string): Promise<Response> => {
+  const forward = async (req: Request, url: URL, machine: string, route: string, via: "local" | "tailnet"): Promise<Response> => {
     const peer = peers.get(machine);
     if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
     // The window's own stream carries other machines' records; a merged view is never asked of a machine.
@@ -600,6 +602,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+    // A write to another machine comes only from the owner's own window: a guest let onto this Inbox's tailnet was
+    // never let onto that machine, and a bare call (an agent's curl) is not the person. Reads stay as they are.
+    if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
+    const windowOnly = () => json({ error: "Only the Inbox window can act on another machine.", code: "window_only" }, 403);
+    if (!req.headers.get("origin") || !isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) return windowOnly();
     // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -613,7 +620,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
         // A file's stale-tab guard rides the query: checked here against this Inbox's page session, never sent on.
         const query = new URLSearchParams(url.search);
         const session = query.get("serverSession");
-        if (session !== null && checkServerSession({ serverSession: session }, context.serverSession) === "mismatch") {
+        if (session === null) return windowOnly();
+        if (checkServerSession({ serverSession: session }, context.serverSession) === "mismatch") {
           return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         }
         query.delete("serverSession");
@@ -625,6 +633,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
+    if (typeof body.serverSession !== "string") return windowOnly();
     if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     // A write that names this Inbox's thread, message, file or project in its body (a comment, a new message) is refused the same way.
     for (const [key, held] of BODY_IDS) {
@@ -712,7 +721,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
     }
     const forwarded = FORWARD.exec(path);
-    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!);
+    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!, via);
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       return json({ self: links.selfId, machines: machinesView() });
