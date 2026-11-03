@@ -5241,12 +5241,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-st-asof::before { content: "·"; margin: 0 6px 0 1px; }
 .ib-st-grow { flex: 1; }
 .ib-st-x { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 8px; color: var(--muted-foreground); margin-right: -6px; }
-.ib-st-x:hover { background: var(--ib-hover); color: var(--foreground); }
+@media (hover: hover) { .ib-st-x:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-st-x:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 
 .ib-sts { list-style: none; margin: 0; padding: 0; }
 .ib-st { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 430; }
-.ib-st:hover { background: var(--ib-hover); }
+/* A touch leaves no hover behind: the sheet opens under the finger that opened it. */
+@media (hover: hover) { .ib-st:hover { background: var(--ib-hover); } }
 .ib-st-gl { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
 .ib-st-t { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
 .ib-st-m { flex: 0 1 auto; min-width: 0; max-width: 50%; margin-left: auto; padding-left: 12px; color: var(--ib-st-mut); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
