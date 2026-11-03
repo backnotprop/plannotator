@@ -1179,7 +1179,7 @@ describe("the tailnet door with Phones off, in process", () => {
   }, 60_000);
 });
 
-describe("the forward takes a write only from the owner's own window", () => {
+describe("the forward takes no write from a tailnet guest", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";
   const GUEST = "guest@example.com";
@@ -1215,7 +1215,7 @@ describe("the forward takes a write only from the owner's own window", () => {
     return { serve, run };
   }
 
-  test("a tailnet guest of this machine, or a bare call on it, never writes to a linked machine; the owner's window does, and reads stay open", async () => {
+  test("a tailnet guest of this machine never writes to a linked machine, though it reads; the owner writes from every path: this window, another device, a plain local call", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-forward-owner-")));
     roots.push(root);
     const dataA = join(root, "macbook");
@@ -1293,34 +1293,51 @@ describe("the forward takes a write only from the owner's own window", () => {
         body: "from the guest",
       });
       expect([upload.status, ((await upload.json()) as Json).code]).toEqual([403, "owner_only"]);
-
-      // A bare call on A (an agent's curl: no page Origin, no page session) is refused too, a file included.
-      const bare = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idempotency_key: "bare-reply", words: "An agent says retry.", seen_through_seq: cursor }),
-      });
-      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
-      const bareUpload = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/uploads?name=bare.txt&idempotency_key=bare-up`, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: "from an agent",
-      });
-      expect([bareUpload.status, ((await bareUpload.json()) as Json).code]).toEqual([403, "window_only"]);
       expect(await personOnB()).toHaveLength(0);
       expect(existsSync(join(dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
 
-      // The owner's own page over the tailnet answers, once.
-      const owned = await throughServe(OWNER, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
-        idempotency_key: "owner-reply",
-        words: "Owner says retry.",
-        seen_through_seq: cursor,
+      // The owner keeps everything through the forward, each answer delivered to B once.
+      const cursorNow = async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/threads/${asked.thread_id}`)).json()) as Json).cursor as number;
+      const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
+      // The owner's window on this machine.
+      const local = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${a.port}` },
+        body: JSON.stringify({ serverSession: await sessionOf(a.port), idempotency_key: "owner-local", words: "From the MacBook's window.", seen_through_seq: await cursorNow() }),
       });
-      expect(owned.status).toBe(200);
-      expect(owned.headers.get("x-plannotator-outbox")).toBe("delivered");
-      const landed = await personOnB();
-      expect(landed).toHaveLength(1);
-      expect(landed[0]!.body).toStartWith("Owner says retry.");
+      expect(await delivered(local)).toEqual([200, "delivered"]);
+      // The owner's window on another of their devices over the tailnet (the same login): a reply, a mark read, a file.
+      const remote = await throughServe(OWNER, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        idempotency_key: "owner-tailnet",
+        words: "From the owner's phone browser.",
+        seen_through_seq: await cursorNow(),
+      });
+      expect(await delivered(remote)).toEqual([200, "delivered"]);
+      expect(await delivered(await throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-tailnet-read" }))).toEqual([200, "delivered"]);
+      const ownerUpload = await fetch(`http://127.0.0.1:${listener}/api/inbox/m/${mini}/uploads?name=owner.txt&idempotency_key=owner-up&serverSession=${await sessionOf(a.port)}`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "text/plain", Origin: page, "Sec-Fetch-Site": "same-origin" },
+        body: "from the owner",
+      });
+      expect(ownerUpload.status).toBe(200);
+      // A plain local call with no Origin and no page session (an agent, a script, the CLI on this machine): a reply and a file.
+      const bare = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotency_key: "owner-bare", words: "From a script on the MacBook.", seen_through_seq: await cursorNow() }),
+      });
+      expect(await delivered(bare)).toEqual([200, "delivered"]);
+      const bareUpload = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/uploads?name=bare.txt&idempotency_key=owner-bare-up`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: "from a script",
+      });
+      expect(bareUpload.status).toBe(200);
+      const landed = (await personOnB()).map((m) => m.body as string);
+      expect(landed).toHaveLength(3);
+      expect(landed[0]).toStartWith("From the MacBook's window.");
+      expect(landed[1]).toStartWith("From the owner's phone browser.");
+      expect(landed[2]).toStartWith("From a script on the MacBook.");
     } finally {
       await client.close().catch(() => {});
       a.stop();
