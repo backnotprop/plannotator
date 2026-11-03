@@ -74,6 +74,7 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
 import { ThreadPane } from './components/Thread';
+import { ReactionLandedContext, reactionSoundOn } from './components/ReactionBadge';
 import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
@@ -150,7 +151,7 @@ import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxReactionsSettings, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
@@ -877,6 +878,16 @@ function Inbox() {
     settings: settings?.sound,
     onSettings: (next) => setSettings((current) => (current ? { ...current, sound: next } : current)),
   });
+  // An emoji reaction landed in the thread on screen: its sound, when Settings → Capabilities → Sound is on.
+  const reactionSoundOnRef = useRef(reactionSoundOn(settings?.reactions));
+  reactionSoundOnRef.current = reactionSoundOn(settings?.reactions);
+  const reactionLandedSound = sound.reactionLanded;
+  const reactionLanded = useCallback(
+    (key: string) => {
+      if (reactionSoundOnRef.current) reactionLandedSound(key);
+    },
+    [reactionLandedSound],
+  );
   /**
    * Search (the approved "inbox-search" design): the palette's code loads on
    * the first open and stays mounted after. It opens from the sidebar's
@@ -3633,6 +3644,19 @@ function Inbox() {
     }
   };
 
+  // Settings → Capabilities → Emoji reactions: saved to config.json, applied at the next delivery; every device reads it.
+  const saveReactions = async (change: Partial<InboxReactionsSettings>) => {
+    setSettingsError(null);
+    setSettings((current) => (current?.reactions ? { ...current, reactions: { ...current.reactions, ...change } } : current));
+    try {
+      const saved = await inboxApi.saveReactions(change);
+      setSettings((current) => (current ? { ...current, reactions: saved.reactions } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -4710,6 +4734,7 @@ function Inbox() {
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
+        onReactions={(change) => void saveReactions(change)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5014,6 +5039,7 @@ function Inbox() {
           />
         )}
         {route.thread && thread && thread.thread_id === route.thread && (
+          <ReactionLandedContext.Provider value={reactionLanded}>
           <ThreadPane
             notice={
               <>
@@ -5163,6 +5189,7 @@ function Inbox() {
               closeTo({ ...routeRef.current, file: null });
             }}
           />
+          </ReactionLandedContext.Provider>
         )}
       </>
     );

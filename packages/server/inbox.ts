@@ -59,6 +59,9 @@ import {
   type InboxCardMark,
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
+  INBOX_REACTIONS_DEFAULT,
+  isInboxReactionLevel,
+  type InboxReactionsSettings,
   INBOX_TEXT_SIZE_DEFAULT,
   INBOX_ROWS_OPTIONS,
   INBOX_TOUR_VERSION,
@@ -131,6 +134,7 @@ import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { decideReaction } from "@plannotator/shared/inbox/reactions";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
 import {
@@ -1577,6 +1581,49 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Emoji reactions (approval "inbox-emoji-reactions", config.json
+   * `inboxReactions`): Off, Now and then (the default) or Often, and the
+   * reaction sound (on unless turned off). Read on every delivery, so a change
+   * applies at once, and every device reads the same through Settings.
+   */
+  const reactionsState = (): InboxReactionsSettings => {
+    const value = loadConfig().inboxReactions;
+    const saved = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return {
+      level: isInboxReactionLevel(saved.level) ? saved.level : INBOX_REACTIONS_DEFAULT.level,
+      sound: saved.sound !== false,
+    };
+  };
+  /** Save `level` / `sound`, keeping the other. `validateOnly`: check the input and write nothing. */
+  const saveReactions = (input: unknown, validateOnly = false): InboxReactionsSettings => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new InboxError("validation_error", "reactions: an object.", { field: "reactions" });
+    }
+    const next = { ...reactionsState() };
+    for (const [field, value] of Object.entries(input as Record<string, unknown>)) {
+      if (field === "level") {
+        if (!isInboxReactionLevel(value)) throw new InboxError("validation_error", "reactions.level: off, sometimes or often.", { field: "reactions.level" });
+        next.level = value;
+      } else if (field === "sound") {
+        if (typeof value !== "boolean") throw new InboxError("validation_error", "reactions.sound: must be a boolean.", { field: "reactions.sound" });
+        next.sound = value;
+      } else throw new InboxError("validation_error", `reactions.${field}: not a setting (level, sound).`, { field: `reactions.${field}` });
+    }
+    if (validateOnly) return reactionsState();
+    saveConfig({ inboxReactions: next });
+    const saved = reactionsState();
+    if (saved.level !== next.level || saved.sound !== next.sound) {
+      throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    }
+    return saved;
+  };
+  // The moment an agent receives the person's reply (store.recordDelivery): whether it gets an emoji.
+  store.setReactor((input) => {
+    const level = reactionsState().level;
+    return level === "off" ? null : decideReaction({ ...input, level });
+  });
+
+  /**
    * Plannotator's appearance (config.json `theme`, the same value plan
    * review, code review and annotate read and write through POST
    * /api/config): the mode and the palette for each half. The Inbox's
@@ -2006,6 +2053,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
+    /** Emoji reactions (config.json `inboxReactions`): Settings → Capabilities' last card. */
+    reactions: reactionsState(),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -3162,15 +3211,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.tour === undefined &&
           body.prompts === undefined &&
           body.board === undefined &&
+          body.reactions === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, reactions, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
         if (body.board !== undefined && !owner) return localOnly();
+        // Emoji reactions are the owner's Inbox reacting to the owner's replies: the owner's to change, like the Board.
+        if (body.reactions !== undefined && !owner) return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -3210,6 +3262,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.experimental !== undefined) saveExperimental(body.experimental, true);
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
+        if (body.reactions !== undefined) saveReactions(body.reactions, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -3228,9 +3281,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
+        const reactions = body.reactions === undefined ? reactionsState() : saveReactions(body.reactions);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, reactions, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {

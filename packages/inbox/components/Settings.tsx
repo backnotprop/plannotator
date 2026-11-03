@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES, type InboxReactionLevel, type InboxReactionsSettings } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
 import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
@@ -73,6 +73,8 @@ export interface SettingsPageProps {
   landOnExperimental?: boolean;
   /** Settings → Capabilities → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
   onToggleBoard?: (next: boolean) => void;
+  /** Settings → Capabilities → Emoji reactions: save how often, or the sound. Absent: no card. */
+  onReactions?: (change: Partial<InboxReactionsSettings>) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -461,6 +463,9 @@ function CapabilitiesSection({
   experimental,
   onToggleExperimental,
   experimentalHeading,
+  reactions,
+  onReactions,
+  sound,
 }: {
   board: { on: boolean } | null;
   onToggleBoard?: (next: boolean) => void;
@@ -468,6 +473,11 @@ function CapabilitiesSection({
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
+  /** Emoji reactions' card, last on the page. Absent: an Inbox before them. */
+  reactions: InboxReactionsSettings | null;
+  onReactions?: (change: Partial<InboxReactionsSettings>) => void;
+  /** The reaction sound's preview. */
+  sound?: InboxSound;
 }) {
   return (
     <>
@@ -490,6 +500,86 @@ function CapabilitiesSection({
           </div>
         </section>
       )}
+      <ExperimentalGroup experimental={experimental} onToggleExperimental={onToggleExperimental} experimentalHeading={experimentalHeading} />
+      {reactions && onReactions && <ReactionsCard reactions={reactions} onChange={onReactions} sound={sound} />}
+    </>
+  );
+}
+
+const REACTION_CHOICES: readonly { id: InboxReactionLevel; label: string }[] = [
+  { id: 'off', label: 'Off' },
+  { id: 'sometimes', label: 'Now and then' },
+  { id: 'often', label: 'Often' },
+];
+
+/**
+ * Emoji reactions (approval "inbox-emoji-reactions", settings-r4): one card,
+ * last on Capabilities, with no heading, paragraph or note. "Emoji
+ * reactions": Off / Now and then / Often. "Sound": a ▶ preview and a switch;
+ * the row greys out while reactions are Off. Saved to config.json, so every
+ * device that opens this Inbox shares it.
+ */
+function ReactionsCard({ reactions, onChange, sound }: { reactions: InboxReactionsSettings; onChange: (change: Partial<InboxReactionsSettings>) => void; sound?: InboxSound }) {
+  const off = reactions.level === 'off';
+  return (
+    <section className="ib-sgroup" data-settings-reactions={reactions.level} aria-label="Emoji reactions">
+      <div className="ib-card">
+        <div className="ib-prow">
+          <span className="ib-txt">
+            <span className="ib-l" id="ib-reactions-label">
+              Emoji reactions
+            </span>
+          </span>
+          <span className="ib-ctl">
+            <span className="ib-seg" role="radiogroup" aria-labelledby="ib-reactions-label">
+              {REACTION_CHOICES.map((choice) => (
+                <label key={choice.id} className="ib-seg-o" data-on={reactions.level === choice.id ? '' : undefined}>
+                  <input type="radio" name="ib-reactions" value={choice.id} checked={reactions.level === choice.id} onChange={() => onChange({ level: choice.id })} />
+                  {choice.label}
+                </label>
+              ))}
+            </span>
+          </span>
+        </div>
+        <div className="ib-prow" data-off={off ? '' : undefined} data-settings-reactions-sound={reactions.sound ? 'on' : 'off'}>
+          <span className="ib-txt">
+            <span className="ib-l" id="ib-reactions-sound-label">
+              Sound
+            </span>
+          </span>
+          <span className="ib-ctl">
+            {sound && (
+              <button
+                type="button"
+                className="ib-btn ib-sm ib-icon"
+                aria-label={sound.reactionPlaying ? 'Playing…' : 'Play the sound'}
+                data-reactions-play=""
+                data-playing={sound.reactionPlaying ? '' : undefined}
+                disabled={off}
+                onClick={() => sound.previewReaction()}
+              >
+                <Icon name="play" />
+              </button>
+            )}
+            <Switch on={reactions.sound} labelledBy="ib-reactions-sound-label" disabled={off} onClick={() => onChange({ sound: !reactions.sound })} />
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ExperimentalGroup({
+  experimental,
+  onToggleExperimental,
+  experimentalHeading,
+}: {
+  experimental: InboxExperimentalSettings | null;
+  onToggleExperimental?: (next: boolean) => void;
+  experimentalHeading: RefObject<HTMLHeadingElement | null>;
+}) {
+  return (
+    <>
       {experimental && onToggleExperimental && (
         <section className="ib-sgroup" data-settings-experimental="" aria-labelledby="ib-g-experimental">
           <h2 id="ib-g-experimental" ref={experimentalHeading} tabIndex={-1}>
@@ -816,13 +906,15 @@ export function SettingsPage(props: SettingsPageProps) {
   // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
+  // Emoji reactions: the last card on Capabilities (an older Inbox has none).
+  const reactions = settings?.reactions && props.onReactions ? settings.reactions : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || experimental !== null || reactions !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -997,13 +1089,16 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || experimental ? (
+          (board && props.onToggleBoard) || experimental || reactions ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
+              reactions={reactions}
+              onReactions={props.onReactions}
+              sound={sound}
             />
           ) : (
             <div className="ib-card ib-sempty" data-settings-capabilities-none="">

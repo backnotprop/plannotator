@@ -458,6 +458,15 @@ export interface PlannotatorConfig {
    * /api/inbox/settings` `{ board: { on } }`), read on every request.
    */
   inboxBoard?: boolean;
+  /**
+   * Emoji reactions (approval "inbox-emoji-reactions"): how often the Inbox
+   * puts an emoji on the person's reply when its agent receives it (`off`,
+   * `sometimes`: Now and then, the default; `often`), and whether the reaction
+   * sound plays as it lands (on unless false). Written by Settings →
+   * Capabilities (`POST /api/inbox/settings` `{ reactions }`), read on every
+   * delivery, so every device that opens this Inbox shares it.
+   */
+  inboxReactions?: { level?: string; sound?: boolean };
   inboxSound?: {
     enabled?: boolean;
     volume?: number;

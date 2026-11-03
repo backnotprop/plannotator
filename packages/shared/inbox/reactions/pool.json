@@ -1,0 +1,1299 @@
+{
+ "families": {
+  "praise": "praise / thanks",
+  "win": "win",
+  "goahead": "go-ahead",
+  "joke": "joke",
+  "looking": "looking / curious",
+  "owning": "owning the miss"
+ },
+ "kept": {
+  "😂": {
+   "words": [
+    "so funny",
+    "lol",
+    "haha",
+    "that is hilarious",
+    "cracking up"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "face with tears of joy"
+  },
+  "❤️": {
+   "words": [
+    "love it",
+    "thank you",
+    "great job",
+    "beautiful",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "heavy black heart"
+  },
+  "🤣": {
+   "words": [
+    "dying laughing",
+    "hilarious",
+    "lmao",
+    "too funny"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "rolling on the floor laughing"
+  },
+  "👍": {
+   "words": [
+    "yes",
+    "ok",
+    "sounds good",
+    "go ahead",
+    "approved",
+    "will do"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "thumbs up sign"
+  },
+  "😭": {
+   "words": [
+    "I am dying",
+    "too funny",
+    "crying laughing"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "loudly crying face",
+   "note": "also reads as real sadness; joke only"
+  },
+  "🙏": {
+   "words": [
+    "thank you",
+    "thanks",
+    "grateful",
+    "appreciate it",
+    "much appreciated"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "person with folded hands"
+  },
+  "🥰": {
+   "words": [
+    "love this",
+    "adore it",
+    "so sweet",
+    "warm and fuzzy"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "smiling face with smiling eyes and three hearts",
+   "note": "a little affectionate for an agent"
+  },
+  "😍": {
+   "words": [
+    "love how it looks",
+    "gorgeous",
+    "beautiful",
+    "stunning"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "smiling face with heart-shaped eyes"
+  },
+  "😊": {
+   "words": [
+    "glad",
+    "happy to help",
+    "you are welcome",
+    "that is kind",
+    "thanks"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "smiling face with smiling eyes"
+  },
+  "🎉": {
+   "words": [
+    "it works",
+    "shipped",
+    "finally",
+    "success",
+    "congrats",
+    "we did it"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "party popper"
+  },
+  "😁": {
+   "words": [
+    "yay",
+    "so happy",
+    "it works",
+    "great news"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "grinning face with smiling eyes"
+  },
+  "😅": {
+   "words": [
+    "oops",
+    "phew",
+    "my bad",
+    "nervous laugh",
+    "close one"
+   ],
+   "families": [
+    "owning",
+    "joke"
+   ],
+   "src": "popular",
+   "name": "smiling face with open mouth and cold sweat"
+  },
+  "🔥": {
+   "words": [
+    "amazing",
+    "impressive",
+    "on fire",
+    "crushing it",
+    "fantastic"
+   ],
+   "families": [
+    "praise",
+    "win"
+   ],
+   "src": "popular",
+   "name": "fire"
+  },
+  "☺️": {
+   "words": [
+    "thank you",
+    "that is kind",
+    "glad you like it",
+    "happy"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "white smiling face"
+  },
+  "🤦": {
+   "words": [
+    "my bad",
+    "doh",
+    "silly mistake",
+    "facepalm"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "popular",
+   "name": "face palm",
+   "note": "can read as aimed at the person"
+  },
+  "♥️": {
+   "words": [
+    "love it",
+    "thanks",
+    "sweet"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "black heart suit",
+   "note": "card-suit heart; a smaller ❤️"
+  },
+  "😆": {
+   "words": [
+    "haha",
+    "lol",
+    "funny",
+    "laughing hard"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "smiling face with open mouth and tightly-closed eyes"
+  },
+  "🤗": {
+   "words": [
+    "glad",
+    "warm thanks",
+    "happy to help",
+    "hug"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "hugging face"
+  },
+  "😉": {
+   "words": [
+    "wink",
+    "you got it",
+    "just kidding",
+    "our little secret"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "winking face"
+  },
+  "🤔": {
+   "words": [
+    "good question",
+    "let me think",
+    "hmm",
+    "thinking about it",
+    "considering"
+   ],
+   "families": [
+    "looking"
+   ],
+   "src": "popular",
+   "name": "thinking face"
+  },
+  "👏": {
+   "words": [
+    "well done",
+    "good job",
+    "nice work",
+    "bravo",
+    "applause"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "clapping hands sign"
+  },
+  "😳": {
+   "words": [
+    "oops",
+    "whoa",
+    "embarrassed",
+    "did not expect that"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "popular",
+   "name": "flushed face"
+  },
+  "🥳": {
+   "words": [
+    "we did it",
+    "released",
+    "celebrate",
+    "party time",
+    "shipped"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "face with party horn and party hat"
+  },
+  "😎": {
+   "words": [
+    "nailed it",
+    "smooth",
+    "cool",
+    "slick",
+    "works great"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "smiling face with sunglasses"
+  },
+  "👌": {
+   "words": [
+    "okay",
+    "perfect",
+    "agreed",
+    "good call",
+    "that choice"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "ok hand sign"
+  },
+  "💜": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "purple heart"
+  },
+  "💪": {
+   "words": [
+    "we got this",
+    "strong",
+    "let us do it",
+    "power through",
+    "solid"
+   ],
+   "families": [
+    "win",
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "flexed biceps"
+  },
+  "✨": {
+   "words": [
+    "looks great",
+    "clean",
+    "polished",
+    "beautiful",
+    "shiny and new"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "sparkles"
+  },
+  "💖": {
+   "words": [
+    "love it",
+    "so lovely",
+    "adore it",
+    "sparkling"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "sparkling heart"
+  },
+  "👀": {
+   "words": [
+    "looking at it",
+    "let me see",
+    "checking",
+    "curious",
+    "reading it"
+   ],
+   "families": [
+    "looking"
+   ],
+   "src": "popular",
+   "name": "eyes"
+  },
+  "💯": {
+   "words": [
+    "exactly",
+    "totally",
+    "one hundred percent",
+    "absolutely right",
+    "agreed"
+   ],
+   "families": [
+    "praise",
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "hundred points symbol"
+  },
+  "🎈": {
+   "words": [
+    "celebrate",
+    "party",
+    "yay",
+    "festive"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "balloon"
+  },
+  "💙": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "blue heart"
+  },
+  "😃": {
+   "words": [
+    "great",
+    "happy",
+    "glad",
+    "nice",
+    "excited"
+   ],
+   "families": [
+    "win",
+    "praise"
+   ],
+   "src": "popular",
+   "name": "smiling face with open mouth"
+  },
+  "😜": {
+   "words": [
+    "kidding",
+    "silly",
+    "playful",
+    "just joking"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "face with stuck-out tongue and winking eye"
+  },
+  "🙈": {
+   "words": [
+    "oops",
+    "cannot look",
+    "embarrassing",
+    "my bad"
+   ],
+   "families": [
+    "owning",
+    "joke"
+   ],
+   "src": "popular",
+   "name": "see-no-evil monkey"
+  },
+  "🤞": {
+   "words": [
+    "fingers crossed",
+    "hope it works",
+    "good luck",
+    "here is hoping"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "hand with index and middle fingers crossed"
+  },
+  "😄": {
+   "words": [
+    "happy",
+    "glad",
+    "great",
+    "love that"
+   ],
+   "families": [
+    "win",
+    "praise"
+   ],
+   "src": "popular",
+   "name": "smiling face with open mouth and smiling eyes"
+  },
+  "🙌": {
+   "words": [
+    "awesome",
+    "hooray",
+    "great news",
+    "yes",
+    "finally"
+   ],
+   "families": [
+    "praise",
+    "win"
+   ],
+   "src": "popular",
+   "name": "person raising both hands in celebration"
+  },
+  "🤪": {
+   "words": [
+    "silly",
+    "crazy",
+    "goofy",
+    "wild"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "grinning face with one large and one small eye"
+  },
+  "😀": {
+   "words": [
+    "happy",
+    "great",
+    "glad",
+    "all good"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "grinning face"
+  },
+  "😌": {
+   "words": [
+    "phew",
+    "relieved",
+    "calm",
+    "finally fixed",
+    "peace of mind"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "relieved face"
+  },
+  "🤩": {
+   "words": [
+    "amazing",
+    "wow",
+    "so impressive",
+    "love this",
+    "star struck"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "grinning face with star eyes"
+  },
+  "😬": {
+   "words": [
+    "oops",
+    "yikes",
+    "my mistake",
+    "awkward",
+    "sorry about that"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "popular",
+   "name": "grimacing face"
+  },
+  "🤭": {
+   "words": [
+    "oops",
+    "giggle",
+    "did not mean to",
+    "tee hee"
+   ],
+   "families": [
+    "joke"
+   ],
+   "src": "popular",
+   "name": "smiling face with smiling eyes and hand covering mouth"
+  },
+  "🎊": {
+   "words": [
+    "congrats",
+    "celebrate",
+    "confetti",
+    "party",
+    "launch day"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "confetti ball"
+  },
+  "💚": {
+   "words": [
+    "love it",
+    "thanks",
+    "all green",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "green heart"
+  },
+  "💥": {
+   "words": [
+    "boom",
+    "nailed it",
+    "done",
+    "bam"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "collision symbol"
+  },
+  "🙋": {
+   "words": [
+    "me",
+    "I will take it",
+    "question",
+    "volunteer",
+    "raising my hand"
+   ],
+   "families": [
+    "goahead",
+    "looking"
+   ],
+   "src": "popular",
+   "name": "happy person raising one hand"
+  },
+  "✅": {
+   "words": [
+    "done",
+    "completed",
+    "checked",
+    "finished",
+    "confirmed"
+   ],
+   "families": [
+    "goahead",
+    "win"
+   ],
+   "src": "popular",
+   "name": "white heavy check mark"
+  },
+  "🤝": {
+   "words": [
+    "deal",
+    "agreed",
+    "let us go with that",
+    "handshake",
+    "partners"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "handshake"
+  },
+  "🙇": {
+   "words": [
+    "apologies",
+    "sorry",
+    "my fault",
+    "humbly",
+    "bowing"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "popular",
+   "name": "person bowing deeply"
+  },
+  "🤯": {
+   "words": [
+    "mind blown",
+    "wow",
+    "incredible",
+    "cannot believe it works"
+   ],
+   "families": [
+    "praise",
+    "win"
+   ],
+   "src": "popular",
+   "name": "shocked face with exploding head"
+  },
+  "😮": {
+   "words": [
+    "oh",
+    "wow",
+    "surprised",
+    "did not expect that"
+   ],
+   "families": [
+    "looking"
+   ],
+   "src": "popular",
+   "name": "face with open mouth"
+  },
+  "😤": {
+   "words": [
+    "determined",
+    "let's go",
+    "game on",
+    "frustrated"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "face with look of triumph",
+   "note": "can read as huffing at the person"
+  },
+  "🧡": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "orange heart"
+  },
+  "💛": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "yellow heart"
+  },
+  "🤍": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "white heart"
+  },
+  "🌟": {
+   "words": [
+    "stellar",
+    "star work",
+    "outstanding",
+    "shining"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "popular",
+   "name": "glowing star"
+  },
+  "🚀": {
+   "words": [
+    "ship it",
+    "launch",
+    "release",
+    "deploy",
+    "let's go",
+    "fast"
+   ],
+   "families": [
+    "win",
+    "goahead"
+   ],
+   "src": "popular",
+   "name": "rocket"
+  },
+  "🏆": {
+   "words": [
+    "winner",
+    "champion",
+    "nailed it",
+    "top work"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "trophy"
+  },
+  "👊": {
+   "words": [
+    "let's go",
+    "fist bump",
+    "respect",
+    "we got this"
+   ],
+   "families": [
+    "goahead",
+    "win"
+   ],
+   "src": "popular",
+   "name": "fisted hand sign"
+  },
+  "🤘": {
+   "words": [
+    "rock on",
+    "hell yeah",
+    "awesome"
+   ],
+   "families": [
+    "win"
+   ],
+   "src": "popular",
+   "name": "sign of the horns"
+  },
+  "🥲": {
+   "words": [
+    "finally works",
+    "bittersweet",
+    "phew",
+    "it was a struggle",
+    "happy tears"
+   ],
+   "families": [
+    "win",
+    "owning"
+   ],
+   "src": "modern",
+   "name": "smiling face with tear"
+  },
+  "🥹": {
+   "words": [
+    "so touched",
+    "that's beautiful",
+    "grateful",
+    "moved"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "modern",
+   "name": "face holding back tears"
+  },
+  "🫠": {
+   "words": [
+    "embarrassed",
+    "melting",
+    "that broke",
+    "oops",
+    "mortified"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "modern",
+   "name": "melting face"
+  },
+  "🫡": {
+   "words": [
+    "on it",
+    "will do",
+    "yes sir",
+    "understood",
+    "roger"
+   ],
+   "families": [
+    "goahead",
+    "owning"
+   ],
+   "src": "modern",
+   "name": "saluting face"
+  },
+  "🫶": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate you",
+    "grateful"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "modern",
+   "name": "heart hands"
+  },
+  "🫣": {
+   "words": [
+    "peeking",
+    "nervous to look",
+    "cannot watch",
+    "scared to check"
+   ],
+   "families": [
+    "owning",
+    "looking"
+   ],
+   "src": "modern",
+   "name": "face with peeking eye"
+  },
+  "🫢": {
+   "words": [
+    "oh no",
+    "gasp",
+    "oops",
+    "did not see that coming"
+   ],
+   "families": [
+    "owning"
+   ],
+   "src": "modern",
+   "name": "face with open eyes and hand over mouth"
+  },
+  "🩷": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "modern",
+   "name": "pink heart"
+  },
+  "🩵": {
+   "words": [
+    "love it",
+    "thank you",
+    "appreciate it"
+   ],
+   "families": [
+    "praise"
+   ],
+   "src": "modern",
+   "name": "light blue heart"
+  },
+  "🙂‍↕️": {
+   "words": [
+    "yes",
+    "nodding",
+    "agreed",
+    "sounds right",
+    "makes sense"
+   ],
+   "families": [
+    "goahead"
+   ],
+   "src": "modern",
+   "name": "slightly smiling face zwj up down arrow"
+  }
+ },
+ "dropped": {
+  "😘": {
+   "why": "kiss: flirty",
+   "src": "popular",
+   "name": "face throwing a kiss"
+  },
+  "💕": {
+   "why": "romantic heart",
+   "src": "popular",
+   "name": "two hearts"
+  },
+  "🥺": {
+   "why": "pleading: an agent begging",
+   "src": "popular",
+   "name": "face with pleading eyes"
+  },
+  "🤷": {
+   "why": "shrug: dismissive",
+   "src": "popular",
+   "name": "shrug"
+  },
+  "🙄": {
+   "why": "eye roll: contempt",
+   "src": "popular",
+   "name": "face with rolling eyes"
+  },
+  "🎂": {
+   "why": "birthdays only",
+   "src": "popular",
+   "name": "birthday cake"
+  },
+  "🙂": {
+   "why": "slight smile: reads passive-aggressive",
+   "src": "popular",
+   "name": "slightly smiling face"
+  },
+  "😔": {
+   "why": "sad, mopey",
+   "src": "popular",
+   "name": "pensive face"
+  },
+  "😋": {
+   "why": "yum: food",
+   "src": "popular",
+   "name": "face savouring delicious food"
+  },
+  "😏": {
+   "why": "smug",
+   "src": "popular",
+   "name": "smirking face"
+  },
+  "😢": {
+   "why": "sad",
+   "src": "popular",
+   "name": "crying face"
+  },
+  "👉": {
+   "why": "pointing (👉👈 = shy)",
+   "src": "popular",
+   "name": "white right pointing backhand index"
+  },
+  "💗": {
+   "why": "romantic heart",
+   "src": "popular",
+   "name": "growing heart"
+  },
+  "😩": {
+   "why": "weary complaint",
+   "src": "popular",
+   "name": "weary face"
+  },
+  "🌹": {
+   "why": "romance",
+   "src": "popular",
+   "name": "rose"
+  },
+  "💞": {
+   "why": "romantic heart",
+   "src": "popular",
+   "name": "revolving hearts"
+  },
+  "😡": {
+   "why": "angry",
+   "src": "popular",
+   "name": "pouting face"
+  },
+  "💐": {
+   "why": "flowers: condolence or romance",
+   "src": "popular",
+   "name": "bouquet"
+  },
+  "❣️": {
+   "why": "romantic heart",
+   "src": "popular",
+   "name": "heavy heart exclamation mark ornament"
+  },
+  "👇": {
+   "why": "see below",
+   "src": "popular",
+   "name": "white down pointing backhand index"
+  },
+  "💓": {
+   "why": "romantic heart",
+   "src": "popular",
+   "name": "beating heart"
+  },
+  "🙃": {
+   "why": "irony / sarcasm",
+   "src": "popular",
+   "name": "upside-down face"
+  },
+  "😱": {
+   "why": "panic",
+   "src": "popular",
+   "name": "face screaming in fear"
+  },
+  "😴": {
+   "why": "asleep / bored",
+   "src": "popular",
+   "name": "sleeping face"
+  },
+  "😐": {
+   "why": "blank: unimpressed",
+   "src": "popular",
+   "name": "neutral face"
+  },
+  "🌞": {
+   "why": "weather / good morning",
+   "src": "popular",
+   "name": "sun with face"
+  },
+  "😒": {
+   "why": "unamused",
+   "src": "popular",
+   "name": "unamused face"
+  },
+  "😇": {
+   "why": "innocent: \"not me\"",
+   "src": "popular",
+   "name": "smiling face with halo"
+  },
+  "🌸": {
+   "why": "decoration",
+   "src": "popular",
+   "name": "cherry blossom"
+  },
+  "🎶": {
+   "why": "music",
+   "src": "popular",
+   "name": "multiple musical notes"
+  },
+  "✌️": {
+   "why": "peace / bye",
+   "src": "popular",
+   "name": "victory hand"
+  },
+  "😞": {
+   "why": "disappointed",
+   "src": "popular",
+   "name": "disappointed face"
+  },
+  "☀️": {
+   "why": "weather",
+   "src": "popular",
+   "name": "black sun with rays"
+  },
+  "🖤": {
+   "why": "dark / goth, grief",
+   "src": "popular",
+   "name": "black heart"
+  },
+  "💰": {
+   "why": "money",
+   "src": "popular",
+   "name": "money bag"
+  },
+  "😚": {
+   "why": "kiss: flirty",
+   "src": "popular",
+   "name": "kissing face with closed eyes"
+  },
+  "👑": {
+   "why": "royalty, over the top",
+   "src": "popular",
+   "name": "crown"
+  },
+  "🎁": {
+   "why": "gift",
+   "src": "popular",
+   "name": "wrapped present"
+  },
+  "☹️": {
+   "why": "frowning",
+   "src": "popular",
+   "name": "white frowning face"
+  },
+  "😑": {
+   "why": "expressionless: annoyed",
+   "src": "popular",
+   "name": "expressionless face"
+  },
+  "👈": {
+   "why": "pointing",
+   "src": "popular",
+   "name": "white left pointing backhand index"
+  },
+  "👋": {
+   "why": "hi / bye only",
+   "src": "popular",
+   "name": "waving hand sign"
+  },
+  "🤨": {
+   "why": "skeptical of the person",
+   "src": "popular",
+   "name": "face with one eyebrow raised"
+  },
+  "😪": {
+   "why": "sleepy",
+   "src": "popular",
+   "name": "sleepy face"
+  },
+  "🫥": {
+   "why": "invisible / disappearing",
+   "src": "modern",
+   "name": "dotted line face"
+  },
+  "🫤": {
+   "why": "meh, unsure",
+   "src": "modern",
+   "name": "face with diagonal mouth"
+  },
+  "🫨": {
+   "why": "shaking: rattled",
+   "src": "modern",
+   "name": "shaking face"
+  },
+  "🩶": {
+   "why": "grey heart: meh",
+   "src": "modern",
+   "name": "grey heart"
+  },
+  "🫰": {
+   "why": "money or Korean heart: unclear",
+   "src": "modern",
+   "name": "hand with index finger and thumb crossed"
+  },
+  "🫵": {
+   "why": "pointing at the person: accusing",
+   "src": "modern",
+   "name": "index pointing at the viewer"
+  },
+  "🫱": {
+   "why": "half a handshake",
+   "src": "modern",
+   "name": "rightwards hand"
+  },
+  "🫲": {
+   "why": "half a handshake",
+   "src": "modern",
+   "name": "leftwards hand"
+  },
+  "🫳": {
+   "why": "palm down: drop it",
+   "src": "modern",
+   "name": "palm down hand"
+  },
+  "🫴": {
+   "why": "palm up: unclear",
+   "src": "modern",
+   "name": "palm up hand"
+  },
+  "🫷": {
+   "why": "pushing: stop",
+   "src": "modern",
+   "name": "leftwards pushing hand"
+  },
+  "🫸": {
+   "why": "pushing: stop",
+   "src": "modern",
+   "name": "rightwards pushing hand"
+  },
+  "🫩": {
+   "why": "exhausted",
+   "src": "modern",
+   "name": "face with bags under eyes"
+  },
+  "🙂‍↔️": {
+   "why": "head shake: no",
+   "src": "modern",
+   "name": "slightly smiling face zwj left right arrow"
+  }
+ }
+}

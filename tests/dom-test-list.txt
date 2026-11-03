@@ -111,6 +111,7 @@ packages/inbox/boardSend.test.tsx
 packages/inbox/boardOff.test.tsx
 packages/inbox/soundIntro.test.tsx
 packages/inbox/soundSettings.test.tsx
+packages/inbox/reactions.test.tsx
 packages/inbox/notifyHook.test.tsx
 packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
