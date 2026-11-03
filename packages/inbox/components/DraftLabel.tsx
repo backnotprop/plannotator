@@ -2,8 +2,8 @@
  * "Draft" (approval "inbox-reply-drafts", variant Label): what the person has
  * not sent in a thread, said with Gmail's word wherever the window used to say
  * "Not sent". The row's count slot ("Draft · Your reply, 2 picks"), the soft
- * pill above the reply box ("Draft  Reply to … · Saved 4:43 PM · Discard"),
- * and the thread's foot ("Draft · 2 picks" before Send / Edit draft). Action
+ * pill under the reply box ("Draft  Saved 4:43 PM  Discard"), and the
+ * thread's foot ("Draft · 2 picks" before Send / Edit draft). Action
  * items waiting for the Send count as "1 done", "1 can't do".
  */
 import { INBOX_DRAFT_BODY_MAX, type InboxRowUnsent } from '@plannotator/core/inbox-types';
@@ -52,6 +52,9 @@ export function DraftLabel({ unsent, short = false }: { unsent: InboxRowUnsent; 
 /** Above the reply box when its words are longer than a draft holds (the Inbox refuses such a draft). */
 export const DRAFT_NOT_SAVED_TOO_LONG = `Not saved: a draft holds at most ${INBOX_DRAFT_BODY_MAX.toLocaleString('en-US')} characters.`;
 
+/** Above the reply box when the last save did not land (refused, or no answer): said in place of "Saved …". */
+export const DRAFT_NOT_SAVED_FAILED = 'Not saved. It tries again when you type.';
+
 /** The conflict line's words: both windows hold words for this reply. */
 export function conflictText(sentElsewhere: boolean): string {
   return sentElsewhere ? 'Not saved: this reply was sent or discarded in another window.' : 'Not saved: this reply changed in another window.';
@@ -70,70 +73,64 @@ export interface DraftConflict {
   onDiscard: () => void;
 }
 
-/** Above the open reply box: the pill, whom it goes to, when it was saved, and Discard (or, after a conflict, the line and its choice). */
-export function DraftHead({
-  label,
+/**
+ * Above the open reply box only after a conflict: the line and its choice (Keep mine, Discard mine). On a
+ * computer nothing else sits above the box (approval "inbox-reply-recipient": the "Reply to X in Z" label is
+ * gone, and the Draft mark, the saved time and Discard are under it, `DraftStamp`); on a phone `DraftStamp`
+ * is above it.
+ */
+export function DraftHead({ conflict }: { conflict: DraftConflict }) {
+  // Not a live region: the thread's own region says it once when it appears.
+  return (
+    <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-conflict="">
+      <span className="ib-draft-pill">Draft</span>
+      <span className="ib-draft-saved" id={conflict.id}>
+        {conflict.text}
+      </span>
+      <span className="ib-draft-acts">
+        <button type="button" className="ib-draft-discard" data-draft-keep-mine="" onClick={conflict.onKeepMine}>
+          Keep mine
+        </button>
+        <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={conflict.onDiscard}>
+          Discard mine
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Under the open reply box, in Send's row (approval "inbox-reply-recipient"), or above the box, at the right, on a
+ * phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
+ * nothing until the first save. "Not saved …" in place of the time when the words are longer than a draft holds
+ * or the last save did not land.
+ */
+export function DraftStamp({
   savedAt,
   onDiscard,
-  conflict = null,
   tooLong = false,
+  failed = false,
 }: {
-  label: string;
   savedAt: string | null;
-  onDiscard: (() => void) | null;
-  conflict?: DraftConflict | null;
+  onDiscard: () => void;
   /** The box's words are longer than a draft holds: not saved, said in place of "Saved …". */
   tooLong?: boolean;
+  /** The last save of the box's words did not land: "Not saved", in place of "Saved …" (an older save's time). */
+  failed?: boolean;
 }) {
-  if (tooLong && !conflict) {
-    return (
-      <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-too-long="">
-        <span className="ib-draft-for" dir="auto">
-          {label}
-        </span>
-        <span className="ib-sp" />
-        <span className="ib-draft-saved" role="status">
-          {DRAFT_NOT_SAVED_TOO_LONG}
-        </span>
-      </div>
-    );
-  }
-  if (conflict) {
-    // Not a live region: the thread's own region says it once when it appears.
-    return (
-      <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-conflict="">
-        <span className="ib-draft-pill">Draft</span>
-        <span className="ib-draft-saved" id={conflict.id}>
-          {conflict.text}
-        </span>
-        <span className="ib-draft-acts">
-          <button type="button" className="ib-draft-discard" data-draft-keep-mine="" onClick={conflict.onKeepMine}>
-            Keep mine
-          </button>
-          <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={conflict.onDiscard}>
-            Discard mine
-          </button>
-        </span>
-      </div>
-    );
-  }
+  if (!tooLong && !failed && savedAt === null) return null;
   return (
-    <div className="ib-reply-l ib-draft-head" data-draft-head="">
-      {savedAt !== null && <span className="ib-draft-pill">Draft</span>} <span className="ib-draft-for" dir="auto">{label}</span>
-      {savedAt !== null && (
-        <>
-          <span className="ib-sp" />
-          <span className="ib-draft-saved" role="status">
-            Saved {shortTime(savedAt)}
-          </span>
-          {onDiscard && (
-            <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={onDiscard}>
-              Discard
-            </button>
-          )}
-        </>
+    <span className="ib-draft-stamp" data-draft-head="" data-draft-stamp="" data-draft-too-long={tooLong ? '' : undefined} data-draft-failed={failed && !tooLong ? '' : undefined}>
+      <span className="ib-draft-pill">Draft</span>
+      <span className="ib-draft-saved" role="status">
+        {tooLong ? DRAFT_NOT_SAVED_TOO_LONG : failed ? DRAFT_NOT_SAVED_FAILED : `Saved ${shortTime(savedAt!)}`}
+      </span>
+      {!tooLong && savedAt !== null && (
+        <button type="button" className="ib-draft-discard" data-draft-discard="" onClick={onDiscard}>
+          Discard
+        </button>
       )}
-    </div>
+    </span>
   );
 }
 

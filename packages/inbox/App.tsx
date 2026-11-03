@@ -108,6 +108,9 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
 import { VoiceIntro } from './components/VoiceIntro';
 import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
+import { SnoozeIntro } from './components/SnoozeIntro';
+import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
+import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
@@ -145,7 +148,7 @@ import { CardChip } from './board/CardChip';
 import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
-import type { CardsModel, DraftView, UpdateCheckFailing } from './api';
+import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { inboxTabCount, useTabCount } from './tabCount';
@@ -863,6 +866,12 @@ function Inbox() {
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   const voiceIntroDueAtLoad = useRef(false);
+  /** The one-time Snooze announcement (snoozeIntro.ts): due for this page, read once per load. */
+  const snoozeIntroLatch = useRef<{ due: boolean } | null>(null);
+  /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
+  const updatingThisLoad = useRef(false);
+  /** This page snoozed something in this load: the announcement would tell the person what they just did. */
+  const snoozedThisLoad = useRef(false);
   const tourThisLoad = useRef(false);
   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -1388,6 +1397,38 @@ function Inbox() {
       setSettingsReadFailed(true);
     }
   }, []);
+
+  // Settings → Storage's sizes (GET /api/inbox/settings/storage): the server walks every file for them, so only that
+  // panel asks, each time it is shown. Kept for the visit. One read at a time, given up after STORAGE_READ_MS so a
+  // held connection never locks Storage; a Delete's answer carries fresh sizes and wins over a read that started
+  // before it. A read starting clears the last error, so Try again shows the wait again. A failed refresh of sizes
+  // already kept leaves them on screen without a word: they are this visit's numbers, read again on the next open.
+  const [store, setStore] = useState<InboxStorageModel | null>(null);
+  const [storeError, setStoreError] = useState<string | null>(null);
+  const storeReading = useRef(false);
+  const storeTurn = useRef(0);
+  const adoptStore = useCallback((next: InboxStorageModel) => {
+    storeTurn.current += 1;
+    setStore(next);
+    setStoreError(null);
+  }, []);
+  const readStore = useCallback(() => {
+    if (storeReading.current) return;
+    storeReading.current = true;
+    setStoreError(null);
+    const turn = storeTurn.current;
+    inboxApi
+      .storage()
+      .then(
+        (next) => {
+          if (turn === storeTurn.current) adoptStore(next);
+        },
+        (cause) => setStoreError(cause instanceof Error ? cause.message : String(cause)),
+      )
+      .finally(() => {
+        storeReading.current = false;
+      });
+  }, [adoptStore]);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -2927,6 +2968,7 @@ function Inbox() {
   const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
+    snoozedThisLoad.current = true;
     try {
       await inboxApi.snooze(threadId, until);
     } catch (cause) {
@@ -3653,24 +3695,26 @@ function Inbox() {
     }
   };
 
-  // Settings' Delete thread / Delete project: the store, its blobs and the size read again.
+  // Settings' Delete thread / Delete project: the answer carries the sizes counted after it; the list is read again.
   const deleteThread = async (threadId: string) => {
     setSettingsError(null);
     try {
-      await inboxApi.deleteThread(threadId);
+      adoptStore((await inboxApi.deleteThread(threadId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The thread was not deleted.');
+      readStore();
     }
-    await Promise.all([refreshSettings(), refreshList(true)]);
+    await refreshList(true);
   };
   const deleteProject = async (projectId: string) => {
     setSettingsError(null);
     try {
-      await inboxApi.deleteProject(projectId);
+      adoptStore((await inboxApi.deleteProject(projectId)).store);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The project was not deleted.');
+      readStore();
     }
-    await Promise.all([refreshSettings(), refreshList(true)]);
+    await refreshList(true);
   };
 
   const projects = latest?.projects ?? [];
@@ -3882,6 +3926,63 @@ function Inbox() {
     `${route.thread}|${route.project}|${route.machine}`,
     listIntroHeldBack,
   );
+  // The one-time Snooze announcement (snoozeIntro.ts): never at load, never with another one-time dialog, the tour or
+  // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
+  if (updateDialog !== null || restarting) updatingThisLoad.current = true;
+  if (snoozeIntroLatch.current === null && settings && latest !== null) {
+    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true };
+  }
+  const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
+  const snoozeIntro = useSnoozeIntro({
+    due: snoozeIntroLatch.current?.due ?? false,
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: snoozeIntroBlockedBy({
+      tour: tourThisLoad.current,
+      updating: updatingThisLoad.current,
+      sound: soundDialog,
+      agentNote,
+      listIntroWant,
+      listIntro,
+      voiceWanted: voiceIntro.wanted,
+      voiceStage: voiceIntro.stage,
+      board: oneTimeDialogShownThisLoad(),
+    }),
+    snoozedHere: snoozedThisLoad.current,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
+    heldBack: () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null,
+  });
+  /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
+  const trySnoozeIntro = () => {
+    const left = snoozeIntro.target;
+    snoozeIntro.close();
+    setTimeout(() => {
+      const now = routeRef.current;
+      void openSnoozeMenu({
+        root: document.querySelector('.pn-inbox') ?? document,
+        phone,
+        openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
+        left,
+        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, thread: threadId }),
+      });
+    }, 0);
+  };
+  /**
+   * The picture's two rows: a neighbour (the row above it in the list, or below when it is the top row), then the thread
+   * just left, last, where the menu is aimed (the approved picture's order).
+   */
+  const snoozeIntroPicture = useMemo(() => {
+    if (snoozeIntro.stage !== 'open') return [];
+    const index = snoozeIntroRows.findIndex((row) => row.thread_id === snoozeIntro.target);
+    if (index < 0) return snoozeIntroRows.slice(0, 2);
+    const neighbour = snoozeIntroRows[index > 0 ? index - 1 : index + 1];
+    return neighbour ? [neighbour, snoozeIntroRows[index]!] : [snoozeIntroRows[index]!];
+  }, [snoozeIntro.stage, snoozeIntro.target, snoozeIntroRows]);
   // The notification lines wait for it too, as for the other one-time dialogs, and stand down while it is due here.
   const linesFree =
     askLinesFree &&
@@ -3890,7 +3991,9 @@ function Inbox() {
     listIntro !== 'claimed' &&
     (!voiceIntro.wanted || voiceIntro.decided) &&
     voiceIntro.stage !== 'open' &&
-    voiceIntro.stage !== 'claimed';
+    voiceIntro.stage !== 'claimed' &&
+    snoozeIntro.stage !== 'open' &&
+    snoozeIntro.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -4657,6 +4760,9 @@ function Inbox() {
         onTestNotification={notifications.sendTest}
         onDeleteThread={deleteThread}
         onDeleteProject={deleteProject}
+        store={store}
+        storeError={storeError}
+        onReadStore={readStore}
         sound={settings?.sound ? sound : undefined}
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         archivedTotal={archivedTotal}
@@ -5285,6 +5391,7 @@ function Inbox() {
           onKeep={() => setListIntro('shown')}
         />
       )}
+      {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

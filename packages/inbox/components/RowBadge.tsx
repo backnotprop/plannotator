@@ -24,6 +24,7 @@ import type { InboxListRow, InboxRowWait } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
+import { RowTip } from './RowTip';
 
 /** Heroicons' exclamation-triangle, outline (MIT), drawn in the badge's own colour. */
 export function TriangleIcon({ size = 14 }: { size?: number }) {
@@ -271,5 +272,5 @@ export function ActionBadge({ row, tip = false }: { row: InboxListRow; tip?: boo
       <span className="ib-sr">{` ${words} `}</span>
     </span>
   );
-  return tip ? <Tip content={words}>{badge}</Tip> : badge;
+  return tip ? <RowTip content={words}>{badge}</RowTip> : badge;
 }

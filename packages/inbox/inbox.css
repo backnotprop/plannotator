@@ -1464,6 +1464,14 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-stbl tr.ib-sub td:first-child { padding-left: 26px; color: var(--muted-foreground); }
 .ib-stbl .ib-fold { display: inline-flex; align-items: center; gap: 6px; }
 .ib-store-note { padding-left: 19px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+/* Settings → Storage while its sizes are counted (owner's choice "A · The calm wait", 2026-11-02): the card holds its
+   place, the total is a soft bar about a number wide, the words come only after 0.4 s, and the numbers fade in. */
+.ib-store-wait { min-height: 260px; display: flex; align-items: center; justify-content: center; text-align: center; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-store-wait-t { animation: ib-store-in 200ms ease-out both; }
+.ib-store-bar { display: inline-block; width: 4.2em; height: 0.85em; vertical-align: -0.05em; border-radius: 4px; background: color-mix(in srgb, var(--muted-foreground) 18%, transparent); }
+.ib-store-in { animation: ib-store-in 160ms ease-out both; }
+@keyframes ib-store-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ib-store-wait-t, .ib-store-in { animation: none; } }
 .pn-inbox .ib-del-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); font-weight: 500; }
 .pn-inbox .ib-del-l:disabled { opacity: 0.45; }
 /* Archived in Settings (owner ruling 2026-10-12): Settings' own rows, one per archived thread. */
@@ -3110,7 +3118,8 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
      the home bar's gap goes, since the keyboard covers it. Under 400 px left (`tight`: an iPhone's ~257 in
      portrait, ~140 on its side) the thread's padding also closes and the reply's words scroll past a third of the
      visible height (about two and a half lines). */
-  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
+  /* overflow-anchor: none, since the Draft line's arrival keeps the foot's view itself (Thread.tsx, draftAboveRef). */
+  :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot { flex: 0 1 auto; min-height: 0; overflow-y: auto; overflow-anchor: none; overscroll-behavior: contain; padding-bottom: 0; scroll-padding-bottom: 64px; }
   :root[data-ib-keyboard-pin] .ib-pane .ib-pfoot > .ib-acts { position: sticky; bottom: 0; z-index: 2; padding-bottom: 10px; background: var(--card); }
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
@@ -6225,17 +6234,34 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
   .ib-bpage-card { display: flex; flex-direction: column; }
   .ib-crdp.ib-crdp-phone { flex: 1; border-radius: 0; box-shadow: none; }
   .ib-crdp-phone .ib-crdp-top { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; border-bottom: 1px solid var(--ib-hair); justify-content: space-between; }
-  .ib-crdp-phone .ib-crdp-col { height: 40px; }
+  /* A phone's bar is one line (cardTopFit.ts): the column's words never break; when even the last way is short they end in "…". */
+  .ib-crdp-phone .ib-crdp-col { height: 44px; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+  .ib-crdp-phone .ib-crdp-col-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .ib-crdp-phone .ib-crdp-open { white-space: nowrap; }
+  /* A short bar gives way (cardTopFit.ts): the thread action's icon alone, then the way back's chevron alone. The words
+     stay for a screen reader (the .ib-sr technique), so "Create thread" and "Board" keep their names. */
+  .ib-crdp-top[data-fit~="icon"] .ib-crdp-open-l,
+  .ib-crdp-top[data-fit~="back"] .ib-bback-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+  .pn-inbox .ib-crdp-top[data-fit~="icon"] .ib-crdp-open { width: 44px; flex-shrink: 0; padding: 0; justify-content: center; }
+  .ib-crdp-top[data-fit~="back"] .ib-bback { min-width: 44px; padding: 0; justify-content: center; }
   .ib-crdp-phone .ib-crdp-ask { margin-left: 0; min-height: 44px; }
   .ib-crdp-phone .ib-crdp-foot { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-crdp-phone .ib-crdp-foot .ib-btn { min-height: 44px; }
   .ib-crdp-notesform textarea, .ib-crdp-link input, .ib-crdp-drop input, .ib-ncd-title, .ib-ncd-notes, .ib-ncd-links input { font-size: var(--ib-fs-16-in, 16px); }
-  dialog.ib-dlg.ib-ncd.ib-ncd-phone { width: 100vw; height: var(--ib-vvh, 100dvh); max-height: none; border-radius: 0; margin: 0; }
+  /* The whole screen: a modal <dialog> keeps the browser's `max-width: calc(100% - 6px - 2em)`, so lift it, or the
+     window is capped (286 px at 320) and sits at the left edge. */
+  dialog.ib-dlg.ib-ncd.ib-ncd-phone { inset: 0 auto auto 0; width: 100%; max-width: none; height: var(--ib-vvh, 100dvh); max-height: none; border: 0; border-radius: 0; margin: 0; }
   .ib-ncd-phone .ib-ncd-form { height: var(--ib-vvh, 100dvh); }
   .ib-ncd-phone .ib-ncd-body { flex: 1; }
   .ib-ncd-phone .ib-ncd-modes { flex: 1; justify-content: space-around; }
   .ib-ncd-phone .ib-ncd-mode { min-height: 44px; flex: 1; justify-content: center; }
-  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) 12px 0; min-height: 56px; }
+  /* Every edge clears the safe areas (a phone on its side has ~59 px left and right; the home bar is below). */
+  .ib-ncd-phone .ib-ncd-head { padding: env(safe-area-inset-top) calc(12px + env(safe-area-inset-right)) 0 calc(12px + env(safe-area-inset-left)); min-height: 56px; }
+  .ib-ncd-phone .ib-ncd-body { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-row { padding-left: calc(22px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-err { margin-left: calc(22px + env(safe-area-inset-left)); margin-right: calc(22px + env(safe-area-inset-right)); }
+  .ib-ncd-phone .ib-ncd-foot { padding: 12px calc(14px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
+  :root[data-ib-keyboard] .ib-ncd-phone .ib-ncd-foot { padding-bottom: 12px; }
   .ib-ncd-phone .ib-ncd-head h2 { text-align: center; }
   .ib-ncd-pick .ib-cp-picker { left: 8px; right: 8px; width: auto; }
   dialog.ib-dlg.ib-bi.ib-bi-phone { margin: auto auto 12px; }
@@ -6929,6 +6955,39 @@ mark.ib-vmark.ib-vfade { background: transparent; }
 .ib-vo-picture .ib-rbox { margin: 0; }
 .ib-vo-text { padding: 10px 12px 6px; min-height: 52px; line-height: 1.55; }
 .ib-lo-text p.ib-vo-route { margin-top: 10px; color: var(--foreground); }
+/* The one-time Snooze announcement (approval "inbox-snooze-announce", B "The real menu"; components/SnoozeIntro.tsx):
+   the list intro's shell, 520 px. Its picture is static and in the person's own mode (no light scope): two real rows
+   in a card, the real "Snooze until" menu (`.ib-pm`) over the target row's right edge with a pointer on Tomorrow, and
+   the real toast (`.ib-toast`) at rest under them. Nothing in it moves: the menu's and the toast's entrances are off.
+   A phone: the ⋯ sheet's times (`.ib-pm-pos[data-phone]`'s own sizes), in the sheet's place at the top. */
+dialog.ib-dlg.ib-lo.ib-zx { width: min(520px, calc(100vw - 32px)); }
+.ib-lo.ib-zx .ib-lo-art { padding: 22px 22px 17px; }
+.ib-zx-scene { position: relative; height: 264px; }
+dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibility: visible; width: 300px; max-width: 100%; height: auto; border: 0; border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; }
+.ib-zx-list .ib-lbody { overflow: hidden; padding-bottom: 10px; }
+.ib-zx-list .ib-lbody > .ib-group > .ib-rw { content-visibility: visible; }
+.ib-zx-list :is(.ib-nrow .ib-l2 > .ib-title, .ib-nrow .ib-l3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.ib-pm.ib-zx-menu { position: absolute; left: 248px; top: 19px; width: 210px; animation: none; text-align: left; }
+.ib-zx-menu .ib-pmi { position: relative; }
+.ib-zx-pointer { position: absolute; left: 76px; top: 7px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
+.ib-toast.ib-zx-toast { position: absolute; left: 0; top: 224px; bottom: auto; transform: none; z-index: auto; animation: none; max-width: 300px; text-align: left; }
+/* "New" above the title: quiet accent text, no fill or border. */
+.ib-zx-new { margin: 0 0 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--primary); }
+.ib-lo-text .ib-zx-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--foreground); }
+.ib-zx-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); }
+.ib-zx-pos[data-phone] { position: static !important; transform: none !important; width: auto !important; }
+.ib-zx-pos .ib-pm.ib-zx-menu { position: static; width: auto; animation: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The bottom sheet's width (the shared phone rule loses to the 520 px width above, which comes later). */
+  dialog.ib-dlg.ib-lo.ib-zx.ib-lo-phone { width: calc(100vw - 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-zx .ib-lo-art { padding: 14px 14px 12px; }
+  /* A picture of the sheet, not the sheet: flat, its rows drawn compact (the real sheet's are 48 px touch rows). */
+  .ib-zx-pos[data-phone] .ib-pm { box-shadow: none; }
+  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; padding: 0 6px; font-size: var(--ib-fs-15, 15px); }
+  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 22px 0; }
+  .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
+  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
+}
 /* Settings → Voice. */
 .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }
@@ -7084,4 +7143,93 @@ mark.ib-vmark.ib-vfade { background: transparent; }
   /* The comments sheet: a comment's place (a long agent name's "…'s message, 2:58 PM") on one line from the left, cut
      with an ellipsis, never a three-line centred link. Its whole name stays its accessible name. */
   .pn-inbox .ib-arow .ib-af { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }
+}
+
+/* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
+   On a computer nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and
+   in a thread with more than one agent the pill after it names who gets the reply ("to [tile] Claude Code
+   (plannotator) ⌄"). A phone is the exception: the pill sits after Cancel (the folder alone), and the Draft line is
+   above the box, at the right, once something is saved; the foot grows upward, so the first save never moves the box. */
+.ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-replyrow > .ib-footstatus:empty { display: none; }
+.ib-replyrow > .ib-footstatus { flex-wrap: nowrap; }
+.ib-replyrow > .ib-footstatus > .ib-draft-stamp { flex: 0 1 auto; }
+.pn-inbox .ib-rto { position: relative; display: inline-flex; align-items: center; gap: 5px; height: 26px; min-width: 0; max-width: 100%; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; cursor: pointer; }
+.pn-inbox .ib-rto:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rto:hover .ib-atile { background: color-mix(in oklch, var(--muted) 50%, var(--border)); }
+.pn-inbox .ib-rto:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rto-n { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); font-weight: 500; }
+.ib-rto-full, .ib-rto-short { overflow: hidden; text-overflow: ellipsis; }
+.ib-rto-short { display: none; }
+.ib-rto-c, .ib-rto-q { flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-rto[data-ended] .ib-atile { opacity: 0.55; }
+.pn-inbox .ib-rto[data-ended] .ib-rto-n { color: var(--muted-foreground); }
+.ib-rto .ib-tg-stack .ib-mk { box-shadow: 0 0 0 1.5px var(--card); }
+.ib-rto-wrap { position: relative; display: inline-flex; align-items: center; min-width: 0; max-width: 100%; }
+/* A wide window: the Draft words step back to plain words on the pill's left, and the slot keeps the widest name's
+   width (the names stacked, hidden), so Discard never moves when the recipient changes. */
+.ib-replyrow:has(.ib-rto-slot) .ib-draft-pill { padding: 0; background: none; color: var(--muted-foreground); font-weight: 400; }
+.ib-rto-slot { display: inline-grid; grid-template-columns: minmax(0, 1fr); justify-items: end; align-items: center; flex: 0 1 auto; min-width: 0; max-width: 260px; margin-left: 6px; margin-right: -6px; }
+.ib-rto-slot > * { grid-area: 1 / 1; }
+.pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
+/* The list: the `@` list's box and tiles, over the pill's right end. */
+.ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
+.ib-rpick-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
+@media (hover: hover) { .ib-rpick-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
+.pn-inbox .ib-rpick-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 4px 0 8px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
+.ib-rpick-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ib-rpick-q { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.pn-inbox .ib-rpick-tick { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: none; color: transparent; cursor: pointer; }
+.ib-rpick-tick > span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border); }
+.pn-inbox .ib-rpick-tick[aria-checked="true"] > span { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+.pn-inbox :is(.ib-rpick-tick, .ib-rpick-name):disabled { cursor: default; opacity: 0.4; }
+.pn-inbox :is(.ib-rpick-name, .ib-rpick-tick, .ib-rpick-more):focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-rpick-more { display: block; width: 100%; height: 34px; margin-top: 4px; padding: 0 8px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; text-align: left; cursor: pointer; }
+@media (hover: hover) { .pn-inbox .ib-rpick-more:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); color: var(--foreground); } }
+/* A pane too narrow for the Draft words and the widest name on one line: the saved time gives way, then the
+   names take their short form, so the row stays one line and the box stays where it is. */
+.ib-replyrow { container-type: inline-size; }
+@media (min-width: 768px) {
+  @container (max-width: 640px) {
+    .ib-replyrow:has(.ib-rto-slot) .ib-draft-saved { display: none; }
+  }
+  @container (max-width: 480px) {
+    .ib-rto-slot .ib-rto-full { display: none; }
+    .ib-rto-slot .ib-rto-short { display: block; }
+  }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* The Draft line is above the box, at the right, once something is saved (the owner, 2026-11-03): the foot is held
+     at the bottom, so the line grows it upward and the box, its mic and Send's row stay where they are. Nothing is
+     there, and nothing is kept for it, before the first save. Discard's 44 px tap area stays inside the foot: the
+     foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
+  .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
+  .ib-draft-above:empty { display: none; }
+  /* The pill in Send's row: the folder alone, so the box stays where a one-agent thread has it. Send gets shorter. */
+  .ib-rto-full { display: none; }
+  .ib-rto-short { display: block; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) { flex: 1 1 100%; flex-wrap: nowrap; gap: 6px; min-width: 0; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn { flex: none; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-pri { flex: 1 1 auto; min-width: 72px; padding-left: 10px; padding-right: 10px; }
+  .pn-inbox .ib-footbtns:has(> .ib-rto-wrap) > .ib-btn.ib-ghost { padding-left: 8px; padding-right: 8px; }
+  .ib-footbtns > .ib-rto-wrap { flex: 0 1 auto; max-width: 52%; }
+  .ib-footbtns > .ib-rto-wrap .ib-rto-l { display: none; }
+  .pn-inbox .ib-footbtns > .ib-rto-wrap .ib-rto { height: 44px; padding: 0 2px 0 4px; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-rpick-name { height: 44px; gap: 8px; }
+  .pn-inbox .ib-rpick-tick { width: 44px; height: 44px; }
+  .ib-rpick-tick > span { width: 20px; height: 20px; }
+  .pn-inbox .ib-rpick-more { height: 44px; margin-top: 0; }
+  /* The list covers the box on a phone: the box's ring would show around it. */
+  .pn-inbox:has(.ib-rpick) .ib-rbox { border-color: transparent; box-shadow: none; }
+  /* The keyboard leaves about 257 px under the header, and the thread only a few dozen of them: the Draft line takes
+     30 px (2 px above it, 8 px under it), so it comes out of the thread's room and the box does not move.
+     Discard's tap area shrinks to 36 px to stay between the foot's top and the box. On its side (about 140 px) the
+     thread has no room and the foot already scrolls: the line comes in above the view (Thread.tsx keeps the foot's
+     scroll), so the box and its mic stay put and the line is a scroll up. */
+  :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pfoot { padding-top: 6px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-rbox { margin-bottom: 6px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-draft-above { padding-top: 2px; margin-bottom: 8px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-draft-above .ib-draft-discard::after { inset: -9px -8px; }
 }

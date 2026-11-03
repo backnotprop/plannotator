@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, MachineView, SettingsModel } from '../api';
+import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -32,6 +32,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
   { host: 'pi', name: 'Pi' },
   { host: 'opencode', name: 'OpenCode' },
+  { host: 'dsh', name: 'DeepSeek Harness' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -51,6 +52,8 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
 
 /** Projects listed before the rest fold under "N more projects". */
 const SHOWN_PROJECTS = 2;
+/** Settings → Storage says "Counting what is stored…" only when its sizes take longer than this to come. */
+export const STORE_SLOW_MS = 400;
 
 export interface SettingsPageProps {
   settings: SettingsModel | null;
@@ -82,6 +85,15 @@ export interface SettingsPageProps {
   /** Delete a thread or a project with its files as they were sent (blobs no other thread uses). */
   onDeleteThread: (threadId: string) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
+  /**
+   * Settings → Storage's sizes (GET /api/inbox/settings/storage): null until first read. Kept by the window for the
+   * visit, so a second visit shows them at once while `onReadStore` reads them again.
+   */
+  store?: InboxStorageModel | null;
+  /** The last storage read failed and there is nothing to show: why. */
+  storeError?: string | null;
+  /** Read the storage sizes again: asked each time Storage is shown, never for another section. */
+  onReadStore?: () => void;
   /** Settings → About: the version, Check now and the two update switches (components/Updates.tsx). */
   about?: ReactNode;
   /** The About nav row's dot: a new version is available, ready or failed, or checking has failed for hours. */
@@ -544,7 +556,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi and OpenCode send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode and DeepSeek Harness send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -572,7 +584,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
           </div>
         )}
       </section>
@@ -620,7 +632,7 @@ function StoreTable({
   onDeleteThread,
   onDeleteProject,
 }: {
-  store: SettingsModel['store'];
+  store: InboxStorageModel;
   onDeleteThread: (threadId: string) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
 }) {
@@ -732,6 +744,27 @@ export function SettingsPage(props: SettingsPageProps) {
     phone = false,
   } = props;
   const section: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  // Settings → Storage's sizes walk every file on the server, so they are read only here, each time Storage is shown.
+  // The calm wait: nothing moves, and words show only when the count takes longer than STORE_SLOW_MS. Numbers that
+  // come after a wait fade in; numbers kept from an earlier visit are there at once.
+  const store = props.store ?? null;
+  const storageShown = section === 'storage';
+  const readStore = useRef(props.onReadStore);
+  readStore.current = props.onReadStore;
+  const [storeSlow, setStoreSlow] = useState(false);
+  const storeWaited = useRef(false);
+  if (!storageShown) {
+    storeWaited.current = false;
+    // Reset on leaving, not on the next open: an open would draw the last visit's words for a frame first.
+    if (storeSlow) setStoreSlow(false);
+  } else if (!store) storeWaited.current = true;
+  useEffect(() => {
+    if (!storageShown) return;
+    readStore.current?.();
+    const slow = setTimeout(() => setStoreSlow(true), STORE_SLOW_MS);
+    return () => clearTimeout(slow);
+  }, [storageShown]);
+  const storeFade = storeWaited.current ? 'ib-store-in' : undefined;
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
@@ -850,7 +883,8 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'archived':
         return archivedTotal ? formatCount(archivedTotal) : '';
       case 'storage':
-        return formatBytes(settings.store.bytes);
+        // Only once Storage was opened this visit: the list never asks for the walk.
+        return store ? formatBytes(store.bytes) : '';
       case 'about':
         return settings.version;
       case 'voice':
@@ -929,12 +963,25 @@ export function SettingsPage(props: SettingsPageProps) {
           <section className="ib-sgroup" aria-labelledby="ib-g-store">
             <h2 id="ib-g-store">By project</h2>
             <p>Delete asks twice. A deleted thread or project cannot be brought back.</p>
-            {settings.store.projects.length > 0 ? (
-              <div className="ib-card">
-                <StoreTable store={settings.store} onDeleteThread={onDeleteThread} onDeleteProject={onDeleteProject} />
+            {!store ? (
+              <div className="ib-card ib-store-wait" data-store-wait="" aria-busy={props.storeError ? undefined : true}>
+                {props.storeError ? (
+                  <span className="ib-store-wait-t" role="alert" data-store-error="">
+                    The sizes could not be read. {props.storeError}{' '}
+                    <button type="button" className="ib-lnk" onClick={() => props.onReadStore?.()}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  storeSlow && <span className="ib-store-wait-t">Counting what is stored…</span>
+                )}
+              </div>
+            ) : store.projects.length > 0 ? (
+              <div className={storeFade ? `ib-card ${storeFade}` : 'ib-card'}>
+                <StoreTable store={store} onDeleteThread={onDeleteThread} onDeleteProject={onDeleteProject} />
               </div>
             ) : (
-              <div className="ib-card ib-sempty">
+              <div className={storeFade ? `ib-card ib-sempty ${storeFade}` : 'ib-card ib-sempty'}>
                 <Icon name="disk" />
                 Nothing stored yet.
               </div>
@@ -971,8 +1018,14 @@ export function SettingsPage(props: SettingsPageProps) {
   const lede =
     section === 'storage' && settings ? (
       <p className="ib-lede">
-        <b data-store-bytes={settings.store.bytes}>{formatBytes(settings.store.bytes)}</b> in {tildePath(settings.store.dir, settings.home)}: messages, attached
-        files as they were sent, and annotations.
+        {store ? (
+          <b data-store-bytes={store.bytes} className={storeFade}>
+            {formatBytes(store.bytes)}
+          </b>
+        ) : (
+          <span className="ib-store-bar" data-store-bar="" aria-hidden="true" />
+        )}{' '}
+        in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
       <p className="ib-lede">Browsers on your other devices.</p>

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
@@ -24,6 +24,8 @@ import { fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { inboxUrl } from '../inboxUrl';
+import { useInboxTextSize } from '../textSize';
+import { clearCardTop, fitCardTop } from './cardTopFit';
 import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
@@ -123,6 +125,31 @@ export function CardPanel(props: CardPanelProps) {
   const askable = (agent !== null || props.canAsk) && live;
   // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
   const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
+  // A phone's top bar gives way so it stays on one line (cardTopFit.ts): the thread action's icon alone, then the way back's chevron alone.
+  const topRef = useRef<HTMLDivElement>(null);
+  const textSize = useInboxTextSize();
+  const topSig = [phone, card.column, sent !== null, threadAt, creatable, you !== null, textSize].join('|');
+  const topFittedFor = useRef('');
+  const fitTopRef = useRef<(force?: boolean) => void>(() => {});
+  fitTopRef.current = (force = false) => {
+    const top = topRef.current;
+    if (!top) return;
+    const key = `${top.getBoundingClientRect().width}|${topSig}`;
+    if (!force && key === topFittedFor.current) return;
+    topFittedFor.current = key;
+    if (phone) fitCardTop(top);
+    else clearCardTop(top);
+  };
+  useLayoutEffect(() => fitTopRef.current());
+  useEffect(() => {
+    const top = topRef.current;
+    if (!top || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fitTopRef.current());
+    observer.observe(top);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fitTopRef.current(true));
+    return () => observer.disconnect();
+  }, []);
   return (
     <aside
       className={`ib-crdp${phone ? ' ib-crdp-phone' : ''}`}
@@ -135,11 +162,11 @@ export function CardPanel(props: CardPanelProps) {
         }
       }}
     >
-      <div className="ib-crdp-top">
+      <div className="ib-crdp-top" ref={topRef}>
         {phone && (
           <button type="button" className="ib-bback" onClick={props.onClose} data-card-back="">
             <Icon name="chevL" size={16} />
-            Board
+            <span className="ib-bback-l">Board</span>
           </button>
         )}
         <ColumnMenu card={card} sent={sent !== null} onColumn={props.onColumn} onRestore={props.onRestore} />
@@ -153,7 +180,7 @@ export function CardPanel(props: CardPanelProps) {
               aria-describedby={you ? `${headingId}-you` : undefined}
               onClick={() => props.onOpenThread(threadAt)}
             >
-              Open thread
+              <span className="ib-crdp-open-l">Open thread</span>
               <Icon name="arrowUpRight" size={14} />
             </button>
           </Tip>
@@ -390,7 +417,7 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Menu.Trigger ref={trigger} className="ib-crdp-col" aria-label={`Column: ${INBOX_CARD_COLUMN_LABELS[card.column]}${sent ? ', sent' : ''}. Move`} data-card-column={card.column}>
         <span className="ib-lane-dot" data-col={card.column} aria-hidden="true" />
-        <b>{INBOX_CARD_COLUMN_LABELS[card.column]}</b>
+        <b className="ib-crdp-col-l">{INBOX_CARD_COLUMN_LABELS[card.column]}</b>
         {sent && <span className="ib-crdp-colsent">· sent</span>}
         <Icon name="chevD" size={14} />
       </Menu.Trigger>
@@ -491,7 +518,7 @@ function CreateThreadButton({ primary, disabled, onCreate }: { primary: boolean;
         onClick={(event) => onCreate(event.currentTarget)}
       >
         <Icon name="plus" size={14} />
-        Create thread
+        <span className="ib-crdp-open-l">Create thread</span>
       </button>
     </Tip>
   );

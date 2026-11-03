@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { ScreenRect } from '../../utils/diagram-projection';
+import { DOUBLE_TAP_ZOOM } from '../imageZoom';
 
 /**
  * The canvas viewport: a translate plus a scale on the wrapper around the
@@ -54,6 +55,7 @@ export function useDiagramViewport(
   readonly viewport: Viewport;
   readonly fit: () => void;
   readonly zoomBy: (factor: number, clientX?: number, clientY?: number) => void;
+  readonly toggleZoom: (clientX: number, clientY: number) => void;
   readonly panBy: (dx: number, dy: number) => void;
   readonly panIntoView: (rect: ScreenRect) => void;
 } {
@@ -128,6 +130,16 @@ export function useDiagramViewport(
     [hostRef],
   );
 
+  // A double tap: from Fit it zooms in about the finger (the image viewer's
+  // step, twice the Fit scale); from any zoom or pan it goes back to Fit.
+  const toggleZoom = useCallback(
+    (clientX: number, clientY: number) => {
+      if (adjustedRef.current) fit();
+      else zoomBy(DOUBLE_TAP_ZOOM, clientX, clientY);
+    },
+    [fit, zoomBy],
+  );
+
   const panBy = useCallback((dx: number, dy: number) => {
     adjustedRef.current = true;
     setViewport((current) => ({ ...current, x: current.x + dx, y: current.y + dy }));
@@ -152,5 +164,5 @@ export function useDiagramViewport(
     [hostRef],
   );
 
-  return { viewport, fit, zoomBy, panBy, panIntoView };
+  return { viewport, fit, zoomBy, toggleZoom, panBy, panIntoView };
 }
