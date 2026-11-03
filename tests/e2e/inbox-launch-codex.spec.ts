@@ -177,7 +177,9 @@ test('the journey: To offers Codex; Send starts a thread (config.toml untouched)
   await expect(d.locator('[data-compose-to="start"]')).toHaveText(/New Codex session/);
   const words = 'The refund total is off by a cent. Find where the rounding happens.';
   await d.getByRole('textbox', { name: 'Message' }).fill(words);
-  await expect(d.locator('[data-compose-status]')).toHaveText('Codex starts in ~/work/ledger when you send.');
+  // No status line (Trust and start, #2451): the folder it starts in is the "in" button's.
+  await expect(d.locator('[data-compose-status]')).toHaveCount(0);
+  await expect(d.getByRole('button', { name: 'Start in: ledger, ~/work/ledger. Change' })).toBeVisible();
   const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
   await d.locator('[data-compose-send]').click();
   const sent = (await (await answer).json()) as { thread_id: string; launch: { id: string; state: string } };
