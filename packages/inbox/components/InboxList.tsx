@@ -11,6 +11,7 @@ import { sentRecipientsWords } from '../tags';
 import { TagStack } from './TagPicker';
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
+import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
@@ -408,11 +409,11 @@ function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
     return (
-      <Tip content={words.full} when={(cell) => cell.scrollWidth > cell.clientWidth + 0.5 || [...cell.querySelectorAll('.ib-cst, .ib-draft-l')].some((t) => t.scrollWidth > t.clientWidth + 0.5)}>
+      <RowTip content={words.full} when={(cell) => cell.scrollWidth > cell.clientWidth + 0.5 || [...cell.querySelectorAll('.ib-cst, .ib-draft-l')].some((t) => t.scrollWidth > t.clientWidth + 0.5)}>
         <span className={`ib-c ib-cwords ib-cfull${quiet}`} data-count-words={words.full}>
           <span className="ib-cs">{typeof words.long === 'string' ? <span className="ib-cst">{words.long}</span> : words.long}</span>
         </span>
-      </Tip>
+      </RowTip>
     );
   }
   const cell = (
@@ -423,7 +424,7 @@ function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip
       <span className="ib-sr">{words.full}</span>
     </span>
   );
-  return tip ? <Tip content={words.full}>{cell}</Tip> : cell;
+  return tip ? <RowTip content={words.full}>{cell}</RowTip> : cell;
 }
 
 /**
@@ -469,7 +470,7 @@ function QuestionCount({ row, tip = false }: { row: InboxListRow; tip?: boolean 
       <span className="ib-sr">{words}</span>
     </span>
   );
-  return tip ? <Tip content={words}>{cell}</Tip> : cell;
+  return tip ? <RowTip content={words}>{cell}</RowTip> : cell;
 }
 
 /**
@@ -480,11 +481,11 @@ function QuestionCount({ row, tip = false }: { row: InboxListRow; tip?: boolean 
  */
 function ClipText({ className, text }: { className: string; text: string }) {
   return (
-    <Tip content={text} cut>
+    <RowTip content={text} cut>
       <span className={className} dir="auto">
         {text}
       </span>
-    </Tip>
+    </RowTip>
   );
 }
 
@@ -513,12 +514,12 @@ function Preview({ row }: { row: InboxListRow }) {
 function GuideMark({ row }: { row: InboxListRow }) {
   if (!row.guide || row.section === 'sent') return null;
   return (
-    <Tip content="Guided review" when={guideLabelHidden}>
+    <RowTip content="Guided review" when={guideLabelHidden}>
       <span className="ib-att" data-guide-mark="" role="img" aria-label="Guided review">
         <Icon name="book" size={13} />
         <span className="ib-att-l">Guided review</span>
       </span>
-    </Tip>
+    </RowTip>
   );
 }
 
@@ -698,11 +699,20 @@ function RowWithAction({
   const offer = !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
   const sendNow = onSendNow && !offer && !unread && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
+  // The action's tooltip mounts when the pointer or focus first comes into the row (RowTip.tsx), before the action
+  // shows: a Tab moves focus onto it, and focus must never land on a trigger that is about to be drawn again.
+  const [actionTip, setActionTip] = useState(false);
   return (
     <div
       className="ib-rw"
       data-row={row.thread_id}
       data-menu={menu ? '' : undefined}
+      onPointerEnter={(event) => {
+        if (!actionTip && opensTips(event)) setActionTip(true);
+      }}
+      onFocus={() => {
+        if (!actionTip) setActionTip(true);
+      }}
       onKeyDown={(event) => {
         // Tab from the row onto its action (focus fix 1): the action shows only while the row has keyboard focus,
         // and focus leaves the row before it reaches the action, so the browser's own Tab finds it gone and drops
@@ -722,7 +732,7 @@ function RowWithAction({
     >
       {children}
       {sendNow && (
-        <Tip content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
+        <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
           <button
             type="button"
             className="ib-ract"
@@ -736,10 +746,10 @@ function RowWithAction({
             <Icon name="send" size={15} />
             Send now
           </button>
-        </Tip>
+        </RowTip>
       )}
       {offer && (
-        <Tip content={withShortcut(`Mark read: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
+        <RowTip armed={actionTip} content={withShortcut(`Mark read: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
           <button
             type="button"
             className="ib-ract"
@@ -753,10 +763,10 @@ function RowWithAction({
             <Icon name="checkCircle" size={15} />
             Mark read
           </button>
-        </Tip>
+        </RowTip>
       )}
       {unread && (
-        <Tip content="Mark unread: back to New, bold. Nothing is sent.">
+        <RowTip armed={actionTip} content="Mark unread: back to New, bold. Nothing is sent.">
           <button
             type="button"
             className="ib-ract"
@@ -770,7 +780,7 @@ function RowWithAction({
             <Icon name="envelope" size={15} />
             Mark unread
           </button>
-        </Tip>
+        </RowTip>
       )}
     </div>
   );
@@ -1214,6 +1224,8 @@ export function InboxList(props: InboxListProps) {
           {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {visible.every((section) => section.id === 'snoozed') && props.empty}
+          {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
+          <LazyRowTips.Provider value={true}>
           {visible.map((section) => {
             const quiet = section.id === 'quiet';
             const snoozed = section.id === 'snoozed';
@@ -1266,6 +1278,7 @@ export function InboxList(props: InboxListProps) {
               </div>
             );
           })}
+          </LazyRowTips.Provider>
         </ThreadRowMenu>
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
