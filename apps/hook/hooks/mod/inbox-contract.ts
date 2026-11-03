@@ -378,7 +378,7 @@ export const INBOX_STEPS_LEAD =
   'your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.'
 
 /** The agent tool's line for the `steps` action (the owner, 2026-11-03): short, so the description stays under 2,048. */
-export const INBOX_STEPS_ACTION_LINE = "keep the person's view of your plan for this thread current (details on the steps field)."
+export const INBOX_STEPS_ACTION_LINE = "keep the person's checklist for this thread current (details on the steps field)."
 
 /** The `steps` field (the action's, and send_message's while steps are on): the approved text, then where a list goes before there is a thread. */
 export const INBOX_STEPS_FIELD_DESCRIPTION = `steps: ${INBOX_STEPS_LEAD} No thread yet: send it with the send_message that starts one.`

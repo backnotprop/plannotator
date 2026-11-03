@@ -41,7 +41,7 @@ import { INBOX_MCP_INSTRUCTIONS } from "./inbox-mcp";
 const APPROVED =
   "steps: your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.";
 /** The action's line in the agent tool (the owner, 2026-11-03), so the description stays under Claude Code's 2,048. */
-const ACTION_LINE = "steps: keep the person's view of your plan for this thread current (details on the steps field).";
+const ACTION_LINE = "steps: keep the person's checklist for this thread current (details on the steps field).";
 const APPROVED_WAKE = "Your steps here: 2 of 5 done; doing: Replay the failures in staging. Update them if that changed.";
 
 /** The word as an agent would read it: `steps` alone, not inside `diff_steps`. */
@@ -228,7 +228,7 @@ describe("on", () => {
 
   // What regresses: Claude Code cuts a tool description at 2,048 characters, which would drop the wake note and the
   // help pointer at its end. Steps on, with the Board off and on, both builders (the mod's copy and the shared one).
-  test("the description with steps on stays within Claude Code's 2,048 characters, the Board off or on", async () => {
+  test("the description with steps on stays under Claude Code's 2,048 characters, the Board off or on", async () => {
     const w = await world();
     await w.setSteps(true);
     for (const board of [false, true]) {
@@ -236,7 +236,7 @@ describe("on", () => {
       const served = await w.tools();
       expect(served.some((tool) => tool.name === "card")).toBe(board);
       for (const tool of [inboxAgentTool(served)!, modAgentTool(served)!]) {
-        expect(tool.description.length).toBeLessThanOrEqual(2_048);
+        expect(tool.description.length).toBeLessThan(2_048);
         expect(tool.description).toEndWith("Every field and question syntax: `plannotator inbox --help`.");
       }
     }
