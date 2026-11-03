@@ -4624,6 +4624,19 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
     }
     openBox();
   };
+  /** "Draft  Saved 4:51 PM  Discard" for the open box: under it in Send's row, or above it on a phone. Nothing until the first save. */
+  const draftStamp = (
+    <DraftStamp
+      savedAt={replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null}
+      tooLong={replyDraft.conflict === null && replyDraft.tooLong}
+      failed={replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
+      onDiscard={() => {
+        replyDraft.discard();
+        closeBox(true);
+        announce('Draft discarded.');
+      }}
+    />
+  );
   const rcptPill = pillActive ? (
     <ReplyRecipient
       rows={rcptAgents}
@@ -5807,6 +5820,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               />
             )}
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
+            {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved. */}
+            {phone && (
+              <div className="ib-draft-above" data-draft-above="">
+                {draftStamp}
+              </div>
+            )}
             <div
               className="ib-rbox"
               data-drop-over={boxDrop.over ? '' : undefined}
@@ -5934,8 +5953,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
               {error && errorLine}
               {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
                   Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
-                  the Draft line takes its own line above the buttons (wrap-reverse), its place kept from the start so the
-                  first save does not move the box. */}
+                  the Draft line is above the box (the owner, 2026-11-03), so the first save grows the foot upward and
+                  the box, its mic and this row stay where they are. */}
               <div className="ib-acts ib-footrow ib-replyrow" data-reply-row="">
                 <div className="ib-footbtns">
                   <button type="button" className="ib-btn ib-pri" ref={sendRef} onClick={() => void send()} disabled={sending || voice.busy}>
@@ -5950,16 +5969,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   {pillActive && phone && rcptPill}
                 </div>
                 <div className="ib-footstatus">
-                  <DraftStamp
-                    savedAt={replyDraft.conflict === null && (boxHasWords || replyDraft.draft?.files?.length) ? (replyDraft.draft?.updated_at ?? null) : null}
-                    tooLong={replyDraft.conflict === null && replyDraft.tooLong}
-                    failed={replyDraft.conflict === null && replyDraft.failed && (boxHasWords || replyFiles.files.length > 0)}
-                    onDiscard={() => {
-                      replyDraft.discard();
-                      closeBox(true);
-                      announce('Draft discarded.');
-                    }}
-                  />
+                  {!phone && draftStamp}
                   {pillActive && !phone && rcptPill}
                 </div>
               </div>

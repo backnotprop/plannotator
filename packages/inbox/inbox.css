@@ -7091,8 +7091,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* ─────────────── Who gets the reply (approval "inbox-reply-recipient", option E "Under the box, right") ───────────────
    Nothing sits above the reply box: "Draft  Saved 4:51 PM  Discard" is in Send's row, at its right, and in a thread with
    more than one agent the pill after it names who gets the reply ("to [tile] Claude Code (plannotator) ⌄"). On a phone
-   the pill sits after Cancel (the folder alone), and the Draft line takes its own line above the buttons, its place
-   kept from the start (empty until something is saved), so the first save never moves the box. */
+   the pill sits after Cancel (the folder alone), and the Draft line is above the box, at the right, once something is
+   saved; the foot grows upward, so the first save never moves the box. */
 .ib-draft-stamp { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-draft-stamp .ib-draft-saved { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-replyrow > .ib-footstatus:empty { display: none; }
@@ -7143,14 +7143,13 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   }
 }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  /* The Draft line on its own line above Send's row, at the right. Its place is kept while the box is open, empty
-     until something is saved, so the first save never moves the box (and the mic) up under the finger. */
-  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; min-height: 24px; }
-  .ib-replyrow > .ib-footstatus:empty { display: flex; }
-  /* Discard's 44 px tap area never takes a tap meant for Send, Cancel or the box: the buttons sit over it, and the
-     line keeps the box's margin plus 4 px above it, so its area ends where the box's margin begins. */
-  .ib-replyrow > .ib-footbtns { position: relative; z-index: 1; }
-  .ib-replyrow > .ib-footstatus:has(.ib-draft-discard) { padding-top: 4px; }
+  /* The Draft line is above the box, at the right, once something is saved (the owner, 2026-11-03): the foot is held
+     at the bottom, so the line grows it upward and the box, its mic and Send's row stay where they are. Nothing is
+     there, and nothing is kept for it, before the first save. Discard's 44 px tap area stays inside the foot: the
+     foot's 10 px top padding plus the line's 4 px above it, and 14 px between the line and the box under it. */
+  .ib-draft-above { display: flex; justify-content: flex-end; padding-top: 4px; margin-bottom: 14px; }
+  .ib-draft-above:empty { display: none; }
+  .ib-replyrow > .ib-footstatus { flex: 1 0 100%; justify-content: flex-end; }
   /* The pill in Send's row: the folder alone, so the box stays where a one-agent thread has it. Send gets shorter. */
   .ib-rto-full { display: none; }
   .ib-rto-short { display: block; }
@@ -7167,8 +7166,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-rpick-more { height: 44px; margin-top: 0; }
   /* The list covers the box on a phone: the box's ring would show around it. */
   .pn-inbox:has(.ib-rpick) .ib-rbox { border-color: transparent; box-shadow: none; }
-  /* The keyboard leaves about 257 px under the header: the Draft line must not push the box under Send's row. */
+  /* The keyboard leaves about 257 px under the header, and the thread only a few dozen of them: the Draft line takes
+     30 px (2 px above it, 8 px under it), so it comes out of the thread's room and the box does not move.
+     Discard's tap area shrinks to 36 px to stay between the foot's top and the box. */
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pfoot { padding-top: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-rbox { margin-bottom: 6px; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot .ib-replyrow { row-gap: 4px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-draft-above { padding-top: 2px; margin-bottom: 8px; }
+  :root[data-ib-keyboard-pin="tight"] .ib-draft-above .ib-draft-discard::after { inset: -9px -8px; }
 }
