@@ -243,7 +243,24 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
 
 test('⌄ gathers the card, the toolbar and the size bar into the bottom-right corner control, which says "Draft" and takes focus; one press brings everything back, focus in the field, the words kept', async () => {
   const page = world.page;
+  // The file's foot (`--ib-fvfoot`, the card's height) holds still through the flight: the card scales down on its way
+  // to the corner, and a measure taken then (any change in the pane re-measures) must not shrink the foot.
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
+  const foot = () => pane().evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-fvfoot').trim());
+  const footBefore = await foot();
+  expect(parseFloat(footBefore)).toBeGreaterThan(30);
   await card().locator('[data-fcomp-minimize]').click();
+  await page.waitForTimeout(170);
+  await pane().evaluate((el) => {
+    const nudge = document.createElement('span');
+    el.appendChild(nudge);
+    nudge.remove();
+  });
+  await page.waitForTimeout(50);
+  expect(await foot(), 'mid-flight').toBe(footBefore);
+  await page.waitForTimeout(500);
+  expect(await foot(), 'landed').toBe(footBefore);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   // Everything went: the card (kept, inert: no pill of its own), the toolbar and the image's size bar.
   await expect(card()).toHaveJSProperty('inert', true);
@@ -256,8 +273,9 @@ test('⌄ gathers the card, the toolbar and the size bar into the bottom-right c
   await expect(corner()).toBeFocused();
   await expect(corner()).toContainText('Draft');
   await expect(corner()).toHaveAccessibleName(/^Show tools, reply draft/);
+  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
+  await expect.poll(async () => Math.round((await corner().boundingBox())!.height)).toBe(32);
   const box = (await corner().boundingBox())!;
-  expect(Math.round(box.height)).toBe(32);
   expect(box.x + box.width).toBeGreaterThan(1440 - 40);
   expect(box.y + box.height).toBeGreaterThan(900 - 40);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -424,6 +442,7 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await expect(toolbar(page)).toBeHidden();
     await expect(pill(page)).toHaveCount(0);
     await expect(corner(page)).toHaveAccessibleName(/^Show tools, reply draft/);
+    await expect.poll(async () => Math.round((await corner(page).boundingBox())!.height)).toBeGreaterThanOrEqual(44);
     const cornerBox = (await corner(page).boundingBox())!;
     expect(cornerBox.width).toBeGreaterThanOrEqual(44);
     expect(cornerBox.height).toBeGreaterThanOrEqual(44);

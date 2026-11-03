@@ -170,7 +170,7 @@ const hide = (page = world.page) => page.locator('[data-full-view-hide]');
 const count = (page = world.page) => bar(page).locator('[data-full-view-comments]');
 
 /** What floats over a file in full screen and gathers into the corner control with the toolbar. */
-const FLOATING = '.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-toolstrip, .ib-contents-open';
+const FLOATING = '.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open';
 
 /** Put the pointer where it reaches nothing of the toolbar. */
 async function pointerAway(page = world.page) {
@@ -275,10 +275,10 @@ test('Hide gathers the tools into one control in the bottom right corner; one pr
   await expect(handle()).toBeFocused();
   await expect(handle()).toHaveAccessibleName('Show tools, 1 comment');
   await expect(page.locator('[data-step-live]')).toHaveText('Tools hidden. They are in the bottom right corner.');
-  // Bottom right, 32 px (approval "inbox-fullscreen-gather").
+  // Bottom right, 32 px (approval "inbox-fullscreen-gather"), measured once it has landed (it scales in from 0.6).
+  await expect.poll(async () => Math.round((await handle().boundingBox())!.height)).toBe(32);
   const handleBox = (await handle().boundingBox())!;
   expect(handleBox.width).toBeGreaterThanOrEqual(32);
-  expect(handleBox.height).toBe(32);
   expect(handleBox.x + handleBox.width).toBeGreaterThan(1280 - 40);
   expect(handleBox.x + handleBox.width).toBeLessThanOrEqual(1280 - 8);
   expect(handleBox.y + handleBox.height).toBeGreaterThan(800 - 40);
@@ -427,6 +427,8 @@ test('the corner control is far from ×: a click where the toolbar was does noth
   // Nothing of the gathered toolbar takes a click where × was.
   const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-full-view-close], [data-full-view-hide]') !== null, { x: close.x + close.width / 2, y: close.y + close.height / 2 });
   expect(under).toBe(false);
+  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
+  await expect.poll(async () => Math.round((await handle().boundingBox())!.height)).toBe(32);
   const tab = (await handle().boundingBox())!;
   const corner = { x: tab.x + tab.width / 2, y: tab.y + tab.height / 2 };
   const onCorner = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-full-view-handle]') !== null, corner);
@@ -701,6 +703,7 @@ test('on an iPhone (WebKit): the same mode, the toolbar bottom right with 44 px 
       await hide(page).click();
       await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
       await expect(pane(page).locator('[data-fcomp-pill]')).toBeHidden();
+      await expect.poll(async () => Math.round((await handle(page).boundingBox())!.height)).toBeGreaterThanOrEqual(44);
       const tab = (await handle(page).boundingBox())!;
       expect(tab.width).toBeGreaterThanOrEqual(44);
       expect(tab.height).toBeGreaterThanOrEqual(44);
