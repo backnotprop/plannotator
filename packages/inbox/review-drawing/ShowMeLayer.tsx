@@ -21,6 +21,7 @@ import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { baseName, showMePlace } from './showMeModel';
+import { SHEET_HOME, useSheetDrag, type SheetOffset } from './useSheetDrag';
 import type { ShowMePlace, ShowMeState } from './useShowMe';
 
 const LAYER = { 'data-popover-layer': '', 'data-chat-window': '' } as const;
@@ -143,6 +144,8 @@ export function ShowMeSheet({
   agent,
   host,
   asked,
+  offset = SHEET_HOME,
+  onOffset,
   onCode,
   onShrink,
   onClose,
@@ -153,13 +156,25 @@ export function ShowMeSheet({
   host: string | null;
   /** A picture of an earlier round, as asked: the parts whose lines changed since, and Show me again. */
   asked?: { stale: ReadonlySet<string>; onAgain: () => void } | null;
+  /** Where it was dragged to (useSheetDrag), kept by the host. Absent `onOffset`: it does not move (a phone's sheet). */
+  offset?: SheetOffset;
+  onOffset?: (offset: SheetOffset) => void;
   onCode: (target: ShapeCodeTarget, el: HTMLElement) => void;
   onShrink: () => void;
   onClose: () => void;
 }) {
+  const drag = useSheetDrag({ offset, onOffset: onOffset ?? (() => {}), enabled: !!onOffset });
   return (
-    <section className="ib-sm-sheet" aria-label={`Show me: ${drawing.title ?? 'the picture'}`} data-show-me-sheet={drawing.id} {...LAYER}>
-      <div className="ib-sm-sheet-h">
+    <section
+      ref={drag.ref}
+      className="ib-sm-sheet"
+      style={drag.style}
+      aria-label={`Show me: ${drawing.title ?? 'the picture'}`}
+      data-show-me-sheet={drawing.id}
+      data-moved={drag.style ? '' : undefined}
+      {...LAYER}
+    >
+      <div className="ib-sm-sheet-h" {...drag.headerProps} title={onOffset ? 'Drag to move · double-click to put it back' : undefined}>
         <Pebble alive={false} size={20} className="ib-sm-peb" />
         <div className="ib-sm-tx">
           <b>{drawing.title ?? 'Show me'}</b>

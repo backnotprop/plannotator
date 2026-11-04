@@ -44,6 +44,7 @@ import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
 import { anchorDrawing, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
+import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
@@ -204,6 +205,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     const lines = (patch: string) => new Map(parseDiffToFiles(patch).map((file) => [file.path, newSideLines(file.patch)] as const));
     return anchorDrawing([shown.drawing.view.html, shown.drawing.view.tall?.html ?? ''], lines(askedPatch.patch), new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)));
   }, [showMe.state.shown?.drawing.id, askedReview, askedPatch, files]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Where the person dragged the picture: kept while the review is open, through the corner card and back.
+  const [sheetOffset, setSheetOffset] = useState<SheetOffset>(SHEET_HOME);
   const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
   /** A part of a picture opens its code: the chapter that holds the file (else All files), the lines painted. */
   const openCode = (target: ShapeCodeTarget): boolean => {
@@ -739,6 +742,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           answer={showMe.state.shown.answer}
           agent={author}
           host={host}
+          offset={sheetOffset}
+          {...(phone ? {} : { onOffset: setSheetOffset })}
           asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing) } : null}
           onCode={(drawn, el) => {
             const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;

@@ -390,6 +390,7 @@ test.afterAll(async () => {
 });
 
 let round1: { thread_id: string; message_id: string };
+let round2: { thread_id: string; message_id: string };
 
 test('Show me on selected lines: the popover, the box, the agent draws, the picture opens over the diff', async () => {
   const { page } = world;
@@ -503,7 +504,7 @@ test("the Overview draws the agent's picture, a part opens its code; with no pic
 
 test('round 2: the redrawn Overview tags its changed parts; a Show me picture stays as asked', async () => {
   const { page } = world;
-  const round2 = await call('submit_guide', { project_path: world.project, guide: guide(2), patch: world.round2, review: true, reply_to: round1.message_id, body: 'Round 2: the row is removed, one email, jitter.' });
+  round2 = await call('submit_guide', { project_path: world.project, guide: guide(2), patch: world.round2, review: true, reply_to: round1.message_id, body: 'Round 2: the row is removed, one email, jitter.' });
   expect(round2.thread_id).toBe(round1.thread_id);
   await page.goto(`${world.url}#thread=${round2.thread_id}`);
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
@@ -537,6 +538,89 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   expect(world.errors).toEqual([]);
 });
 
+test('the picture moves by its header like the window, stays in the pane, keeps its place, and a double-click puts it back', async ({ browser }) => {
+  // Its own recorded context: the walkthrough lands in PLANNOTATOR_E2E_VIDEO_DIR (default the shots folder's parent).
+  const videoDir = resolve(process.env.PLANNOTATOR_E2E_VIDEO_DIR ?? join(shotsDir, '..', 'video'));
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce', recordVideo: { dir: videoDir, size: { width: 1280, height: 800 } } });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  try {
+    await page.goto(`${world.url}#thread=${round2.thread_id}`);
+    await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
+    const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
+    await expect(pane).toBeVisible();
+    await pane.locator('[data-review-chapters] li').nth(3).click();
+    await selectLines(page, WORKER, 17, 18);
+    await chooser(page).getByRole('button', { name: 'Show me' }).click();
+    const picture = sheet(page);
+    await expect(picture).toBeVisible();
+    await page.waitForTimeout(600);
+    const header = picture.locator('.ib-sm-sheet-h');
+    await expect(header).toHaveCSS('cursor', 'grab');
+    const home = (await picture.boundingBox())!;
+    const inside = async () => {
+      const box = (await picture.boundingBox())!;
+      const frame = (await pane.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(frame.x - 0.5);
+      expect(box.y).toBeGreaterThanOrEqual(frame.y - 0.5);
+      expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width + 0.5);
+      expect(box.y + box.height).toBeLessThanOrEqual(frame.y + frame.height + 0.5);
+      return box;
+    };
+    const grab = { x: home.x + 300, y: home.y + 30 };
+    await page.mouse.move(grab.x, grab.y);
+    await page.mouse.down();
+    await expect(header).toHaveAttribute('data-show-me-drag', '');
+    await page.mouse.move(grab.x - 90, grab.y + 30, { steps: 12 });
+    await expect(header).toHaveAttribute('data-show-me-drag', 'dragging');
+    await page.mouse.move(grab.x - 240, grab.y + 70, { steps: 18 });
+    await page.mouse.up();
+    let box = await inside();
+    expect(Math.round(box.x - home.x)).toBe(-240);
+    expect(Math.round(box.y - home.y)).toBe(70);
+    await page.waitForTimeout(500);
+    await shot(page, '09-dragged');
+
+    // Past the pane's edge: it stops at the edge.
+    await page.mouse.move(box.x + 300, box.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300 + 2000, box.y + 30 + 2000, { steps: 20 });
+    await page.mouse.up();
+    box = await inside();
+    await page.waitForTimeout(500);
+
+    // It keeps its place through the corner card and back.
+    await picture.getByRole('button', { name: 'Shrink the picture' }).click();
+    await expect(corner(page)).toBeVisible();
+    await page.waitForTimeout(500);
+    await corner(page).getByRole('button', { name: 'Grow the picture' }).click();
+    await expect(picture).toBeVisible();
+    const back = (await picture.boundingBox())!;
+    expect(Math.round(back.x)).toBe(Math.round(box.x));
+    expect(Math.round(back.y)).toBe(Math.round(box.y));
+    await page.waitForTimeout(500);
+
+    // A narrower window clamps it again.
+    await page.setViewportSize({ width: 1100, height: 760 });
+    await page.waitForTimeout(400);
+    await inside();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.waitForTimeout(400);
+
+    // A double-click on the header puts it back where it started.
+    await header.dblclick({ position: { x: 300, y: 30 } });
+    await expect(picture).not.toHaveAttribute('data-moved', '');
+    const reset = (await picture.boundingBox())!;
+    expect(Math.round(reset.x)).toBe(Math.round(home.x));
+    expect(Math.round(reset.y)).toBe(Math.round(home.y));
+    await page.waitForTimeout(800);
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('a phone at 390 px: the popover and the picture', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce', hasTouch: true });
   const page = await context.newPage();
@@ -556,6 +640,8 @@ test('a phone at 390 px: the popover and the picture', async ({ browser }) => {
     await expect(sheet(page)).toBeVisible({ timeout: 30_000 });
     await expect(sheet(page).locator('[data-show-me-answer]')).toContainText('nothing deletes the row', { timeout: 15_000 });
     await shot(page, 'phone-04-drawn', ['light', 'dark']);
+    // A phone's picture is a sheet: it does not move.
+    await expect(sheet(page).locator('.ib-sm-sheet-h')).not.toHaveAttribute('data-show-me-drag', /.*/);
     expect(errors).toEqual([]);
   } finally {
     await context.close();

@@ -7755,3 +7755,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-b { position: relative; overflow: hidden; }
 .ib-sm-pip-in { position: absolute; top: 6px; left: 8px; transform-origin: 0 0; pointer-events: none; }
 .ib-sm-h .ib-sp, .ib-sm-pip-h .ib-sp, .ib-ov-fig-h .ib-sp { flex: 1; }
+/* The picture moves by its header, like the Ask window (useSheetDrag); not on a phone, where it is a sheet. */
+.ib-sm-sheet-h[data-show-me-drag] { cursor: grab; touch-action: none; user-select: none; }
+.ib-sm-sheet-h[data-show-me-drag="dragging"] { cursor: grabbing; }
+.ib-sm-sheet-h[data-show-me-drag] button { cursor: pointer; }
