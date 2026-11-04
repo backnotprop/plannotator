@@ -41,6 +41,8 @@ import {
   type InboxMessage,
   type InboxPull,
   type InboxPullChecks,
+  type InboxPullCliState,
+  inboxPullCompareBranch,
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
@@ -70,31 +72,31 @@ function shaOf(value: unknown): string | null {
 
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision
-      repository { nameWithOwner } headRepository { nameWithOwner } author { login }
+const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision mergeable
+      repository { nameWithOwner } baseRepository { defaultBranchRef { name } } headRepository { nameWithOwner } author { login avatarUrl }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
-/** One query per GitHub host: the viewer, and the three searches. */
+/** One query per GitHub host: the viewer, and the three searches (the open ones with their full count: more than a read takes is said). */
 export const GITHUB_PULLS_QUERY = `query InboxPulls($requested: String!, $authored: String!, $merged: String!) {
   viewer { login }
-  requested: search(type: ISSUE, query: $requested, first: ${INBOX_PULLS_SEARCH_MAX}) { nodes { ... on PullRequest { ${GH_PULL} } } }
-  authored: search(type: ISSUE, query: $authored, first: ${INBOX_PULLS_SEARCH_MAX}) { nodes { ... on PullRequest { ${GH_PULL} } } }
+  requested: search(type: ISSUE, query: $requested, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  authored: search(type: ISSUE, query: $authored, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
   merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
 }`;
 
-const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch diffHeadSha approved detailedMergeStatus
+const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch diffHeadSha approved detailedMergeStatus conflicts
       diffStatsSummary { additions deletions fileCount } headPipeline { status }
-      project { fullPath } sourceProject { fullPath } author { username }
+      project { fullPath repository { rootRef } } sourceProject { fullPath } author { username avatarUrl }
       approvedBy(first: 3) { nodes { username } } reviewers(first: 5) { nodes { username } }`;
 
 /** One query per GitLab host: the current user's requested, opened and merged MRs. */
 export const GITLAB_PULLS_QUERY = `query InboxPulls {
   currentUser {
     username
-    requested: reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { nodes { ${GL_MR} } }
-    authored: authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { nodes { ${GL_MR} } }
+    requested: reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
+    authored: authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     merged: authoredMergeRequests(state: merged, first: 20, sort: MERGED_AT_DESC) { nodes { ${GL_MR} } }
   }
 }`;
@@ -139,8 +141,45 @@ function splitPath(path: string): { owner: string; repo: string } | null {
   return { owner: path.slice(0, at), repo: path.slice(at + 1) };
 }
 
+/** A host's answer: the login, its PRs, and how many open ones its searches found past what one read takes. */
+export interface ParsedPulls {
+  login: string | null;
+  pulls: InboxPull[];
+  /** The open searches (requested, authored) found more than they answered: how many came back, of how many. */
+  capped?: { shown: number; total: number };
+  /**
+   * By author login: the profile picture's URL as the forge answered it (absolute; GitLab's relative `/uploads/…`
+   * resolved on the host). Kept on the server: the window asks the Inbox for the picture, never the forge.
+   */
+  avatars: Record<string, string>;
+}
+
+/** An author's avatar URL as the forge gave it, absolute; "" when it gave none or it is not a URL. */
+function avatarOf(value: unknown, host: string): string {
+  const raw = str(value);
+  if (!raw) return "";
+  try {
+    return new URL(raw, `https://${host}/`).href;
+  } catch {
+    return "";
+  }
+}
+
+/** The open searches' counts (GitHub `issueCount`, GitLab `count`) against the nodes they answered; undefined when nothing was left out. */
+function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPulls["capped"] {
+  let shown = 0;
+  let total = 0;
+  for (const list of lists) {
+    const got = nodes(list).length;
+    const count = obj(list)[countKey];
+    shown += got;
+    total += typeof count === "number" && Number.isFinite(count) && count > got ? count : got;
+  }
+  return total > shown ? { shown, total } : undefined;
+}
+
 /** A GitHub answer as the viewer's login and PRs; null when it is not one. */
-export function parseGithubPulls(stdout: string, host: string): { login: string | null; pulls: InboxPull[] } | null {
+export function parseGithubPulls(stdout: string, host: string): ParsedPulls | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -151,6 +190,7 @@ export function parseGithubPulls(stdout: string, host: string): { login: string 
   if (!data.viewer && !data.authored && !data.requested) return null;
   const login = str(obj(data.viewer).login) || null;
   const out = new Map<string, InboxPull>();
+  const avatars: Record<string, string> = {};
   const read = (list: unknown, requested: boolean) => {
     for (const item of nodes(list)) {
       const repo = str(obj(item.repository).nameWithOwner);
@@ -159,6 +199,9 @@ export function parseGithubPulls(stdout: string, host: string): { login: string 
       if (!parts || number < 1) continue;
       const key = forgeRefKey({ platform: "github", host, owner: parts.owner, repo: parts.repo, number, kind: "pull" });
       const author = str(obj(item.author).login) || null;
+      const avatar = author ? avatarOf(obj(item.author).avatarUrl, host) : "";
+      if (author && avatar) avatars[author] = avatar;
+      const defaultBranch = str(obj(obj(item.baseRepository).defaultBranchRef).name);
       const state: InboxPullState = item.state === "MERGED" ? "merged" : item.state === "CLOSED" ? "closed" : item.isDraft === true ? "draft" : "open";
       const rollup = str(obj(obj(obj(nodes(item.commits)[0]).commit).statusCheckRollup).state);
       const checks: InboxPullChecks | null = rollup === "SUCCESS" ? "success" : rollup === "PENDING" || rollup === "EXPECTED" ? "pending" : rollup === "FAILURE" || rollup === "ERROR" ? "failure" : null;
@@ -193,6 +236,9 @@ export function parseGithubPulls(stdout: string, host: string): { login: string 
         approved_by: approver ? str(obj(approver.author).login) || null : null,
         reviewers,
         checks,
+        // `UNKNOWN` (GitHub has not worked it out yet) says nothing.
+        ...(state === "open" || state === "draft" ? (item.mergeable === "CONFLICTING" ? { conflicts: true } : item.mergeable === "MERGEABLE" ? { conflicts: false } : {}) : {}),
+        ...(defaultBranch ? { default_branch: defaultBranch } : {}),
         updated_at: str(item.updatedAt),
         merged_at: str(item.mergedAt) || null,
       });
@@ -201,14 +247,15 @@ export function parseGithubPulls(stdout: string, host: string): { login: string 
   read(data.authored, false);
   read(data.merged, false);
   read(data.requested, true);
-  return { login, pulls: [...out.values()] };
+  const capped = cappedOf([data.requested, data.authored], "issueCount");
+  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
 }
 
 const GL_FAIL = new Set(["FAILED", "CANCELED"]);
 const GL_QUIET = new Set(["SKIPPED", "MANUAL"]);
 
 /** A GitLab answer as the current user's name and MRs; null when it is not one. */
-export function parseGitlabPulls(stdout: string, host: string): { login: string | null; pulls: InboxPull[] } | null {
+export function parseGitlabPulls(stdout: string, host: string): ParsedPulls | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -219,6 +266,7 @@ export function parseGitlabPulls(stdout: string, host: string): { login: string 
   if (!user.username) return null;
   const login = str(user.username) || null;
   const out = new Map<string, InboxPull>();
+  const avatars: Record<string, string> = {};
   const read = (list: unknown, requested: boolean) => {
     for (const item of nodes(list)) {
       const repo = str(obj(item.project).fullPath);
@@ -227,6 +275,9 @@ export function parseGitlabPulls(stdout: string, host: string): { login: string 
       if (!parts || number < 1) continue;
       const key = forgeRefKey({ platform: "gitlab", host, owner: parts.owner, repo: parts.repo, number, kind: "pull" });
       const author = str(obj(item.author).username) || null;
+      const avatar = author ? avatarOf(obj(item.author).avatarUrl, host) : "";
+      if (author && avatar) avatars[author] = avatar;
+      const defaultBranch = str(obj(obj(item.project).repository).rootRef);
       const state: InboxPullState = item.state === "merged" ? "merged" : item.state === "opened" ? (item.draft === true ? "draft" : "open") : "closed";
       const status = str(obj(item.headPipeline).status);
       const checks: InboxPullChecks | null = !status || GL_QUIET.has(status) ? null : status === "SUCCESS" ? "success" : GL_FAIL.has(status) ? "failure" : "pending";
@@ -260,6 +311,8 @@ export function parseGitlabPulls(stdout: string, host: string): { login: string 
           .map((n) => str(n.username))
           .filter((name) => name !== "" && name !== login && !approvers.includes(name)),
         checks,
+        ...(state === "open" || state === "draft" ? (typeof item.conflicts === "boolean" ? { conflicts: item.conflicts } : {}) : {}),
+        ...(defaultBranch ? { default_branch: defaultBranch } : {}),
         updated_at: str(item.updatedAt),
         merged_at: str(item.mergedAt) || null,
       });
@@ -268,7 +321,8 @@ export function parseGitlabPulls(stdout: string, host: string): { login: string 
   read(user.authored, false);
   read(user.merged, false);
   read(user.requested, true);
-  return { login, pulls: [...out.values()] };
+  const capped = cappedOf([user.requested, user.authored], "count");
+  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
 }
 
 // --- the reader ---
@@ -285,6 +339,11 @@ interface HostAnswer {
   at: number;
   login: string | null;
   pulls: InboxPull[];
+  /** The open searches' raw counts: how many nodes came back, of how many they found. */
+  capped?: { shown: number; total: number };
+  /** Whether the searches were limited to the projects' repositories (GitHub `repo:` qualifiers that fit). */
+  scoped: boolean;
+  avatars: Record<string, string>;
   /** The repositories the searches were scoped to (lowercased, sorted, space-separated). */
   repos: string;
 }
@@ -307,10 +366,18 @@ export class InboxPullsError extends Error {
 }
 
 export interface InboxPulls {
-  /** The PRs of these repositories, with the hosts asked. Never throws. */
-  list(repos: readonly InboxPullRepo[], options?: { refresh?: boolean }): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[] }>;
+  /**
+   * The PRs of these repositories, with the hosts asked, what each CLI asked was found to be (`clis`), and the
+   * repositories' hosts no CLI here is signed in to (`unsigned`). Never throws.
+   */
+  list(
+    repos: readonly InboxPullRepo[],
+    options?: { refresh?: boolean },
+  ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
+  avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
@@ -319,8 +386,15 @@ export interface InboxPulls {
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-/** Core's branch check (`inboxPullSafeBranch`): the compare and the hand-off's words take the same names. */
+/** Core's branch check for words (`inboxPullSafeBranch`): the hand-off names a branch only when it passes. */
 export const safeBranch = inboxPullSafeBranch;
+/** Core's branch check for the compare (`inboxPullCompareBranch`): any branch name git takes, percent-encoded into the URL. */
+export const compareBranch = inboxPullCompareBranch;
+
+/** A branch in a compare's path: each character percent-encoded but the `/` between its parts (`übersetzung/x` → `%C3%BCbersetzung/x`). */
+function compareRef(name: string): string {
+  return name.split("/").map(encodeURIComponent).join("/");
+}
 
 /** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
 export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number) => Promise<RefCommandResult & { tooLarge?: boolean }>;
@@ -385,17 +459,25 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
   const holdUntil = new Map<string, number>();
-  const signed = new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>> }>();
+  const signed = new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
+  let avatars = new Map<string, Record<string, string>>();
 
   const signedIn = (cli: RefCli): Promise<Set<string>> => {
     const hit = signed.get(cli);
     if (hit && now() - hit.at < hit.ttl) return hit.set;
-    const set = readSignedInHosts(run, cli).catch(() => new Set<string>());
-    const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, set };
+    // The same calls `readSignedInHosts` makes, watched: a CLI that is not installed is told apart from one signed out.
+    const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, set: Promise.resolve(new Set<string>()), missing: false };
+    const watched: RefRunner = async (c, args, env) => {
+      const result = await run(c, args, env);
+      if (refErrorOf(c, result) === "cli_missing") entry.missing = true;
+      return result;
+    };
+    const set = readSignedInHosts(watched, cli).catch(() => new Set<string>());
+    entry.set = set;
     signed.set(cli, entry);
     void set.then((found) => {
       if (found.size === 0) entry.ttl = REF_FAILURE_MS;
@@ -403,10 +485,17 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     return set;
   };
 
-  /** The CLI signed in to a host, or null: nothing is asked of a host no CLI here is signed in to. */
-  const cliFor = async (host: string): Promise<RefCli | null> => {
+  /**
+   * The CLI signed in to a host, or null: nothing is asked of a host no CLI here is signed in to. What each CLI asked
+   * turned out to be goes into `states`, the one list call's own (two lists at once never share it).
+   */
+  const cliFor = async (host: string, states: Partial<Record<RefCli, InboxPullCliState>>): Promise<RefCli | null> => {
     const order: RefCli[] = /gitlab/i.test(host) ? ["glab", "gh"] : ["gh", "glab"];
-    for (const cli of order) if ((await signedIn(cli)).has(host)) return cli;
+    for (const cli of order) {
+      const set = await signedIn(cli);
+      states[cli] = signed.get(cli)?.missing ? "missing" : set.size > 0 ? "signed_in" : "signed_out";
+      if (set.has(host)) return cli;
+    }
     return null;
   };
 
@@ -419,13 +508,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         state.failedAt = now();
         return;
       }
-      const args =
-        state.cli === "gh"
-          ? (() => {
-              const s = githubPullSearches(now(), repos);
-              return ["api", "graphql", "--hostname", host, "-f", `query=${GITHUB_PULLS_QUERY}`, "-f", `requested=${s.requested}`, "-f", `authored=${s.authored}`, "-f", `merged=${s.merged}`];
-            })()
-          : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
+      const searches = state.cli === "gh" ? githubPullSearches(now(), repos) : null;
+      // GitLab's lists are the user's own, never limited to the projects; GitHub's are while the repositories fit.
+      const scoped = !!searches && searches.authored.includes(" repo:");
+      const args = searches
+        ? ["api", "graphql", "--hostname", host, "-f", `query=${GITHUB_PULLS_QUERY}`, "-f", `requested=${searches.requested}`, "-f", `authored=${searches.authored}`, "-f", `merged=${searches.merged}`]
+        : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
       const result = await run(state.cli, args);
       const parsed = result.exitCode === 0 ? (state.cli === "gh" ? parseGithubPulls(result.stdout, host) : parseGitlabPulls(result.stdout, host)) : null;
       if (!parsed) {
@@ -435,7 +523,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         state.failedAt = now();
         return;
       }
-      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, repos: reposKey };
+      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, avatars: parsed.avatars, scoped, repos: reposKey, ...(parsed.capped ? { capped: parsed.capped } : {}) };
       state.error = null;
     })()
       .catch(() => {
@@ -464,10 +552,15 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         byHost.set(host, [...(byHost.get(host) ?? []), repo]);
       }
       const asked: { host: string; state: HostState }[] = [];
+      const unsigned: string[] = [];
+      const cliStates: Partial<Record<RefCli, InboxPullCliState>> = {};
       await Promise.all(
         [...byHost.keys()].map(async (host) => {
-          const cli = await cliFor(host);
-          if (!cli) return;
+          const cli = await cliFor(host, cliStates);
+          if (!cli) {
+            unsigned.push(host);
+            return;
+          }
           let state = hosts.get(host);
           if (!state || state.cli !== cli) {
             state = { cli, answer: null, failedAt: 0, error: null, pending: null };
@@ -485,15 +578,52 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       for (const { state } of asked) for (const pull of state.answer?.pulls ?? []) if (wanted.has(inboxPullRepoKey(pull.host, pull.repo))) pulls.push(pull);
       known = new Map(pulls.map((p) => [p.key, p]));
       lastRepos = wanted;
+      // Only the authors of PRs this list shows: the window may ask for their pictures, no one else's.
+      const nextAvatars = new Map<string, Record<string, string>>();
+      for (const { host, state } of asked) {
+        const urls: Record<string, string> = {};
+        for (const pull of pulls) {
+          if (pull.host.toLowerCase() !== host || !pull.author) continue;
+          const url = state.answer?.avatars[pull.author];
+          if (url) urls[pull.author] = url;
+        }
+        nextAvatars.set(host, urls);
+      }
+      avatars = nextAvatars;
+      /**
+       * What the list shows of a host whose searches left PRs out: its open PRs in this list, and (searches limited
+       * to the projects' repositories) those plus the ones left out; else how many of those are the projects' is not
+       * known (null).
+       */
+      const cappedOfHost = (host: string, answer: HostAnswer | null): InboxPullHost["capped"] | undefined => {
+        if (!answer?.capped || answer.capped.total <= answer.capped.shown) return undefined;
+        const shown = pulls.filter((p) => p.host.toLowerCase() === host && (p.state === "open" || p.state === "draft")).length;
+        return { shown, total: answer.scoped ? shown + (answer.capped.total - answer.capped.shown) : null };
+      };
       const times = asked.map((a) => a.state.answer?.at).filter((t): t is number => typeof t === "number");
       return {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
-        hosts: asked.map(({ host, state }) => ({ cli: state.cli, host, login: state.answer?.login ?? null, ...(state.error ? { error: state.error } : {}) })),
+        hosts: asked.map(({ host, state }): InboxPullHost => {
+          const capped = cappedOfHost(host, state.answer);
+          return {
+            cli: state.cli,
+            host,
+            login: state.answer?.login ?? null,
+            // A host that failed this time still shows its last answer, when there is one: the window says so.
+            ...(state.error ? { error: state.error, ...(state.answer ? { last_read: new Date(state.answer.at).toISOString() } : {}) } : {}),
+            ...(capped ? { capped } : {}),
+          };
+        }),
         pulls,
+        clis: { ...cliStates },
+        unsigned: unsigned.sort(),
       };
     },
     find(key) {
       return known.get(key) ?? null;
+    },
+    avatarUrls(host) {
+      return { ...(avatars.get(host.toLowerCase()) ?? {}) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
     async diff(key, scope) {
@@ -509,24 +639,27 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // A layer from a fork: its branch lives in the fork, never under the same name upstream.
       const fork = !!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase();
       let head = pull.head;
+      // The compare's head as its URL takes it: the branch percent-encoded, a fork's owner before it.
+      let headRef = compareRef(pull.head);
       if (scope === "stack" && fork) {
         const owner = splitPath(pull.head_repo!)?.owner ?? "";
         if (pull.platform !== "github" || !FORK_OWNER.test(owner)) {
           throw new InboxPullsError("pull_diff_fork", `This layer comes from a fork, which ${pull.platform === "gitlab" ? "GitLab" : "the forge"} can't compare with the stack here. Review it layer by layer, or open it on the forge.`);
         }
         head = `${owner}:${pull.head}`;
+        headRef = `${owner}:${compareRef(pull.head)}`;
       }
       const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.updated_at}`;
       const hit = diffs.get(cacheKey);
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
-      if (scope === "stack" && (!bases.every(safeBranch) || !safeBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+      if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
       const parts = splitPath(pull.repo)!;
       const argsFor = (base: string): string[] => {
         if (pull.platform === "github") {
-          const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${base}...${head}`;
+          const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
           return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
         }
         const project = encodeURIComponent(pull.repo);
@@ -596,14 +729,27 @@ export interface InboxPullLinkStore {
   threadSubject(threadId: string): string | null;
   /** The project a thread is in (canonical id), or null when there is no such thread. */
   threadProject(threadId: string): string | null;
+  /** Whether an agent session polls now (the live sessions); absent: every agent is taken as live. */
+  sessionLive?(session: string): boolean;
 }
 
-function previewOf(body: string): string {
+/**
+ * An agent message's words as one line for the stack view: Markdown's own markers out (code fences, images, link
+ * targets, headings, quotes, list bullets, emphasis and code ticks), the words and code inside them kept as written
+ * (`settle_batch()` stays `settle_batch()`, "from `main`." stays "from main."), cut at 240 characters.
+ */
+export function previewOf(body: string): string {
   const text = body
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[#>*_`~|]+/g, " ")
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")
+    .replace(/^[ \t]{0,3}(?:>[ \t]?)+/gm, "")
+    .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/gm, "")
+    .replace(/(`+)([^`]+?)\1/g, "$2")
+    .replace(/(\*\*|__|~~)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, "$1$2")
+    .replace(/(^|[^\w_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, "$1$2")
     .replace(/\s+/g, " ")
     .trim();
   return text.length > 240 ? `${text.slice(0, 240).replace(/\s+\S*$/, "")}…` : text;
@@ -671,13 +817,21 @@ export function linkInboxPulls(
     const root = store.message(threadId)?.to ?? null;
     // A thread the person just handed over: its agent has not written yet, so it is the session the first message went to.
     const to = last ? null : root;
+    // Ended: a session that sent with a wake polls while it runs, so one not polling now has ended; the session a
+    // hand-off went to was live then. An agent that only reads the Inbox (no wake) is never called ended.
+    const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
     return {
       via,
       ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
       thread_id: threadId,
       thread_subject: store.threadSubject(threadId),
       project_id: projectId,
-      agent: last && last.author.kind === "agent" ? { host: last.author.host, session: last.author.session, name: last.author.name } : to ? { host: to.host, session: to.session, name: null } : null,
+      agent:
+        last && last.author.kind === "agent"
+          ? { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) }
+          : to
+            ? { host: to.host, session: to.session, name: null, ...(ended(to.session, true) ? { ended: true } : {}) }
+            : null,
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
       guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
     };

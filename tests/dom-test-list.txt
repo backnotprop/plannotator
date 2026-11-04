@@ -142,6 +142,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
@@ -508,9 +509,13 @@ packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
+packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/inbox/shapeBoardHead.test.tsx
+packages/inbox/shapeChangeFailed.test.tsx
+packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx

@@ -48,6 +48,12 @@ test("inbox.css spells PHONE_QUERY in its phone block, and no other phone break"
   expect(css).not.toMatch(/@media \(max-width: 767px\) \{/);
 });
 
+test("the standalone Shape page's sheet spells PHONE_QUERY too", () => {
+  const css = readFileSync(join(import.meta.dir, 'shape', 'standalone', 'shape-page.css'), 'utf8');
+  expect(css).toContain(`@media ${PHONE_QUERY} {`);
+  expect(css).not.toMatch(/@media \(max-width: 767px\) \{/);
+});
+
 /**
  * trackKeyboard against a fake window, as the owner's iPhone (iOS 26) read it with the keyboard up: clientHeight 660,
  * innerHeight and the visual viewport 257, the page panned by Safari. The failures these catch: the keyboard read

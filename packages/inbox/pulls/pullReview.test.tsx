@@ -9,7 +9,11 @@
  *  - a teammate's PR (no agent thread here) offering a verdict that has
  *    nowhere to go;
  *  - the list not grouped by whose move it is, a stack drawn as several rows,
- *    or the waiting ones not folded.
+ *    or the waiting ones not folded;
+ *  - the worst case (break-ui on #2590): a failed read saying "Nothing open",
+ *    a capped read with no count, a refused diff offering a verdict, an empty
+ *    diff read forever, a long title lost from the header, an ended agent
+ *    offered Reply.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -19,7 +23,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { INBOX_REVIEW_SKILL_TEXTS } from '@plannotator/core/inbox-review';
 import type { StartThreadInput } from '../api';
-import { handoffKeys, handoffStack, layerVerdictLink, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
+import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
+import { layerVerdictLink } from './topology';
 
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
@@ -123,10 +128,13 @@ let refuse: Record<string, { status: number; body: Record<string, unknown> }> = 
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
 let takenNames: string[] = [];
 let sessionReads = 0;
+/** What the diff door answers instead of a one-file patch (a refused branch, an empty diff); null: the patch. */
+let diffOverride: ((key: string, scope: string) => Response) | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
+  diffOverride = null;
   asked = [];
   posted = [];
   sessionsAnswer = {
@@ -167,6 +175,7 @@ beforeEach(() => {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
       asked.push({ key, scope });
+      if (diffOverride) return diffOverride(key, scope);
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
       return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
     }
@@ -510,6 +519,90 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'on_you', 'ready', 'waiting']);
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
+});
+
+test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
+  // The person's own stack (as "mara-lee", a login no other test drew), handed to Claude; a teammate's PR whose account is gone.
+  const gone = pull(990, { repo: 'northwind/web-app', mine: false, requested: true, author: null, head: 'gone', updated_at: '2026-11-03T11:00:00.000Z' });
+  const own = model.pulls.map((p) => (stack.some((l) => l.key === p.key) ? { ...p, author: 'mara-lee' } : p));
+  const answer: InboxPullsAnswer = { ...model, pulls: [...own, gone], links: { [stack[0]!.key]: { ...link, via: 'owner' } } };
+  // happy-dom loads no image (each one errors at once): the address each picture asks is read as it is set.
+  const srcs: string[] = [];
+  const setAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name: string, value: string) {
+    if (this.tagName === 'IMG' && name === 'src') srcs.push(String(value));
+    return setAttribute.call(this, name, value);
+  };
+  try {
+    mount(<Page answer={answer} stackId={STACK_ID} />);
+    await settle();
+  } finally {
+    Element.prototype.setAttribute = setAttribute;
+  }
+  const row = (id: string) => el(`[data-pulls-row="${id}"]`);
+  const stackRow = row(STACK_ID);
+  const lead = stackRow.querySelector('.ib-lead')!;
+  // The person's own stack: her picture (the bottom layer's author), never the agent's mark.
+  const av = lead.querySelector<HTMLElement>('[data-pulls-author]')!;
+  expect(av.getAttribute('data-pulls-author')).toBe('mara-lee');
+  const asked = srcs.map((s) => new URL(s, 'http://inbox.test'));
+  // Every picture is the Inbox's own route: nothing from another origin.
+  expect(asked.length).toBeGreaterThan(0);
+  expect(asked.every((u) => u.origin === 'http://inbox.test' && /\/api\/inbox\/pulls\/avatar$/.test(u.pathname))).toBe(true);
+  expect(asked.map((u) => `${u.searchParams.get('host')} ${u.searchParams.get('login')}`)).toContain('github.com mara-lee');
+  expect(lead.querySelector('.ib-atiles')).toBeNull();
+  // The agent: its mark and name on the third line.
+  const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
+  expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
+  expect(agent.textContent).toBe('Claude Code has it');
+  expect(agent.querySelector('svg, img')).not.toBeNull();
+  // The picture failed: the initials stay, no broken image.
+  expect(av.querySelector('img')).toBeNull();
+  expect(av.getAttribute('data-pulls-avatar')).toBe('none');
+  expect(av.textContent).toBe('ML');
+  // A deleted account: a grey person, never an empty box, and no picture asked for.
+  const ghost = row(gone.key).querySelector('[data-pulls-ghost]')!;
+  expect(ghost.getAttribute('aria-label')).toBe('A deleted account');
+  expect(ghost.querySelector('svg')).not.toBeNull();
+  expect(ghost.querySelector('img')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is the review\'s own switch', async () => {
+  const reviewed: string[] = [];
+  mount(<Page answer={model} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
+  await settle();
+  const pane = el('[data-pulls-stack]');
+  expect(pane.querySelectorAll('[data-pulls-open-diff]')).toHaveLength(1);
+  expect(pane.querySelector('[data-pulls-review-stack]')).toBeNull();
+  expect([...pane.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Whole stack')).toBe(false);
+  await act(async () => el('[data-pulls-open-diff]').click());
+  expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
+});
+
+test.skipIf(!hasDom)("a Whole stack over two agents' layers goes to neither: the agent option is off and says why; posting still can", async () => {
+  // Claude has #412 (the bottom), Codex #413: the stack up to #413 covers both.
+  const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
+  // Its head read (postable), and a fresh push: no comments kept from another test.
+  const pulls = model.pulls.map((p) => (p.key === stack[1]!.key ? { ...p, head_sha: SHA, updated_at: '2026-11-04T03:00:00.000Z' } : p));
+  const two: InboxPullsAnswer = { ...model, pulls, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
+  mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
+  await settle();
+  // This layer: Codex's own, offered.
+  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
+  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await settle();
+  const words = 'Claude Code and Codex each have layers here. Send to an agent from This layer.';
+  const option = el('[data-review-destination-choice="agent"]');
+  expect(option.querySelector('input')!.disabled).toBe(true);
+  expect(option.getAttribute('title')).toBe(words);
+  expect(el('[data-review-destination]').getAttribute('data-review-destination')).toBe('forge');
+  expect(el('[data-review-decision]').getAttribute('data-review-posts')).toBe('github');
+  expect(el('[data-pull-review-readonly]').textContent).toBe(words);
+  // Back to This layer: Codex is offered again; nothing was sent.
+  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  await settle();
+  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
+  expect(posted).toEqual([]);
 });
 
 // --- the review's findings (#2590): who a verdict may go to ---
@@ -1275,4 +1368,72 @@ test('a GitHub Enterprise host: the host before the repository, and the link onl
   );
   // A github.com URL on a GHE PR is not its own host's: left out.
   expect(handoffOf(ghe({ url: 'https://github.com/northwind/web-app/pull/869' }))).not.toContain('- Link:');
+});
+
+// --- the worst-case stress test (break-ui on #2590) ---
+
+test.skipIf(!hasDom)('a host that didn\'t answer: the list says so, never "Nothing open"; with a last read its PRs stay and a notice says why', async () => {
+  const failed: InboxPullsAnswer = { ...model, pulls: [], links: {}, hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable' }], clis: { gh: 'signed_in' }, unsigned: [] };
+  mount(<Page answer={failed} stackId="" />);
+  await settle();
+  expect(el('[data-pulls-empty]').getAttribute('data-pulls-empty')).toBe('unread');
+  expect(document.body.textContent).not.toContain('Nothing open');
+  act(() => root?.unmount());
+  host?.remove();
+
+  const kept: InboxPullsAnswer = { ...model, hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', error: 'rate_limited', last_read: '2026-11-03T09:00:00.000Z' }] };
+  mount(<Page answer={kept} stackId="" />);
+  await settle();
+  expect(document.querySelector('[data-pulls-empty]')).toBeNull();
+  expect(document.querySelector('[data-pulls-notice="rate_limited:true"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)("more PRs than one read takes: the list says how many it shows, with the forge's own list", async () => {
+  const capped: InboxPullsAnswer = { ...model, hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 100, total: 133 } }] };
+  mount(<Page answer={capped} stackId="" />);
+  await settle();
+  expect(el('[data-pulls-notice="capped:github.com"]').textContent).toContain('100 of 133');
+  expect(el<HTMLAnchorElement>('[data-pulls-notice-link]').href).toBe('https://github.com/pulls');
+});
+
+/** The model with #412 pushed again at `at` (the window's diff cache, by a PR's last update, reads it afresh). */
+const pushed412 = (at: string): InboxPullsAnswer => ({ ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, updated_at: at } : p)) });
+
+test.skipIf(!hasDom)('a diff the Inbox refuses (a branch it cannot compare): the forge link, and no verdict on a diff never read', async () => {
+  diffOverride = () => Response.json({ error: 'The diff could not be read.', code: 'pull_diff_failed' }, { status: 502 });
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed412('2026-11-04T01:00:00.000Z')} />);
+  await settle();
+  expect(document.querySelector('[data-pull-diff-error]')).not.toBeNull();
+  expect(el<HTMLAnchorElement>('[data-pull-diff-error-forge]').href).toBe(stack[0]!.url);
+  expect(document.querySelector('[data-review-decision]')).toBeNull();
+  expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading the diff…" forever', async () => {
+  diffOverride = (key, scope) => Response.json({ serverSession: 's', key, scope, base: 'x', head: 'y', patch: '', head_sha: 'a'.repeat(40) });
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed412('2026-11-04T02:00:00.000Z')} />);
+  await settle();
+  expect(el('[data-pull-diff-empty]').textContent).toContain('changes no files');
+  expect(document.body.textContent).not.toContain('Reading the diff');
+});
+
+// The cut itself is measured in tests/e2e/inbox-pull-requests.spec.ts (happy-dom lays nothing out).
+test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover', async () => {
+  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
+  const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);
+  await settle();
+  expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
+});
+
+test.skipIf(!hasDom)('an ended agent stays named, marked ended; Reply gives way to "Hand to another agent"', async () => {
+  const ended: InboxPullsAnswer = { ...model, links: { [stack[2]!.key]: { ...link, agent: { ...link.agent!, ended: true } } } };
+  mount(<Page answer={ended} stackId={STACK_ID} />);
+  await settle();
+  expect(document.querySelector('[data-pulls-agent-ended]')).not.toBeNull();
+  expect(document.querySelector('[data-pulls-reply]')).toBeNull();
+  await act(async () => el('[data-pulls-rehand-foot]').click());
+  await settle();
+  expect(document.querySelector('[data-pulls-ended-foot]')).toBeNull();
+  expect(el('[data-pulls-handoff]').getAttribute('data-pulls-handoff')).toBe('again');
 });
