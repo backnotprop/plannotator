@@ -80,6 +80,59 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('[data-show-me-box]')!.matches('[data-popover-layer][data-chat-window]')).toBe(true);
   });
 
+  test("a Show me the agent did not take is not drawing: busy offers the Ask window's choice, a refused one its problem", () => {
+    const policies: string[] = [];
+    const props = { agent: 'Claude Code', onWords: () => {}, onSend: () => {}, onBusy: (p: string) => void policies.push(p), onStop: () => {}, onClose: () => {} };
+    const box = { place: { file: 'src/retry-worker.ts', lines: [16, 18] as [number, number] }, words: '', turn: 'ask_1' };
+    const busy = { questionId: 'q', createdAt: 0, text: '', isStreaming: false, error: 'busy', errorCode: 'agent_busy' };
+    const el = mount(<layer.ShowMeBox state={state({ box, busy })} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')!.getAttribute('data-show-me-box')).toBe('busy');
+    expect(el.querySelector('[role="status"]')).toBeNull();
+    expect(el.querySelector('[data-show-me-stop]')).toBeNull();
+    expect(el.querySelector('[data-ask-note="busy"]')!.textContent).toContain('Claude Code is working on something else.');
+    const choices = [...el.querySelectorAll<HTMLButtonElement>('[data-session-ask-actions="busy"] button')];
+    expect(choices.map((b) => b.textContent)).toEqual(['Ask when it finishes', 'Interrupt and ask now']);
+    act(() => choices[0]!.click());
+    act(() => choices[1]!.click());
+    expect(policies).toEqual(['wait', 'interrupt']);
+
+    // Waiting on the busy agent: running, in the Ask window's words.
+    act(() => root!.render(<layer.ShowMeBox state={state({ box, drawing: true, waiting: 'waiting' })} {...props} />));
+    expect(el.querySelector('[role="status"]')!.textContent).toBe('Waiting for Claude Code to finish…');
+
+    // Nobody took it: the box is ready to send again, with the problem.
+    act(() => root!.render(<layer.ShowMeBox state={state({ box: { ...box, turn: null }, problem: 'The agent can’t take this right now. Try again in a moment.' })} {...props} />));
+    expect(el.querySelector('[data-show-me-box]')!.getAttribute('data-show-me-box')).toBe('compose');
+    expect(el.querySelector('[role="alert"]')!.textContent).toBe('The agent can’t take this right now. Try again in a moment.');
+    expect(el.querySelector('[data-show-me-send]')).not.toBeNull();
+  });
+
+  test("this round's picture has Show me again in its footer; an earlier round's has it in its banner only", () => {
+    let again = 0;
+    const sheet = (asked: boolean) => (
+      <layer.ShowMeSheet
+        drawing={DRAWING}
+        answer="The retry waits, then puts the job back."
+        agent="Claude Code"
+        host="claude-code"
+        asked={asked ? { stale: new Set<string>(), onAgain: () => void again++ } : null}
+        onAgain={() => void (again += 10)}
+        onCode={() => {}}
+        onShrink={() => {}}
+        onClose={() => {}}
+      />
+    );
+    const el = mount(sheet(false));
+    expect(el.querySelectorAll('[data-show-me-again]').length).toBe(1);
+    expect(el.querySelector('[data-show-me-asked]')).toBeNull();
+    act(() => el.querySelector<HTMLButtonElement>('.ib-sm-sheet-f [data-show-me-again]')!.click());
+    expect(again).toBe(10);
+    act(() => root!.render(sheet(true)));
+    expect(el.querySelectorAll('[data-show-me-again]').length).toBe(1);
+    act(() => el.querySelector<HTMLButtonElement>('[data-show-me-asked] [data-show-me-again]')!.click());
+    expect(again).toBe(11);
+  });
+
   test("a part of the picture opens its code, and the corner card names the part it opened", () => {
     const opened: { target: ShapeCodeTarget; mark: string | null }[] = [];
     const el = mount(

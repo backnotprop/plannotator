@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, newSideLines, showMeAbout, showMePlace, showMeSamePlace, waitingShowMe } from './showMeModel';
+import { anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, newSideLines, showMePlace, showMeSamePlace, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
   test("a part opens the chapter that holds its file, else All files (null)", () => {
@@ -51,13 +51,6 @@ describe('Show me model', () => {
     expect(anchorLines([15, 16], before, new Map([[15, 'z'], [16, 'a']]))).toBeNull();
   });
 
-  test("a Show me opens what was asked about the same place: overlapping lines of the same file, or the whole review", () => {
-    expect(showMeAbout({ file: 'w.ts', lines: [16, 18] }, { file: 'w.ts', lines: [18, 20] })).toBe(true);
-    expect(showMeAbout({ file: 'w.ts', lines: [16, 18] }, { file: 'w.ts', lines: [19, 20] })).toBe(false);
-    expect(showMeAbout({ file: 'x.ts', lines: [16, 18] }, { file: 'w.ts', lines: [16, 18] })).toBe(false);
-    expect(showMeAbout({ file: null, lines: null }, { file: null, lines: null })).toBe(true);
-    expect(showMeAbout({ file: 'w.ts', lines: [1, 2] }, { file: null, lines: null })).toBe(false);
-  });
   test("this round's picture opens again only for the same place: inside its lines, or most of the lines both cover", () => {
     const asked = { file: 'w.ts', lines: [16, 18] as [number, number] };
     expect(showMeSamePlace(asked, { file: 'w.ts', lines: [17, 17] })).toBe(true);
@@ -78,14 +71,12 @@ describe('Show me model', () => {
     expect(waitingShowMe([turn('t-run')], 'msg_r', place, 't-run', null)?.id).toBe('t-run');
     expect(waitingShowMe([turn('t-live')], 'msg_r', place, null, 't-live')?.id).toBe('t-live');
   });
-  test("a version-2 html overview keeps the guide viewer's note unless it is a clean Shape picture of the review's files", () => {
-    const files = ['src/auth.ts'];
-    // The format's own `code:` link picture: drawn as before Show me (the viewer's note), never through Shape.
-    expect(overviewPicture(FIXTURE_V2_HTML.guide.overview?.diagram, files)).toBeNull();
-    expect(overviewPicture({ kind: 'html', source: '<style>.a{}</style><div class="a">x</div>' }, files)).toBeNull();
-    const clean = { kind: 'html' as const, source: '<div data-mark="g" data-code="src/auth.ts#L1">guard</div>' };
-    expect(overviewPicture(clean, files)).toBe(clean);
-    expect(overviewPicture(clean, ['src/other.ts'])).toBeNull();
-    expect(overviewPicture({ kind: 'mermaid', source: 'flowchart LR' }, files)).toBeNull();
+  test("only a drawn (version-3) overview is a Shape picture; every version-2 html diagram keeps the viewer's note", () => {
+    // The format's own `code:` link picture, and one that would pass Shape's rules: both as before Show me.
+    expect(overviewPicture(FIXTURE_V2_HTML.guide.overview?.diagram)).toBeNull();
+    expect(overviewPicture({ kind: 'html', source: '<div data-mark="g" data-code="src/auth.ts#L1">guard</div>' })).toBeNull();
+    expect(overviewPicture({ kind: 'mermaid', source: 'flowchart LR' })).toBeNull();
+    const drawn = { kind: 'html' as const, source: '<div data-mark="g">guard</div>', width: 800, height: 360 };
+    expect(overviewPicture(drawn)).toBe(drawn);
   });
 });

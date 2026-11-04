@@ -18,6 +18,7 @@ import { inboxReviewLines, type InboxReviewDrawing } from '@plannotator/core/inb
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { Pebble, ShapeDiagram, type MarkState } from '@plannotator/ui/components/shape';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { SessionAskActions, type SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { baseName, showMePlace } from './showMeModel';
@@ -49,6 +50,7 @@ export function ShowMeBox({
   agent,
   onWords,
   onSend,
+  onBusy,
   onStop,
   onClose,
 }: {
@@ -56,6 +58,8 @@ export function ShowMeBox({
   agent: string;
   onWords: (words: string) => void;
   onSend: () => void;
+  /** The agent was busy: ask when it finishes, or interrupt it. */
+  onBusy?: (policy: SessionAskAction) => void;
   onStop: () => void;
   onClose: () => void;
 }) {
@@ -66,7 +70,7 @@ export function ShowMeBox({
   }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!box) return null;
   return (
-    <section className="ib-sm-box" aria-label="Show me" data-show-me-box={box.turn ? (state.drawing ? 'drawing' : 'done') : 'compose'} {...LAYER}>
+    <section className="ib-sm-box" aria-label="Show me" data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
       <div className="ib-sm-h">
         <Pebble alive={false} size={18} className="ib-sm-peb" />
         <b>Show me</b>
@@ -107,7 +111,15 @@ export function ShowMeBox({
                 <div className="ib-sm-line" role="status">
                   <Pebble alive reshaping size={20} className="ib-sm-peb" />
                   <span>
-                    <b>{agent} is drawing it.</b> It opens over the review when it’s ready.
+                    {state.waiting === 'waiting' ? (
+                      `Waiting for ${agent} to finish…`
+                    ) : state.waiting === 'interrupting' ? (
+                      `Interrupting ${agent}…`
+                    ) : (
+                      <>
+                        <b>{agent} is drawing it.</b> It opens over the review when it’s ready.
+                      </>
+                    )}
                   </span>
                 </div>
                 <div>
@@ -116,6 +128,11 @@ export function ShowMeBox({
                   </button>
                 </div>
               </>
+            ) : state.busy ? (
+              <div className="ib-ask-note" data-ask-note="busy">
+                <p>{agent} is working on something else.</p>
+                <SessionAskActions response={state.busy} onAction={onBusy} />
+              </div>
             ) : state.answerOnly ? (
               <p className="ib-sm-answer" data-show-me-answer="">
                 {state.answerOnly}
@@ -144,6 +161,7 @@ export function ShowMeSheet({
   agent,
   host,
   asked,
+  onAgain,
   offset = SHEET_HOME,
   onOffset,
   onCode,
@@ -156,6 +174,8 @@ export function ShowMeSheet({
   host: string | null;
   /** A picture of an earlier round, as asked: the parts whose lines changed since, and Show me again. */
   asked?: { stale: ReadonlySet<string>; onAgain: () => void } | null;
+  /** This round's picture: Show me again, the same lines asked anew (other words). */
+  onAgain?: () => void;
   /** Where it was dragged to (useSheetDrag), kept by the host. Absent `onOffset`: it does not move (a phone's sheet). */
   offset?: SheetOffset;
   onOffset?: (offset: SheetOffset) => void;
@@ -206,12 +226,22 @@ export function ShowMeSheet({
         )}
         <ShapeDiagram drawn={drawing.view} onCode={onCode} {...(asked?.stale.size ? { stale: asked.stale, tags: { stale: 'changed since asked' } } : {})} />
       </div>
-      {answer.trim() && (
-        <div className="ib-sm-sheet-f" data-show-me-answer="">
-          <span className="ib-sm-mark">
-            <HostMark host={host} />
-          </span>
-          <div className="ib-sm-tx">{answer.trim()}</div>
+      {(answer.trim() || (onAgain && !asked)) && (
+        <div className="ib-sm-sheet-f" data-show-me-answer={answer.trim() ? '' : undefined}>
+          {answer.trim() && (
+            <>
+              <span className="ib-sm-mark">
+                <HostMark host={host} />
+              </span>
+              <div className="ib-sm-tx">{answer.trim()}</div>
+            </>
+          )}
+          {onAgain && !asked && (
+            <button type="button" className="ib-btn ib-sm-again" onClick={onAgain} data-show-me-again="">
+              <Pebble alive={false} size={14} className="ib-sm-peb" />
+              Show me again
+            </button>
+          )}
         </div>
       )}
     </section>

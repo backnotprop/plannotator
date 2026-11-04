@@ -181,7 +181,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     const at = thread.messages.findIndex((m) => m.id === message.id);
     return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
   }, [thread.messages, message.id]);
-  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, enabled: !readOnly });
+  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, enabled: !readOnly });
   // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
   const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
   const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);
@@ -261,11 +261,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   };
 
   // The Overview's picture, and in a later round which of its parts the agent redrew.
-  // The Overview's picture, drawn as a Shape picture (overviewPicture); any other diagram keeps the guide viewer's own.
-  const overviewHtml = useMemo(
-    () => overviewPicture(snapshot?.guide.overview?.diagram, files.map((file) => file.path)),
-    [snapshot, files],
-  );
+  // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the guide viewer's own.
+  const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
   const earlierReview = earlierReviews.at(-1) ?? null;
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
   useEffect(() => {
@@ -755,6 +752,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
         agent={author}
         onWords={showMe.setWords}
         onSend={() => void showMe.send()}
+        onBusy={(policy) => void showMe.busyChoice(policy)}
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
@@ -767,6 +765,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           offset={sheetOffset}
           {...(phone ? {} : { onOffset: setSheetOffset })}
           asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing, againPlace()) } : null}
+          onAgain={() => showMe.again(showMe.state.shown!.drawing)}
           onCode={(drawn, el) => {
             const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;
             if (openCode(target)) showMe.toCorner({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });

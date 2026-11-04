@@ -5,7 +5,7 @@
  * redrawn Overview changed.
  */
 import { parseShapeCodeTarget, shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
-import { checkInboxDrawing, inboxReviewLines } from '@plannotator/core/inbox-review';
+import { inboxReviewLines } from '@plannotator/core/inbox-review';
 import { guideDiagramIsDrawn } from '@plannotator/core/guide-format';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 
@@ -14,33 +14,22 @@ export function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
-/** Whether a Show me asked on `asked` is about `place`: the whole review both, or the same file with lines that overlap. */
-export function showMeAbout(
-  asked: { file: string | null; lines: readonly [number, number] | null },
-  place: { file: string | null; lines: readonly [number, number] | null },
-): boolean {
-  if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
-  return asked.file === place.file && !!asked.lines && asked.lines[0] <= place.lines[1] && place.lines[0] <= asked.lines[1];
-}
-
 /**
- * The Overview's diagram as the review pane draws it, a Shape picture: a drawn
- * one (snapshot version 3, checked by the Inbox when it came), or a version-2
- * html one only when it keeps Shape's rules and opens only the review's files.
- * Null for anything else, which keeps the guide viewer's own rendering (an
- * html picture's note), as before Show me.
+ * The Overview's diagram as the review pane draws it, a Shape picture: only a
+ * drawn one (snapshot version 3, checked by the Inbox when it came). Null for
+ * anything else, a version-2 html diagram included, which keeps the guide
+ * viewer's own rendering (its note), exactly as before Show me.
  */
-export function overviewPicture(diagram: GuideOverviewDiagram | undefined, files: readonly string[]): GuideOverviewDiagram | null {
-  if (diagram?.kind !== 'html') return null;
-  if (guideDiagramIsDrawn(diagram)) return diagram;
-  return checkInboxDrawing(diagram, files, { withTitle: false }).ok ? diagram : null;
+export function overviewPicture(diagram: GuideOverviewDiagram | undefined): GuideOverviewDiagram | null {
+  return diagram?.kind === 'html' && guideDiagramIsDrawn(diagram) ? diagram : null;
 }
 
 type Place = { file: string | null; lines: readonly [number, number] | null };
 
 /**
- * Whether a Show me of this round asked on `asked` is the one the person means
- * by `place`, so it opens again rather than asking anew: the whole review both;
+ * Whether a Show me asked on `asked` (this round's, or an earlier round's) is
+ * the one the person means by `place`, so it opens again rather than asking
+ * anew: the whole review both;
  * or the same file with the selection inside the asked lines, or sharing at
  * least half of the lines the two cover together. Lines 1–200 are not a
  * picture of 16–18; 15–18 is.

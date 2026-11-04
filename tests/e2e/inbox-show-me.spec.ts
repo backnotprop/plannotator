@@ -511,6 +511,38 @@ test('a part opens its code and the picture shrinks to the corner card; plain As
   await expect(page.locator('[data-chat-window]')).toHaveCount(0);
 });
 
+test("a busy agent: the box offers the Ask window's choice, never says it draws; interrupt asks now; this round's picture has Show me again", async () => {
+  const { page } = world;
+  const pane = page.locator('[data-review-message]');
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  const asked = world.agent.asked.length;
+  world.agent.setBusy(true);
+  await selectLines(page, WORKER, 7, 9);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  const box = page.locator('[data-show-me-box]');
+  await expect(box).toHaveAttribute('data-show-me-box', 'compose');
+  await box.locator('[data-show-me-send]').click();
+  await expect(box).toHaveAttribute('data-show-me-box', 'busy', { timeout: 15_000 });
+  await expect(box).toContainText('Claude Code is working on something else.');
+  await expect(box).not.toContainText('is drawing it');
+  await expect(box.locator('[data-show-me-stop]')).toHaveCount(0);
+  expect(world.agent.asked.length).toBe(asked);
+  await shot(page, '10-busy');
+
+  await box.getByRole('button', { name: 'Interrupt and ask now' }).click();
+  await expect.poll(() => world.agent.interrupts()).toBe(1);
+  await expect(sheet(page)).toBeVisible({ timeout: 30_000 });
+  expect(world.agent.asked.length).toBe(asked + 1);
+  await expect(sheet(page)).toContainText('Claude Code · Show me on retry-worker.ts lines 7–9 · round 1');
+
+  // This round's picture: Show me again asks the same lines anew, with other words.
+  await sheet(page).getByRole('button', { name: 'Show me again' }).click();
+  await expect(box).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(box.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 7–9');
+  await box.getByRole('button', { name: 'Close Show me' }).click();
+  expect(world.errors).toEqual([]);
+});
+
 test("the Overview draws the agent's picture, a part opens its code; with no picture, the Overview offers Show me", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${round1.thread_id}`);
@@ -571,6 +603,13 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
   // Asked again on this round's lines: the lines pressed (16–18 changed since, so they are not found again).
   await expect(page.locator('[data-show-me-box] [data-show-me-place]')).toHaveText('retry-worker.ts · lines 17–18');
+  await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
+  // Lines that only overlap the round-1 picture (6–18 holds its 16–18) ask anew about the lines selected.
+  await selectLines(page, WORKER, 6, 18);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(page.locator('[data-show-me-box] [data-show-me-place]')).toHaveText('retry-worker.ts · lines 6–18');
+  await expect(sheet(page)).toHaveCount(0);
   await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
   expect(world.errors).toEqual([]);
 });
@@ -693,4 +732,34 @@ test('a phone at 390 px: the popover and the picture', async ({ browser }) => {
   } finally {
     await context.close();
   }
+});
+
+test("the agent gone: a Show me it never answers goes back to the box with the Ask window's problem, never says it draws", async () => {
+  // The Inbox holds the turn until the bridge calls the agent gone (30 s).
+  test.setTimeout(150_000);
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${round2.thread_id}`);
+  await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
+  const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  // Line 21: no picture of it in any round.
+  await selectLines(page, WORKER, 21, 21);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  const box = page.locator('[data-show-me-box]');
+  await expect(box).toHaveAttribute('data-show-me-box', 'compose');
+  const asked = world.agent.asked.length;
+  // Its connection goes after the window showed Show me (the last test: nothing answers after this).
+  world.agent.stop();
+  await box.getByLabel('What the picture should show').fill('Where does the log go?');
+  await box.locator('[data-show-me-send]').click();
+  // Drawing only while the Inbox holds the turn; then what the Ask window says (the chat's problem, or the turn's
+  // note, whichever comes first), and the box keeps its words.
+  await expect(box.getByRole('alert')).toHaveText(/This session is no longer available|Claude Code went away before it finished\./, { timeout: 60_000 });
+  await expect(box).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(box.getByRole('status')).toHaveCount(0);
+  await expect(box.getByLabel('What the picture should show')).toHaveValue('Where does the log go?');
+  await shot(page, '11-gone');
+  expect(world.agent.asked.length).toBe(asked);
+  expect(world.errors).toEqual([]);
 });
