@@ -155,6 +155,35 @@ export function deriveGuideRepoKeyFallback(dirPath: string): string {
   return `${name}-${hash8(resolved)}`;
 }
 
+/**
+ * The shelf a review keys its guides under: the PR url when it parses, else
+ * the origin remote of `gitCwd`, else that repository's top-level directory,
+ * else `fallbackDir`. The one resolution both the review session and
+ * `plannotator guide import` use, so an imported guide lands where the next
+ * review looks.
+ */
+export async function resolveGuideRepoKey(opts: {
+  prUrl?: string;
+  gitCwd?: string;
+  runGit?: (args: string[], cwd?: string) => Promise<string | null>;
+  fallbackDir: string;
+}): Promise<string> {
+  if (opts.prUrl) {
+    const key = deriveGuideRepoKeyFromPRUrl(opts.prUrl);
+    if (key) return key;
+  }
+  if (opts.gitCwd && opts.runGit) {
+    const remote = await opts.runGit(["remote", "get-url", "origin"], opts.gitCwd);
+    if (remote?.trim()) {
+      const key = deriveGuideRepoKeyFromRemote(remote.trim());
+      if (key) return key;
+    }
+    const toplevel = await opts.runGit(["rev-parse", "--show-toplevel"], opts.gitCwd);
+    if (toplevel?.trim()) return deriveGuideRepoKeyFallback(toplevel.trim());
+  }
+  return deriveGuideRepoKeyFallback(opts.fallbackDir);
+}
+
 // ---------------------------------------------------------------------------
 // Ids
 // ---------------------------------------------------------------------------
@@ -373,17 +402,48 @@ export function buildSavedGuideSnapshot(repoKey: string, envelope: SavedGuideEnv
  * on a repo shelf, so the next review of that repository lists it under
  * Guides like one it generated. The inverse of buildSavedGuideSnapshot: the
  * snapshot's patch becomes the sibling `.patch` (written first, as everywhere
- * else), its provenance the envelope's. Null on a failed write.
+ * else), its provenance the envelope's.
+ *
+ * Never replaces a saved guide: the id is claimed by creating its `.patch`
+ * exclusively, and a taken id (same title in the same millisecond, or a
+ * leftover patch) moves on to the next millisecond. A failed write leaves no
+ * file behind.
  */
 export function saveImportedGuide(
   repoKey: string,
   snapshot: GuideSnapshot,
   opts: { label: string; prUrl?: string; now?: number },
-): { id: string } | null {
+): { ok: true; id: string } | { ok: false; error: string } {
   const now = opts.now ?? Date.now();
   const { reviewed, ...guide } = snapshot.guide;
-  const id = makeGuideId(guide.title, now);
-  if (!saveGuidePatch(repoKey, id, snapshot.review.rawPatch)) return null;
+  const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  const removeQuietly = (path: string) => {
+    try { if (existsSync(path)) unlinkSync(path); } catch {}
+  };
+  try {
+    mkdirSync(guidesDir(repoKey), { recursive: true });
+  } catch (e) {
+    return { ok: false, error: `Could not create ${guidesDir(repoKey)}: ${message(e)}` };
+  }
+
+  let id: string | undefined;
+  for (let attempt = 0; attempt < 1000 && id === undefined; attempt++) {
+    const candidate = makeGuideId(guide.title, now + attempt);
+    if (existsSync(guidePath(repoKey, candidate))) continue;
+    const patchPath = guidePatchPath(repoKey, candidate);
+    try {
+      // Patch first, then the envelope that references it. `wx` fails on an existing file.
+      writeFileSync(patchPath, snapshot.review.rawPatch, { encoding: "utf-8", flag: "wx" });
+      id = candidate;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === "EEXIST") continue;
+      // The path was free a moment ago, so whatever is there now is our partial write.
+      removeQuietly(patchPath);
+      return { ok: false, error: `Could not write ${patchPath}: ${message(e)}` };
+    }
+  }
+  if (id === undefined) return { ok: false, error: `No free guide id for "${guide.title}" in ${guidesDir(repoKey)}.` };
+
   const generator = snapshot.generator ?? {};
   const generatedAt = generator.generatedAt ? Date.parse(generator.generatedAt) : NaN;
   const headSha = snapshot.source.headSha;
@@ -408,7 +468,10 @@ export function saveImportedGuide(
     guide: guide as CodeGuideOutput,
     reviewed: coerceReviewed(reviewed, guide.sections.length),
   };
-  return saveGuide(repoKey, id, envelope) ? { id } : null;
+  if (saveGuide(repoKey, id, envelope)) return { ok: true, id };
+  removeQuietly(`${guidePath(repoKey, id)}.tmp`);
+  removeQuietly(guidePatchPath(repoKey, id));
+  return { ok: false, error: `Could not write ${guidePath(repoKey, id)}.` };
 }
 
 /**
@@ -607,24 +670,13 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
   let repoKeyPromise: Promise<string> | null = null;
   const resolveRepoKey = (): Promise<string> => {
     if (!repoKeyPromise) {
-      repoKeyPromise = (async () => {
-        const pr = getPRInfo();
-        if (pr) {
-          const key = deriveGuideRepoKeyFromPRUrl(pr.url);
-          if (key) return key;
-        }
-        const cwd = getGitCwd();
-        if (cwd && runGit) {
-          const remote = await runGit(["remote", "get-url", "origin"], cwd);
-          if (remote?.trim()) {
-            const key = deriveGuideRepoKeyFromRemote(remote.trim());
-            if (key) return key;
-          }
-          const toplevel = await runGit(["rev-parse", "--show-toplevel"], cwd);
-          if (toplevel?.trim()) return deriveGuideRepoKeyFallback(toplevel.trim());
-        }
-        return deriveGuideRepoKeyFallback(getFallbackDir());
-      })().catch(() => deriveGuideRepoKeyFallback(getFallbackDir()));
+      repoKeyPromise = (async () =>
+        resolveGuideRepoKey({
+          prUrl: getPRInfo()?.url,
+          gitCwd: getGitCwd(),
+          runGit,
+          fallbackDir: getFallbackDir(),
+        }))().catch(() => deriveGuideRepoKeyFallback(getFallbackDir()));
     }
     return repoKeyPromise;
   };

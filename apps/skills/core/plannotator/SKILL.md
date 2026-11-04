@@ -163,7 +163,7 @@ Guided Reviews are AI-generated walkthroughs of a diff, produced inside the code
 - `export` writes one portable, self-contained HTML file (the viewer loads from guides.show). `--guide` + `--patch` exports a guide you authored yourself against a unified diff (`--patch -` reads stdin; validation is strict and names any file the guide references that the patch lacks). `--out -` writes to stdout. `--viewer-url` overrides the pinned viewer base.
 - `share` uploads the guide and prints a link. Encrypted by default: the key lives only in the URL fragment and the host stores ciphertext. `--public` stores it unencrypted so chat apps can unfurl a preview. `--ttl` sets an expiry; otherwise the link stays until `unshare`. A saved guide records its link, and a second `share --id` refuses rather than orphaning the first link's delete token.
 - `unshare <id> --token <t>` removes a link using the delete token printed at share time.
-- `import` saves a guide you authored (`--guide` + `--patch`, validated as for `export`, or `--snapshot`) so the next `plannotator review` of this repository lists it under Guides. `--pr <url>` files it with that PR's repository and labels it with the PR. Prints the saved id.
+- `import` saves a guide you authored (`--guide` + `--patch`, checked as for `export`, or `--snapshot`) so the next `plannotator review` of this repository lists it under Guides. `--pr <url>` saves it with that PR's repository and labels it with the PR. Prints the new id; it never replaces a saved guide.
 
 ## plannotator sessions
 
