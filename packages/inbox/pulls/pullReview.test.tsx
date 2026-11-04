@@ -123,6 +123,8 @@ let diffHead: string | null = 'a'.repeat(40);
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 let sessionReads = 0;
+/** While set, starting a thread waits for it: a send still on its way. */
+let holdSend: Promise<void> | null = null;
 /** What the diff door answers instead of a one-file patch (a refused branch, an empty diff); null: the patch. */
 let diffOverride: ((key: string, scope: string) => Response) | null = null;
 
@@ -145,6 +147,7 @@ beforeEach(() => {
   diffHead = 'a'.repeat(40);
   refuse = {};
   sessionReads = 0;
+  holdSend = null;
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -153,6 +156,7 @@ beforeEach(() => {
       if (url.pathname.endsWith('/api/inbox/messages')) {
         const no = refuse[String((JSON.parse(String(init.body)) as { to?: { session?: string } }).to?.session)];
         if (no) return Response.json(no.body, { status: no.status });
+        if (holdSend) await holdSend;
         return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
       }
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
@@ -778,6 +782,76 @@ test.skipIf(!hasDom)('a stack past the limit of one review thread is refused bef
   expect(el('[data-pulls-picker] [role="alert"]').textContent).toBe("A stack of more than 20 open pull requests can't go to one review thread.");
 });
 
+test.skipIf(!hasDom)('the limit holds for a new agent too: past it, Start review thread opens no compose', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const many = Array.from({ length: 21 }, (_, i) => pull(600 + i, { head: `n${i}`, base: i === 0 ? 'main' : `n${i - 1}` }));
+  const launched: string[] = [];
+  mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} onLaunch={(_keys, _projects, body) => launched.push(body)} />);
+  await settle();
+  await openPicker();
+  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('new');
+  await act(async () => el('[data-pulls-start]').click());
+  await settle();
+  expect(launched).toEqual([]);
+  expect(posted).toEqual([]);
+  expect(el('[data-pulls-picker] [role="alert"]').textContent).toContain("can't go to one review thread");
+});
+
+test.skipIf(!hasDom)('one send at a time: Review with an agent waits while a thread starts and until its link arrives, so no second thread starts', async () => {
+  let release = () => {};
+  holdSend = new Promise<void>((done) => (release = done));
+  const started: string[] = [];
+  const page = (answer: InboxPullsAnswer) => <Page answer={answer} stackId={STACK_ID} onStarted={(s) => started.push(s)} />;
+  mount(page({ ...model, links: {} }));
+  await settle();
+  await openPicker();
+  await startWith('ses_billing');
+  await settle();
+  const primary = el<HTMLButtonElement>('[data-pulls-primary]');
+  // The send is on its way: the button that would open a second picker is off, and a click on it opens nothing.
+  expect(primary.disabled).toBe(true);
+  await act(async () => primary.click());
+  await act(async () => primary.click());
+  expect(el('[data-pulls-start]').textContent).toBe('Starting…');
+  release();
+  await settle();
+  expect(started).toEqual(['ses_billing']);
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  // Sent, the list not read again yet: the button still waits.
+  expect(el<HTMLButtonElement>('[data-pulls-primary]').disabled).toBe(true);
+  await act(async () => el('[data-pulls-primary]').click());
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(1);
+  // The link arrives: the stack has its thread, and the one button opens it.
+  const owned: InboxPullLink = { ...link, thread_id: 'thr_new', via: 'owner', ask: 'guide', last: null, guide: null };
+  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: owned } })}</div>));
+  await settle();
+  expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('open');
+  expect(el<HTMLButtonElement>('[data-pulls-primary]').disabled).toBe(false);
+});
+
+test.skipIf(!hasDom)('Start a new agent closes the picker: it does not come back by itself when that agent later ends', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const launched: string[] = [];
+  const page = (answer: InboxPullsAnswer) => <Page answer={answer} stackId={STACK_ID} onLaunch={(_keys, _projects, body) => launched.push(body)} />;
+  mount(page({ ...model, links: {} }));
+  await settle();
+  await openPicker();
+  await act(async () => el('[data-pulls-start]').click());
+  await settle();
+  expect(launched).toHaveLength(1);
+  expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
+  // Compose started the thread; later its agent ends: the stack offers a new thread, the picker stays closed.
+  const live: InboxPullLink = { ...link, via: 'owner', ask: 'guide' };
+  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: live } })}</div>));
+  await settle();
+  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: { ...live, agent: { ...live.agent!, ended: true } } } })}</div>));
+  await settle();
+  expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('again');
+  expect(el('[data-pulls-primary]').getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
+});
+
 test.skipIf(!hasDom)('Start a new agent shows once the Inbox can start one: it opens compose with the first message, the stack\'s PRs and their project, and the chosen ask', async () => {
   sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }, { agent: 'codex', name: 'Codex' }], projects: [] } };
   const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string }[] = [];
@@ -788,7 +862,8 @@ test.skipIf(!hasDom)('Start a new agent shows once the Inbox can start one: it o
   expect(el('[data-pulls-picker-list]').textContent).toContain('No agent is running in billing-svc.');
   const fresh = el('[data-pulls-picker-new]');
   expect(fresh.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
-  expect(fresh.textContent).toBe('Start a new agentClaude Code or Codex');
+  expect(fresh.querySelector('b')!.textContent).toBe('Start a new agent');
+  expect(fresh.querySelector('.ib-pr-opt-s')!.textContent).toBe('Claude Code or Codex');
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
   await typeWords('just the retry loop');
   await act(async () => el('[data-pulls-start]').click());
@@ -808,8 +883,14 @@ test.skipIf(!hasDom)('the picker picks a running agent that is not working, the 
   await openPicker();
   expect(pickedSession()).toEqual(['ses_a']);
   // Each row says what it is: the agent, its title (or none yet), and whether it is working.
-  expect(el('[data-pulls-picker-session="ses_busy"]').textContent).toBe('Claude CodeRefactor the ledgerWorking');
-  expect(el('[data-pulls-picker-session="ses_a"]').textContent).toMatch(/^Claude CodeNo title yetStarted .+ ago$/);
+  const row = (session: string) => {
+    const o = el(`[data-pulls-picker-session="${session}"]`);
+    return [o.querySelector('b')!.textContent, o.querySelector('.ib-pr-opt-s')!.textContent, o.querySelector('.ib-pr-opt-k')!.textContent];
+  };
+  expect(row('ses_busy')).toEqual(['Claude Code', 'Refactor the ledger', 'Working']);
+  const [agentA, titleA, whenA] = row('ses_a');
+  expect([agentA, titleA]).toEqual(['Claude Code', 'No title yet']);
+  expect(whenA).toMatch(/^Started .+ ago$/);
   // The rows are one radio group.
   expect(el('[data-pulls-picker-list][role="radiogroup"]').querySelectorAll('input[type="radio"]')).toHaveLength(3);
   await act(async () => el('[data-pulls-picker-session="ses_b"] input').click());
@@ -974,7 +1055,8 @@ test.skipIf(!hasDom)('a review thread: "Review thread with Claude Code", the ask
   await settle();
   const line = el('[data-pulls-thread-line]');
   expect(line.getAttribute('data-pulls-thread-line')).toBe('asked');
-  expect(line.textContent).toBe('Review thread with Claude CodeGuided review on the way');
+  expect(line.querySelector('.ib-pr-thread-h b')!.textContent).toBe('Claude Code');
+  expect(line.querySelector('[data-pulls-ask]')!.textContent).toBe('Guided review on the way');
   expect(line.querySelector('.ib-atile, .ib-mk, svg')).not.toBeNull();
   expect(document.querySelectorAll('[data-pulls-thread]')).toHaveLength(1);
   expect(document.body.textContent).not.toContain('Codex');

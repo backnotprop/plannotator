@@ -43,7 +43,7 @@ function reviewCurateBlock(): string {
  * The hosts a new agent can be, from compose's sessions answer (`launch.agents`, each `{ agent: 'claude-code', … }`);
  * null when it has no launch block: this Inbox can't start one.
  */
-export function launchHosts(model: unknown): string[] | null {
+function launchHosts(model: unknown): string[] | null {
   const offer = (model as { launch?: { agents?: unknown[] } } | null)?.launch;
   if (!Array.isArray(offer?.agents) || offer.agents.length === 0) return null;
   return offer.agents.flatMap((a) => {
@@ -53,7 +53,7 @@ export function launchHosts(model: unknown): string[] | null {
 }
 
 /** "Claude Code, Codex or Pi": the agents "Start a new agent" can start; null when the Inbox did not name them. */
-export function launchWords(hosts: readonly string[]): string | null {
+function launchWords(hosts: readonly string[]): string | null {
   const names = [...new Set(hosts.map(hostLabel))];
   if (names.length < 2) return names[0] ?? null;
   return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
@@ -123,12 +123,14 @@ export interface ReviewPickerProps {
   /** The review thread started with `session`: the list reads it. */
   onStarted: (session: string) => void;
   onCancel: () => void;
+  /** A send to a running agent began (true) or ended (false): the button that opened the picker waits meanwhile. */
+  onSending?: (sending: boolean) => void;
   /** The Inbox restarted and lost the list: read it again. */
   onReload: () => void;
 }
 
 /** The picker, inline under the stack's actions: every choice shows, one agent is picked, nothing covers the page. */
-export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, onStarted, onCancel, onReload }: ReviewPickerProps) {
+export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, onStarted, onCancel, onSending, onReload }: ReviewPickerProps) {
   const now = useRelativeClock(true);
   const [targets, readAgain] = useReviewTargets(projects, exclude);
   const [askKind, setAskKind] = useState<'guide' | 'custom'>('guide');
@@ -160,14 +162,20 @@ export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, 
   }, [read]);
   const keys = handoffKeys(stack);
   const waiting = askKind === 'custom' && !words.trim();
+  const busy = (on: boolean) => {
+    setSending(on);
+    onSending?.(on);
+  };
+  /** One review thread takes at most INBOX_PULL_OWNER_KEYS_MAX PRs: refused before either path sends anything. */
+  const tooMany = () => {
+    if (keys.length <= INBOX_PULL_OWNER_KEYS_MAX) return false;
+    setError(`A stack of more than ${INBOX_PULL_OWNER_KEYS_MAX} open pull requests can't go to one review thread.`);
+    return true;
+  };
 
   const start = async (session: ReviewSession) => {
     if (sending) return;
-    if (keys.length > INBOX_PULL_OWNER_KEYS_MAX) {
-      setError(`A stack of more than ${INBOX_PULL_OWNER_KEYS_MAX} open pull requests can't go to one review thread.`);
-      return;
-    }
-    setSending(true);
+    busy(true);
     setError(null);
     const idempotency = keyRef.current?.session === session.session ? keyRef.current : (keyRef.current = { session: session.session, key: newUuid() });
     try {
@@ -195,7 +203,7 @@ export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, 
       }
       setError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'The review thread was not started.');
     } finally {
-      setSending(false);
+      busy(false);
     }
   };
 
@@ -289,8 +297,9 @@ export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, 
           disabled={sending || waiting || picked === null}
           aria-busy={sending || undefined}
           onClick={(event) => {
+            if (!picked || tooMany()) return;
             if (picked === 'new') onLaunch(pullHandoffMessage(stack, ask), event.currentTarget);
-            else if (picked) void start(picked);
+            else void start(picked);
           }}
           data-pulls-start={picked === 'new' ? 'new' : (picked?.session ?? '')}
         >

@@ -114,9 +114,11 @@ export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links:
 }
 
 /**
- * Where a "Whole stack" verdict goes: the stack's one review thread (`stackLink`, its lowest open linked layer's), so a
- * stack whose layers several agents linked still has one thread. Null for a teammate's PR, which never takes a verdict
- * here, and for a stack whose thread is a teammate layer's; then the layer's own (`layerVerdictLink`), if any.
+ * Where a "Whole stack" verdict goes: the thread of the person's own lowest open linked layer, so a stack whose layers
+ * several agents linked still sends it to one thread. A teammate's layers are skipped (their thread is not the
+ * person's), so with a teammate's lower layer linked this can differ from `stackLink`, the thread the page names; in a
+ * fork it can be a sibling branch's thread. With none of the person's layers linked, the layer's own
+ * (`layerVerdictLink`), if any. Null for a teammate's PR, which never takes a verdict here.
  */
 export function stackVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Links): InboxPullLink | null {
   if (!layer.mine) return null;

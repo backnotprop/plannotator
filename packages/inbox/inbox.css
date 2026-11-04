@@ -6162,7 +6162,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-x { margin-left: auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
 .ib-crdp-x:hover { color: var(--foreground); background: var(--ib-hover); }
 .ib-crdp-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 14px; }
-.ib-crdp-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; text-wrap: balance; }
+.ib-crdp-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
 .ib-crdp-who { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
 .ib-crdp-who b { color: var(--foreground); font-weight: 600; }
 .ib-crdp-state { display: inline-flex; align-items: center; gap: 5px; }
@@ -7495,7 +7495,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-ext:hover { background: var(--ib-hover-s, var(--muted)); }
 .pn-inbox .ib-pr-ext:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-pr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
-.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
+.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; text-wrap: balance; }
 .ib-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
 .ib-pr-meta > * { min-width: 0; }
 .pn-inbox .ib-pr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 9px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
@@ -7675,7 +7675,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-pr-actions .ib-btn { height: 44px; }
   /* The picker on a phone: the ask's words a full line at 16px (no zoom), each agent a 52px row. */
   .pn-inbox .ib-pr-askin { font-size: var(--ib-fs-16-in, 16px); height: 44px; }
-  .ib-pr-pick-ask .ib-seg-sm .ib-seg-o { height: 40px; }
+  .pn-inbox .ib-pr-pick-ask .ib-seg-sm .ib-seg-o { height: 44px; }
   .pn-inbox .ib-pr-opt { min-height: 52px; }
   .pn-inbox .ib-pr-pick-go .ib-btn { height: 44px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }

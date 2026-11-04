@@ -428,6 +428,9 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
   );
 }
 
+/** How long the primary waits for a just-started thread's link before it comes back anyway. */
+const AWAIT_LINK_MS = 15_000;
+
 function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; phone: boolean; onClose: () => void }) {
   const { item, model, phone } = props;
   const stack = item.stack;
@@ -466,6 +469,20 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     focusSaid.current = false;
     said.current.focus();
   }, [linkThread]);
+  // A send to a running agent, then the wait for its link: the primary waits too, so a second thread can't start.
+  // `awaiting` holds the thread the stack had when the send began; the link to a new thread ends the wait.
+  const [pickerSending, setPickerSending] = useState(false);
+  const [awaiting, setAwaiting] = useState<{ from: string | null } | null>(null);
+  useEffect(() => {
+    if (awaiting && linkThread !== awaiting.from) setAwaiting(null);
+  }, [awaiting, linkThread]);
+  useEffect(() => {
+    // The list never brought the link in (a failed read): the button comes back rather than staying off.
+    if (!awaiting) return;
+    const timer = window.setTimeout(() => setAwaiting(null), AWAIT_LINK_MS);
+    return () => window.clearTimeout(timer);
+  }, [awaiting]);
+  const primaryWaits = pickerSending || awaiting !== null;
   const primaryButton = useRef<HTMLButtonElement>(null);
   const closePicker = () => {
     setPicking(false);
@@ -477,6 +494,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
       id={primaryId}
       type="button"
       className="ib-btn ib-pri"
+      disabled={primaryWaits}
       onClick={() => setPicking((v) => !v)}
       aria-expanded={picking}
       aria-controls={picking ? pickerId : undefined}
@@ -557,9 +575,15 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             stack={stack}
             projects={projects}
             exclude={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
-            onLaunch={(body, opener) => props.onLaunch(handoffKeys(stack), projects, body, pullHandoffAskLine(stack, { kind: 'guide' }), opener)}
+            onLaunch={(body, opener) => {
+              // Compose takes it from here: the picker closes, so it never comes back by itself (an agent ending later).
+              setPicking(false);
+              props.onLaunch(handoffKeys(stack), projects, body, pullHandoffAskLine(stack, { kind: 'guide' }), opener);
+            }}
+            onSending={setPickerSending}
             onStarted={(session) => {
               focusSaid.current = true;
+              setAwaiting({ from: linkThread });
               setPicking(false);
               props.onStarted(session);
             }}
