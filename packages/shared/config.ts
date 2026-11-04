@@ -500,11 +500,13 @@ export interface PlannotatorConfig {
    * on this machine (list options, voice, Snooze, the Board), the 48 h
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
+   * `steps.shownAt`: the Checklist reveal was claimed.
    */
   inboxReveals?: {
     lastShownAt?: string;
     waitingSince?: { snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string };
+    steps?: { shownAt?: string };
   };
   inboxSound?: {
     enabled?: boolean;
