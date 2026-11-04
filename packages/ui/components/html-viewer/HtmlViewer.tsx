@@ -22,6 +22,7 @@ import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
+import { hashDraftScope } from "../../utils/draftScopeHash";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -192,16 +193,6 @@ export function formatBridgeUnavailableMessage(info: BridgeUnavailableInfo): str
   }
   const reported = info.reportedVersion === undefined ? "no version" : `version ${info.reportedVersion}`;
   return `Annotation tools may not work: this viewer expects bridge protocol version ${info.expectedVersion}, but the script at ${info.url} reported ${reported}. Serve the bridge-script asset from the same @plannotator/ui version as the viewer.`;
-}
-
-/** FNV-1a over the document's text, with its length: a short, stable draft scope for a page. */
-function hashDraftScope(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `${(hash >>> 0).toString(36)}.${text.length.toString(36)}`;
 }
 
 function parseVimBridgeCopy(value: unknown): string | null {
@@ -501,17 +492,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
+      draftKey: string;
     } | null>(null);
 
     // Live proxied-app mode: the iframe navigates a real origin, so the
     // srcdoc pipeline is skipped entirely and its messages carry credentials.
     const liveMode = !!src;
-    // One kept global-comment draft per page: the live app's URL, else the
-    // document's own text (a hash, so two documents never share a draft).
-    const globalCommentDraftKey = useMemo(
-      () => `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`,
-      [src, rawHtml],
-    );
     const liveSessionRef = useRef<HtmlLiveSession | null>(liveSession ?? null);
     liveSessionRef.current = liveSession ?? null;
     const onPageChangeRef = useRef(onPageChange);
@@ -1273,7 +1259,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             onClick={() => {
               const anchorEl = globalCommentButtonRef.current;
               if (!anchorEl) return;
-              setGlobalCommentPopover({ anchorEl, contextText: "" });
+              // One kept draft per live-app URL (src), else per document: a
+              // hash of its text, taken only when the composer opens, so two
+              // documents never share a draft.
+              const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
+              setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -1488,8 +1478,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
-              // The words typed survive a close (Escape, X) and come back on reopen, per page.
-              draftKey={globalCommentDraftKey}
+              // The words typed survive a close (Escape, X) and come back on reopen.
+              draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}

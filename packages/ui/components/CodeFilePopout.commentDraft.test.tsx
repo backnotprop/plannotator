@@ -4,7 +4,9 @@
  *
  * What regresses: Escape on the composer throwing the words away, so choosing
  * the same lines again shows an empty box; one range's words showing up on
- * another range; Save leaving the words behind.
+ * another range, or on another file with the same name (the Inbox passes a
+ * basename, so two threads' `index.ts` share a path); Save leaving the words
+ * behind.
  *
  * Pierre's `File` is replaced by a stub that hands its options back, so a line
  * range is chosen the way Pierre reports one (`onLineSelectionEnd`).
@@ -52,13 +54,15 @@ afterAll(() => {
 
 const CONTENTS = ['const a = 1;', 'const b = 2;', 'const c = 3;', 'const d = 4;'].join('\n');
 
-async function mount(added: CodeFileAnnotationInput[]) {
+async function mount(added: CodeFileAnnotationInput[], filepath = 'src/a.ts', contents = CONTENTS) {
   const CodeFileView = popoutModule!.CodeFileView;
+  if (root) await act(async () => root?.unmount());
+  host?.remove();
   host = document.createElement('div');
   document.body.appendChild(host);
   await act(async () => {
     root = createRoot(host!);
-    root.render(<CodeFileView filepath="src/a.ts" contents={CONTENTS} onAddAnnotation={(a) => added.push(a)} />);
+    root.render(<CodeFileView filepath={filepath} contents={contents} onAddAnnotation={(a) => added.push(a)} />);
   });
 }
 
@@ -109,5 +113,24 @@ describe.if(hasDom)('CodeFileView line composer draft', () => {
     await press(back, 'Enter', { metaKey: true });
     expect(added.map((a) => [a.lineStart, a.lineEnd, a.text])).toEqual([[2, 3, 'b and c should be one line']]);
     expect((await chooseLines(2, 3)).value).toBe('');
+  });
+
+  test('two files with the same name keep separate drafts: the other one opens empty', async () => {
+    const added: CodeFileAnnotationInput[] = [];
+    // Thread A's index.ts.
+    await mount(added, 'index.ts', 'export const a = 1;\nexport const b = 2;');
+    await type(await chooseLines(1, 1), 'rename a for thread A');
+    await press(document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!, 'Escape');
+
+    // Thread B's index.ts, same name and lines, other contents: empty.
+    await mount(added, 'index.ts', 'export const x = 9;\nexport const y = 8;');
+    const other = await chooseLines(1, 1);
+    expect(other.value).toBe('');
+    await press(other, 'Escape');
+
+    // Thread A's file again: its words are still there.
+    await mount(added, 'index.ts', 'export const a = 1;\nexport const b = 2;');
+    expect((await chooseLines(1, 1)).value).toBe('rename a for thread A');
+    expect(added).toEqual([]);
   });
 });
