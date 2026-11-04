@@ -12,7 +12,8 @@
  *
  * A moment lasts `momentMs`; one that passes without all of that waits for the next leave. A claimed reveal that
  * cannot open yet waits for a free moment (unless the reveal says it no longer holds). Every way out is final: the
- * claim already stamped it.
+ * claim already stamped it. A claim turns nothing on (the owner, 2026-11-04: reveals are opt-in); a feature's dialog
+ * offers "Turn it on" and "Not now".
  */
 import { useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
@@ -200,7 +201,7 @@ export interface BoardRevealInput {
   clear: boolean;
   place: string;
   heldBack: () => boolean;
-  /** The claim was granted: the Inbox turned the Board on (the sidebar's row appears with the dialog). */
+  /** The claim's answer says the Board is on (another tab or device turned it on): the sidebar's row shows now. */
   onBoardOn: () => void;
 }
 
@@ -219,8 +220,8 @@ export function boardRevealMayClaim(gate: Pick<BoardRevealInput, 'due' | 'blocke
 }
 
 /**
- * The Board reveal: at the calm moment it claims `board` (the claim turns the Board on), then opens the Board's
- * existing first-visit dialog (`BoardIntro`). No new dialog (the owner, 2026-11-03).
+ * The Board reveal: at the calm moment it claims `board` (the claim only stamps it), then opens the Board's existing
+ * first-visit dialog (`BoardIntro`) as an offer: "Turn it on" or "Not now" (the owner, 2026-11-04: opt-in).
  */
 export function useBoardReveal(input: BoardRevealInput) {
   const latest = useRef(input);
@@ -238,23 +239,23 @@ export function useBoardReveal(input: BoardRevealInput) {
     holds: () => true,
     claim: async () => {
       const answer = await inboxApi.claimReveal('board');
-      // Granted here, or by another tab or device first: the Board is on either way, so its row shows now.
-      if (answer.show || answer.board?.on) latest.current.onBoardOn();
+      // The claim turns nothing on; the answer only reports a Board turned on elsewhere, so its row shows now.
+      if (answer.board?.on) latest.current.onBoardOn();
       return answer.show;
     },
   });
 }
 
-/** What one load knows for the Checklist reveal: the Board's, but its claim turns the Checklist on. */
+/** What one load knows for the Checklist reveal: the Board's. */
 export interface StepsRevealInput extends Omit<BoardRevealInput, 'onBoardOn'> {
-  /** The claim was granted (or another tab's was): the Inbox turned the Checklist on. */
+  /** The claim's answer says the Checklist is on (another tab or device turned it on). */
   onStepsOn: () => void;
 }
 
 /**
  * The Checklist reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's calm moment and gate (back on
- * the list after reading a thread, 60 s into the page, 5 rows or more). The claim turns the Checklist on, then the
- * page opens `ChecklistIntro`.
+ * the list after reading a thread, 60 s into the page, 5 rows or more). The claim only stamps it; the page opens
+ * `ChecklistIntro`, whose "Turn it on" turns the Checklist on.
  */
 export function useStepsReveal(input: StepsRevealInput) {
   const latest = useRef(input);
@@ -272,7 +273,7 @@ export function useStepsReveal(input: StepsRevealInput) {
     holds: () => true,
     claim: async () => {
       const answer = await inboxApi.claimReveal('steps');
-      if (answer.show || answer.steps?.on) latest.current.onStepsOn();
+      if (answer.steps?.on) latest.current.onStepsOn();
       return answer.show;
     },
   });

@@ -1398,7 +1398,7 @@ export const inboxApi = {
   claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
   /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
   claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
-  /** A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). The Board's turns the Board on. */
+  /** A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). It turns nothing on. */
   claimReveal: (id: InboxRevealId) => post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), { id }),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */

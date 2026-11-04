@@ -4161,8 +4161,8 @@ function Inbox() {
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
   });
-  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim turns the Board on, so its
-  // sidebar row appears with the Board's own first-visit dialog (BoardIntro). No new dialog.
+  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim only stamps it, and the Board's own
+  // first-visit dialog (BoardIntro) offers it: "Turn it on" turns it on (its sidebar row appears), "Not now" leaves it.
   const boardReveal = useBoardReveal({
     due: snoozeIntroLatch.current?.next === 'board',
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4176,8 +4176,8 @@ function Inbox() {
     heldBack: revealHeldBack,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
-  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim turns the Checklist on,
-  // then ChecklistIntro opens.
+  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim only stamps it, then
+  // ChecklistIntro offers it.
   const stepsReveal = useStepsReveal({
     due: snoozeIntroLatch.current?.next === 'steps',
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4191,6 +4191,36 @@ function Inbox() {
     heldBack: revealHeldBack,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  /**
+   * A reveal's "Turn it on" (the owner, 2026-11-04: reveals are opt-in): the dialog closes and the switch is saved as
+   * Settings saves it, so the page follows at once and agents from their next session. Not saved: the switch goes back
+   * and a toast says so (the dialog never comes back; Settings is the way on from here).
+   */
+  const turnOnFromReveal = (feature: 'board' | 'steps', close: () => void) => {
+    close();
+    setSettings((current) => (current ? { ...current, [feature]: { on: true } } : current));
+    const save = feature === 'board' ? inboxApi.saveBoard(true).then((saved) => saved.board) : inboxApi.saveSteps(true).then((saved) => saved.steps);
+    void save
+      .then((on) => setSettings((current) => (current ? { ...current, [feature]: on } : current)))
+      .catch(() => {
+        void refreshSettings();
+        showToast(
+          {
+            icon: 'warn',
+            lead: feature === 'board' ? 'The Board isn’t on' : 'The Checklist isn’t on',
+            detail: 'The setting wasn’t saved. You can turn it on in Settings.',
+            action: {
+              label: 'Open Settings',
+              onPress: () => {
+                dismissToast();
+                window.location.hash = '#settings/capabilities';
+              },
+            },
+          },
+          8000,
+        );
+      });
+  };
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -5695,17 +5725,10 @@ function Inbox() {
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
-      {boardReveal.stage === 'open' && <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} />}
-      {stepsReveal.stage === 'open' && (
-        <ChecklistIntro
-          phone={phone}
-          onClose={stepsReveal.close}
-          onSettings={() => {
-            stepsReveal.close();
-            go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
-          }}
-        />
+      {boardReveal.stage === 'open' && (
+        <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
       )}
+      {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

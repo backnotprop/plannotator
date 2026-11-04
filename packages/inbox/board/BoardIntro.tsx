@@ -35,17 +35,34 @@ export function useCopyBoardPrompt(mcpCommand: readonly string[] | null | undefi
  * line about the prompt, Copy prompt (check and "Copied" for 2 s; "Not now"
  * becomes "Done") and Not now. The Inbox's Modal shell, as the sound dialog.
  * Shown once per machine; the header's "?" opens it again.
+ *
+ * `onTurnOn`: the reveal's offer (the owner, 2026-11-04: reveals are opt-in), shown while the Board is still off. The
+ * same picture and words, with "Not now" and "Turn it on" in place of Copy prompt: Turn it on is the only way this
+ * dialog turns the Board on; Not now, Escape and a click outside leave it off.
  */
-export function BoardIntro({ mcpCommand, phone, onClose }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void }) {
+export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void; onTurnOn?: () => void }) {
   const { state, copiedOnce, copy } = useCopyBoardPrompt(mcpCommand);
+  if (onTurnOn) {
+    return (
+      <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
+        <BoardIntroArt />
+        <BoardIntroText />
+        <div className="ib-bi-acts">
+          <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
+            Not now
+          </button>
+          <span className="ib-bsp" />
+          <button type="button" className="ib-btn ib-pri ib-bi-copy" onClick={onTurnOn} data-board-intro-on="">
+            Turn it on
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
       <BoardIntroArt />
-      <div className="ib-bi-text">
-        <h2 id="ib-bi-title">Your Board</h2>
-        <p id="ib-bi-desc">Work in flight, by stage. Agents keep their cards current.</p>
-        <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>
-      </div>
+      <BoardIntroText />
       <div className="ib-bi-acts">
         <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
           {copiedOnce ? 'Done' : 'Not now'}
@@ -60,6 +77,16 @@ export function BoardIntro({ mcpCommand, phone, onClose }: { mcpCommand: readonl
         {state === 'copied' ? 'Board prompt copied.' : state === 'failed' ? 'The prompt could not be copied.' : ''}
       </div>
     </Modal>
+  );
+}
+
+function BoardIntroText() {
+  return (
+    <div className="ib-bi-text">
+      <h2 id="ib-bi-title">Your Board</h2>
+      <p id="ib-bi-desc">Work in flight, by stage. Agents keep their cards current.</p>
+      <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>
+    </div>
   );
 }
 

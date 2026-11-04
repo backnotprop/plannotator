@@ -458,8 +458,10 @@ export interface PlannotatorConfig {
    * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
    * `{ board: { on } }`), read on every request. Three readings (approval
    * "inbox-feature-reveal"): unset = not decided yet (off, and the only state
-   * the reveal can turn on), `true` = on, `false` = the person switched it
-   * off. The reveal's claim is the only automatic write, unset -> `true`.
+   * the reveal offers it in), `true` = on, `false` = the person switched it
+   * off. Nothing writes it automatically: the reveal's claim turns nothing
+   * on, and only its dialog's "Turn it on" writes `true` (opt-in, the owner
+   * 2026-11-04).
    */
   inboxBoard?: boolean;
   /**

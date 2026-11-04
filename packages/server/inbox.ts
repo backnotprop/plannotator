@@ -2062,7 +2062,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/shared/inbox/reveals.ts):
    * Snooze, then the Board. Read live, like Snooze: the days pass while the Inbox runs. A dev build decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
-   * the person's (or an earlier reveal's), and a test's `board` option decides it too.
+   * the person's (a `true` from 0.28.49's reveal, which turned it on at the claim, is theirs now and never touched), and
+   * a test's `board` option decides it too.
    */
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
@@ -2083,7 +2084,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       open: {
         snooze: snoozeIntroDue(snooze, now, snoozeIntroRelease),
         // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
-        // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
+        // dialog before the Board was a switch: the reveal offers it to them too (`claimReveal`).
         board: boardUndecided() && !reveals?.board?.shownAt,
         // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
         // need not be on.
@@ -2109,11 +2110,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
-   * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. The
-   * Board's claim turns the Board on (unset -> true, its one automatic write), stamps the first-visit dialog (the
-   * reveal shows it, so the Board's first visit does not) and the spacing clock, all in one save. `show`: the page
-   * draws the dialog. Someone who already saw it (before the Board was a switch) gets the Board on and no dialog:
-   * `show: false` with `board.on`, so only the sidebar's row appears, and their old stamp is kept.
+   * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. A claim
+   * turns nothing on (the owner, 2026-11-04: reveals are opt-in): the dialog offers the feature, and only its "Turn it
+   * on" writes the switch (`POST /api/inbox/settings`). The Board's claim stamps its reveal, the first-visit dialog (the
+   * reveal shows it, so the Board's first visit does not; an older stamp is kept) and the spacing clock, all in one
+   * save. `show`: the page draws the dialog.
    */
   const claimReveal = (id: RevealId, owner: boolean): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
@@ -2123,32 +2124,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
     const at = now.toISOString();
     const config = loadConfig();
-    const seen = Boolean(config.inboxBoardIntro?.shownAt);
     saveConfig({
-      inboxBoard: true,
-      ...(seen ? {} : { inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at } }),
+      ...(config.inboxBoardIntro?.shownAt ? {} : { inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at } }),
       inboxReveals: { ...config.inboxReveals, lastShownAt: at, board: { shownAt: at } },
     });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
-    const saved = loadConfig();
-    return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
+    return loadConfig().inboxReveals?.board?.shownAt === at;
   };
   /**
-   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim turns the Checklist on (unset ->
-   * true, its one automatic write; never false) and stamps the spacing clock, in one save, as the Board's does. Every
-   * window hears the switch at once (`event: capabilities`); agents get the steps field from their next session.
+   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim stamps the reveal and the spacing
+   * clock in one save and turns nothing on, as the Board's. "Turn it on" in `ChecklistIntro` writes `inboxSteps`.
    */
   const claimStepsReveal = (owner: boolean): boolean => {
     if (!owner || !snoozeIntroRelease) return false;
     const now = new Date();
     if (!revealMayClaim("steps", revealState(now), now) || !stepsUndecided()) return false;
     const at = now.toISOString();
-    const config = loadConfig();
-    saveConfig({ inboxSteps: true, inboxReveals: { ...config.inboxReveals, lastShownAt: at, steps: { shownAt: at } } });
-    const saved = loadConfig();
-    const on = saved.inboxSteps === true && saved.inboxReveals?.steps?.shownAt === at;
-    if (on) for (const listener of capabilityListeners) listener();
-    return on;
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, steps: { shownAt: at } } });
+    return loadConfig().inboxReveals?.steps?.shownAt === at;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -3662,7 +3655,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       // The reveals for returning users (approval "inbox-feature-reveal"): one compare-and-set over the queue. Only the
-      // reveal that is still next can be claimed; a guest never claims. The Board's claim turns the Board on.
+      // reveal that is still next can be claimed; a guest never claims. A claim turns nothing on (opt-in, 2026-11-04).
       if (path === "/api/inbox/reveal") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
