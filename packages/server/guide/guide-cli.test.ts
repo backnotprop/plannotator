@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { decompress } from "@plannotator/shared/compress";
 import { decrypt } from "@plannotator/shared/crypto";
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
 import { GUIDE_SNAPSHOT_SCRIPT_ID, parseGuideSnapshot, parseGuideSnapshotJson } from "@plannotator/shared/guide-format";
-import { FIXTURE_V1_PR } from "@plannotator/shared/guide-format-fixtures";
+import { FIXTURE_V1_LOCAL, FIXTURE_V1_PR } from "@plannotator/shared/guide-format-fixtures";
 import { parseGuideShareTtl, runGuideCli } from "./guide-cli";
 
 const PATCH = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
@@ -356,10 +356,97 @@ describe("plannotator guide", () => {
       const shelf = join(dataDir, "guides", "github.com__acme__widgets");
       // A directory where the envelope's temp file goes makes that one write fail.
       mkdirSync(join(shelf, `${Date.parse(now)}-token-refresh.json.tmp`), { recursive: true });
-      const res = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch"], {}, workDir, { now });
-      expect(res.code).toBe(1);
-      expect(res.stderr).toContain("Could not save the guide");
+      const logged = spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const res = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch"], {}, workDir, { now });
+        expect(res.code).toBe(1);
+        expect(res.stderr).toContain("Could not save the guide");
+        expect(res.stderr).toContain("EISDIR");
+        // The CLI reports the failure once; the store does not log it too.
+        expect(logged).not.toHaveBeenCalled();
+      } finally {
+        logged.mockRestore();
+      }
       expect(guideFiles()).toEqual(["github.com__acme__widgets", `github.com__acme__widgets/${Date.parse(now)}-token-refresh.json.tmp`]);
+    });
+
+    // What regresses: an authored guide imported with --pr keeps the local
+    // HEAD, so the PR's review shows it as moved (stale) at once, and its
+    // export and share links carry a local-branch header instead of the PR.
+    test("import --pr of an authored guide describes the PR: not moved in the PR review, PR header in export and share", async () => {
+      initRepo("git@github.com:acme/widgets.git");
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify(AUTHORED));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+      const url = "https://github.com/acme/widgets/pull/7";
+      const res = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", url], {}, workDir);
+      expect(res.code).toBe(0);
+      const id = res.stdout!.trim();
+
+      const rows = await session({ url, headSha: "f".repeat(40), label: "PR #7" }).listSaved();
+      expect(rows.map((r) => ({ id: r.id, label: r.label, moved: r.moved }))).toEqual([{ id, label: "PR #7", moved: false }]);
+
+      const expectedSource = { kind: "pr", repo: "acme/widgets", pr: { url, number: 7, platform: "github" } };
+      const exported = embeddedSnapshot((await runGuideCli(["export", "--id", id, "--out", "-"], {}, workDir)).stdout!);
+      expect(exported.source).toEqual(expectedSource);
+
+      let body: { data: string } | undefined;
+      const host = (async (_input: unknown, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body));
+        return Response.json({ id: "PrShare0123456789abcd", url: "https://guides.show/g/PrShare0123456789abcd", deleteToken: "tok" }, { status: 201 });
+      }) as unknown as typeof fetch;
+      const shared = await runGuideCli(["share", "--id", id], {}, workDir, { fetch: host });
+      expect(shared.code).toBe(0);
+      const key = new URLSearchParams(new URL(shared.stdout!.trim()).hash.slice(1)).get("key")!;
+      const uploaded = parseGuideSnapshot(await decompress(await decrypt(body!.data, key)));
+      expect(uploaded.ok && uploaded.value.source).toEqual(expectedSource);
+    });
+
+    test("import --pr of a snapshot without a PR stores no head, so the PR review does not show it as moved", async () => {
+      writeFileSync(join(workDir, "snap.json"), JSON.stringify(FIXTURE_V1_LOCAL));
+      const url = "https://github.com/acme/demo/pull/3";
+      const res = await runGuideCli(["import", "--snapshot", "snap.json", "--pr", url], {}, workDir);
+      expect(res.code).toBe(0);
+      expect(loadGuide("github.com__acme__demo", res.stdout!.trim())?.headSha).toBeUndefined();
+      expect((await session({ url, headSha: "f".repeat(40), label: "PR #3" }).listSaved()).map((r) => r.moved)).toEqual([false]);
+    });
+
+    // What regresses: a www. or /files variant of the PR URL lands on a shelf
+    // the review (keyed by the platform's canonical URL) never reads.
+    test("import --pr keys a www. or /files PR URL like the canonical one, and warns on a case-only mismatch with origin", async () => {
+      initRepo("git@github.com:acme/widgets.git");
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify(AUTHORED));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+      const canonical = "https://github.com/acme/widgets/pull/7";
+      const variant = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", "https://WWW.GitHub.com/acme/widgets/pull/7/files?w=1"], {}, workDir);
+      expect(variant.code).toBe(0);
+      expect(variant.stderr).not.toContain("Warning");
+      expect(loadGuide("github.com__acme__widgets", variant.stdout!.trim())?.prUrl).toBe(canonical);
+      expect((await session({ url: canonical, headSha: "", label: "PR #7" }).listSaved()).map((r) => r.id)).toEqual([variant.stdout!.trim()]);
+
+      // The repository path keeps its case (the existing key); only a warning says so.
+      const cased = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", "https://github.com/Acme/Widgets/pull/7"], {}, workDir);
+      expect(cased.code).toBe(0);
+      expect(cased.stderr).toContain("Warning: the PR URL spells the repository differently from origin (github.com__Acme__Widgets vs github.com__acme__widgets)");
+      expect(loadGuide("github.com__Acme__Widgets", cased.stdout!.trim())).not.toBeNull();
+    });
+
+    test("import refuses a --pr that names a different PR from the guide's own source.pr, and saves nothing", async () => {
+      writeFileSync(join(workDir, "snap.json"), JSON.stringify(FIXTURE_V1_PR));
+      const other = "https://github.com/acme/widgets/pull/999";
+      const fromSnapshot = await runGuideCli(["import", "--snapshot", "snap.json", "--pr", other], {}, workDir);
+      expect(fromSnapshot.code).toBe(1);
+      expect(fromSnapshot.stderr).toBe(`--pr ${other} is not the PR the guide names (source.pr.url ${FIXTURE_V1_PR.source.pr!.url}). Drop --pr, or fix source.pr in the guide.\n`);
+
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify({ ...AUTHORED, source: { pr: { url: "https://github.com/acme/widgets/pull/7" } } }));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+      const fromGuide = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", other], {}, workDir);
+      expect(fromGuide.code).toBe(1);
+      expect(fromGuide.stderr).toContain("is not the PR the guide names");
+      expect(existsSync(join(dataDir, "guides"))).toBe(false);
+
+      // The same PR spelled differently is not a conflict.
+      const same = await runGuideCli(["import", "--snapshot", "snap.json", "--pr", FIXTURE_V1_PR.source.pr!.url.replace("https://", "https://www.")], {}, workDir);
+      expect(same.code).toBe(0);
     });
 
     test("share --id works on an imported guide and records the link on it", async () => {

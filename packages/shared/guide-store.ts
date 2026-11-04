@@ -325,17 +325,23 @@ function parseSavedShare(value: unknown): SavedGuideShare | null {
  * id or write failure — persistence must never break the review session.
  */
 export function saveGuide(repoKey: string, id: string, envelope: SavedGuideEnvelope): boolean {
-  if (!isValidGuideId(id)) return false;
+  const written = writeGuideEnvelope(repoKey, id, envelope);
+  if (!written.ok) console.error(`[guide-store] Failed to save guide ${id}: ${written.error}`);
+  return written.ok;
+}
+
+/** saveGuide without the log: the failure comes back for a caller that reports it itself. */
+function writeGuideEnvelope(repoKey: string, id: string, envelope: SavedGuideEnvelope): { ok: true } | { ok: false; error: string } {
+  if (!isValidGuideId(id)) return { ok: false, error: `invalid guide id ${JSON.stringify(id)}` };
   try {
     mkdirSync(guidesDir(repoKey), { recursive: true });
     const finalPath = guidePath(repoKey, id);
     const tmpPath = `${finalPath}.tmp`;
     writeFileSync(tmpPath, JSON.stringify(envelope, null, 2), "utf-8");
     renameSync(tmpPath, finalPath);
-    return true;
+    return { ok: true };
   } catch (e) {
-    console.error(`[guide-store] Failed to save guide ${id}: ${e}`);
-    return false;
+    return { ok: false, error: String(e) };
   }
 }
 
@@ -412,7 +418,13 @@ export function buildSavedGuideSnapshot(repoKey: string, envelope: SavedGuideEnv
 export function saveImportedGuide(
   repoKey: string,
   snapshot: GuideSnapshot,
-  opts: { label: string; prUrl?: string; now?: number },
+  opts: {
+    label: string;
+    prUrl?: string;
+    now?: number;
+    /** Store no head sha (so a review never flags the guide as moved): the snapshot's head is not the shelf PR's head. */
+    omitHeadSha?: boolean;
+  },
 ): { ok: true; id: string } | { ok: false; error: string } {
   const now = opts.now ?? Date.now();
   const { reviewed, ...guide } = snapshot.guide;
@@ -446,7 +458,7 @@ export function saveImportedGuide(
 
   const generator = snapshot.generator ?? {};
   const generatedAt = generator.generatedAt ? Date.parse(generator.generatedAt) : NaN;
-  const headSha = snapshot.source.headSha;
+  const headSha = opts.omitHeadSha ? undefined : snapshot.source.headSha;
   const envelope: SavedGuideEnvelope = {
     version: 1,
     savedAt: now,
@@ -468,10 +480,11 @@ export function saveImportedGuide(
     guide: guide as CodeGuideOutput,
     reviewed: coerceReviewed(reviewed, guide.sections.length),
   };
-  if (saveGuide(repoKey, id, envelope)) return { ok: true, id };
+  const written = writeGuideEnvelope(repoKey, id, envelope);
+  if (written.ok) return { ok: true, id };
   removeQuietly(`${guidePath(repoKey, id)}.tmp`);
   removeQuietly(guidePatchPath(repoKey, id));
-  return { ok: false, error: `Could not write ${guidePath(repoKey, id)}.` };
+  return { ok: false, error: `Could not write ${guidePath(repoKey, id)}: ${written.error}` };
 }
 
 /**

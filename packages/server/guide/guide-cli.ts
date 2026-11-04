@@ -34,6 +34,7 @@ import {
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
 import {
   buildSavedGuideSnapshot,
+  deriveGuideRepoKeyFromRemote,
   findSavedGuideById,
   listAllSavedGuides,
   resolveGuideRepoKey,
@@ -41,7 +42,7 @@ import {
   updateGuideShare,
   type SavedGuideShare,
 } from "@plannotator/shared/guide-store";
-import { getMRLabel, getMRNumberLabel, parsePRUrl } from "@plannotator/shared/pr-types";
+import { getDisplayRepo, getMRLabel, getMRNumberLabel, getPRNumber, parsePRUrl, type PRRef } from "@plannotator/shared/pr-types";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import { loadConfig, resolveGuideShareUrl, resolveSharingEnabled } from "@plannotator/shared/config";
 import { validateGuideOutput } from "./guide-review";
@@ -320,7 +321,7 @@ function parseSourceArgs(argv: string[]): { ok: true; args: SourceArgs } | { ok:
 }
 
 /** Load the snapshot a parsed source names. `saved` is set for `--id` so a share can be recorded on its envelope (and carries any link it already has). */
-function loadSnapshotSource(args: SourceArgs, cwd: string, io: GuideCliIo): SnapshotSource {
+function loadSnapshotSource(args: SourceArgs, cwd: string, io: GuideCliIo, authoredSource?: GuideSnapshotSource): SnapshotSource {
   if (args.id) {
     const found = findSavedGuideById(args.id);
     if (!found) return { ok: false, result: { code: 1, stderr: `No saved guide with id ${args.id}. Run \`plannotator guide list\`.\n` } };
@@ -339,7 +340,7 @@ function loadSnapshotSource(args: SourceArgs, cwd: string, io: GuideCliIo): Snap
       if (!existsSync(patchFile)) return { ok: false, result: { code: 1, stderr: `Patch file not found: ${patchFile}\n` } };
       rawPatch = readFileSync(patchFile, "utf-8");
     }
-    const built = buildAuthoredGuideSnapshot(readFileSync(guideFile, "utf-8"), rawPatch, { cwd, now: io.now });
+    const built = buildAuthoredGuideSnapshot(readFileSync(guideFile, "utf-8"), rawPatch, { cwd, now: io.now, ...(authoredSource ? { source: authoredSource } : {}) });
     if (!built.ok) return { ok: false, result: { code: 1, stderr: `${built.error}\n` } };
     return { ok: true, snapshot: built.snapshot };
   }
@@ -492,14 +493,27 @@ export async function runGuideImport(argv: string[], cwd = process.cwd(), io: Gu
   if (parsedSource.args.id) return { code: 2, stderr: `import takes --guide with --patch, or --snapshot (a guide with an --id is already saved).\n\n${GUIDE_CLI_USAGE}\n` };
   if (parsedSource.args.rest.length > 0) return { code: 2, stderr: `Unknown argument: ${parsedSource.args.rest[0]}\n\n${GUIDE_CLI_USAGE}\n` };
   const unrecognizedPr = (url: string, what: string): GuideCliResult => ({ code: 1, stderr: `${what} is not a pull or merge request URL Plannotator recognizes: ${url}\n` });
-  if (prOpt.value !== undefined && !parsePRUrl(prOpt.value)) return unrecognizedPr(prOpt.value, "--pr");
-  const source = loadSnapshotSource(parsedSource.args, cwd, io);
+  const argRef = prOpt.value !== undefined ? parsePRUrl(prOpt.value) : null;
+  if (prOpt.value !== undefined && !argRef) return unrecognizedPr(prOpt.value, "--pr");
+  const argUrl = argRef ? canonicalPRUrl(argRef) : undefined;
+  // An authored guide imported with --pr describes that PR: its source says
+  // so and carries no local head, which is not the PR's head and would mark
+  // the guide as moved in the PR's review.
+  const authoredSource = argRef && argUrl && parsedSource.args.guide ? prSnapshotSource(argRef, argUrl) : undefined;
+  const source = loadSnapshotSource(parsedSource.args, cwd, io, authoredSource);
   if (!source.ok) return source.result;
   const { snapshot } = source;
 
-  const prUrl = prOpt.value ?? snapshot.source.pr?.url;
-  const pr = prUrl ? parsePRUrl(prUrl) : null;
-  if (prUrl && !pr) return unrecognizedPr(prUrl, "The guide's source.pr.url");
+  const ownUrl = snapshot.source.pr?.url;
+  const ownRef = ownUrl ? parsePRUrl(ownUrl) : null;
+  if (ownUrl && !ownRef) return unrecognizedPr(ownUrl, "The guide's source.pr.url");
+  const ownCanonical = ownRef ? canonicalPRUrl(ownRef) : undefined;
+  if (argUrl && ownCanonical && argUrl.toLowerCase() !== ownCanonical.toLowerCase()) {
+    return { code: 1, stderr: `--pr ${prOpt.value} is not the PR the guide names (source.pr.url ${ownUrl}). Drop --pr, or fix source.pr in the guide.\n` };
+  }
+
+  const pr = argRef ?? ownRef;
+  const prUrl = argUrl ?? ownCanonical;
   const label = pr ? `${getMRLabel(pr)} ${getMRNumberLabel(pr)}` : snapshot.source.branch ?? "local";
   const repoKey = await resolveGuideRepoKey({
     prUrl,
@@ -507,10 +521,46 @@ export async function runGuideImport(argv: string[], cwd = process.cwd(), io: Gu
     runGit: async (args, dir) => git(args, dir ?? cwd) ?? null,
     fallbackDir: cwd,
   });
+  // A PR is keyed by its URL exactly as the platform spells it. When that
+  // differs from origin only in case, the review may look on origin's shelf.
+  const remote = prUrl ? git(["remote", "get-url", "origin"], cwd) : undefined;
+  const originKey = remote ? deriveGuideRepoKeyFromRemote(remote) : null;
+  const caseWarning = originKey && originKey !== repoKey && originKey.toLowerCase() === repoKey.toLowerCase()
+    ? `Warning: the PR URL spells the repository differently from origin (${repoKey} vs ${originKey}). If the review does not list the guide, import again with the PR URL exactly as the platform shows it.\n`
+    : "";
 
-  const saved = saveImportedGuide(repoKey, snapshot, { label, ...(prUrl ? { prUrl } : {}), ...(io.now ? { now: Date.parse(io.now) } : {}) });
+  const saved = saveImportedGuide(repoKey, snapshot, {
+    label,
+    ...(prUrl ? { prUrl } : {}),
+    ...(io.now ? { now: Date.parse(io.now) } : {}),
+    // A snapshot without a PR, filed under --pr: its head is not the PR's head.
+    omitHeadSha: argUrl !== undefined && !ownRef,
+  });
   if (!saved.ok) return { code: 1, stderr: `Could not save the guide: ${saved.error}\n` };
-  return { code: 0, stdout: `${saved.id}\n`, stderr: `Saved ${snapshot.guide.title} for ${label} (${repoKey}). The next \`plannotator review\` of that repository lists it under Guides.\n` };
+  return { code: 0, stdout: `${saved.id}\n`, stderr: `${caseWarning}Saved ${snapshot.guide.title} for ${label} (${repoKey}). The next \`plannotator review\` of that repository lists it under Guides.\n` };
+}
+
+/**
+ * A PR URL in the form the review session keys by: the platform's own host
+ * (`www.github.com` → `github.com`, lower case) and the PR page itself, no
+ * `/files` or query. The repository path keeps its case: only the platform
+ * knows the canonical spelling.
+ */
+function canonicalPRUrl(ref: PRRef): string {
+  const lower = ref.host.toLowerCase();
+  const host = lower === "www.github.com" || lower === "www.gitlab.com" ? lower.slice(4) : lower;
+  if (ref.platform === "github") return `https://${host}/${ref.owner}/${ref.repo}/pull/${ref.number}`;
+  if (ref.platform === "gitlab") return `https://${host}/${ref.projectPath}/-/merge_requests/${ref.iid}`;
+  return `https://${host}/${ref.workspace}/${ref.repo}/pull-requests/${ref.number}`;
+}
+
+/** The snapshot source of a guide written for a PR. */
+function prSnapshotSource(ref: PRRef, url: string): GuideSnapshotSource {
+  return {
+    kind: "pr",
+    repo: getDisplayRepo(ref),
+    pr: { url, number: getPRNumber(ref), ...(ref.platform === "bitbucket" ? {} : { platform: ref.platform }) },
+  };
 }
 
 export async function runGuideCli(argv: string[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd(), io: GuideCliIo = {}): Promise<GuideCliResult> {
