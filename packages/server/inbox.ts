@@ -789,6 +789,18 @@ export function inboxUsedBefore(dataDir: string): boolean {
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
 
+/**
+ * HELD FOR 0.28.50: DELETE THIS FUNCTION IN 0.28.50. The owner decided (2026-11-04) to hold Code review and Shape
+ * back from 0.28.49. Their Settings → Capabilities switches show only to a person who already has that feature on,
+ * or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read, the save's answer and the windows' `event:
+ * capabilities` leave the key out, and Settings draws no row for an absent key. `told`: this request or event is the
+ * switch's own save, so a person who turns a shown switch off hears it. The row may go at the next load.
+ * In 0.28.50, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
+ */
+function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
+  return on || told || process.env.PLANNOTATOR_INBOX_PREVIEW === "1" ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+}
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   const dataDir = options.dataDir ?? getPlannotatorDataDir();
@@ -895,8 +907,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
-  /** The steps switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. */
-  const capabilityListeners = new Set<() => void>();
+  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held for 0.28.50 (heldSwitch). */
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -2022,7 +2034,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxCodeReview: on });
     if ((loadConfig().inboxCodeReview === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Every window follows at once (its Settings switch, the review cards, the "/" list).
-    if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener();
+    if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener("code_review");
     return { on: codeReviewOn() };
   };
 
@@ -2042,7 +2054,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const was = shapeOn();
     saveConfig({ inboxShape: on });
     if ((loadConfig().inboxShape === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    if (was !== shapeOn()) for (const listener of capabilityListeners) listener();
+    if (was !== shapeOn()) for (const listener of capabilityListeners) listener("shape");
     return { on: shapeOn() };
   };
 
@@ -2244,9 +2256,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: { on: boardOn() },
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
-    /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
-    code_review: { on: codeReviewOn() },
-    shape: { on: shapeOn() },
+    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held for 0.28.50: absent while off. */
+    ...heldSwitch("code_review", codeReviewOn()),
+    ...heldSwitch("shape", shapeOn()),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2409,9 +2421,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = () => {
+        const onCapabilities = (changed?: "code_review" | "shape") => {
           syncShapes();
-          send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() }, code_review: { on: codeReviewOn() }, shape: { on: shapeOn() } })}\n\n`);
+          const frame = { steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
@@ -3595,7 +3608,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, code_review: codeReview, shape, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
