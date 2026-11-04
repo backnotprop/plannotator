@@ -11,16 +11,20 @@ export const INBOX_AGENT_NAME_SHORT_MAX = 40;
 let graphemes: Intl.Segmenter | null | undefined;
 
 /**
+ * A text's user-perceived characters (Intl.Segmenter graphemes), so a cut never splits
+ * an emoji sequence, a flag or an accent; code points where Intl.Segmenter is missing.
+ */
+export function graphemesOf(text: string): string[] {
+  if (graphemes === undefined) graphemes = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter('en', { granularity: 'grapheme' }) : null;
+  return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text);
+}
+
+/**
  * An agent's name for a one-line place: whole up to `max` characters (user-perceived
  * characters, so an emoji or an accent is never split), else cut to `max` with "…" at
  * its end, at the last space when one is near (design record "inbox-toasts-break-fixes").
  * "Claude Code (worktree agent-a0316994da8440ab5)" -> "Claude Code (worktree agent-a0316994da8…".
  */
-function graphemesOf(text: string): string[] {
-  if (graphemes === undefined) graphemes = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter('en', { granularity: 'grapheme' }) : null;
-  return graphemes ? Array.from(graphemes.segment(text), (s) => s.segment) : Array.from(text);
-}
-
 export function shortAgentName(name: string, max = INBOX_AGENT_NAME_SHORT_MAX): string {
   const text = name.trim().replace(/\s+/g, ' ');
   const parts = graphemesOf(text);
