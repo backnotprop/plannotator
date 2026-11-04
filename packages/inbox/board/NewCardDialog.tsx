@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import { INBOX_CARD_NOTES_MAX, INBOX_CARD_TITLE_MAX } from '@plannotator/core/inbox-types';
+import { INBOX_CARD_NOTES_MAX, INBOX_CARD_TITLE_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel, ProjectFolder } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -19,6 +19,8 @@ export interface NewCardInput {
   mode: NewCardMode;
   project: string | null;
   to: ComposeTarget | null;
+  /** The initiative the card starts in (the Board's filter, approval "board-initiatives"), or null. */
+  initiative: string | null;
 }
 
 /**
@@ -52,9 +54,15 @@ export function NewCardDialog({
   phone,
   initialMode = 'backlog',
   fixed = null,
+  initiatives = [],
+  defaultInitiative = null,
   onClose,
   onCreate,
 }: {
+  /** The live initiatives: the one the card starts in is named by its id. */
+  initiatives?: readonly InboxInitiative[];
+  /** The initiative the Board is filtered to: the card starts in it (the × takes it out). */
+  defaultInitiative?: string | null;
   /** Sending a card that exists (the opened card's Send to an agent): its title and notes, shown and not edited; only the agent is picked. */
   fixed?: { title: string; notes: string | null } | null;
   projects: readonly ProjectFolder[];
@@ -72,6 +80,8 @@ export function NewCardDialog({
   const [links, setLinks] = useState('');
   const [mode, setMode] = useState<NewCardMode>(initialMode);
   const [project, setProject] = useState<string | null>(defaultProject ?? projects[0]?.id ?? null);
+  const [initiative, setInitiative] = useState<string | null>(defaultInitiative && initiatives.some((i) => i.id === defaultInitiative) ? defaultInitiative : null);
+  const initiativeName = initiative ? (initiatives.find((i) => i.id === initiative)?.name ?? null) : null;
   const [chosen, setChosen] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -104,7 +114,7 @@ export function NewCardDialog({
     }
     setBusy(true);
     setError(null);
-    const failed = await onCreate({ title: text, notes: notes.trim() || null, refs: splitRefs(links), mode, project, to: mode === 'send' ? target : null });
+    const failed = await onCreate({ title: text, notes: notes.trim() || null, refs: splitRefs(links), mode, project, to: mode === 'send' ? target : null, initiative: fixed ? null : initiative });
     setBusy(false);
     if (failed) setError(failed);
   };
@@ -237,6 +247,18 @@ export function NewCardDialog({
               <span className="ib-ncd-l">In</span>
               <ProjectPicker projects={projects} project={projectRow} home={home} onPick={setProject} />
             </>
+          )}
+          {fixed === null && initiativeName && (
+            // Made on a Board filtered to an initiative: the card starts in it; × takes it out.
+            <span className="ib-bflt-tok ib-ncd-ini" data-new-card-initiative={initiative ?? ''}>
+              <Icon name="hash" size={13} />
+              <span className="ib-bflt-tok-l" dir="auto">
+                {initiativeName}
+              </span>
+              <button type="button" className="ib-bflt-tok-x" aria-label={`Not in ${initiativeName}`} onClick={() => setInitiative(null)} data-new-card-initiative-clear="">
+                <Icon name="x" size={12} />
+              </button>
+            </span>
           )}
         </div>
         {picker && mode === 'send' && (

@@ -222,7 +222,7 @@ jobs:
       # with byte for byte. Its own artifact: never a release asset.
       - name: Record embedded page digests
         shell: bash
-        run: bun scripts/page-digests.ts apps/hook/dist/index.html apps/hook/dist/review.html apps/hook/dist/inbox.html apps/hook/dist/diagram-engine/*.js | tee page-digests.txt
+        run: bun scripts/page-digests.ts apps/hook/dist/index.html apps/hook/dist/review.html apps/hook/dist/inbox.html apps/hook/dist/shape.html apps/hook/dist/diagram-engine/*.js | tee page-digests.txt
 
       - name: Upload embedded page digests
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -169,6 +169,21 @@
     box-shadow: none !important;
   }
 
+  /* Browser-menu printing still targets the host. Unclip raw HTML using the
+     bridge's measured height; the app's Print action prints the frame itself
+     so authored page breaks work too. Screen and live-app sizing stay intact. */
+  [data-print-html],
+  [data-print-html] > article {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  [data-print-html] > article > iframe {
+    height: var(--pn-html-print-height) !important;
+    max-height: none !important;
+  }
+
   /* Collapse first heading top margin for tight print layout */
   article h1:first-of-type,
   [data-print-region="article"] h1:first-of-type {

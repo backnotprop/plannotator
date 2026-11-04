@@ -9,13 +9,15 @@
  * Proves: an image in full screen has one floating card at its foot with two
  * tabs (Comment on this image, Reply to Claude Code); Reply writes the
  * thread's reply draft (saved on the server, the thread's box holds the same
- * words); minimize leaves the "Reply draft" pill with focus on it; Hide (»)
- * hides the card and the pill with the toolbar; the pill gives the card back
- * with focus in the field; Send goes from full screen, which stays, the card
- * says it went and the draft is gone. An HTML page is Reply only. At 390 px
- * (a phone) the card spans the width under the toolbar, the tabs read Comment
- * and Reply, Send is the icon, and minimized the pill sits left of the
- * toolbar, never under it.
+ * words). The card's ⌄ and the toolbar's » do one thing (approval
+ * "inbox-fullscreen-gather"): the card, the toolbar and the image's size bar
+ * gather into one control in the bottom right corner, which says "Draft"
+ * while a reply draft waits and takes focus; one press brings everything back
+ * with focus in the field and the words kept. Send goes from full screen,
+ * which stays, the card says it went and the draft is gone. An HTML page is
+ * Reply only. At 390 px (a phone) the card spans the width under the toolbar,
+ * the tabs read Comment and Reply, Send is the icon, ⌄ gathers into a 44 px
+ * corner control, and the reply comes back working after one tap.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-fullscreen-composer.spec.ts`.
@@ -96,6 +98,10 @@ const pane = (page = world.page) => page.locator('[data-attachment-pane]');
 const card = (page = world.page) => page.locator('[data-fcomp]');
 const pill = (page = world.page) => page.locator('[data-fcomp-pill]');
 const replyField = (page = world.page) => card(page).locator('[data-fcomp-field] textarea');
+const dock = (page = world.page) => page.locator('[data-full-view-dock]');
+const toolbar = (page = world.page) => page.locator('[data-full-view-bar]');
+/** The corner control everything gathers into (approval "inbox-fullscreen-gather"). */
+const corner = (page = world.page) => page.locator('[data-full-view-handle]');
 const fileUrl = (name: string) => `${world.url}#thread=${world.threadId}&file=${world.ids[name]}&view=full`;
 
 async function draftOnServer(): Promise<string | null> {
@@ -197,7 +203,8 @@ test('an image in full screen: one card at its foot, Comment and Reply as a radi
   await expect(radios).toHaveCount(2);
   await expect(card().getByRole('radio', { name: 'Comment on this image' })).toHaveAttribute('aria-checked', 'true');
   await expect(card().getByRole('radio', { name: 'Reply to Claude Code' })).toHaveAttribute('aria-checked', 'false');
-  await expect(card().getByRole('button', { name: 'Hide the composer' })).toBeVisible();
+  // ⌄ is named for what it does: it hides all the tools, as » does.
+  await expect(card().getByRole('button', { name: 'Hide tools' })).toBeVisible();
   // The comment row is the image's own (its field, Mark up, Comment), inside the card; no old band at the foot.
   await expect(card().getByRole('textbox', { name: 'Comment on checkout.png' })).toBeVisible();
   await expect(pane().locator('.ib-imgcompose')).toHaveCount(0);
@@ -230,62 +237,87 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
   await page.mouse.move(200, 400);
   await shot(page, '2A-expanded-reply');
   await card().locator('[data-fcomp-minimize]').hover();
-  await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toContainText('Hide the composer');
+  await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toContainText('Hide tools');
   await shot(page, '2A-expanded-reply-hover', ['dark']);
 });
 
-test('minimize leaves the "Reply draft" pill with focus on it; Hide hides the pill too; the pill gives the card back, focus in the field', async () => {
+test('⌄ gathers the card, the toolbar and the size bar into the bottom-right corner control, which says "Draft" and takes focus; one press brings everything back, focus in the field, the words kept', async () => {
   const page = world.page;
+  // The file's foot (`--ib-fvfoot`, the card's height) holds still through the flight: the card scales down on its way
+  // to the corner, and a measure taken then (any change in the pane re-measures) must not shrink the foot.
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
+  const foot = () => pane().evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-fvfoot').trim());
+  const footBefore = await foot();
+  expect(parseFloat(footBefore)).toBeGreaterThan(30);
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(card()).toHaveCount(0);
-  await expect(pill()).toBeFocused();
-  await expect(pill()).toHaveText(/Reply draft/);
-  await expect(pill()).toHaveAccessibleName('Show the composer: Reply draft');
-  const box = (await pill().boundingBox())!;
-  expect(Math.round(box.height)).toBe(30);
-  expect(Math.round(box.x + box.width / 2)).toBe(720);
-  // The pill is the file's foot now (the comment row is kept, hidden): the pane measures it, so the chip,
-  // the notes and a film's controls keep above it.
-  const foot = await pane().evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--ib-fvfoot')));
-  const wrap = (await page.locator('[data-fcomp-pillwrap]').boundingBox())!;
-  expect(foot).toBe(Math.round(wrap.height));
-  expect(foot).toBeGreaterThanOrEqual(30);
+  await page.waitForTimeout(170);
+  await pane().evaluate((el) => {
+    const nudge = document.createElement('span');
+    el.appendChild(nudge);
+    nudge.remove();
+  });
+  await page.waitForTimeout(50);
+  expect(await foot(), 'mid-flight').toBe(footBefore);
+  await page.waitForTimeout(500);
+  expect(await foot(), 'landed').toBe(footBefore);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  // Everything went: the card (kept, inert: no pill of its own), the toolbar and the image's size bar.
+  await expect(card()).toHaveJSProperty('inert', true);
+  await expect(card()).toBeHidden();
+  await expect(pill()).toHaveCount(0);
+  await expect(toolbar()).toHaveJSProperty('inert', true);
+  await expect(toolbar()).toBeHidden();
+  await expect(pane().locator('.ib-imgbar')).toBeHidden();
+  // The corner control: focused, bottom right, 32 px, and it says a reply draft waits.
+  await expect(corner()).toBeFocused();
+  await expect(corner()).toContainText('Draft');
+  await expect(corner()).toHaveAccessibleName(/^Show tools, reply draft/);
+  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
+  await expect.poll(async () => Math.round((await corner().boundingBox())!.height)).toBe(32);
+  const box = (await corner().boundingBox())!;
+  expect(box.x + box.width).toBeGreaterThan(1440 - 40);
+  expect(box.y + box.height).toBeGreaterThan(900 - 40);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(200, 400);
-  await shot(page, '2A-min-draft');
+  await shot(page, '2A-gathered-draft');
 
-  // Hide (») takes the pill away with the toolbar; showing the tools brings it back.
-  await page.locator('[data-full-view-hide]').click();
-  await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'tucked');
-  await expect(pill()).toBeHidden();
-  await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', true);
-  await page.locator('[data-full-view-handle]').click();
-  await page.locator('[data-full-view-hide]').click();
-  await page.mouse.move(200, 400);
-  await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'pinned');
-  await expect(pill()).toBeVisible();
+  // One press: the card, the toolbar and the size bar come back; focus is back in the field it was gathered from.
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(card()).toHaveJSProperty('inert', false);
+  await expect(card()).toBeVisible();
+  await expect(toolbar()).toBeVisible();
+  await expect(pane().locator('.ib-imgbar')).toBeVisible();
+  await expect(replyField()).toBeFocused();
+  await expect(replyField()).toHaveValue(WORDS);
 
-  // Kept for the thread: leaving full screen and coming back finds the pill.
+  // Gathered, then away and back: every opening of full screen starts with the tools showing, the draft kept.
+  await card().locator('[data-fcomp-minimize]').click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.goto(fileUrl('checkout.png'));
-  await expect(pill()).toBeVisible();
-
-  await pill().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await expect(card()).toBeVisible();
-  await expect(replyField()).toBeFocused();
+  await card().getByRole('radio', { name: 'Reply to Claude Code' }).click();
   await expect(replyField()).toHaveValue(WORDS);
 });
 
-test('Hide (») hides the card and the size chip with the toolbar', async () => {
+test('Hide (») gathers the card and the size bar with the toolbar; one press brings them back, focus on »', async () => {
   const page = world.page;
   await page.locator('[data-full-view-hide]').click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await expect(card()).toBeHidden();
   await expect(card()).toHaveJSProperty('inert', true);
   await expect(pane().locator('.ib-imgbar')).toBeHidden();
-  await page.locator('[data-full-view-handle]').click();
-  await page.locator('[data-full-view-hide]').click();
+  await expect(corner()).toBeFocused();
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(page.locator('[data-full-view-hide]')).toBeFocused();
   await page.mouse.move(200, 400);
   await expect(card()).toBeVisible();
+  await expect(card()).toHaveJSProperty('inert', false);
+  await expect(pane().locator('.ib-imgbar')).toBeVisible();
 });
 
 test('the paperclip attaches to the reply; Send goes from full screen with the file: it stays, the card says it went, the reply is in the thread and the draft is gone', async () => {
@@ -317,19 +349,22 @@ test('the paperclip attaches to the reply; Send goes from full screen with the f
   const mine = thread.messages.filter((m) => m.author.kind === 'person').at(-1) as { attachments?: { name: string }[] };
   expect(mine.attachments?.map((a) => a.name)).toEqual(['footer-over-cvc.png']);
   await expect(card().locator('[data-fcomp-files]')).toHaveCount(0);
-  // Empty again: Send is dimmed, and minimized the pill says what the card is for.
+  // Empty again: Send is dimmed, and gathered, the corner control no longer says "Draft".
   await expect(card().locator('[data-fcomp-send]')).toBeDisabled();
   await card().getByRole('radio', { name: 'Comment on this image' }).click();
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(pill()).toHaveText(/Comment on this image/);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await expect(corner()).not.toContainText('Draft');
+  await expect(corner()).not.toHaveAccessibleName(/reply draft/);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(200, 400);
-  await shot(page, '2A-min-nodraft');
-  await pill().click();
+  await shot(page, '2A-gathered-nodraft');
+  await corner().click();
+  await expect(card()).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 
-test('an HTML page is Reply only: no tabs, the reply field, and its pill', async () => {
+test('an HTML page is Reply only: no tabs, the reply field; ⌄ gathers it with the toolbar, and one press gives the field back', async () => {
   const page = world.page;
   await page.goto(fileUrl('checkout.html'));
   await expect(pane()).toHaveAttribute('data-full-view', '');
@@ -340,15 +375,22 @@ test('an HTML page is Reply only: no tabs, the reply field, and its pill', async
   await page.keyboard.type('The footer should stay, with room under the form.');
   await expect.poll(draftOnServer).toBe('The footer should stay, with room under the form.');
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(pill()).toHaveText(/Reply draft/);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await expect(card()).toHaveJSProperty('inert', true);
+  await expect(toolbar()).toHaveJSProperty('inert', true);
+  await expect(pill()).toHaveCount(0);
+  await expect(corner()).toBeFocused();
+  await expect(corner()).toContainText('Draft');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(700, 400);
-  await shot(page, '2A-html-min');
-  await pill().click();
+  await shot(page, '2A-html-gathered');
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await expect(replyField()).toBeFocused();
+  await expect(replyField()).toHaveValue('The footer should stay, with room under the form.');
 });
 
-test('a phone (390 px): the card spans the width under the toolbar, Comment and Reply, Send the icon; minimized, the pill sits left of the toolbar', async ({ browser }: { browser: Browser }) => {
+test('a phone (390 px): the card spans the width under the toolbar, Comment and Reply, Send the icon; ⌄ gathers everything into a 44 px corner control', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   try {
     const page = await context.newPage();
@@ -395,15 +437,23 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await expect(card(page).locator('[data-fcomp-files]')).toHaveCount(0);
 
     await card(page).locator('[data-fcomp-minimize]').click();
-    await expect(pill(page)).toHaveText('Draft');
-    const pillBox = (await pill(page).boundingBox())!;
-    const bar = (await page.locator('[data-full-view-bar]').boundingBox())!;
-    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(bar.x);
-    expect(Math.abs(pillBox.y + pillBox.height - (bar.y + bar.height))).toBeLessThanOrEqual(1);
+    await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+    await expect(card(page)).toBeHidden();
+    await expect(toolbar(page)).toBeHidden();
+    await expect(pill(page)).toHaveCount(0);
+    await expect(corner(page)).toHaveAccessibleName(/^Show tools, reply draft/);
+    await expect.poll(async () => Math.round((await corner(page).boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+    const cornerBox = (await corner(page).boundingBox())!;
+    expect(cornerBox.width).toBeGreaterThanOrEqual(44);
+    expect(cornerBox.height).toBeGreaterThanOrEqual(44);
+    expect(cornerBox.x + cornerBox.width).toBeGreaterThan(390 - 40);
+    expect(cornerBox.y + cornerBox.height).toBeGreaterThan(844 - 80);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await shot(page, '2A-phone-min');
-    await pill(page).click();
+    await shot(page, '2A-phone-gathered');
+    await corner(page).click();
+    await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
     await expect(replyField(page)).toBeFocused();
+    await expect(replyField(page)).toHaveValue(WORDS);
   } finally {
     await context.close();
   }
@@ -520,48 +570,40 @@ test('on a computer the pill keeps its whole words', async () => {
   await expect(card().locator('[data-fcomp-questions]')).toHaveAttribute('data-label-form', 'full');
 });
 
-test('a phone: Hide, then Show tools, brings the reply back working (the card, and the pill when minimized), without pressing the pin', async ({ browser }: { browser: Browser }) => {
+test('a phone: » or ⌄ gathers, then one tap on the corner control brings the reply back working', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   try {
     const page = await context.newPage();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(fileUrl('checkout.png'));
     await expect(pane(page)).toHaveAttribute('data-full-view', '');
-    const dock = page.locator('[data-full-view-dock]');
-    for (const minimized of [false, true]) {
-      if (minimized) await card(page).locator('[data-fcomp-minimize]').tap({ timeout: 10_000 });
-      else await expect(card(page)).toBeVisible();
-      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
-      await expect(dock).toHaveAttribute('data-bar', 'tucked');
-      // Hidden: the reply goes with the tools.
-      await expect(page.locator(minimized ? '[data-fcomp-pillwrap]' : '[data-fcomp]')).toHaveJSProperty('inert', true);
-      await page.locator('[data-full-view-handle]').tap({ timeout: 10_000 });
-      await expect(dock).toHaveAttribute('data-bar', 'revealed');
-      if (minimized) {
-        await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', false);
-        await pill(page).tap({ timeout: 10_000 });
-      }
+    for (const from of ['[data-full-view-hide]', '[data-fcomp-minimize]']) {
+      await expect(card(page)).toBeVisible();
+      await page.locator(from).tap({ timeout: 10_000 });
+      await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+      // Gathered: the reply goes with the tools, whichever bar's button did it.
+      await expect(card(page)).toHaveJSProperty('inert', true);
+      await expect(toolbar(page)).toHaveJSProperty('inert', true);
+      await corner(page).tap({ timeout: 10_000 });
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
       // The reply works as it is: not inert, and a tap in it types.
       await expect(card(page)).toHaveJSProperty('inert', false);
       // A tap, then a real finger (touch events from the DevTools protocol), each focus the field and leave the
-      // tools out. Focus moving off the handle into the reply used to tuck the toolbar, which took the reply with it.
+      // tools out: nothing gathers them again but a press on » or ⌄.
       await replyField(page).tap({ timeout: 10_000 });
       await expect(replyField(page)).toBeFocused();
-      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
       const box = (await replyField(page).boundingBox())!;
       const touch = await finger(page, 'chromium');
       await touch.down(box.x + box.width / 2, box.y + box.height / 2, 0, 0, 0);
       await touch.up();
       await expect(replyField(page)).toBeFocused();
-      await expect(dock).toHaveAttribute('data-bar', 'revealed');
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
       await page.keyboard.type(' ok');
       // The words land where the finger put the caret.
       await expect(replyField(page)).toHaveValue(/ ok/);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      // Pin the tools back (the revealed toolbar's last button) for the next round.
-      await page.locator('[data-full-view-hide]').tap({ timeout: 10_000 });
-      await expect(dock).toHaveAttribute('data-bar', 'pinned');
     }
   } finally {
     await context.close();

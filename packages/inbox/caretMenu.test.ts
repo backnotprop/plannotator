@@ -5,7 +5,7 @@
  * floating over the To line or the footer.
  */
 import { describe, expect, test } from 'bun:test';
-import { caretAnchor } from './caretMenu';
+import { caretAnchor, phoneSkillListHeight, seenBox } from './caretMenu';
 
 const field = { left: 40, width: 600 };
 
@@ -26,5 +26,28 @@ describe('caretAnchor', () => {
     const box = caretAnchor({ top: 300, bottom: 324 }, { top: 250, bottom: 260 }, field);
     expect(box.top).toBe(250);
     expect(box.bottom).toBe(260);
+  });
+});
+
+describe('seenBox', () => {
+  const view = (vv: { height: number; offsetTop: number } | null, innerHeight: number) =>
+    ({ visualViewport: vv, innerHeight, document: { documentElement: { clientHeight: 640 } } }) as unknown as Window;
+
+  test('the visual viewport, not the layout viewport: under the iOS keyboard innerHeight still reads the full height', () => {
+    expect(seenBox(view({ height: 257, offsetTop: 0 }, 660))).toEqual({ top: 0, bottom: 257 });
+    expect(seenBox(view({ height: 257, offsetTop: 40 }, 660))).toEqual({ top: 40, bottom: 297 });
+  });
+
+  test('a reading caught mid-rotation (NaN) falls back to a real height, never NaN (NaN re-rendered the list forever)', () => {
+    expect(seenBox(view({ height: Number.NaN, offsetTop: 0 }, 660))).toEqual({ top: 0, bottom: 660 });
+    expect(seenBox(view({ height: Number.NaN, offsetTop: 0 }, Number.NaN))).toEqual({ top: 0, bottom: 640 });
+  });
+});
+
+describe('phoneSkillListHeight', () => {
+  test('4½ rows at most, 40% of what shows, never under 1½ rows', () => {
+    expect(phoneSkillListHeight(800)).toBe(198);
+    expect(phoneSkillListHeight(257)).toBe(103);
+    expect(phoneSkillListHeight(140)).toBe(66);
   });
 });

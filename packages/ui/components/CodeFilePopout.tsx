@@ -12,6 +12,7 @@ import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { whenCodeLineRendered } from '../utils/codeLineScroll';
+import { hashDraftScope } from '../utils/draftScopeHash';
 
 export interface CodeFileAnnotationInput {
   filePath: string;
@@ -47,6 +48,8 @@ interface PendingComment {
   range: { start: number; end: number };
   contextText: string;
   originalCode: string;
+  /** The composer's kept-draft key: this file (its path and a hash of its contents) and these lines. */
+  draftKey: string;
   anchorEl?: HTMLElement;
   anchorRect?: DOMRect;
 }
@@ -314,6 +317,11 @@ export interface CodeFileViewProps {
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
   onAddAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: an Ask action in the line composer, beside Save (Shape's "Ask"). Absent → Save only, as always. */
+  onAskAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: the line composer's labels (Shape: "Change it" / "Ask"). Absent → "Save" / "Ask AI". */
+  commentSubmitLabel?: string;
+  commentAskLabel?: string;
   onEditAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -363,6 +371,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   annotations = [],
   selectedAnnotationId,
   onAddAnnotation,
+  onAskAnnotation,
+  commentSubmitLabel,
+  commentAskLabel,
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
@@ -511,8 +522,12 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
       anchorRect: anchorRect ?? anchorEl?.getBoundingClientRect() ?? lastPointerRectRef.current ?? undefined,
       contextText: `${relativePath} ${lineLabel(start, end)}`,
       originalCode: getLineSlice(contents, start, end),
+      // The path alone is not the file: the Inbox passes a basename, so two
+      // threads' `index.ts` would share a draft. The contents hash, taken only
+      // when the composer opens, keeps one draft per file and range.
+      draftKey: `code-file:${filepath}:${hashDraftScope(contents)}:${start}-${end}`,
     });
-  }, [contents, relativePath]);
+  }, [contents, filepath, relativePath]);
 
   const openCommentForBrowserSelection = useCallback(() => {
     if (!onAddAnnotation) return;
@@ -661,6 +676,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           isGlobal={false}
           skillReferences
           allowImages={allowImages}
+          // The words typed for these lines survive a close (Escape, X) and come back when they are chosen again.
+          draftKey={pendingComment.draftKey}
           onSubmit={(text, images) => {
             onAddAnnotation({
               filePath: filepath,
@@ -672,6 +689,20 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             });
             setPendingComment(null);
           }}
+          submitLabel={commentSubmitLabel}
+          askAILabel={commentAskLabel}
+          onAskAI={onAskAnnotation ? (question) => {
+            onAskAnnotation({
+              filePath: filepath,
+              lineStart: pendingComment.range.start,
+              lineEnd: pendingComment.range.end,
+              text: question,
+              originalCode: pendingComment.originalCode,
+            });
+            setPendingComment(null);
+            return true;
+          } : undefined}
+          askAIContext={onAskAnnotation ? { kind: 'selection', label: pendingComment.contextText, text: pendingComment.originalCode } : undefined}
           onClose={() => setPendingComment(null)}
         />
       )}

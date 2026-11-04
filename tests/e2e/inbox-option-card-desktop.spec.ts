@@ -5,7 +5,8 @@
  * a zoomed picture may still slide under it, stepping between choices never
  * moves the card (it holds the end note's row on every choice), and Hide takes
  * the card with the rest so the picture refits to the whole pane, and so does
- * minimizing the comment box (restoring it brings the card back). The card is
+ * the comment box's ⌄, the same gather into the corner control (approval
+ * "inbox-fullscreen-gather"; one press on it brings the card back). The card is
  * one row (approval "inbox-option-card-lean"): ‹ Previous and Next › that step
  * like [ and ], marked disabled at the ends, the letter, the name (a long one
  * cut with its full name on hover), "Recommended" when there is one. It is one
@@ -322,7 +323,7 @@ for (const { width, height } of [
   { width: 1440, height: 900 },
   { width: 1000, height: 700 },
 ])
-  test(`desktop ${width} × ${height}: the arrows step like [ and ] and rest disabled at the ends, a long name is cut with its full name on hover, minimizing the comment box takes the card`, async () => {
+  test(`desktop ${width} × ${height}: the arrows step like [ and ] and rest disabled at the ends, a long name is cut with its full name on hover, the comment box's ⌄ takes the card with the tools`, async () => {
     test.setTimeout(240_000);
     const { root, url, agent, thread } = await world();
     const browser: Browser = await chromium.launch();
@@ -384,18 +385,21 @@ for (const { width, height } of [
       await atRest(page);
       expect([...heights], 'one height on every option').toHaveLength(1);
 
-      // Minimize the comment box: the card goes and the picture refits to the room it gets; restoring brings both back.
+      // The comment box's ⌄ gathers the tools into the corner control (approval "inbox-fullscreen-gather"): the card
+      // goes with them and the picture refits to the room it gets; one press on the corner control brings both back.
       await step(page, ']', 'D');
       const before = await layout(page);
       await page.locator('[data-fcomp-minimize]').click();
-      await expect(page.locator('[data-fcomp-pill]')).toBeVisible();
+      await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
+      await expect(page.locator('[data-fcomp-pill]')).toHaveCount(0);
       await expect(caption(page)).toBeHidden();
       await atRest(page);
-      const minimized = await layout(page);
-      expect(minimized.card).toBeNull();
-      expect(minimized.image.bottom).toBeGreaterThan(last.card!.top);
-      await shot(page, `${width}x${height}-D-minimized`);
-      await page.locator('[data-fcomp-pill]').click();
+      const gathered = await layout(page);
+      expect(gathered.card).toBeNull();
+      expect(gathered.image.bottom).toBeGreaterThan(last.card!.top);
+      await shot(page, `${width}x${height}-D-gathered`);
+      await page.locator('[data-full-view-handle]').click();
+      await expect(page.locator('[data-tools="pinned"]')).toHaveCount(1);
       await expect(caption(page)).toBeVisible();
       await atRest(page);
       const restored = await layout(page);
@@ -453,7 +457,7 @@ test('the card is one box on every step, so three clicks on Next with the mouse 
   }
 });
 
-test('a panned picture holds its place when the room around it changes: Hide, minimize, the Reply tab', async () => {
+test('a panned picture holds its place when the room around it changes: Hide, the comment box\'s ⌄, the Reply tab', async () => {
   test.setTimeout(240_000);
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
@@ -480,7 +484,7 @@ test('a panned picture holds its place when the room around it changes: Hide, mi
       await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
       await holds('Hide');
       await context.close();
-      // Minimize and the Reply tab on a fresh page (Hide left the toolbar tucked).
+      // ⌄ and the Reply tab on a fresh page (Hide left the tools gathered).
       const again = await browser.newContext({ viewport: { width, height } });
       const second = await again.newPage();
       await open(second, url, thread, 'A');
@@ -495,9 +499,10 @@ test('a panned picture holds its place when the room around it changes: Hide, mi
         expect(Math.abs((await layout(second)).image.top - where), what).toBeLessThan(1.5);
       };
       await second.locator('[data-fcomp-minimize]').click();
-      await expect(second.locator('[data-fcomp-pill]')).toBeVisible();
-      await holdsNow('minimize');
-      await second.locator('[data-fcomp-pill]').click();
+      await expect(second.locator('[data-tools="tucked"]')).toHaveCount(1);
+      await holdsNow('⌄');
+      await second.locator('[data-full-view-handle]').click();
+      await expect(second.locator('[data-tools="pinned"]')).toHaveCount(1);
       await holdsNow('restore');
       await second.getByRole('radio', { name: /Reply/ }).first().click();
       await holdsNow('the Reply tab');
@@ -602,7 +607,7 @@ test('the full name of a cut name shows on hover and goes with the step; the las
   }
 });
 
-test('minimizing takes the card at once and restoring waits for the picture; Save it and go on leaves focus on the arrow', async () => {
+test('the comment box\'s ⌄ takes the card with the tools and restoring waits for the picture; Save it and go on leaves focus on the arrow', async () => {
   test.setTimeout(240_000);
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
@@ -612,9 +617,10 @@ test('minimizing takes the card at once and restoring waits for the picture; Sav
     await open(page, url, thread, 'B');
     const opacity = () => page.locator('.ib-optcap').evaluate((el) => (getComputedStyle(el).visibility === 'hidden' ? 0 : Number(getComputedStyle(el).opacity)));
     await page.locator('[data-fcomp-minimize]').click();
-    await page.locator('[data-fcomp-pill]').waitFor({ state: 'attached' });
-    expect(await opacity(), 'gone as the box goes, not fading where the foot has already moved it').toBe(0);
-    await page.locator('[data-fcomp-pill]').click();
+    await expect(page.locator('[data-tools="tucked"]')).toHaveCount(1);
+    // Gathered as Hide gathers (approval "inbox-fullscreen-gather"): the card goes with the tools, in place (the foot does not move).
+    await expect.poll(opacity, 'the card goes with the tools').toBe(0);
+    await page.locator('[data-full-view-handle]').click();
     await page.waitForTimeout(60);
     expect(await opacity(), 'not back while the picture is still easing').toBeLessThan(0.1);
     await expect.poll(opacity).toBe(1);

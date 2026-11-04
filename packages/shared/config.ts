@@ -424,7 +424,8 @@ export interface PlannotatorConfig {
   experimental?: { decisionMode?: boolean };
   /**
    * The Board's one-time first-visit dialog (approval "inbox-board", intro
-   * amendment): `shownAt` once a page on this computer claimed it
+   * amendment): `shownAt` once a page on this computer or the owner's phone
+   * claimed it (or the Board reveal showed it)
    * (`POST /api/inbox/board/intro`, a compare-and-set), once per machine.
    */
   inboxBoardIntro?: { shownAt?: string };
@@ -452,12 +453,65 @@ export interface PlannotatorConfig {
   inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
   /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
-   * person turns on, off by default. On: the sidebar's Board row and page,
-   * and the Inbox serves the agents' `card` tool. Off: neither, every card
-   * kept. Written by the Inbox's Settings → Capabilities (`POST
-   * /api/inbox/settings` `{ board: { on } }`), read on every request.
+   * person turns on. On: the sidebar's Board row and page, and the Inbox
+   * serves the agents' `card` tool. Off: neither, every card kept. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ board: { on } }`), read on every request. Three readings (approval
+   * "inbox-feature-reveal"): unset = not decided yet (off, and the only state
+   * the reveal offers it in), `true` = on, `false` = the person switched it
+   * off. Nothing writes it automatically: the reveal's claim turns nothing
+   * on, and only its dialog's "Turn it on" writes `true` (opt-in, the owner
+   * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /**
+   * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
+   * person turns on, off by default. On: the thread's steps button, the
+   * steps in the Board's opened card, and the agents' `steps` tool, wake
+   * line, compaction line and Tidy rule. Off: none of it, every list kept.
+   * Written by the Inbox's Settings → Capabilities (`POST
+   * /api/inbox/settings` `{ steps: { on } }`), read on every request.
+   */
+  inboxSteps?: boolean;
+  /**
+   * Code review in the Inbox (approval "inbox-code-review-direction",
+   * 2026-11-03): something the person turns on, off by default. On: the
+   * review skills in the reply box's "/" list, the review card and its
+   * full-window review with Approve / Send feedback, and submit_guide's
+   * `review` field. Off: none of it; guided reviews and `plannotator review`
+   * stay as they are. Three readings, like the Board's: unset = not decided
+   * yet (off), `true` = on, `false` = the person switched it off. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ code_review: { on } }`), read on every request.
+   */
+  inboxCodeReview?: boolean;
+  /**
+   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
+   * agent draws and keeps current. Off unless the person turns it on. On: the
+   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
+   * group in the search, the `/api/shapes` routes and the shape skill in the
+   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
+   * readings, like the Board's: unset (off), `true`, `false`. Written by
+   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
+   */
+  inboxShape?: boolean;
+  /**
+   * The queue of one-time reveals for returning users (approval
+   * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
+   * only by the server. `lastShownAt`: the last one-time announcement claimed
+   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * spacing's clock. `waitingSince`: when each reveal first became next, for
+   * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
+   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * the claiming page's own key, so that page's retry after a lost answer is
+   * shown it again (any other key is not).
+   */
+  inboxReveals?: {
+    lastShownAt?: string;
+    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    board?: { shownAt?: string; key?: string };
+    steps?: { shownAt?: string; key?: string };
+  };
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
@@ -626,6 +680,14 @@ export interface PlannotatorConfig {
    * preference cookies, #2184); remote sessions ignore those names.
    */
   urlHost?: string;
+  /**
+   * Publish every `plannotator review`, `annotate` and `annotate-last`/`last`
+   * session over the tailnet, as if `--tailscale` were passed, so a host or
+   * agent need not add the flag each time. PLANNOTATOR_TAILSCALE wins over
+   * this key; the flag turns it on for one run. Other subcommands ignore it.
+   * The Inbox has its own key (`inboxTailscale`). Default: false.
+   */
+  tailscale?: boolean;
   /**
    * Mirror the approved plan checklist into an editable todo provider during
    * execution (issue #484). "auto" (default) syncs whenever a provider is
@@ -1695,6 +1757,46 @@ export function resolveInboxTailscale(
   const fromConfig = parseConfigBoolean(config.inboxTailscale);
   if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
   return { on: false, source: "default" };
+}
+
+export type SessionTailscaleSource = "flag" | "env" | "config" | "default";
+
+/**
+ * Resolve whether a review / annotate / annotate-last session is published
+ * over the tailnet (the per-session `--tailscale` transport, not the Inbox's).
+ *
+ * Priority (highest wins):
+ *   `--tailscale`  →  PLANNOTATOR_TAILSCALE  →  config.tailscale  →  default false
+ *
+ * The flag only turns it on. The env var takes the same words as
+ * PLANNOTATOR_INBOX_TAILSCALE: `1` / `true` / `on` turn it on, `0` / `false` /
+ * `off` / `disabled` keep it off against the config key (a one-run opt-out);
+ * an empty or unrecognized value counts as unset.
+ */
+export function resolveSessionTailscale(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  flag = false,
+): { on: boolean; source: SessionTailscaleSource } {
+  if (flag) return { on: true, source: "flag" };
+  const v = env.PLANNOTATOR_TAILSCALE?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return { on: true, source: "env" };
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return { on: false, source: "env" };
+  const fromConfig = parseConfigBoolean(config.tailscale);
+  if (fromConfig !== undefined) return { on: fromConfig, source: "config" };
+  return { on: false, source: "default" };
+}
+
+/**
+ * How to run one session without the tailnet, worded for what turned it on:
+ * dropping the flag does nothing when the env var or config key decided.
+ */
+export function sessionTailscaleOptOut(source: SessionTailscaleSource): string {
+  return source === "flag"
+    ? "run the same command without --tailscale"
+    : source === "env"
+      ? "run the same command with PLANNOTATOR_TAILSCALE unset or set to 0"
+      : "run the same command with PLANNOTATOR_TAILSCALE=0 (config.json's \"tailscale\" key turned it on)";
 }
 
 /**

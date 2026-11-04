@@ -36,11 +36,12 @@ export const inboxThreadShortcuts = defineShortcutScope({
     },
     send: {
       // The reply box's and compose's own keydown (Thread.tsx, ComposeDialog.tsx) match this binding, and so does
-      // Thread.tsx's handler for the closed foot's Send (from any focus in the thread), and the full-screen composer's card.
+      // Thread.tsx's handler for the closed foot's Send (from any focus in the thread), the full-screen composer's card,
+      // and the Pull requests stack view's Reply box (pulls/PullsPage.tsx).
       description: 'Send',
       bindings: ['Mod+Enter'],
       section: 'Thread',
-      hint: 'Anywhere in an open thread where Send shows (your picks, a note, the reply box), and in a new message. Not while a menu or dialog is open.',
+      hint: 'Anywhere in an open thread where Send shows (your picks, a note, the reply box), in a new message, and in a stack’s Reply under Pull requests. Not while a menu or dialog is open.',
       preventDefault: true,
       displayOrder: 1,
     },

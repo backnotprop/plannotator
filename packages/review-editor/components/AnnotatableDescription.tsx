@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
+import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
 
 /**
@@ -29,7 +30,11 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
     onAddDescriptionAnnotation,
     onSelectDescriptionAnnotation,
     onAskAIForDescription,
+    prMetadata,
   } = useReviewState();
+  // Only a github.com PR proxies attachment images; elsewhere every image
+  // renders exactly as before (no resolver).
+  const proxiedImages = proxiesGitHubImages(prMetadata);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +62,13 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
 
   return (
     <div ref={containerRef}>
-      <RenderedMarkdown markdown={markdown} className={className} />
+      <RenderedMarkdown
+        markdown={markdown}
+        className={className}
+        resolveImage={proxiedImages ? resolvePRImage : undefined}
+        preserveVideos
+        responsiveImages
+      />
 
       {hook.commentPopover &&
         createPortal(

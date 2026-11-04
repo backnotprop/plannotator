@@ -192,6 +192,63 @@ describe('sessions that keep today\'s title', () => {
   });
 });
 
+describe('a caller-chosen title (--title, #2289)', () => {
+  const title = 'add-refund-flow review';
+  // Fails if the title is decorated (repo or Plannotator added), or loses to
+  // the open file, a linked document, or the folder's own name.
+  test('a folder session: the tab and header show the title, whichever file is open', () => {
+    const folder = annotate({ annotateSource: 'folder', folderPath: '/repo/docs', sessionTitle: title });
+    expect(documentTabTitle(folder)).toBe(title);
+    expect(documentHeaderName(folder)).toEqual({ name: title, title: '/repo/docs' });
+    const open = { ...folder, activeFile: '/repo/docs/proposal.md', linkedPath: '/repo/docs/proposal.md' };
+    expect(documentTabTitle(open)).toBe(title);
+    expect(documentHeaderName(open)).toEqual({ name: title, title: '/repo/docs' });
+    const linked = { ...open, linkedPath: '/repo/shared/glossary.md' };
+    expect(documentTabTitle(linked)).toBe(title);
+    expect(documentHeaderName(linked)?.name).toBe(title);
+  });
+  // Fails if the header's tooltip stops naming what is open, or a URL's
+  // tooltip shows its query again.
+  test('one file, a URL, the last message and a live app: the title, the tooltip names what is open', () => {
+    const file = annotate({ sourceFilePath: '/repo/docs/proposal.md', sessionTitle: title });
+    expect(documentTabTitle(file)).toBe(title);
+    expect(documentHeaderName(file)).toEqual({ name: title, title: '/repo/docs/proposal.md' });
+    const url = annotate({ sourceFilePath: 'https://docs.stripe.com/refunds?token=secret', sessionTitle: title });
+    expect(documentTabTitle(url)).toBe(title);
+    expect(documentHeaderName(url)).toEqual({ name: title, title: 'docs.stripe.com/refunds?…' });
+    const message = annotate({ annotateSource: 'message', sessionTitle: title });
+    expect(documentTabTitle(message)).toBe(title);
+    expect(documentHeaderName(message)).toEqual({ name: title });
+    const app = annotate({ liveAppUrl: 'http://localhost:5173/admin', sessionTitle: title });
+    expect(documentTabTitle(app)).toBe(title);
+    expect(documentHeaderName(app)?.name).toBe(title);
+  });
+  // Fails if the title pushes the several-file switcher out of the header.
+  test('several files: the tab shows the title, the header keeps its switcher', () => {
+    const bundle = annotate({ annotateSource: 'folder', sourceFilePath: '/r/spec.md', bundle: { index: 0, total: 2 }, sessionTitle: title });
+    expect(documentTabTitle(bundle)).toBe(title);
+    expect(documentHeaderName(bundle)).toBeNull();
+  });
+  // Fails if the title is used outside the live session it was launched for.
+  test('archive, goal setup and share links ignore it', () => {
+    expect(documentTabTitle({ ...base, archiveMode: true, sessionTitle: title })).toBe('acme/payments · Plannotator');
+    expect(documentTabTitle({ ...base, goalSetupMode: true, sessionTitle: title })).toBe('acme/payments · Plannotator');
+    expect(documentTabTitle({ ...base, apiMode: false, repo: null, sessionTitle: title })).toBe('Plannotator');
+  });
+  // Fails if an empty title blanks the tab instead of leaving today's title.
+  test('no title, or an empty one, changes nothing', () => {
+    const open = annotate({ annotateSource: 'folder', folderPath: '/repo/docs', activeFile: '/repo/docs/proposal.md' });
+    for (const sessionTitle of [undefined, null, '']) {
+      expect(documentTabTitle({ ...open, sessionTitle })).toBe('proposal.md · acme/payments');
+      expect(documentHeaderName({ ...open, sessionTitle })).toEqual({ name: '/repo/docs', title: '/repo/docs', cutsFromStart: true });
+    }
+  });
+  test('the compact header is unchanged', () => {
+    const open = annotate({ annotateSource: 'folder', folderPath: '/repo/docs', activeFile: '/repo/docs/proposal.md', sessionTitle: title });
+    expect(compactDocumentTitle(open)).toBe('proposal.md');
+  });
+});
+
 describe('planHeadingText', () => {
   test('drops inline markdown and a Plan: prefix', () => {
     expect(planHeadingText('Plan: Add `refunds` to **checkout**')).toBe('Add refunds to checkout');

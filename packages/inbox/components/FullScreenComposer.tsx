@@ -14,12 +14,15 @@
  *   thread's words, every keystroke goes through the reply box's own change
  *   (Thread.tsx `changeReply`), and Send is the thread's Send, with its rules
  *   and refusals, kept in full screen.
- * - Minimize (the double chevron at the card's top right) leaves a 30 px pill
- *   at the foot that reads "Reply draft" while a draft waits, else the tab's
- *   label. The pill gives the card back and focus goes to its field; minimizing
- *   puts focus on the pill. Kept per thread (fullScreenComposer.ts).
- * - Hide (») in the toolbar hides the card and the pill with everything else
- *   that floats (`tucked`: inert, faded out in inbox.css).
+ * - Minimize (the double chevron at the card's top right) is the toolbar's »:
+ *   the card, the toolbar and everything else that floats gather into one
+ *   corner control (`onGather`; `tucked`: inert, flown into the corner in
+ *   inbox.css). The corner control says "Draft" while a draft waits; one press
+ *   brings everything back with focus in the card's field.
+ * - The pill (30 px, "Reply draft" while a draft waits, else the tab's label)
+ *   is left for a card folded by default (an HTML page on a phone opens clear)
+ *   and for a host that gives no `onGather`. The pill gives the card back and
+ *   focus goes to its field. Kept per thread (fullScreenComposer.ts).
  * - No dots, no "Draft saved" line: the words say what waits.
  * - Files: the Reply tab's toolbar starts with the reply box's paperclip, and a
  *   paste or a drop on the card attaches as in the box. They are the box's
@@ -32,6 +35,7 @@
  * the toolbar on a phone, the chip and the notes sit above it. A phone's pill
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
+import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
@@ -92,14 +96,18 @@ export interface FullScreenReply {
   /** The thread's reply box, on the device's own route back to the thread. */
   onOpenThread: () => void;
   tags?: InboxComposerTags;
+  /** The thread's skill rule (skills.ts `inboxSkillFilter`), as the reply box's. */
+  skillFilter?: (entry: SkillCatalogEntry) => boolean;
 }
 
 export interface FullScreenComposerValue {
   threadId: string;
   phone: boolean;
   reply: FullScreenReply;
-  /** Hide (») tucked the toolbar: the card and the pill hide with it. Set by the pane. */
+  /** The tools are gathered into the corner control: the card and the pill went with them (inert). Set by the pane. */
   tucked?: boolean;
+  /** The card's ⌄: gather every floating tool into the corner control, as » does. Set by the pane. */
+  onGather?: () => void;
 }
 
 /** Given by the pane in full screen (image, film and HTML only): the views draw the composer from it. */
@@ -428,17 +436,19 @@ export function FullScreenComposer({
             Reply to <b>{reply.to}</b>
           </span>
         )}
-        <Tip content="Hide the composer" side="top">
+        <Tip content={value.onGather ? 'Hide tools' : 'Hide the composer'} side="top">
           <button
             type="button"
             className="ib-fvb ib-fcomp-min"
             onClick={() => {
+              onMinimized?.();
+              // The same gather as the toolbar's »: everything goes into the corner control, and comes back with it.
+              if (value.onGather) return value.onGather();
               focusNext.current = 'pill';
               state.setMinimized(true);
-              onMinimized?.();
             }}
-            aria-label="Hide the composer"
-            aria-expanded={true}
+            aria-label={value.onGather ? 'Hide tools' : 'Hide the composer'}
+            aria-expanded={value.onGather ? undefined : true}
             data-fcomp-minimize=""
           >
             <Icon name="chevsD" size={phone ? 18 : 15} />
@@ -458,6 +468,7 @@ export function FullScreenComposer({
                 placeholder={`${replyLabel}…`}
                 destination="your reply"
                 tags={reply.tags}
+                skillFilter={reply.skillFilter}
                 value={reply.value}
                 onChange={(text) => {
                   // Writing here keeps the card on Reply for the thread (a draft emptied never flips it back).
