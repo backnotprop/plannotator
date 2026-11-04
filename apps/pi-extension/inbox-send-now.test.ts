@@ -49,9 +49,10 @@ afterEach(async () => {
 });
 
 /** A stand-in for Pi's ExtensionAPI and one session's context. */
-function fakePi(project: string) {
+function fakePi(project: string, ohMyPi = false) {
 	const handlers = new Map<string, ((event: any, ctx?: any) => unknown)[]>();
 	const sent: { text: string; deliverAs: string | undefined }[] = [];
+	const custom: { message: { customType: string; content: string; display: boolean; details?: { inboxReplyId?: string } }; options?: { triggerTurn?: boolean } }[] = [];
 	let tool: { execute: (...args: any[]) => Promise<{ content: { text: string }[] }> } | null = null;
 	let idle = false;
 	const ctx = {
@@ -67,6 +68,7 @@ function fakePi(project: string) {
 		for (const handler of handlers.get(event) ?? []) handler(payload, ctx);
 	};
 	const pi = {
+		...(ohMyPi ? { arktype: {}, pi: {} } : {}),
 		on: (event: string, handler: (event: any, ctx?: any) => unknown) => {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
 		},
@@ -75,6 +77,9 @@ function fakePi(project: string) {
 		},
 		getActiveTools: () => [] as string[],
 		setActiveTools: () => {},
+		sendMessage: (message: typeof custom[number]["message"], options?: { triggerTurn?: boolean }) => {
+			custom.push({ message, options });
+		},
 		sendUserMessage: (text: string, options?: { deliverAs?: string }) => {
 			sent.push({ text, deliverAs: options?.deliverAs });
 		},
@@ -83,6 +88,7 @@ function fakePi(project: string) {
 		pi,
 		ctx,
 		sent,
+		custom,
 		emit,
 		setIdle: (value: boolean) => {
 			idle = value;
@@ -181,7 +187,7 @@ describe.skipIf(process.platform === "win32")("Oh My Pi: the wake", () => {
 		process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
 		process.env.PLANNOTATOR_BIN = join(w.bin, "plannotator");
 
-		const fake = fakePi(w.project);
+		const fake = fakePi(w.project, true);
 		// What index.ts records when Oh My Pi loads the extension.
 		setPiHost("oh-my-pi");
 		await setupPiInbox(fake.pi as never, { isAskActive: () => false });
@@ -195,6 +201,52 @@ describe.skipIf(process.platform === "win32")("Oh My Pi: the wake", () => {
 		const wake = await waitFor("the wake", () => fake.sent[0]);
 		expect(wake.text).toContain("Retry with the same key.");
 		expect(wake.deliverAs).toBeUndefined();
+	}, 60_000);
+	test("an acknowledgment is saved without a model turn and delivery waits for the session entry", async () => {
+		const w = createInboxWorld("plannotator-inbox-omp-ack-", "omp-ack", "pi");
+		worlds.push(w);
+		startInbox(w);
+		mkdirSync(w.dataDir, { recursive: true });
+		writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true } }));
+		process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
+		process.env.PLANNOTATOR_BIN = join(w.bin, "plannotator");
+
+		const fake = fakePi(w.project, true);
+		setPiHost("oh-my-pi");
+		await setupPiInbox(fake.pi as never, { isAskActive: () => false });
+		fake.emit("session_start", {});
+		ends.push(() => fake.emit("session_shutdown", {}));
+		fake.setIdle(true);
+		const result = await fake.tool().execute("call-1", { action: "send_message", body: "The task is complete." }, undefined, undefined, fake.ctx);
+		const text = result.content[0]!.text;
+		const sent = JSON.parse(text.slice(text.indexOf("{"))) as { message_id: string; thread_id: string };
+		const { port } = registry(w);
+		const health = await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json() as { serverSession: string };
+		const ack = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${sent.message_id}/ack`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${port}` },
+			body: JSON.stringify({ serverSession: health.serverSession }),
+		});
+		expect(ack.status).toBe(200);
+		await waitFor("the acknowledgment", () => fake.custom[0] ?? fake.sent[0]);
+		expect(fake.sent).toEqual([]);
+		const entry = fake.custom[0]!;
+		expect(entry.message.display).toBe(true);
+		expect(entry.options?.triggerTurn).toBe(false);
+		const delivered = async () => {
+			const value = await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads/${sent.thread_id}`)).json() as {
+				thread: { messages: { id: string; ack?: { delivered_at?: string | null } }[] };
+			};
+			return value.thread.messages.find((message) => message.id === sent.message_id)?.ack?.delivered_at;
+		};
+		expect(await delivered()).toBeFalsy();
+		fake.emit("message_start", { message: { role: "custom", ...entry.message, details: { inboxReplyId: "unrelated" } } });
+		expect(await delivered()).toBeFalsy();
+		fake.emit("message_start", { message: { role: "custom", ...entry.message } });
+		expect(await waitFor("acknowledgment delivery", delivered)).toBeTruthy();
+		await Bun.sleep(1_500);
+		expect(fake.custom).toHaveLength(1);
+		expect(fake.sent).toEqual([]);
 	}, 60_000);
 });
 

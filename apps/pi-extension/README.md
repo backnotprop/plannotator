@@ -394,6 +394,8 @@ The extension also ships the `plannotator` knowledge skill (a CLI reference) for
 
 With this tool the agent writes to your Plannotator Inbox and reads it: `send_message` starts or continues a thread (a question, a note, files to annotate as attachments), `read_thread` reads your answers, `search` finds messages by their words, and `get_guide_brief` and `submit_guide` send you a guided review. The actions are the ones your Inbox offers when the session starts. When you press Send on a reply, the session that sent the message wakes: the reply goes in as a follow-up once Pi is idle (a run is never interrupted), and the thread shows "Delivered to Pi". If two Pi processes have the same session open, the one you used last gets it. The tool appears only when an Inbox is installed (you ran `plannotator inbox` once) and the `inboxTool` setting is on for Pi. It is off by default on Pi, because Pi sends every tool's full definition with each request. Turn it on with `export PLANNOTATOR_INBOX_TOOL=1`, or with `{ "inboxTool": { "pi": true } }` in `~/.plannotator/config.json` (the Inbox's Settings writes this key; the environment variable wins). The setting is read when a session starts. A call starts a stopped Inbox in the background. In print or JSON mode the tool is inactive.
 
+In Oh My Pi, Looks good acknowledgments are shown and saved without starting a model turn. This avoids empty-response retry errors for acknowledgments that need no answer. Your replies still wake the agent normally.
+
 ### Archive browser
 
 The Plannotator archive browser is available through the shared event API as `archive`, which opens the saved plan/decision browser for future callers. The orchestrator does not expose a dedicated archive command yet.

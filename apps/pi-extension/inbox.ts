@@ -79,7 +79,7 @@ const DELIVERY_WATCHDOG_MS = 15_000;
 /** `defaultActive: false`, spread in: the Pi floor's types (0.79.1) do not declare it. */
 const NOT_ACTIVE_ON_REGISTRATION = { defaultActive: false } as const;
 
-type InboxPi = Pick<ExtensionAPI, "registerTool" | "sendUserMessage" | "getActiveTools" | "setActiveTools"> & {
+type InboxPi = Pick<ExtensionAPI, "registerTool" | "sendMessage" | "sendUserMessage" | "getActiveTools" | "setActiveTools"> & {
 	on(event: string, handler: (event: any, ctx?: any) => unknown): unknown;
 };
 
@@ -255,7 +255,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		}
 	};
 
-	/** Put the wake text into the session and wait until Pi starts it as a user message. */
+	/** Put replies into a turn; save OMP acknowledgments without requesting a response. */
 	const send = (text: string, command: InboxReplyCommand, deliverAs: "followUp" | "steer") =>
 		new Promise<void>((resolve, reject) => {
 			const current = ctx;
@@ -274,7 +274,16 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			};
 			waiting = { id: command.id, resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) };
 			try {
-				pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs }));
+				if (ohMyPi && command.ack_of) {
+					pi.sendMessage({
+						customType: "plannotator-inbox-ack",
+						content: text,
+						display: true,
+						details: { inboxReplyId: command.id },
+					}, { triggerTurn: false });
+				} else {
+					pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs }));
+				}
 			} catch (error) {
 				endWaiting(error instanceof Error ? error : new Error(String(error)));
 			}
@@ -424,8 +433,13 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		runOpen = false;
 	});
 	pi.on("message_start", (event) => {
-		const message = event?.message as { role?: string; content?: unknown } | undefined;
-		if (message?.role !== "user" || !waiting) return;
+		const message = event?.message as { role?: string; content?: unknown; customType?: string; details?: { inboxReplyId?: string } } | undefined;
+		if (!waiting) return;
+		if (message?.role === "custom" && message.customType === "plannotator-inbox-ack") {
+			if (message.details?.inboxReplyId === waiting.id) endWaiting();
+			return;
+		}
+		if (message?.role !== "user") return;
 		const firstLine = userText(message).split("\n", 1)[0] ?? "";
 		if (firstLine.startsWith("Plannotator Inbox: ") && firstLine.endsWith(`(${waiting.id})`)) endWaiting();
 	});
