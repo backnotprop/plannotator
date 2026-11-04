@@ -6,8 +6,8 @@
  * - Change it and Ask: stored. Both wait for the agent: it picks them up with
  *   `plannotator shape read --notes` and answers an Ask with `plannotator
  *   shape answer`. There is no thread, so no session is asked here and no Ask
- *   AI answers: the board says the question waits for the agent (the
- *   Inbox's label, `askWaitsWhenEnded`).
+ *   AI answers. The server knows no sessions, so the board shows no session
+ *   line (`sessionless`) rather than "Session ended" while the agent is live.
  * - The event feed (`/api/shapes/events`, the page's one stream) tells an open
  *   board what changed: a version, "drawing", a delivery, an answer.
  * - Files and hover: the shape's project folder, through code-nav.
@@ -97,5 +97,7 @@ export function createStandaloneShapeHost(options: StandaloneShapeHostOptions): 
       await (options.copy ?? copyTextToClipboard)(text);
     },
     askWaitsWhenEnded: true,
+    // No thread, so no session: the Shapes server cannot tell a live agent from a gone one. Say nothing about it.
+    sessionless: true,
   };
 }

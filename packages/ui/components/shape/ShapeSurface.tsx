@@ -101,7 +101,16 @@ interface Target {
   view: ShapeViewId | null;
   id: string | null;
   text: string;
+  /** A Change it that did not reach the host: the person's words, back in the box, and why. */
+  retry?: { text: string; error: string };
 }
+
+/**
+ * A Change it the host refused or never got (a server that restarted, Shape turned off, a server that is gone):
+ * the composer opens again with the person's words and says so. The Inbox's words for a message that was not sent
+ * (packages/inbox: NewMessage, ComposeDialog), reused until the owner approves words of Shape's own.
+ */
+export const SHAPE_CHANGE_NOT_SENT = 'The message was not sent. Send again to retry.';
 
 const key = (view: string, id: string) => `${view}/${id}`;
 
@@ -375,9 +384,10 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const shapeState = loaded?.shape.state ?? 'active';
   const finished = shapeState === 'finished';
 
-  const sendChange = useCallback(async (input: Omit<ShapeNoteInput, 'kind' | 'v'>) => {
+  /** Store a Change it; false when the host did not take it (the caller gives the person their words back). */
+  const sendChange = useCallback(async (input: Omit<ShapeNoteInput, 'kind' | 'v'>): Promise<boolean> => {
     const v = versionRef.current;
-    if (!v || finished) return;
+    if (!v || finished) return true;
     if (input.part && input.view) {
       const k = key(input.view, input.part);
       setMarks((m) => ({ ...m, noted: new Set([...m.noted, k]) }));
@@ -386,8 +396,10 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       const note = await host.note(id, { ...input, kind: 'change', v: v.n });
       upsertNote(note);
       if (session.state !== 'gone') setInFlight((f) => [...f, note.id]);
+      return true;
     } catch {
       setMarks((m) => ({ ...m, noted: new Set() }));
+      return false;
     }
   }, [host, id, finished, session.state, upsertNote]);
 
@@ -526,7 +538,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   // ── global comments: the whole board, or the whole Code view ──
   // The words, globe and look of Plannotator's other "Global comment" buttons.
-  const [general, setGeneral] = useState<{ el: HTMLElement; view: ShapeViewId | null } | null>(null);
+  const [general, setGeneral] = useState<{ el: HTMLElement; view: ShapeViewId | null; retry?: Target['retry'] } | null>(null);
   const generalButton = (forView: ShapeViewId | null) => (
     <button
       type="button"
@@ -796,8 +808,14 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               allowImages={false}
               submitLabel="Change it"
               askAILabel="Ask"
+              initialText={target.retry?.text}
+              errorText={target.retry?.error}
               onSubmit={(text) => {
-                void sendChange({ view: target.view, part: target.id, quote: target.text, text });
+                const sent = target;
+                void sendChange({ view: sent.view, part: sent.id, quote: sent.text, text }).then((ok) => {
+                  // Not taken: the same box again, with the words and why (unless another one opened meanwhile).
+                  if (!ok) setTarget((open) => open ?? { ...sent, retry: { text, error: SHAPE_CHANGE_NOT_SENT } });
+                });
                 setTarget(null);
               }}
               onAskAI={(question) => {
@@ -818,8 +836,13 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               allowImages={false}
               submitLabel="Change it"
               askAILabel="Ask"
+              initialText={general.retry?.text}
+              errorText={general.retry?.error}
               onSubmit={(text) => {
-                void sendChange({ view: general.view, part: null, quote: null, text });
+                const sent = general;
+                void sendChange({ view: sent.view, part: null, quote: null, text }).then((ok) => {
+                  if (!ok) setGeneral((open) => open ?? { ...sent, retry: { text, error: SHAPE_CHANGE_NOT_SENT } });
+                });
                 setGeneral(null);
               }}
               onAskAI={(question) => {
@@ -869,6 +892,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 isStreaming={streaming}
                 onAskGeneral={finished ? undefined : (text) => void sendAsk({ view: null, part: null, quote: null, text }, { kind: 'general', label: 'The whole board' })}
                 aiProviders={provider}
+                hideProviderBar={host.sessionless}
               />
             )}
             {panel === 'thread' && renderThread && <div className="shp-thread-in">{renderThread({ flash: msgFlash })}</div>}
