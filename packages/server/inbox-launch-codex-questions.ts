@@ -12,8 +12,8 @@
  * request so a request Codex sends again (after a dropped connection or an
  * Inbox restart, on `thread/resume`) is the same card. The `perm:` identity
  * keeps what a permission prompt has (the answer is never a second turn, the
- * person's own words still go to Codex, it is never asked again, a tailnet
- * guest never answers it) while the window draws a plain question card.
+ * person's own words still go to Codex, it is never asked again) while the
+ * window draws a plain question card.
  *
  * The answer goes back as the request's result once every question of the
  * card is sent (or skipped), in the shape Codex's own TUI sends:
