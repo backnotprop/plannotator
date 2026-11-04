@@ -3356,7 +3356,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
     const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
     // `plannotator review draw` / `drawings` (inbox-review-drawings.ts): a POST, or a read that carries the token. The window reads below.
-    const drawingsClient = INBOX_REVIEW_DRAWINGS_PATH.test(path) && (req.method !== "GET" || req.headers.has("authorization"));
+    // Code review off: not a route at all, as before Show me.
+    const drawingsClient = INBOX_REVIEW_DRAWINGS_PATH.test(path) && (req.method !== "GET" || req.headers.has("authorization")) && codeReviewOn();
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient || drawingsClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.

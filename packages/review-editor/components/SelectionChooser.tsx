@@ -18,7 +18,7 @@ export interface DiffSelection {
 export interface DiffSelectionActions {
   /** Ask about the lines in words. Absent: no Ask. */
   onAsk?: (selection: DiffSelection) => void;
-  /** Ask for a picture of the lines. Absent: no Show me. */
+  /** Ask for a picture of the lines (offered on the new side only: added or unchanged lines). Absent: no Show me. */
   onShowMe?: (selection: DiffSelection) => void;
   /** The Show me button's mark (the host's own icon). */
   showMeIcon?: React.ReactNode;

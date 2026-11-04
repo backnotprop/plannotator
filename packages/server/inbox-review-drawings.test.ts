@@ -11,8 +11,11 @@
  *  - Code review on without Ask (it brings Ask, the env var or not);
  *  - a Show me about a review of another thread, a file the review lacks, or
  *    with words other than the request the agent will read;
- *  - a drawing for a turn that is not a Show me, or one that breaks Shape's
- *    rules or names code outside the review, being stored;
+ *  - a drawing for a turn that is not a Show me, a second one for a turn, one
+ *    for a stopped turn or from another session, or one that breaks Shape's
+ *    rules or names code outside the review (however the attribute is
+ *    written), being stored;
+ *  - a Show me again's retry from the Ask window being refused;
  *  - a drawing read by anything but the owner's window or the token.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -23,6 +26,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { updateInboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -225,6 +229,69 @@ describe("Show me while Code review is on", () => {
     expect((await fetch(`${w.base}${path}`, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
   });
 
+  test("one drawing per Show me, never for a stopped one, and only from the turn's own session", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const review = await w.sendReview();
+    const title = review.guide.title;
+    const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
+    const path = w.drawingsPath(review.message_id);
+    expect((await w.showMe(review.thread_id, "turn-0001", target, title)).status).toBe(200);
+
+    // A CLI in another known session: not its Show me. Its own session (or none known): taken.
+    const elsewhere = await w.cli(path, { turn: "turn-0001", drawing: GOOD_DRAWING, session: "ses_someone_else" });
+    expect(elsewhere.status).toBe(409);
+    expect(await json(elsewhere)).toEqual({ error: "turn-0001 is not a Show me in this review's thread.", code: "turn_unknown" });
+    expect((await w.cli(path, { turn: "turn-0001", drawing: GOOD_DRAWING, session: SESSION })).status).toBe(200);
+
+    // A second drawing for the same turn is refused; the first stays the turn's.
+    const again = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, title: "Another" } });
+    expect(again.status).toBe(409);
+    expect(await json(again)).toEqual({ error: "turn-0001 already has its drawing; a Show me takes one.", code: "drawing_exists" });
+    const read = await json(await w.fromWindow(path));
+    expect(read.drawings.map((d: { title: string }) => d.title)).toEqual(["The refresh guard"]);
+
+    // A stopped Show me takes no drawing.
+    expect((await w.showMe(review.thread_id, "turn-0002", { ...target, lines: [1, 1], words: "and this" }, title)).status).toBe(200);
+    // As the Stop button leaves it (Stop needs a live answer, which this test's agent never starts).
+    updateInboxAskTurn(inboxDir(w.dataDir), review.thread_id, "turn-0002", { stopped: true });
+    const stopped = await w.cli(path, { turn: "turn-0002", drawing: GOOD_DRAWING });
+    expect(stopped.status).toBe(409);
+    expect(await json(stopped)).toEqual({ error: "The reviewer stopped turn-0002; it takes no drawing.", code: "turn_stopped" });
+  });
+
+  test("a part's code is read as the browser reads it: unquoted, after `/` or a closing quote; an unreadable one is refused", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const review = await w.sendReview();
+    const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
+    expect((await w.showMe(review.thread_id, "turn-0001", target, review.guide.title)).status).toBe(200);
+    const path = w.drawingsPath(review.message_id);
+    for (const source of ["<div data-code=src/zzz.ts#L1>x</div>", '<div class="a"data-code="src/zzz.ts#L1">x</div>', '<div/data-code="src/zzz.ts#L1">x</div>']) {
+      const refused = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source } });
+      expect(refused.status).toBe(422);
+      expect((await json(refused)).problems).toContain('data-code="src/zzz.ts#L1": src/zzz.ts is not a file in this review');
+    }
+    const unreadable = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source: "<div data-code=src/auth.ts>x</div>" } });
+    expect(unreadable.status).toBe(422);
+    expect((await json(unreadable)).problems).toContain('source: data-code="src/auth.ts" is not a file and line in the project (write path#L42)');
+  });
+
+  test("a Show me again asked again (the Ask window's retry) is the same turn, not a refusal", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const review = await w.sendReview();
+    const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
+    const first = await w.showMe(review.thread_id, "turn-0001", target, review.guide.title, { again_of_round: 1 });
+    expect(first.status).toBe(200);
+    const turn = (await json(first)).turn;
+    expect(turn).toMatchObject({ kind: "show_me", again_of_round: 1 });
+    // What AskChat's retry sends: the kept turn's question, target and round.
+    const retry = await w.fromWindow(w.askPath(review.thread_id), { turn_id: turn.id, question: turn.question, kind: "show_me", show_me: turn.show_me, again_of_round: turn.again_of_round });
+    expect(retry.status).toBe(200);
+    expect((await json(retry)).turn.id).toBe("turn-0001");
+  });
+
   test("the overview's drawing rides a review, version 3, and get_guide_brief describes it", async () => {
     const w = await world();
     await w.setCodeReview(true);
@@ -248,7 +315,7 @@ describe("Show me while Code review is on", () => {
 });
 
 describe("off, the default", () => {
-  test("no Show me, no drawings, no Ask, and no drawn overview: refused before anything is read or kept", async () => {
+  test("no Show me, no drawings, no Ask, and no drawn overview: as before Show me, nothing read or kept", async () => {
     const w = await world();
     await w.setCodeReview(true);
     const review = await w.sendReview();
@@ -263,8 +330,9 @@ describe("off, the default", () => {
 
     const path = w.drawingsPath(review.message_id);
     for (const response of [await w.cli(path, { turn: "turn-0001", drawing: GOOD_DRAWING }), await w.cli(path), await w.fromWindow(path)]) {
-      expect(response.status).toBe(409);
-      expect((await json(response)).code).toBe("code_review_off");
+      // The unknown route, as before Show me.
+      expect(response.status).toBe(404);
+      expect((await json(response)).code).toBe("not_found");
     }
 
     // The brief says nothing of the overview; an authored overview is left out as always; a v3 snapshot is refused.
@@ -279,6 +347,6 @@ describe("off, the default", () => {
     const v3 = { ...read.snapshot, version: 3, guide: { ...read.snapshot.guide, overview: { text: "x", diagram } } };
     const refused = await w.call("submit_guide", { project_path: w.project, snapshot: v3, idempotency_key: "off-v3" });
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toContain("code_review_off");
+    expect(refused.content[0]!.text).toContain("Invalid guide snapshot ($.version): Unsupported snapshot version: 3");
   });
 });

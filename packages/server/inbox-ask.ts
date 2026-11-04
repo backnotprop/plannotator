@@ -214,7 +214,7 @@ export function createInboxAsk(options: {
     const input = checkInboxAskInput(body);
     // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
     const showMe = checkInboxShowMeInput(body);
-    let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget } | null = null;
+    let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_of_round?: number } | null = null;
     if (showMe) {
       if (!(options.codeReviewOn?.() ?? false)) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
       const review = options.reviewOf?.(showMe.target.review) ?? null;
@@ -227,7 +227,7 @@ export function createInboxAsk(options: {
       const target: InboxShowMeTarget = { ...showMe.target, round: inboxReviewRound(thread.messages, showMe.target.review) };
       const expected = inboxShowMeRequest({ target, title: review.title, turnId: input.id, ...(showMe.againOfRound !== undefined ? { againOfRound: showMe.againOfRound } : {}) });
       if (input.question !== expected) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
-      showMeFields = { kind: "show_me", show_me: target };
+      showMeFields = { kind: "show_me", show_me: target, ...(showMe.againOfRound !== undefined ? { again_of_round: showMe.againOfRound } : {}) };
     }
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
     const known = findInboxAskTurn(store.dir, threadId, input.id);

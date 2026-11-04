@@ -3,15 +3,17 @@
  * "shape-in-code-review", ac2). Bun only, as the Inbox is; the Pi server has
  * none of this.
  *
- *   POST /api/inbox/reviews/:msg/drawings   `{ turn, drawing }`: the agent's drawing for a Show me
- *                                           (`plannotator review draw`). The connection routes' gate:
+ *   POST /api/inbox/reviews/:msg/drawings   `{ turn, drawing, session? }`: the agent's drawing for a
+ *                                           Show me (`plannotator review draw`): one per turn, never
+ *                                           for a stopped turn, and from the turn's own session
+ *                                           when the CLI knows its session. The connection routes' gate:
  *                                           this machine, no browser Origin, the Inbox's token.
  *   GET  /api/inbox/reviews/:msg/drawings   `{ serverSession, title, round, overview, drawings }`:
  *                                           the owner's own window (`Sec-Fetch-Site: same-origin`,
  *                                           never a tailnet guest), or the token (`plannotator review drawings`).
  *
- * Both answer `409 code_review_off` while Code review is off, before anything
- * is read. A drawing is checked by Shape's own rules (core's
+ * While Code review is off neither exists: the unknown route answers, as in
+ * the release before Show me. A drawing is checked by Shape's own rules (core's
  * `checkInboxDrawing`), so the agent hears at once which field is wrong, and
  * every part's code must be a file of the review's diff. Stored beside the
  * review (packages/shared/inbox/review-drawings.ts); the Ask turn it answers
@@ -49,7 +51,6 @@ export function createInboxReviewDrawings(options: {
   onAskChange: (threadId: string) => void;
 }) {
   const { store, json } = options;
-  const off = () => json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
 
   /** The review a path names, or the refusal. */
   const reviewOf = (messageId: string): { snapshot: GuideSnapshot; threadId: string; title: string; round: number } | Response => {
@@ -88,9 +89,14 @@ export function createInboxReviewDrawings(options: {
       found = null;
     }
     const turn = found?.turn;
-    if (!turn || turn.kind !== "show_me" || turn.show_me?.review !== messageId) {
+    // The turn's own agent draws it: a CLI in another known session hears the turn is not its to answer.
+    const session = typeof body.session === "string" && body.session ? body.session : null;
+    if (!turn || turn.kind !== "show_me" || turn.show_me?.review !== messageId || (session && turn.session && session !== turn.session)) {
       return json({ error: inboxReviewDrawRefusal.turn_unknown(turnId || "(no --turn)"), code: "turn_unknown" }, 409);
     }
+    if (turn.stopped) return json({ error: inboxReviewDrawRefusal.turn_stopped(turn.id), code: "turn_stopped" }, 409);
+    // One drawing per Show me: another picture is another Show me (Show me again).
+    if (turn.drawing) return json({ error: inboxReviewDrawRefusal.drawing_exists(turn.id), code: "drawing_exists" }, 409);
     const files = parseDiffToFiles(review.snapshot.review.rawPatch).map((file) => file.path);
     const checked = checkInboxDrawing(body.drawing, files);
     if (!checked.ok) return json({ error: inboxReviewDrawRefusal.invalid(checked.problems), code: "invalid", problems: checked.problems }, 422);
@@ -126,8 +132,7 @@ export function createInboxReviewDrawings(options: {
     /** The CLI's door: the gate in inbox.ts already checked this machine, no Origin and the token. */
     cliRoute(req: Request, path: string): Promise<Response> | Response | null {
       const match = INBOX_REVIEW_DRAWINGS_PATH.exec(path);
-      if (!match) return null;
-      if (!options.codeReviewOn()) return off();
+      if (!match || !options.codeReviewOn()) return null;
       if (req.method === "POST") return guard(() => write(req, match[1]!));
       if (req.method === "GET") return guard(() => read(match[1]!));
       return json({ error: "Use GET or POST." }, 405);
@@ -135,12 +140,11 @@ export function createInboxReviewDrawings(options: {
     /** The owner's window: reads only. */
     windowRoute(req: Request, path: string, via: "local" | "tailnet"): Promise<Response> | Response | null {
       const match = INBOX_REVIEW_DRAWINGS_PATH.exec(path);
-      if (!match) return null;
+      if (!match || !options.codeReviewOn()) return null;
       if (options.isGuest(req, via)) return json({ error: "Only this computer's owner can read a review's drawings.", code: "owner_only" }, 403);
       if (req.headers.get("sec-fetch-site")?.trim().toLowerCase() !== "same-origin") {
         return json({ error: "A review's drawings answer only the Inbox window, or `plannotator review drawings`.", code: "window_only" }, 403);
       }
-      if (!options.codeReviewOn()) return off();
       if (req.method !== "GET") return json({ error: "Use GET. The agent sends a drawing with `plannotator review draw`." }, 405);
       return guard(() => read(match[1]!));
     },

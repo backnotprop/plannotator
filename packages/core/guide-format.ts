@@ -591,8 +591,17 @@ function parseTheme(input: unknown): Parsed<GuideSnapshotTheme | undefined> {
   return { ok: true, value: palette.value === undefined ? {} : { palette: palette.value } };
 }
 
-/** Parse an unknown value into a snapshot (version 1 or 2). Never throws. */
-export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
+/**
+ * What a parse accepts. `versions`: the snapshot versions read (default every
+ * one this parser knows); a reader that must answer as an older release did
+ * (the Inbox with Code review off: 1 and 2) names its own.
+ */
+export interface GuideSnapshotParseOptions {
+  readonly versions?: readonly GuideSnapshotVersion[];
+}
+
+/** Parse an unknown value into a snapshot (version 1, 2 or 3). Never throws. */
+export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   const object = asRecord(input, "$");
   if (isFail(object)) return object;
   const s = strict(
@@ -603,7 +612,7 @@ export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
   if (isFail(s)) return s;
   if (s.value.kind !== GUIDE_SNAPSHOT_KIND) return fail("$.kind", `Expected ${GUIDE_SNAPSHOT_KIND}`);
   const version = s.value.version;
-  if (!GUIDE_SNAPSHOT_VERSIONS.includes(version as GuideSnapshotVersion)) {
+  if (!(options.versions ?? GUIDE_SNAPSHOT_VERSIONS).includes(version as GuideSnapshotVersion)) {
     return fail("$.version", `Unsupported snapshot version: ${String(version)}`);
   }
   const exportedAt = str(s.value.exportedAt, "$.exportedAt", { nonEmpty: true });
@@ -634,15 +643,15 @@ export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
   };
 }
 
-/** Parse serialized JSON into a snapshot (version 1 or 2). Never throws. */
-export function parseGuideSnapshotJson(text: string): GuideSnapshotParseResult {
+/** Parse serialized JSON into a snapshot (version 1, 2 or 3). Never throws. */
+export function parseGuideSnapshotJson(text: string, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   let input: unknown;
   try {
     input = JSON.parse(text);
   } catch {
     return fail("$", "Snapshot is not valid JSON");
   }
-  return parseGuideSnapshot(input);
+  return parseGuideSnapshot(input, options);
 }
 
 // ---------------------------------------------------------------------------

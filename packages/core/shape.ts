@@ -490,9 +490,23 @@ export function shapeHtmlProblems(html: string): string[] {
       } else if (!shapePaintAllowed(value)) add(`<${tag} ${name}="${shown}">: only url(#id) is allowed here`);
     }
   }
-  for (const m of html.matchAll(/\sdata-code\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-    const value = m[1] ?? m[2] ?? '';
+  for (const value of shapeHtmlDataCodes(html)) {
     if (!parseShapeCodeTarget(value)) add(`data-code="${value.slice(0, 80)}" is not a file and line in the project (write path#L42)`);
+  }
+  return out;
+}
+
+/**
+ * Every `data-code` value in drawn HTML, as a browser reads the attribute:
+ * by the tag and attribute tokenizer above (quoted or not, after `/` or
+ * straight after another attribute), named references decoded. In order.
+ */
+export function shapeHtmlDataCodes(html: string): string[] {
+  const out: string[] = [];
+  for (const t of html.matchAll(TAG_RE)) {
+    for (const a of (t[2] ?? '').matchAll(ATTR_RE)) {
+      if (a[1]!.toLowerCase() === 'data-code') out.push(decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
+    }
   }
   return out;
 }

@@ -1543,6 +1543,8 @@ export interface InboxAskTurnWire {
   /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
   kind?: 'show_me';
   show_me?: InboxShowMeTarget;
+  /** Show me again: the round of the picture it asked to redraw. */
+  again_of_round?: number;
   /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
   drawing?: string;
 }

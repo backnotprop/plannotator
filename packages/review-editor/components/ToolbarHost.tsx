@@ -174,7 +174,8 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
       <SelectionChooser
         toolbarRef={toolbar.toolbarRef}
         position={toolbar.toolbarState.position}
-        actions={selectionActions}
+        // A picture is of the code as it is now: Show me only on the new side (added or unchanged lines).
+        actions={toolbar.toolbarState.range.side === 'deletions' ? { ...selectionActions, onShowMe: undefined } : selectionActions}
         onComment={toolbar.chooseComment}
         onAsk={() => takeSelection(selectionActions.onAsk)}
         onShowMe={() => takeSelection(selectionActions.onShowMe)}

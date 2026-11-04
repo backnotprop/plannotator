@@ -66,6 +66,8 @@ export interface InboxAskTurn {
    */
   kind?: "show_me";
   show_me?: InboxShowMeTarget;
+  /** Show me again: the round of the picture it asks to redraw (its request says so). A retry sends it again. */
+  again_of_round?: number;
   /** The drawing the agent sent for this Show me (`plannotator review draw`): its id in the review's drawings. */
   drawing?: string;
 }

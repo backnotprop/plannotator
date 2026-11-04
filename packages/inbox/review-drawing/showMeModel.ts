@@ -12,6 +12,15 @@ export function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
+/** Whether a Show me asked on `asked` is about `place`: the whole review both, or the same file with lines that overlap. */
+export function showMeAbout(
+  asked: { file: string | null; lines: readonly [number, number] | null },
+  place: { file: string | null; lines: readonly [number, number] | null },
+): boolean {
+  if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
+  return asked.file === place.file && !!asked.lines && asked.lines[0] <= place.lines[1] && place.lines[0] <= asked.lines[1];
+}
+
 /** "retry-worker.ts lines 16–18", or "the whole review" for the Overview's. */
 export function showMePlace(file: string | null, lines: readonly [number, number] | null): string {
   if (!file) return 'the whole review';
@@ -124,6 +133,21 @@ export function anchorPart(target: ShapeCodeTarget, before: ReadonlyMap<number, 
   const moved = [...(after?.keys() ?? [])].sort((a, b) => Math.abs(a - start) - Math.abs(b - start)).find(matchesAt);
   if (moved !== undefined) return { now: { ...target, line: moved, ...(target.lineEnd !== undefined ? { lineEnd: moved + (end - start) } : {}) }, changed: false };
   return { now: target, changed: true };
+}
+
+/**
+ * Lines an earlier round asked about, where they are in this round: the same
+ * text found at the same place or the nearest one (`anchorPart`). Null when
+ * the earlier diff did not show them all, or they changed since.
+ */
+export function anchorLines(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  for (let n = lines[0]; n <= lines[1]; n++) if (before?.get(n) === undefined) return null;
+  const anchor = anchorPart({ path: '', line: lines[0], ...(lines[1] > lines[0] ? { lineEnd: lines[1] } : {}) }, before, after);
+  return anchor.changed ? null : targetLines(anchor.now);
 }
 
 /**

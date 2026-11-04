@@ -18,7 +18,7 @@
  * Browser-safe, no dependencies outside core: the server and the window both read it.
  */
 
-import { checkShapeDrawnView, parseShapeCodeTarget, SHAPE_LIMITS, type ShapeDrawnView } from './shape';
+import { checkShapeDrawnView, parseShapeCodeTarget, shapeHtmlDataCodes, SHAPE_LIMITS, type ShapeDrawnView } from './shape';
 
 /** One built-in review skill: its name in the "/" list, the list's description, and the instructions it sends. */
 export interface InboxReviewSkill {
@@ -40,10 +40,10 @@ export interface InboxReviewSkill {
 const NO_CODE = 'If you changed no code for this thread, say so in one sentence instead.';
 const OLD_SESSION = 'If submit_guide takes no `review` field in this session, send it without one.';
 
-/** /review-curate's line for the overview's drawing (Show me, AGENT-TEXT §5, DRAFT), at the end of its instructions. */
+/** /review-curate's line for the overview's drawing (Show me, AGENT-TEXT §5, approved), at the end of its instructions. */
 export const INBOX_REVIEW_CURATE_DRAWING_LINE = 'If the change is a flow across 3 or more steps that is easier to see than to read, give the overview one drawing (`overview.diagram`). The guide brief has the format.';
 
-/** /review-recheck's line for the overview's drawing (AGENT-TEXT §5, DRAFT), after "Give one chapter to each comment you acted on…". */
+/** /review-recheck's line for the overview's drawing (AGENT-TEXT §5, approved), after "Give one chapter to each comment you acted on…". */
 export const INBOX_REVIEW_RECHECK_DRAWING_LINE = "If the earlier review's overview had a drawing and you changed lines it opens, send it again, redrawn, as this review's `overview.diagram`, with the same data-mark ids. `plannotator review drawings <the earlier review's message id>` prints it.";
 
 /**
@@ -188,10 +188,11 @@ export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: stri
 
 // ───────────────────────────── Show me (approval "shape-in-code-review", ac2) ─────────────────────────────
 //
-// DRAFT, every word: the owner approves them word for word after the
-// clean-room test (`.product/approved/shape-in-code-review/mock/ac2/AGENT-TEXT.md`).
+// Every word as the owner approved it (q-b81e04bd), from
+// `.product/approved/shape-in-code-review/mock/ac2/AGENT-TEXT.md`.
 // None of it reaches an agent while Code review is off: the window offers no
-// Show me, the routes answer `code_review_off`, the CLI prints only that line.
+// Show me, the drawings routes are the unknown route, and `plannotator review
+// draw|drawings` is the review parse's, as before Show me.
 
 /** What a Show me points at: a review, its file and lines (null: the Overview, the whole review), the round asked in, the person's words. */
 export interface InboxShowMeTarget {
@@ -284,12 +285,16 @@ export interface InboxReviewDrawing {
   at: string;
 }
 
-/** Every `data-code` value in a drawing's HTML (the wide and the tall one), in order, once each. */
+/**
+ * Every `data-code` value in a drawing's HTML (the wide and the tall one), in
+ * order, once each: read by Shape's own tag and attribute tokenizer, so a
+ * value unquoted, or after `/` or another attribute's closing quote, is read.
+ */
 export function inboxDrawingCodes(view: { html: string; tall?: { html: string } }): string[] {
   const out: string[] = [];
   for (const html of [view.html, view.tall?.html ?? '']) {
-    for (const m of html.matchAll(/\sdata-code\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-      const value = (m[1] ?? m[2] ?? '').trim();
+    for (const raw of shapeHtmlDataCodes(html)) {
+      const value = raw.trim();
       if (value && !out.includes(value)) out.push(value);
     }
   }
@@ -354,6 +359,7 @@ export function checkInboxDrawing(
   };
   for (const value of inboxDrawingCodes(sources)) {
     const at = parseShapeCodeTarget(value);
+    // Shape's own check names a code it cannot read (shapeHtmlProblems); one it can must be a file of the review.
     if (at && !files.includes(at.path)) problems.push(`data-code="${value.slice(0, 80)}": ${at.path} is not a file in this review`);
   }
   if (problems.length || !view) return { ok: false, problems: problems.length ? problems : ['source: is required'] };
@@ -362,8 +368,6 @@ export function checkInboxDrawing(
 
 /** `plannotator review draw --help` (AGENT-TEXT §2), while Code review is on. */
 export const INBOX_REVIEW_DRAW_HELP = [
-  'DRAFT: this text is not approved yet.',
-  '',
   'Usage:',
   '  plannotator review draw --file <drawing.json> --review <msg_id> --turn <turn_id>',
   '  plannotator review drawings <msg_id>',
@@ -413,6 +417,8 @@ export const inboxReviewDrawRefusal = {
   not_found: (review: string) => `No review ${review} here.`,
   not_a_review: (review: string) => `${review} is not a review you sent.`,
   turn_unknown: (turn: string) => `${turn} is not a Show me in this review's thread.`,
+  turn_stopped: (turn: string) => `The reviewer stopped ${turn}; it takes no drawing.`,
+  drawing_exists: (turn: string) => `${turn} already has its drawing; a Show me takes one.`,
   invalid: (problems: readonly string[]) => ['the drawing has problems:', ...problems.map((p) => `  - ${p}`)].join('\n'),
 } as const;
 

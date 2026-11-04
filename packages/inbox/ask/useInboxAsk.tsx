@@ -150,14 +150,20 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
       </Tip>
     ) : null;
 
-  const askWith = (words: string) => {
-    if (!askFor) return;
-    openChats.current.add(askFor);
-    store.setMinimized(false);
-    seedCount += 1;
-    setSeed({ threadId: askFor, words, token: seedCount });
-    askForFocus(askFor);
-  };
+  // One function for the window's life (a review's selection actions hold it): the thread on screen through its ref.
+  const askWith = useCallback(
+    (words: string) => {
+      const thread = onScreen.current;
+      if (!thread) return;
+      openChats.current.add(thread);
+      store.setMinimized(false);
+      seedCount += 1;
+      setSeed({ threadId: thread, words, token: seedCount });
+      wantsFocus.current = thread;
+      setFocusRequest((count) => count + 1);
+    },
+    [store],
+  );
 
   return {
     askWith,

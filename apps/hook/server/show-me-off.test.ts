@@ -3,7 +3,10 @@
  * agent on the Code review switch. With Code review off, what an agent can
  * read is byte-equal to the release before Show me (0.28.49): the Inbox's
  * MCP tool list, the guide brief, `plannotator inbox --help`, the top-level
- * help (Board off and on) and `plannotator review --help`.
+ * help (Board off and on) and `plannotator review --help`; `plannotator review
+ * draw …` and `review drawings …` are the review parse's (`review <DIRECTORY>`),
+ * the drawings routes are the unknown route, and a version-3 guide snapshot is
+ * refused with the release's own "Unsupported snapshot version" words.
  *
  * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
@@ -21,6 +24,9 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
 import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
+import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-show-me-off-")));
 const home = join(root, "home");
@@ -74,4 +80,48 @@ test("Code review off: every agent text is byte-equal to the release before Show
     server.stop();
     process.env.PLANNOTATOR_DATA_DIR = saved;
   }
+});
+
+test("Code review off: `review draw` and `review drawings` are the review parse's, every form", () => {
+  const review = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F";
+  for (const argv of [
+    ["review", "draw", "--help"],
+    ["review", "draw", "--file", "d.json", "--review", review, "--turn", "turn-0001"],
+    ["review", "drawings", review],
+    ["review", "drawings", "--help"],
+    ["review", "drawings"],
+  ]) {
+    expect(isReviewDrawCommand(argv, false)).toBe(false);
+  }
+});
+
+test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
+  const dataDir = join(root, "data-routes");
+  mkdirSync(dataDir, { recursive: true });
+  const server = await startInboxServer({ dataDir, codeReview: false, phones: false });
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const path = "/api/inbox/reviews/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings";
+    for (const headers of [{ "sec-fetch-site": "same-origin" }, { authorization: "Bearer x" }]) {
+      const unknown = await fetch(`${base}/api/inbox/reviewz/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings`, { headers });
+      const read = await fetch(`${base}${path}`, { headers });
+      expect([read.status, await read.text()]).toEqual([unknown.status, await unknown.text()]);
+      expect(read.status).toBe(404);
+    }
+  } finally {
+    server.stop();
+  }
+  // 0.28.49's parser knew versions 1 and 2: any other was "Unsupported snapshot version: <n>", at $.version.
+  const snapshot = { kind: "plannotator-guided-review", version: 3, exportedAt: "2026-01-01T00:00:00Z", guide: {}, review: {}, source: {} };
+  expect(checkInboxGuide({ snapshot }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
+  expect(checkInboxGuide({ snapshot: JSON.stringify(snapshot) }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
+});
+
+test("an html overview diagram in a version-2 snapshot: Shape's check while Code review is on, untouched while off", () => {
+  const outside = '<div data-mark="a" data-code="src/not-in-the-patch.ts#L1">a</div>';
+  const snapshot = { ...FIXTURE_V2_HTML, guide: { ...FIXTURE_V2_HTML.guide, overview: { text: "x", diagram: { kind: "html" as const, source: outside } } } };
+  expect(checkInboxGuide({ snapshot }, root, { codeReview: false }).ok).toBe(true);
+  const on = checkInboxGuide({ snapshot }, root, { codeReview: true });
+  expect(on.ok).toBe(false);
+  if (!on.ok) expect(on.error).toContain('data-code="src/not-in-the-patch.ts#L1": src/not-in-the-patch.ts is not a file in this review');
 });

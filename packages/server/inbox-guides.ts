@@ -30,6 +30,7 @@ import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-
 import {
   GUIDE_SNAPSHOT_DRAWN_VERSION,
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
+  GUIDE_SNAPSHOT_VERSION,
   guideDiagramIsDrawn,
   parseGuideSnapshot,
   parseGuideSnapshotJson,
@@ -85,7 +86,10 @@ export const GET_GUIDE_BRIEF_DESCRIPTION =
 export const SUBMIT_GUIDE_DESCRIPTION =
   "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to, supersedes, done and idempotency_key work as in send_message, and the person's answer comes back the same way.\n\nExample: get_guide_brief's `example` is a call that works as it is.";
 
-export type InboxGuideCheck = { ok: true; snapshot: GuideSnapshot } | { ok: false; error: string; code?: "code_review_off" };
+export type InboxGuideCheck = { ok: true; snapshot: GuideSnapshot } | { ok: false; error: string };
+
+/** The snapshot versions read while Code review is off: the release before Show me's. */
+const OFF_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION] as const;
 
 /**
  * A guide as an agent sent it, checked by Plannotator's own code. `cwd` is the
@@ -98,14 +102,14 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     return { ok: false, error: "Send either `snapshot`, or `guide` with `patch`." };
   }
   if (hasSnapshot) {
-    const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot) : parseGuideSnapshot(input.snapshot);
+    // A drawn overview picture (format version 3) is code review's: off, the parse reads versions 1 and 2 only,
+    // and a version 3 is refused in the release-before-Show-me's own words ("Unsupported snapshot version: 3").
+    const parseOptions = options.codeReview ? {} : { versions: OFF_SNAPSHOT_VERSIONS };
+    const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot, parseOptions) : parseGuideSnapshot(input.snapshot, parseOptions);
     if (!parsed.ok) return { ok: false, error: `Invalid guide snapshot (${parsed.error.path}): ${parsed.error.message}` };
     const snapshot = parsed.value;
-    // A drawn overview picture (format version 3) is code review's: only while the person has it on.
-    if (snapshot.version === GUIDE_SNAPSHOT_DRAWN_VERSION && !options.codeReview) {
-      return { ok: false, code: "code_review_off", error: "Code review is off in this Inbox (Settings → Capabilities): send the overview's diagram as { kind, source } only." };
-    }
-    const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
+    // On, every html overview diagram (version 2 or 3) is the picture the review pane draws: Shape's rules, the patch's files.
+    const drawnProblem = options.codeReview ? overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch) : null;
     if (drawnProblem) return { ok: false, error: drawnProblem };
     // The strict placement checks, on the snapshot's own guide and patch. The
     // snapshot format lets a file reference omit its summary (a shipped
@@ -139,9 +143,9 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
   return withAuthoredOverview(built.snapshot, overview);
 }
 
-/** What is wrong with an overview's drawn (html) diagram, by Shape's rules and the patch's files, or null. */
+/** What is wrong with an overview's html diagram (the review pane draws it), by Shape's rules and the patch's files, or null. */
 function overviewDiagramProblem(diagram: GuideOverviewDiagram | undefined, rawPatch: string): string | null {
-  if (!diagram || diagram.kind !== "html" || !guideDiagramIsDrawn(diagram)) return null;
+  if (!diagram || diagram.kind !== "html") return null;
   const files = parseDiffToFiles(rawPatch).map((file) => file.path);
   const checked = checkInboxDrawing(diagram, files, { withTitle: false });
   return checked.ok ? null : `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}`;
@@ -376,7 +380,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         methodology: GUIDE_REVIEW_PROMPT,
         output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, DRAFT): the overview and its one drawing. Off: as before, byte for byte.
+        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
         rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : GUIDE_RULES,
         example: GUIDE_BRIEF_EXAMPLE,
       }),
@@ -410,7 +414,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
       guarded(async () => {
         const project = await sendProject(context, input);
         const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false });
-        if (!checked.ok) throw new InboxError(checked.code ?? "invalid_guide", checked.error);
+        if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
         const review = (input as { review?: boolean }).review === true;

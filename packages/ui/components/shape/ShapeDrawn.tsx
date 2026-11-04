@@ -34,6 +34,8 @@ export interface MarkState {
 
 /** A tagged part's top padding at least: the tag (2 px down, about 19 px tall) and a gap above the part's words. */
 const TAG_ROOM = 28;
+/** A tagged part's own inline padding-top, to put back when its tag goes. */
+const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
@@ -98,12 +100,12 @@ img { max-width: 100%; }
 .board.reduce .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
 .board.reduce .mk.fresh { animation: none; background-size: 100% 100%; }
 
-/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.stale: its code moved on).
+/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.shp-stale: its code moved on).
    The ring and the tag stay inside the part's own box, so they never cover a connector's label or a neighbour; the
    tag gets room at the top of the part (the host's effect pads it), and an untagged part keeps its layout. */
-.mk.stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: -5px; }
+.mk.shp-stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: -5px; }
 .mk[data-shp-tag]::after { content: attr(data-shp-tag); position: absolute; top: 2px; right: 8px; z-index: 1; font: 600 10.5px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .04em; text-transform: uppercase; padding: 4px 6px; border-radius: 6px; background: var(--mark); color: var(--primary-foreground); white-space: nowrap; pointer-events: none; }
-.mk.stale[data-shp-tag]::after { background: color-mix(in oklab, var(--warning, var(--mark)) 22%, var(--paper)); color: color-mix(in oklab, var(--warning, var(--mark)) 60%, var(--ink)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning, var(--mark)) 50%, transparent); }
+.mk.shp-stale[data-shp-tag]::after { background: color-mix(in oklab, var(--warning, var(--mark)) 22%, var(--paper)); color: color-mix(in oklab, var(--warning, var(--mark)) 60%, var(--ink)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning, var(--mark)) 50%, transparent); }
 
 /* A part that opens code. */
 .shp-cl { cursor: pointer; outline: 1.5px dashed transparent; outline-offset: 3px; transition: outline-color .15s; }
@@ -338,23 +340,25 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       el.classList.toggle('erasing', marks.erasing.has(id));
       el.classList.toggle('fresh', marks.fresh.has(id));
       const isStale = !!stale?.has(id);
-      el.classList.toggle('stale', isStale);
+      el.classList.toggle('shp-stale', isStale);
       const tag = isStale ? staleTag : marks.fresh.has(id) ? freshTag : undefined;
       if (tag) {
         el.setAttribute('data-shp-tag', tag);
         // The tag sits in the part's corner: a part the drawing left in the flow becomes its containing block.
         if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-        // Room for it above the part's own words, kept to put back when the tag goes.
-        if (!el.hasAttribute('data-shp-pad')) {
-          el.setAttribute('data-shp-pad', el.style.paddingTop);
+        // Room for it above the part's own words; the part's own padding kept here (never in the DOM, where
+        // the drawing could have written it) to put back when the tag goes.
+        if (!tagPads.has(el)) {
+          tagPads.set(el, el.style.paddingTop);
           const top = parseFloat(getComputedStyle(el).paddingTop) || 0;
           if (top < TAG_ROOM) el.style.paddingTop = `${TAG_ROOM}px`;
         }
       } else {
         el.removeAttribute('data-shp-tag');
-        if (el.hasAttribute('data-shp-pad')) {
-          el.style.paddingTop = el.getAttribute('data-shp-pad') ?? '';
-          el.removeAttribute('data-shp-pad');
+        const pad = tagPads.get(el);
+        if (pad !== undefined) {
+          el.style.paddingTop = pad;
+          tagPads.delete(el);
         }
       }
     }

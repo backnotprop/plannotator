@@ -15,6 +15,7 @@ import { generateId } from '@plannotator/ui/utils/generateId';
 import { inboxApi, type InboxAskTurnWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { errorText } from '../toastError';
+import { showMeAbout } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -33,8 +34,16 @@ export interface ShowMeState {
   /**
    * The picture on screen: the sheet over the review, or the corner card.
    * `review`: the review it was asked on (an earlier round's, when it stays as asked).
+   * `from`: the place the person pressed Show me on that opened it (this round's lines), if any.
    */
-  shown: { drawing: InboxReviewDrawing; review: string; answer: string; as: 'sheet' | 'corner'; part: { name: string; mark: string | null; file: string; lines: [number, number] } | null } | null;
+  shown: {
+    drawing: InboxReviewDrawing;
+    review: string;
+    answer: string;
+    as: 'sheet' | 'corner';
+    part: { name: string; mark: string | null; file: string; lines: [number, number] } | null;
+    from: ShowMePlace | null;
+  } | null;
   /** The turn being drawn (between the request and the picture). */
   drawing: boolean;
   /** The request's answer when it came with no picture. */
@@ -43,7 +52,6 @@ export interface ShowMeState {
   posting: boolean;
 }
 
-const overlaps = (a: readonly [number, number], b: readonly [number, number]) => a[0] <= b[1] && b[0] <= a[1];
 
 export function useShowMe({
   threadId,
@@ -68,7 +76,7 @@ export function useShowMe({
   const [drawings, setDrawings] = useState<InboxReviewDrawing[]>([]);
   const [before, setBefore] = useState<{ review: string; drawing: InboxReviewDrawing }[]>([]);
   const [box, setBox] = useState<ShowMeState['box']>(null);
-  const [view, setView] = useState<{ drawing: string; as: 'sheet' | 'corner'; part: NonNullable<ShowMeState['shown']>['part'] } | null>(null);
+  const [view, setView] = useState<{ drawing: string; as: 'sheet' | 'corner'; part: NonNullable<ShowMeState['shown']>['part']; from: ShowMePlace | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const live = useRef<{ turn: string; index: number } | null>(null);
@@ -126,7 +134,7 @@ export function useShowMe({
   useEffect(() => {
     if (!boxTurn || !boxDrawing || opened.current.has(boxDrawing.id)) return;
     opened.current.add(boxDrawing.id);
-    setView({ drawing: boxDrawing.id, as: 'sheet', part: null });
+    setView({ drawing: boxDrawing.id, as: 'sheet', part: null, from: box?.place ?? null });
     setBox(null);
   }, [boxTurn?.id, boxDrawing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -149,33 +157,59 @@ export function useShowMe({
     ? (drawings.map((drawing) => ({ review: reviewId, drawing })).find((at) => at.drawing.id === view.drawing) ?? before.find((at) => at.drawing.id === view.drawing))
     : undefined;
   const shown: ShowMeState['shown'] =
-    view && viewed ? { drawing: viewed.drawing, review: viewed.review, answer: answerOf(turnOf(viewed.drawing.turn)), as: view.as, part: view.part } : null;
+    view && viewed ? { drawing: viewed.drawing, review: viewed.review, answer: answerOf(turnOf(viewed.drawing.turn)), as: view.as, part: view.part, from: view.from } : null;
   const boxRunning = !!box?.turn && (running === box.turn || (live.current?.turn === box.turn && streaming));
   const boxDone = !!boxTurn && (boxTurn.answer !== undefined || boxTurn.stopped === true || boxTurn.failure !== undefined);
 
   /**
-   * Show me on these lines (or the whole review). Lines an earlier round's
-   * picture was asked on open that picture as asked (round 2: it stays, with
-   * Show me again); other lines open the box.
+   * Show me on these lines (or the whole review). What was asked about them
+   * before opens again, never a second request: this review's picture (from
+   * this window or another one), else the Show me still being drawn (its
+   * box, waiting), else an earlier round's picture as asked (round 2: it
+   * stays, with Show me again). Other lines open the box.
    */
   const open = (place: ShowMePlace) => {
     setProblem(null);
-    const asked = place.file && place.lines
-      ? before.filter((at) => at.drawing.file === place.file && at.drawing.lines && overlaps(at.drawing.lines, place.lines!)).at(-1)
-      : undefined;
+    const drawn = drawings.filter((drawing) => showMeAbout(drawing, place)).at(-1);
+    if (drawn) {
+      opened.current.add(drawn.id);
+      setBox(null);
+      setView({ drawing: drawn.id, as: 'sheet', part: null, from: place });
+      return;
+    }
+    const waiting = turns
+      .filter((turn) => turn.kind === 'show_me' && turn.show_me?.review === reviewId && showMeAbout(turn.show_me, place))
+      .filter((turn) => !turn.drawing && turn.answer === undefined && !turn.stopped && turn.failure === undefined)
+      .at(-1);
+    if (waiting?.show_me) {
+      setView(null);
+      setBox({
+        place: { file: waiting.show_me.file, lines: waiting.show_me.lines },
+        words: waiting.show_me.words ?? '',
+        turn: waiting.id,
+        ...(waiting.again_of_round !== undefined ? { again: waiting.again_of_round } : {}),
+      });
+      return;
+    }
+    const asked = place.file && place.lines ? before.filter((at) => showMeAbout(at.drawing, place)).at(-1) : undefined;
     if (asked) {
       setBox(null);
-      setView({ drawing: asked.drawing.id, as: 'sheet', part: null });
+      setView({ drawing: asked.drawing.id, as: 'sheet', part: null, from: place });
       return;
     }
     setBox({ place, words: '', turn: null });
   };
 
-  /** Show me again: the box for an earlier round's picture, asking for the code as it is now. */
-  const again = (drawing: InboxReviewDrawing) => {
+  /**
+   * Show me again: the box for an earlier round's picture, asking for the code
+   * as it is now. `place`: where those lines are in this round (the host
+   * anchors them, or takes the lines the person pressed Show me on); absent,
+   * the lines the picture was asked on.
+   */
+  const again = (drawing: InboxReviewDrawing, place?: ShowMePlace) => {
     setProblem(null);
     setView(null);
-    setBox({ place: { file: drawing.file, lines: drawing.lines }, words: drawing.words ?? '', turn: null, again: drawing.round });
+    setBox({ place: place ?? { file: drawing.file, lines: drawing.lines }, words: drawing.words ?? '', turn: null, again: drawing.round });
   };
 
   const send = async () => {

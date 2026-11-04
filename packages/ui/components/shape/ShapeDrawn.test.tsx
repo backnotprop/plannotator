@@ -136,12 +136,14 @@ describe.skipIf(!hasDom)('a drawn view', () => {
   // Code review's redrawn Overview tags the parts that changed; a Show me of an earlier round tags the parts whose code moved on.
   test("a host's tags land on the fresh and the stale parts only, and leave with them", async () => {
     const { NO_MARKS, ShapeDrawn } = drawnModule!;
-    const html = '<div data-mark="a">A</div><div data-mark="b" style="padding-top: 6px">B</div><div data-mark="c">C</div>';
+    // c carries the drawing's own `stale` class and a padding note it wrote: a host's tags leave both alone.
+    const html = '<div data-mark="a">A</div><div data-mark="b" style="padding-top: 6px">B</div><div data-mark="c" class="stale" data-shp-pad="99px">C</div>';
     const tags = { fresh: 'changed', stale: 'changed since asked' };
     const { board } = await draw({ html, marks: { ...NO_MARKS, fresh: new Set(['a']) }, stale: new Set(['b']), tags });
     const tagOf = (id: string) => board.querySelector(`[data-mark="${id}"]`)!.getAttribute('data-shp-tag');
     expect([tagOf('a'), tagOf('b'), tagOf('c')]).toEqual(['changed', 'changed since asked', null]);
-    expect(board.querySelector('[data-mark="b"]')!.classList.contains('stale')).toBe(true);
+    expect(board.querySelector('[data-mark="b"]')!.classList.contains('shp-stale')).toBe(true);
+    expect(board.querySelector('[data-mark="c"]')!.classList.contains('stale')).toBe(true);
     // The tag sits inside its part, with room made above the part's words; an untagged part keeps its layout.
     const padOf = (id: string) => board.querySelector<HTMLElement>(`[data-mark="${id}"]`)!.style.paddingTop;
     expect([padOf('a'), padOf('b'), padOf('c')]).toEqual(['28px', '28px', '']);
@@ -149,7 +151,8 @@ describe.skipIf(!hasDom)('a drawn view', () => {
       root!.render(<ShapeDrawn drawn={{ html, css: '.x { color: red; }' }} reduce />);
     });
     expect([tagOf('a'), tagOf('b')]).toEqual([null, null]);
-    expect(board.querySelector('[data-mark="b"]')!.classList.contains('stale')).toBe(false);
+    expect(board.querySelector('[data-mark="b"]')!.classList.contains('shp-stale')).toBe(false);
+    expect(board.querySelector('[data-mark="c"]')!.classList.contains('stale')).toBe(true);
     expect([padOf('a'), padOf('b'), padOf('c')]).toEqual(['', '6px', '']);
   });
 

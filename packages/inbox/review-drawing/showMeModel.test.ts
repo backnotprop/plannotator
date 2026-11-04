@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
-import { anchorPart, changedMarks, chapterOf, newSideLines, showMePlace } from './showMeModel';
+import { anchorLines, anchorPart, changedMarks, chapterOf, newSideLines, showMeAbout, showMePlace } from './showMeModel';
 
 describe('Show me model', () => {
   test("a part opens the chapter that holds its file, else All files (null)", () => {
@@ -42,5 +42,19 @@ describe('Show me model', () => {
   test('the sheet names lines with an en dash, and the Overview as the whole review', () => {
     expect(showMePlace('src/retry-worker.ts', [16, 18])).toBe('retry-worker.ts lines 16–18');
     expect(showMePlace(null, null)).toBe('the whole review');
+  });
+  test("Show me again asks about the lines where they are now: moved, they follow; changed or unseen, none", () => {
+    const before = new Map([[16, 'a'], [17, 'b'], [18, 'c']]);
+    expect(anchorLines([16, 18], before, new Map([[17, 'a'], [18, 'b'], [19, 'c']]))).toEqual([17, 19]);
+    expect(anchorLines([16, 18], before, new Map([[16, 'a'], [17, 'B'], [18, 'c']]))).toBeNull();
+    expect(anchorLines([15, 16], before, new Map([[15, 'z'], [16, 'a']]))).toBeNull();
+  });
+
+  test("a Show me opens what was asked about the same place: overlapping lines of the same file, or the whole review", () => {
+    expect(showMeAbout({ file: 'w.ts', lines: [16, 18] }, { file: 'w.ts', lines: [18, 20] })).toBe(true);
+    expect(showMeAbout({ file: 'w.ts', lines: [16, 18] }, { file: 'w.ts', lines: [19, 20] })).toBe(false);
+    expect(showMeAbout({ file: 'x.ts', lines: [16, 18] }, { file: 'w.ts', lines: [16, 18] })).toBe(false);
+    expect(showMeAbout({ file: null, lines: null }, { file: null, lines: null })).toBe(true);
+    expect(showMeAbout({ file: 'w.ts', lines: [1, 2] }, { file: null, lines: null })).toBe(false);
   });
 });

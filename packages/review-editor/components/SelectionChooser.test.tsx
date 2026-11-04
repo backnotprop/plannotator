@@ -75,6 +75,14 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     expect(asked).toEqual([{ filePath: 'src/retry-worker.ts', lineStart: 15, lineEnd: 15, side: 'new' }]);
   });
 
+  test('deleted (old-side) lines offer no Show me: a picture is of the code as it is now; Ask stays', () => {
+    const shown: DiffSelection[] = [];
+    const ref = mount({ onShowMe: (s) => shown.push(s), onAsk: () => {} });
+    act(() => ref.current!.handleLineSelectionEnd({ start: 14, end: 14, side: 'deletions' }));
+    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
+    expect(shown).toEqual([]);
+  });
+
   test('Comment opens the comment box for the same lines', () => {
     mount({ onShowMe: () => {} });
     act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());

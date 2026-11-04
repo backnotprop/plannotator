@@ -1,7 +1,7 @@
 /**
  * `plannotator review draw` and `plannotator review drawings`: an agent's
  * side of Show me (code review in the Inbox, approval "shape-in-code-review",
- * ac2). Every word it prints is DRAFT (AGENT-TEXT.md), in core's inbox-review.ts.
+ * ac2). Every word it prints is AGENT-TEXT.md's, approved (q-b81e04bd), in core's inbox-review.ts.
  *
  *   plannotator review draw --file <drawing.json> --review <msg_id> --turn <turn_id>
  *   plannotator review drawings <msg_id>
@@ -28,6 +28,8 @@ import {
   inboxReviewDrawRefusal,
   type InboxReviewDrawing,
 } from "@plannotator/core/inbox-review";
+import { isInboxId } from "@plannotator/core/inbox-types";
+import { inboxHostSessionFromEnv } from "./inbox-mcp-shim";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 
 export type ParsedReviewDrawCommand =
@@ -36,12 +38,24 @@ export type ParsedReviewDrawCommand =
   | { ok: true; op: "drawings"; review: string }
   | { ok: false; error: string };
 
-/** Whether argv (after `plannotator`) is one of these commands: `review draw …` or `review drawings …`. */
-export function isReviewDrawCommand(argv: readonly string[]): boolean {
-  return argv[0] === "review" && (argv[1] === "draw" || argv[1] === "drawings");
-}
-
 const HELP = new Set(["--help", "-h", "help"]);
+
+/**
+ * Whether argv (after `plannotator`) is one of these commands, by its shape:
+ * `review draw` then --file, --review, --turn or --help; `review drawings`
+ * then one review message id, or --help. Anything else (`review drawings`
+ * alone, `review draw`, `review drawings ./dir`) is `plannotator review
+ * <DIRECTORY | PR_URL>`, as it always was. Off (Code review off), never:
+ * the review parse takes it, as in the release before Show me.
+ */
+export function isReviewDrawCommand(argv: readonly string[], codeReviewOn: boolean): boolean {
+  if (!codeReviewOn || argv[0] !== "review") return false;
+  const first = argv[2];
+  if (first === undefined) return false;
+  if (argv[1] === "draw") return first === "--help" || first === "-h" || /^--(?:file|review|turn)(?:=|$)/.test(first);
+  if (argv[1] === "drawings") return first === "--help" || first === "-h" || isInboxId("msg", first);
+  return false;
+}
 
 /** Parse the arguments after `review`: `draw --file F --review M --turn T`, or `drawings M`. */
 export function parseReviewDrawCommand(argv: readonly string[]): ParsedReviewDrawCommand {
@@ -71,6 +85,8 @@ export function parseReviewDrawCommand(argv: readonly string[]): ParsedReviewDra
 
 export interface ReviewDrawCommandDeps {
   cwd: string;
+  /** The environment: inside an agent host session, the drawing names that session (the turn's own). */
+  env?: Record<string, string | undefined>;
   /** The running Inbox (started detached when stopped). */
   ensureRunning: () => Promise<InboxRegistryEntry>;
   fetch?: typeof fetch;
@@ -91,6 +107,8 @@ function refusalLine(body: Refusal, status: number, ids: { review: string; turn?
   if (code === "not_found") return `not_found: ${inboxReviewDrawRefusal.not_found(ids.review)}`;
   if (code === "not_a_review") return `not_a_review: ${inboxReviewDrawRefusal.not_a_review(ids.review)}`;
   if (code === "turn_unknown" && ids.turn) return `turn_unknown: ${inboxReviewDrawRefusal.turn_unknown(ids.turn)}`;
+  if (code === "turn_stopped" && ids.turn) return `turn_stopped: ${inboxReviewDrawRefusal.turn_stopped(ids.turn)}`;
+  if (code === "drawing_exists" && ids.turn) return `drawing_exists: ${inboxReviewDrawRefusal.drawing_exists(ids.turn)}`;
   if (code === "invalid" && Array.isArray(body.problems)) return `invalid: ${inboxReviewDrawRefusal.invalid(body.problems)}`;
   return `${code}: ${body.error ?? `the Inbox answered ${status}.`}`;
 }
@@ -128,13 +146,14 @@ export async function runReviewDrawCommand(argv: readonly string[], deps: Review
     err(`inbox_unavailable: ${(error as Error).message}`);
     return 1;
   }
+  const session = deps.env ? (inboxHostSessionFromEnv(deps.env)?.session ?? null) : null;
   const url = `http://127.0.0.1:${entry.port}/api/inbox/reviews/${encodeURIComponent(parsed.review)}/drawings`;
   const headers: Record<string, string> = { Authorization: `Bearer ${entry.token}` };
   let res: Response;
   try {
     res =
       parsed.op === "draw"
-        ? await doFetch(url, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ turn: parsed.turn, drawing }) })
+        ? await doFetch(url, { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ turn: parsed.turn, drawing, ...(session ? { session } : {}) }) })
         : await doFetch(url, { headers });
   } catch (error) {
     err(`inbox_unavailable: ${(error as Error).message}`);

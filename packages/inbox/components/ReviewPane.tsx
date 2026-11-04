@@ -42,8 +42,8 @@ import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
-import { anchorDrawing, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
-import { useShowMe } from '../review-drawing/useShowMe';
+import { anchorDrawing, anchorLines, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
+import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
 import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
 import { InboxApiError, inboxApi } from '../api';
@@ -223,11 +223,15 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
     return true;
   };
+  // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
+  // the latest render's open through this ref, so it sees the drawings and turns read since.
+  const showMeOpen = useRef(showMe.open);
+  showMeOpen.current = showMe.open;
   const selectionActions = useMemo<GuideSelectionActions | undefined>(
     () =>
       showMe.state.canAsk
         ? {
-            onShowMe: (selection) => showMe.open({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }),
+            onShowMe: (selection) => showMeOpen.current({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }),
             ...(onAsk
               ? {
                   onAsk: (selection) =>
@@ -237,10 +241,24 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
             showMeIcon: <Pebble alive={false} size={15} />,
           }
         : undefined,
-    // showMe.open only sets state; a new object each render would re-render every diff.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [showMe.state.canAsk, onAsk],
   );
+  /**
+   * Show me again on an earlier round's picture: its lines where they are in this round (the same text, moved
+   * or not), else the lines the person pressed Show me on, else the lines it was asked on.
+   */
+  const againPlace = (): ShowMePlace | undefined => {
+    const shown = showMe.state.shown;
+    if (!shown) return undefined;
+    const { file, lines } = shown.drawing;
+    if (file && lines && askedPatch?.review === askedReview) {
+      const before = parseDiffToFiles(askedPatch.patch).find((f) => f.path === file);
+      const after = files.find((f) => f.path === file);
+      const now = before && after ? anchorLines(lines, newSideLines(before.patch), newSideLines(after.patch)) : null;
+      if (now) return { file, lines: now };
+    }
+    return shown.from ?? undefined;
+  };
 
   // The Overview's picture, and in a later round which of its parts the agent redrew.
   const overviewHtml = snapshot?.guide.overview?.diagram?.kind === 'html' ? snapshot.guide.overview.diagram : null;
@@ -744,7 +762,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           host={host}
           offset={sheetOffset}
           {...(phone ? {} : { onOffset: setSheetOffset })}
-          asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing) } : null}
+          asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing, againPlace()) } : null}
           onCode={(drawn, el) => {
             const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;
             if (openCode(target)) showMe.toCorner({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });

@@ -426,6 +426,19 @@ test('Show me on selected lines: the popover, the box, the agent draws, the pict
   expect(asked).toContain(`The reviewer pressed Show me on lines 16–18 of ${WORKER}`);
   expect(asked).toContain(`(${round1.message_id}): "What happens after the third failure?"`);
   expect(asked).toMatch(new RegExp(`plannotator review draw --file /tmp/show-me.json --review ${round1.message_id} --turn \\S+`));
+
+  // Reloaded while the agent draws: Show me on the same lines finds that request waiting, never a second one.
+  await page.reload();
+  const reopened = page.locator('[data-review-message]');
+  await expect(page.locator('[data-review-card]').getByRole('button', { name: /review/ }).or(reopened).first()).toBeVisible();
+  if (!(await reopened.isVisible())) await page.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
+  await expect(reopened).toBeVisible();
+  await reopened.locator('[data-review-chapters] li').nth(3).click();
+  await selectLines(page, WORKER, 17, 17);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
+  await expect(box.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 16–18');
+  expect(world.agent.asked.length).toBe(1);
   world.hold.release();
   world.hold = null;
 
@@ -458,6 +471,28 @@ test('a part opens its code and the picture shrinks to the corner card; plain As
   await expect(sheet(page)).toBeVisible();
   await sheet(page).getByRole('button', { name: 'Close the picture' }).click();
   await expect(sheet(page)).toHaveCount(0);
+
+  // Closed, the picture is one Show me away on the same lines: it opens again, nothing is asked.
+  const askedBefore = world.agent.asked.length;
+  await selectLines(page, WORKER, 18, 18);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(sheet(page)).toContainText('After the third failure');
+  await expect(page.locator('[data-show-me-box]')).toHaveCount(0);
+  await sheet(page).getByRole('button', { name: 'Close the picture' }).click();
+  // Another window on the same review reaches it the same way.
+  const other = await world.context.newPage();
+  try {
+    await other.goto(`${world.url}#thread=${round1.thread_id}`);
+    await other.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
+    await other.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+    await selectLines(other, WORKER, 16, 16);
+    await chooser(other).getByRole('button', { name: 'Show me' }).click();
+    await expect(sheet(other)).toContainText('After the third failure');
+    await expect(other.locator('[data-show-me-box]')).toHaveCount(0);
+  } finally {
+    await other.close();
+  }
+  expect(world.agent.asked.length).toBe(askedBefore);
 
   // Plain Ask stays words: the Ask window opens with the lines named, and nothing is sent.
   const asked = world.agent.asked.length;
@@ -534,6 +569,8 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   await corner(page).getByRole('button', { name: 'Grow the picture' }).click();
   await sheet(page).getByRole('button', { name: 'Show me again' }).click();
   await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
+  // Asked again on this round's lines: the lines pressed (16–18 changed since, so they are not found again).
+  await expect(page.locator('[data-show-me-box] [data-show-me-place]')).toHaveText('retry-worker.ts · lines 17–18');
   await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
   expect(world.errors).toEqual([]);
 });
