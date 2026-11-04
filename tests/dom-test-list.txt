@@ -131,6 +131,7 @@ packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
+packages/inbox/sessionLabels.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
