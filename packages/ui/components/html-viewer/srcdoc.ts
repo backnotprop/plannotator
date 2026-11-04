@@ -163,13 +163,13 @@ export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
 }
 
 // These defaults live inside the sandbox: host print.css cannot style a
-// child document. Low specificity leaves authored print layouts in control.
+// child document. Every page gets only what keeps it from being cut off on
+// paper: no clipping by an app shell's `height: 100vh; overflow: hidden`, and
+// long code lines wrapped instead of running off the sheet. Otherwise an
+// arbitrary page prints exactly as it would from a browser tab.
 const DOCUMENT_PRINT_CSS = `
 @layer plannotator-print-defaults {
 @media print {
-  :where(html, body) { min-height: 0; }
-  :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
-  :where(figure, img, svg, pre, table) { break-inside: avoid; }
   :where(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
 }
@@ -180,12 +180,17 @@ const DOCUMENT_PRINT_CSS = `
 
 // Only a document that opts in to the host's look
 // (`<meta name="plannotator-theme" content="host">`, which Plannotator's own
-// explainers carry) starts each sibling section on a new sheet. On an
-// arbitrary page, many short sections would print mostly blank paper.
+// explainers carry) gets pagination: each sibling section on a new sheet,
+// headings kept with what follows, and figures, images, diagrams, code and
+// tables kept whole where they fit. Low specificity leaves authored print
+// layouts in control.
 const SECTION_BREAK_PRINT_CSS = `
 @layer plannotator-print-defaults {
 @media print {
+  :where(html, body) { min-height: 0; }
   :where(section ~ section) { break-before: page; }
+  :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  :where(figure, img, svg, pre, table) { break-inside: avoid; }
 }
 }
 `;
@@ -224,8 +229,9 @@ function printDefaultsPosition(rawHtml: string): number {
 /**
  * Splice the print defaults in ahead of author styles, declaring their layer
  * before any authored one. Every document gets the no-clip rule (it wins over
- * an app shell's `html, body { height: 100vh; overflow: hidden }`) and the
- * neutral break hints; `sectionBreaks` adds a new sheet per section.
+ * an app shell's `html, body { height: 100vh; overflow: hidden }`) and
+ * wrapped code lines; `sectionBreaks` adds the pagination (a new sheet per
+ * section and the keep-together hints).
  */
 export function injectPrintDefaults(rawHtml: string, { sectionBreaks = false }: { sectionBreaks?: boolean } = {}): string {
   const style = `<style>${DOCUMENT_PRINT_CSS}${sectionBreaks ? SECTION_BREAK_PRINT_CSS : ""}</style>`;

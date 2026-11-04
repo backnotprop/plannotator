@@ -7,6 +7,8 @@
  *  - A page with the host-theme marker (Plannotator's own explainers) starts
  *    each of its 8 sections on a new sheet.
  *  - An unmarked page of 30 short sections is not printed one per sheet.
+ *  - An unmarked page with a <pre> and a <table> crossing a page prints on as
+ *    many sheets as the raw page (keep-together hints are for marked pages).
  *
  * Needs no build: `bunx playwright test -c tests/e2e/playwright.config.ts html-print-defaults.spec.ts`.
  */
@@ -48,4 +50,19 @@ test('a marked explainer starts each of its 8 sections on a new sheet', async ({
 
 test('an unmarked page of 30 short sections is not printed one per sheet', async ({ page }) => {
   expect(await sheets(page, framed(FAQ))).toBeLessThan(5);
+});
+
+// An unmarked page prints as it would from a browser tab: a <pre> and a
+// <table> that cross a page boundary are split there, not pushed whole onto
+// the next sheet (which turned 2 sheets into 3).
+const CROSSING = `<!doctype html><html><head><title>Report</title></head><body>${
+  Array.from({ length: 8 }, (_, i) => para(i)).join('')
+}<pre>${Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n')}</pre><table>${
+  Array.from({ length: 15 }, (_, i) => `<tr><td>row ${i + 1}</td><td>value</td></tr>`).join('')
+}</table></body></html>`;
+
+test('an unmarked page with a <pre> and a <table> across a page prints on as many sheets as the raw page', async ({ page }) => {
+  const raw = await sheets(page, CROSSING);
+  expect(raw).toBeGreaterThan(1);
+  expect(await sheets(page, framed(CROSSING))).toBe(raw);
 });
