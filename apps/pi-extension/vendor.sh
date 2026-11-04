@@ -52,9 +52,9 @@ printf '// @generated — DO NOT EDIT. Source: packages/core/shape.ts\n' | cat -
   > generated/shape/core.ts
 printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/format.ts\n' | cat - ../../packages/shared/shape/format.ts \
   | sed "s|from ['\"]@plannotator/core/shape['\"]|from './core.ts'|g" > generated/shape/format.ts
-for f in store routes; do
-  printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/%s.ts\n' "$f" | cat - "../../packages/shared/shape/$f.ts" > "generated/shape/$f.ts"
-done
+# One line each (not a loop): tests/parity/vendor-parity.test.ts reads these paths to match Pi's imports.
+printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/store.ts\n' | cat - ../../packages/shared/shape/store.ts > "generated/shape/store.ts"
+printf '// @generated — DO NOT EDIT. Source: packages/shared/shape/routes.ts\n' | cat - ../../packages/shared/shape/routes.ts > "generated/shape/routes.ts"
 printf '// @generated — DO NOT EDIT. Source: packages/shared/inbox/project-key.ts\n' | cat - ../../packages/shared/inbox/project-key.ts \
   | sed "s|from ['\"]@plannotator/core/project['\"]|from '../project.ts'|g" > generated/inbox/project-key.ts
 
