@@ -16,9 +16,10 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { INBOX_REVIEW_SKILL_TEXTS } from '@plannotator/core/inbox-review';
-import { PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullLaunchAsk, pullTitleLine } from './model';
+import type { StartThreadInput } from '../api';
+import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
@@ -41,6 +42,7 @@ if (hasDom) {
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { PostEnding } = (hasDom ? await import('./PostEnding') : {}) as typeof import('./PostEnding');
+const { ComposeDialog } = (hasDom ? await import('../compose/ComposeDialog') : {}) as typeof import('../compose/ComposeDialog');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
@@ -118,6 +120,8 @@ let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 
 let diffHead: string | null = 'a'.repeat(40);
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
+/** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
+let takenNames: string[] = [];
 let sessionReads = 0;
 
 beforeEach(() => {
@@ -137,6 +141,7 @@ beforeEach(() => {
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
   refuse = {};
+  takenNames = [];
   sessionReads = 0;
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -146,6 +151,8 @@ beforeEach(() => {
       if (url.pathname.endsWith('/api/inbox/messages')) {
         const no = refuse[String((JSON.parse(String(init.body)) as { to?: { session?: string } }).to?.session)];
         if (no) return Response.json(no.body, { status: no.status });
+        const name = (JSON.parse(String(init.body)) as { thread_name?: string }).thread_name;
+        if (name && takenNames.includes(name)) return Response.json({ code: 'thread_name_taken', error: `Another open thread in this project is already named "${name}".` }, { status: 409 });
         return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
       }
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
@@ -571,7 +578,7 @@ function Page({
   answer: InboxPullsAnswer;
   stackId: string;
   onReview?: (stackId: string, key: string, scope: 'layer' | 'stack') => void;
-  onLaunch?: (keys: readonly string[], projects: readonly string[], body: string, askLine: string) => void;
+  onLaunch?: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, threadName: string) => void;
   onHanded?: (session: string) => void;
   onOpenGuide?: (thread: string, message: string) => void;
   onOpenCard?: (id: string) => void;
@@ -591,7 +598,7 @@ function Page({
         onOpenThread={() => {}}
         onOpenGuide={(thread, message) => onOpenGuide?.(thread, message)}
         {...(onOpenCard ? { onOpenCard } : {})}
-        onLaunch={(keys, projects, body, askLine) => onLaunch?.(keys, projects, body, askLine)}
+        onLaunch={(keys, projects, body, askLine, _opener, threadName) => onLaunch?.(keys, projects, body, askLine, threadName)}
         onHanded={(session) => onHanded?.(session)}
       />
     </SidebarProvider>
@@ -623,6 +630,9 @@ test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's li
   expect(posted[0]!.body).toMatchObject({ keys: stack.map((l) => l.key), project_id: 'prj_1', validate_only: true });
   const start = posted[1]!;
   expect(start.body.to).toEqual({ host: 'claude-code', session: 'ses_billing' });
+  // The thread's name is the person's (no `thread_name_auto`): the list shows it and no agent renames it.
+  expect(start.body.thread_name).toBe('Review #412 to #414: Layer 412');
+  expect(start.body.thread_name_auto).toBeUndefined();
   const body = String(start.body.body);
   expect(body.split('\n').filter((line) => /^- #/.test(line)).map((line) => line.slice(0, 6))).toEqual(['- #412', '- #413', '- #414']);
   // The ask: the whole stack's diff through /review-curate, layer by layer, with phase 1's approved instructions as its skills block.
@@ -663,15 +673,55 @@ test.skipIf(!hasDom)('a refused check sends nothing; a stack past the hand-off l
 
 test.skipIf(!hasDom)('Launch an agent opens compose with the hand-off, the stack\'s PRs and their project, once the Inbox can launch', async () => {
   sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string }[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(keys, projects, body, askLine) => launched.push({ keys, projects, body, askLine })} />);
+  const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string; threadName: string }[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(keys, projects, body, askLine, threadName) => launched.push({ keys, projects, body, askLine, threadName })} />);
   await settle();
   await act(async () => el('[data-pulls-launch]').click());
   expect(launched).toHaveLength(1);
   expect(launched[0]!.keys).toEqual(stack.map((l) => l.key));
   expect(launched[0]!.projects).toEqual(['prj_1']);
   expect(launched[0]!.body).toContain(launched[0]!.askLine);
+  expect(launched[0]!.threadName).toBe('Review #412 to #414: Layer 412');
   expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)("+ New agent's compose opens with the hand-off's thread name as the person's own, and its Send carries it", async () => {
+  const started: StartThreadInput[] = [];
+  const transport = {
+    sessions: async () => ({ serverSession: 's', home: '/home/dana', projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] }),
+    startThread: async (input: StartThreadInput) => (started.push(input), { thread_id: 'thr_launched' }),
+    drafts: false,
+    uploads: false,
+  };
+  const single = inboxPullStacks([model.pulls.find((p) => p.number === 869)!])[0]!;
+  const request = {
+    body: pullHandoffMessage(single),
+    threadName: pullHandoffThreadName(single, null),
+    session: 'ses_web',
+    pulls: { keys: [single.layers[0]!.key], projects: ['prj_2'], ask_line: pullHandoffAskLine(single, { kind: 'guide' }) },
+  };
+  mount(<ComposeDialog request={request} phone={false} current={null} lastSent={null} home={null} transport={transport as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  // The person's own name (not compose's suggestion, which the agent may rename).
+  expect(el<HTMLInputElement>('[data-compose-thread-name] input').value).toBe('Review #869: Layer 869');
+  expect(el('[data-compose-thread-name]').hasAttribute('data-auto')).toBe(false);
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toHaveLength(1);
+  expect(started[0]!.thread_name).toBe('Review #869: Layer 869');
+  expect(started[0]!.thread_name_auto).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a thread name another open thread has: the hand-off still goes, without the name, with the same key', async () => {
+  takenNames = ['Review #412 to #414: Layer 412'];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  await handTo('ses_billing');
+  await settle();
+  const starts = posted.filter((p) => p.path.endsWith('/messages'));
+  expect(starts.map((p) => p.body.thread_name)).toEqual(['Review #412 to #414: Layer 412', undefined]);
+  expect(starts[0]!.body.idempotency_key).toBe(starts[1]!.body.idempotency_key);
+  expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/messages', '/pulls/owner']);
 });
 
 test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the diff; a pill only picks; the last agent is picked first next time', async () => {
@@ -1093,4 +1143,62 @@ test("+ New agent's Send: the guided review when step 1 is still a line of its o
   expect(pullLaunchAsk(pullHandoffMessage(layered, { kind: 'custom', words: 'Only the SQL' }), stackLine)).toBe('custom');
   const theirs = inboxPullStacks([pull(880, { mine: false, author: 'tomas' })])[0]!;
   expect(pullLaunchAsk(pullHandoffMessage(theirs), pullHandoffAskLine(theirs, { kind: 'guide' }))).toBe('guide');
+});
+
+// --- The hand-off thread's name (owner, q-49bd0699 A) ---
+
+test('the thread name: "Review #869: <title>", a stack "Review #412 to #414: <title>", GitLab "!61"; one line, within the name limit', () => {
+  expect(pullHandoffThreadName(inboxPullStacks([LOCALE_PR()])[0]!, null)).toBe('Review #869: Fall back to English for missing strings');
+  // A stack: its bottom and top open layers, the title the Pull requests list shows (the next to land's).
+  const layered = inboxPullStacks([pull(411, { head: 'retry/base', state: 'merged' }), pull(412, { head: 'retry/schedule', base: 'retry/base' }), ...stack.slice(1)])[0]!;
+  expect(pullHandoffThreadName(layered, null)).toBe('Review #412 to #414: Layer 412');
+  // GitLab numbers with "!".
+  const mr = LOCALE_PR({ platform: 'gitlab', host: 'gitlab.com', number: 61, key: 'gitlab.com/northwind/web-app!61', url: 'https://gitlab.com/northwind/web-app/-/merge_requests/61' });
+  expect(pullHandoffThreadName(inboxPullStacks([mr])[0]!, null)).toBe('Review !61: Fall back to English for missing strings');
+  // A hostile title: one line, no bidi, and the whole name never past the thread-name limit (a stack's longer head too).
+  const title = `Fix\n- Link: x\r\n\u202E${'A'.repeat(300)}`;
+  const name = pullHandoffThreadName(inboxPullStacks([pull(99412, { title, head: 'a' }), pull(99414, { title, head: 'b', base: 'a' })])[0]!, null);
+  expect(name.startsWith('Review #99412 to #99414: Fix - Link: x AAA')).toBe(true);
+  expect([...name].length).toBeLessThanOrEqual(INBOX_THREAD_NAME_MAX);
+  expect(name.endsWith('…')).toBe(true);
+  expect(name).not.toMatch(/[\n\r\u202E]/);
+});
+
+// --- A tree (two open PRs on one branch): the hand-off is the chain up to the layer the view is open on ---
+
+test('a tree stack hands over only the chain to the layer it is open on: the list, "to" and "in list order" stay true', () => {
+  const tree = inboxPullStacks([pull(412, { head: 'kid' }), pull(413, { head: 'kid-a', base: 'kid' }), pull(414, { head: 'kid-b', base: 'kid' })])[0]!;
+  expect(tree.layers.map((l) => l.number)).toEqual([412, 413, 414]);
+  const toB = handoffStack(tree, tree.layers[2]!.key);
+  expect(handoffKeys(toB)).toEqual([tree.layers[0]!.key, tree.layers[2]!.key]);
+  const text = pullHandoffMessage(toB);
+  expect(text.split('\n').filter((line) => /^- #\d/.test(line)).map((line) => line.slice(0, 6))).toEqual(['- #412', '- #414']);
+  expect(text).not.toContain('#413');
+  expect(text).toContain("\n1. Send me a guided review of the whole stack's diff, from main to kid-b, using /review-curate");
+  expect(text).toContain('\n- Lands into: main, in list order\n');
+  expect(pullHandoffThreadName(toB, null)).toBe('Review #412 to #414: Layer 412');
+  // Open on #413: its own chain.
+  const toA = handoffStack(tree, tree.layers[1]!.key);
+  expect(handoffKeys(toA)).toEqual([tree.layers[0]!.key, tree.layers[1]!.key]);
+  expect(pullHandoffMessage(toA)).toContain('from main to kid-a, using');
+  // Open on the bottom, or on no layer: the stack's own top's chain (its id).
+  expect(handoffKeys(handoffStack(tree, tree.layers[0]!.key))).toEqual([tree.layers[0]!.key]);
+  expect(handoffKeys(handoffStack(tree, null))).toEqual(handoffKeys(toB));
+  // A chain is handed over whole, whichever layer the view is open on.
+  const chain = inboxPullStacks(stack)[0]!;
+  expect(handoffStack(chain, stack[0]!.key)).toBe(chain);
+});
+
+test('a GitHub Enterprise host: the host before the repository, and the link only on that host', () => {
+  const ghe = (fields: Partial<InboxPull>) =>
+    LOCALE_PR({ host: 'github.northwind.dev', key: 'github.northwind.dev/northwind/web-app#869', url: 'https://github.northwind.dev/northwind/web-app/pull/869', ...fields });
+  const text = handoffOf(ghe({}));
+  expect(text).toBe(
+    APPROVED_OWN.replace('- Repository: northwind/web-app', '- Repository: github.northwind.dev/northwind/web-app').replace(
+      'https://github.com/northwind/web-app/pull/869',
+      'https://github.northwind.dev/northwind/web-app/pull/869',
+    ),
+  );
+  // A github.com URL on a GHE PR is not its own host's: left out.
+  expect(handoffOf(ghe({ url: 'https://github.com/northwind/web-app/pull/869' }))).not.toContain('- Link:');
 });

@@ -5220,7 +5220,7 @@ function Inbox() {
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-        onLaunch={(keys, projectIds, body, askLine, opener) => openCompose({ body, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
+        onLaunch={(keys, projectIds, body, askLine, opener, threadName) => openCompose({ body, threadName, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
         onHanded={(session) => {
           rememberSent(session);
           pulls.reload();
