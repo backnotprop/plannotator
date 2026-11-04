@@ -129,7 +129,7 @@ test.skipIf(!hasDom)('one group per agent found, with its switches and the state
   expect(group(el, 'cursor').querySelector('.ib-agstate')?.textContent).toBe('Removed outside Plannotator');
   expect(rows(group(el, 'cursor'))).toEqual([
     { k: 'Reaches the Inbox', v: "plannotator-inbox is no longer in ~/.cursor/mcp.json. Plannotator won't add it back on its own; turn this on to add it.", sw: 'false', sub: null },
-    { k: 'Note in its instructions', v: 'Customize → Rules in Cursor · copy by handShow note', sw: null, sub: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." },
+    { k: 'Note in its instructions', v: 'Customize → Rules in Cursor · copy yourselfShow note', sw: null, sub: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." },
   ]);
 });
 
@@ -200,7 +200,7 @@ test.skipIf(!hasDom)('PLANNOTATOR_INBOX_TOOL locks the tool and reminder switche
 test.skipIf(!hasDom)('the agents not found fold behind the harness picker, editors included', () => {
   const el = mount(model());
   const more = [...el.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Not found on this computer'))!;
-  expect(more.textContent).toBe('Not found on this computer1 agent · connect one by hand');
+  expect(more.textContent).toBe('Not found on this computer1 agent · connect one yourself');
   expect(more.getAttribute('aria-expanded')).toBe('false');
   act(() => more.click());
   expect([...el.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('VS Code');
@@ -265,7 +265,7 @@ test.skipIf(!hasDom)('Claude Code\'s mod off: "Reaches the Inbox" says why in pl
   expect((group(el, 'claude-code').querySelectorAll('[role="switch"]')[0] as HTMLButtonElement).disabled).toBe(true);
 });
 
-test.skipIf(!hasDom)('Claude Code connected by hand through MCP: shown, never switched (Plannotator does not own that entry)', () => {
+test.skipIf(!hasDom)('Claude Code connected yourself through MCP: shown, never switched (Plannotator does not own that entry)', () => {
   const base = model();
   base.agents[0] = mcp('claude-code', 'Claude Code', '~/.claude.json');
   const el = mount(base);

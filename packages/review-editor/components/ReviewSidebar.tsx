@@ -50,8 +50,9 @@ interface ReviewSidebarProps {
   /** "+ Global comment": commit a durable scope:'general' review-level
    *  comment to the session (spec §3.3). When present, the affordance renders
    *  in the General section header AND in the all-empty state — the state it
-   *  is most useful in. */
-  onAddGeneralComment?: (text: string) => void;
+   *  is most useful in. Returns false when the comment was not added: the
+   *  words stay in the box. */
+  onAddGeneralComment?: (text: string) => boolean | void;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -150,7 +151,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
  * field, the same contract as the decision composers.
  */
 const GeneralCommentComposer: React.FC<{
-  onAdd: (text: string) => void;
+  onAdd: (text: string) => boolean | void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   text: string;
@@ -173,7 +174,7 @@ const GeneralCommentComposer: React.FC<{
       ref.current?.querySelector<HTMLTextAreaElement>('[data-decision-note-input]')?.focus();
       return;
     }
-    onAdd(trimmed);
+    if (onAdd(trimmed) === false) return;
     onTextChange('');
     onOpenChange(false);
   };

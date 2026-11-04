@@ -39,7 +39,7 @@ import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
-import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullVerdictReply } from './model';
+import { findStack, forgeName, inboxPullLabel, isOpenPull, layerVerdictLink, linkAgentName, nextLayer, openLayers, pullGroups, pullVerdictReply } from './model';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = GuideReaderPart.Part;
@@ -132,7 +132,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict.
   const link = stack && model && layer ? layerVerdictLink(layer, stack, model.links) : null;
   const agent = linkAgentName(link);
-  const open = stack ? stack.layers.filter((l) => l.state === 'open' || l.state === 'draft') : [];
+  const open = stack ? openLayers(stack) : [];
   const at = layer ? open.findIndex((l) => l.key === layer.key) : -1;
   const next = stack && layer ? nextLayer(stack, layer.key) : null;
 
@@ -401,7 +401,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <nav className="ib-prr-layers" aria-label="Layers, bottom first">
           {stack.layers.map((l, i) => {
             const here = l.key === layer.key;
-            const reviewable = l.state === 'open' || l.state === 'draft';
+            const reviewable = isOpenPull(l);
             return (
               <span key={l.key} className="ib-prr-lstep">
                 {i > 0 && <Icon name="chevR" size={12} />}

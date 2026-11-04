@@ -369,7 +369,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
 }
 
 function Pill({ row }: { row: InboxAgentRow }) {
-  return <span className="ib-anote-pill">{noteCopiedByHand(row) ? 'Copy by hand' : row.note?.create ? 'New file' : 'Adds to end'}</span>;
+  return <span className="ib-anote-pill">{noteCopiedByHand(row) ? 'Copy yourself' : row.note?.create ? 'New file' : 'Adds to end'}</span>;
 }
 
 function RowMain({ row, failure, onRetry }: { row: InboxAgentRow; failure?: string | null; onRetry?: () => void }) {
