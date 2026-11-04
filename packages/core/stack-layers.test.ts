@@ -650,15 +650,17 @@ describe("layers that do not chain into one stack", () => {
       " line 6",
     );
 
-  it("forgets only the files where a lower layer gained a commit the layer above is not rebased on", () => {
+  it("keeps only the stale layer's own lines in a file where a lower layer gained a commit the layer above is not rebased on", () => {
     const stack = (rewrite: (p: string) => string): StackLayer[] => [
       { id: "L1", patch: l1Stale },
       { id: "L2", patch: rewrite(l2Stale) },
     ];
-    // Only a.ts breaks the chain: it loses its labels, b.ts keeps L1's.
+    // Only a.ts breaks the chain: it keeps only L2's own line, b.ts keeps L1's.
     const map = mapStackLines(stack((p) => p), { reviewPatch: reviewStale });
     expect(map).toMatchObject({ status: "partial", reason: "stale" });
-    expect(at(map, "a.ts", 1, 13)).toEqual({ kind: "unknown" });
+    expect(at(map, "a.ts", 9)).toEqual({ kind: "layer", id: "L2" });
+    expect(at(map, "a.ts", 1, 8)).toEqual({ kind: "unknown" });
+    expect(at(map, "a.ts", 10, 13)).toEqual({ kind: "unknown" });
     expect(at(map, "b.ts", 3)).toEqual({ kind: "layer", id: "L1" });
     // An index line that claims the chain holds is not believed over the lines L2 deletes.
     const lying = mapStackLines(stack((p) => p.replace("index 624b469..06f2de4", "index 4b5ce0b..06f2de4")), {
@@ -724,7 +726,7 @@ describe("layers that do not chain into one stack", () => {
     expect(at(map, "b.ts", 3)).toEqual({ kind: "unknown" });
   });
 
-  it("gives nothing when the lower layer was force-pushed and the layer above was not rebased", () => {
+  it("keeps only the upper layer's own lines when the lower layer was force-pushed and the layer above was not rebased", () => {
     const l1 = patch(
       "diff --git a/a.ts b/a.ts",
       "index 624b469..01bed1d 100644",
@@ -769,19 +771,27 @@ describe("layers that do not chain into one stack", () => {
       " line 11",
       " line 12",
     );
-    unavailable(
+    const map = mapStackLines(
       [
         { id: "L1", patch: l1 },
         { id: "L2", patch: l2 },
       ],
-      l2,
-      "stale",
+      { reviewPatch: l2 },
     );
+    expect(map).toMatchObject({ status: "partial", reason: "stale" });
+    // Both `+` lines are in L2's own diff, which starts below the force-pushed L1.
+    expect(at(map, "a.ts", 4)).toEqual({ kind: "layer", id: "L2" });
+    expect(at(map, "a.ts", 10)).toEqual({ kind: "layer", id: "L2" });
+    expect(map.runs["a.ts"]).toEqual([
+      [4, 4, [1]],
+      [10, 10, [1]],
+    ]);
   });
 
-  it("gives nothing when a layer is based on a layer lower than the one below it", () => {
+  it("labels only the top layer's own lines when it is based on a layer lower than the one below it", () => {
     // L3 is based on L1, so L2's "}" is not in the reviewed tree, while
-    // L1's identical "}" is: the texts alone cannot tell them apart.
+    // L1's identical "}" is: the texts alone cannot tell them apart, so the
+    // "}" gets no label, and only L3's own line does.
     const l1 = patch(
       "diff --git a/a.ts b/a.ts",
       "index 624b469..7ce8701 100644",
@@ -842,15 +852,106 @@ describe("layers that do not chain into one stack", () => {
       " line 10",
       " line 11",
     );
-    unavailable(
+    const map = mapStackLines(
       [
         { id: "L1", patch: l1 },
         { id: "L2", patch: l2 },
         { id: "L3", patch: l3 },
       ],
-      review,
-      "stale",
+      { reviewPatch: review },
     );
+    expect(map).toMatchObject({ status: "partial", reason: "stale" });
+    expect(at(map, "a.ts", 1)).toEqual({ kind: "layer", id: "L3" });
+    expect(at(map, "a.ts", 9)).toEqual({ kind: "unknown" });
+  });
+
+  it("calls the stack unreadable, not stale, when it is both", () => {
+    // a.ts is stale (as above); b.ts lacks its index line in L1, which updating the stack cannot fix.
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1Stale.replace("index f985857..0759b20 100644\n", "") },
+        { id: "L2", patch: l2Stale },
+      ],
+      { reviewPatch: reviewStale },
+    );
+    expect(map).toMatchObject({ status: "partial", reason: "unreadable" });
+    expect(at(map, "a.ts", 9)).toEqual({ kind: "layer", id: "L2" });
+    expect(at(map, "b.ts", 3)).toEqual({ kind: "unknown" });
+  });
+
+  it("labels a stale layer's own line in a file the lower layer changed again (git output)", () => {
+    // L1 gains a commit (line 10) after L2 branched from it, and L2 is not rebased.
+    const l1 = patch(
+      "diff --git a/a.txt b/a.txt",
+      "index 8e399c4..07ebaed 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -2,12 +2,12 @@ base 1",
+      " base 2",
+      " base 3",
+      " base 4",
+      "-base 5",
+      "+L1 five",
+      " base 6",
+      " base 7",
+      " base 8",
+      " base 9",
+      "-base 10",
+      "+L1 ten",
+      " base 11",
+      " base 12",
+      " base 13",
+    );
+    const l2 = patch(
+      "diff --git a/a.txt b/a.txt",
+      "index c6a2268..e70062f 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -27,7 +27,7 @@ base 26",
+      " base 27",
+      " base 28",
+      " base 29",
+      "-base 30",
+      "+L2 thirty",
+      " base 31",
+      " base 32",
+      " base 33",
+    );
+    const review = patch(
+      "diff --git a/a.txt b/a.txt",
+      "index 8e399c4..e70062f 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -2,7 +2,7 @@ base 1",
+      " base 2",
+      " base 3",
+      " base 4",
+      "-base 5",
+      "+L1 five",
+      " base 6",
+      " base 7",
+      " base 8",
+      "@@ -27,7 +27,7 @@ base 26",
+      " base 27",
+      " base 28",
+      " base 29",
+      "-base 30",
+      "+L2 thirty",
+      " base 31",
+      " base 32",
+      " base 33",
+    );
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+      ],
+      { reviewPatch: review },
+    );
+    expect(map).toMatchObject({ status: "partial", reason: "stale" });
+    expect(at(map, "a.txt", 30)).toEqual({ kind: "layer", id: "L2" });
+    // L1's line comes from the L1 that L2 is based on, not the L1 diffed: no label.
+    expect(at(map, "a.txt", 5)).toEqual({ kind: "unknown" });
   });
 
   it("gives nothing for a layer that is two commits' diffs joined, naming a file twice", () => {
@@ -899,6 +1000,87 @@ describe("layers that do not chain into one stack", () => {
       " line 8",
     );
     unavailable([{ id: "L1", patch: c1 + c2 }], review, "unreadable");
+  });
+});
+
+describe("a file turned into a symlink", () => {
+  // git shows the type change as a delete and an add of the same path in one diff.
+  const l1 = patch(
+    "diff --git a/f.txt b/f.txt",
+    "index 8d3cb57..a0b591a 100644",
+    "--- a/f.txt",
+    "+++ b/f.txt",
+    "@@ -3,3 +3,4 @@ base 2",
+    " base 3",
+    " base 4",
+    " base 5",
+    "+L1 line",
+  );
+  const l2 = patch(
+    "diff --git a/f.txt b/f.txt",
+    "deleted file mode 100644",
+    "index a0b591a..0000000",
+    "--- a/f.txt",
+    "+++ /dev/null",
+    "@@ -1,6 +0,0 @@",
+    "-base 1",
+    "-base 2",
+    "-base 3",
+    "-base 4",
+    "-base 5",
+    "-L1 line",
+    "diff --git a/f.txt b/f.txt",
+    "new file mode 120000",
+    "index 0000000..b310e29",
+    "--- /dev/null",
+    "+++ b/f.txt",
+    "@@ -0,0 +1 @@",
+    "+g.txt",
+    "\\ No newline at end of file",
+  );
+  const review = patch(
+    "diff --git a/f.txt b/f.txt",
+    "deleted file mode 100644",
+    "index 8d3cb57..0000000",
+    "--- a/f.txt",
+    "+++ /dev/null",
+    "@@ -1,5 +0,0 @@",
+    "-base 1",
+    "-base 2",
+    "-base 3",
+    "-base 4",
+    "-base 5",
+    "diff --git a/f.txt b/f.txt",
+    "new file mode 120000",
+    "index 0000000..b310e29",
+    "--- /dev/null",
+    "+++ b/f.txt",
+    "@@ -0,0 +1 @@",
+    "+g.txt",
+    "\\ No newline at end of file",
+  );
+
+  it("is not stale when every layer chains, and labels the link", () => {
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+      ],
+      { reviewPatch: review },
+    );
+    expect(map).toEqual({ status: "ok", ids: ["L1", "L2"], runs: { "f.txt": [[1, 1, [1]]] } });
+  });
+
+  it("is still stale when the file it deletes is not the lower layer's", () => {
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2.replace("index a0b591a..0000000", "index 8d3cb57..0000000") },
+      ],
+      { reviewPatch: review },
+    );
+    expect(map).toMatchObject({ status: "partial", reason: "stale" });
+    expect(at(map, "f.txt", 1)).toEqual({ kind: "layer", id: "L2" });
   });
 });
 

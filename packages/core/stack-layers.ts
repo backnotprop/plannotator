@@ -19,6 +19,11 @@
  *   one below ended. A file changed without them gets no labels, so a patch
  *   rebuilt from GitHub's files API (`reconstructGhPatch`, which has no old
  *   blob ids) gives no labels.
+ * - Refused safely (fewer labels, never wrong ones): copy detection (`-C`) is
+ *   read as a rename, so a copy's source loses its labels, and a copy plus an
+ *   edit to its source names the path twice, which makes the whole diff
+ *   unreadable (the forges never show copies). Blob ids shorter than seven
+ *   characters (`core.abbrev` below 7) do not count as `index` lines.
  *
  * Browser-safe and dependency-free. The map it builds is plain data, so a
  * server can build it and send it as JSON.
@@ -51,7 +56,9 @@ export type StackLineRuns = Record<string, [start: number, end: number, layers: 
 /**
  * Why lines go unlabelled beyond the usual: `stale` when some layers do not
  * start where the one below ended (update the stack to see them), and
- * `unreadable` when a diff cannot be read or lacks its `index` lines.
+ * `unreadable` when a diff cannot be read or lacks its `index` lines. When
+ * both happen the reason is `unreadable`, since updating the stack cannot fix it.
+ * A stale layer's own `+` lines keep its label; the lines below it lose theirs.
  */
 export type StackGap = "stale" | "unreadable";
 
@@ -121,7 +128,8 @@ export function mapStackLines(layers: readonly StackLayer[], check: { reviewPatc
   if (!review) return unreadable;
   const runs = toRuns(keepReviewedLines(walk, review));
   if (walk.gaps.size === 0) return { status: "ok", ids, runs };
-  const reason = walk.gaps.has("stale") ? "stale" : "unreadable";
+  // `unreadable` first: updating the stack does not fix it.
+  const reason = walk.gaps.has("unreadable") ? "unreadable" : "stale";
   return { status: Object.keys(runs).length > 0 ? "partial" : "unavailable", reason, ids, runs };
 }
 
@@ -205,11 +213,13 @@ function changesLines(step: FileStep): boolean {
 
 /**
  * Whether a layer's change to one file can be followed: `follow`, `forget`
- * (a binary file: no lines to follow), or the gap that stops it.
+ * (a binary file: no lines to follow), or the gap that stops it. `vacated`
+ * holds the paths the same diff deletes or renames away: a file added at one
+ * of them (a file turned symlink is a delete and an add) starts from nothing.
  */
-function traceStep(blobs: Blobs, step: FileStep): "follow" | "forget" | StackGap {
+function traceStep(blobs: Blobs, vacated: ReadonlySet<string>, step: FileStep): "follow" | "forget" | StackGap {
   if (step.oldBlob === null || step.newBlob === null) return changesLines(step) ? "unreadable" : "follow";
-  const below = blobs.get((step.from ?? step.to)!);
+  const below = step.from === null && vacated.has(step.to!) ? undefined : blobs.get((step.from ?? step.to)!);
   if (below !== undefined && !sameBlob(below, step.oldBlob)) return "stale";
   if (step.binary) return "forget";
   const changedUnseen = step.hunks.length === 0 && !sameBlob(step.oldBlob, step.newBlob);
@@ -244,11 +254,19 @@ function applyLayer(walk: Walk, steps: readonly FileStep[], layer: number): void
   const before = walk.claims;
   const after = new Map(before);
   for (const step of steps) if (step.from !== null) after.delete(step.from);
+  const vacated = new Set(steps.flatMap((step) => (step.from !== null && step.from !== step.to ? [step.from] : [])));
   for (const step of steps) {
-    const verdict = traceStep(walk.blobs, step);
+    const verdict = traceStep(walk.blobs, vacated, step);
     if (verdict === "stale" || verdict === "unreadable") walk.gaps.add(verdict);
     if (step.to === null) continue;
-    const lines = verdict === "follow" ? followStep(step.from === null ? undefined : before.get(step.from), step, layer) : null;
+    // A stale layer still wrote its own `+` lines: they are labelled, and
+    // nothing from below the break is carried up or inherited.
+    const lines =
+      verdict === "follow"
+        ? followStep(step.from === null ? undefined : before.get(step.from), step, layer)
+        : verdict === "stale" && !step.binary
+          ? followStep(undefined, step, layer)
+          : null;
     if (verdict === "follow" && !lines) walk.gaps.add("stale");
     after.set(step.to, lines ?? new Map());
   }
