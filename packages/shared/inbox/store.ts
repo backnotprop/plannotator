@@ -171,6 +171,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
 import {
+  inboxInitiativeMatchKey,
   inboxInitiativeNameKey,
   INBOX_INITIATIVE_NAME_MAX,
   INBOX_INITIATIVES_MAX,
@@ -6178,9 +6179,13 @@ export class InboxStore {
 
   // ─────────────────────────── initiatives ───────────────────────────
   // The Board's initiatives (approval "board-initiatives"): named by the
-  // person, across projects; a card is in at most one. Only the person makes,
-  // renames, deletes and sets them. Deleting writes no card: a card whose
-  // initiative is deleted reads as in none (cardWire).
+  // person, across projects; a card is in at most one. Only the person
+  // renames and deletes them. An agent puts its card in one by name, through
+  // the card tool's `initiative` (createCard and updateCard's
+  // `initiative_name`), and makes one only that way. Deleting writes no card:
+  // a card whose initiative is deleted reads as in none (cardWire). Whoever
+  // sets a card's initiative last wins, the person or an agent (no write is
+  // refused for the other's earlier pick), as every other card field.
 
   /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
   initiatives(): InboxInitiative[] {
@@ -6219,16 +6224,48 @@ export class InboxStore {
     }
   }
 
-  /** A new initiative, named `name` (the person's). */
+  /** A new initiative, named `name` (the person's; an agent makes one only through a card's `initiative_name`). */
   createInitiative(input: { name: unknown; by: InboxAuthor }): InboxInitiative {
     if (input.by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person makes an initiative.");
     const name = this.initiativeName(input.name, null);
+    this.checkInitiativeRoom();
+    return this.appendNewInitiative(name, input.by);
+  }
+
+  private checkInitiativeRoom(): void {
     const live = [...this.initiativesById.values()].filter((i) => i.deleted_at === null).length;
     if (live >= INBOX_INITIATIVES_MAX) throw new InboxError("initiative_limit", `At most ${INBOX_INITIATIVES_MAX} initiatives: delete one first.`);
+  }
+
+  private appendNewInitiative(name: string, by: InboxAuthor): InboxInitiative {
     const at = this.stamp();
-    const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: input.by, updated_at: at, deleted_at: null };
+    const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: by, updated_at: at, deleted_at: null };
     this.appendInitiative(record, at);
     return record;
+  }
+
+  /**
+   * A card's initiative given by name (the card tool's `initiative`): `""`
+   * is none; a live initiative whose name matches ignoring case and spaces
+   * (inboxInitiativeMatchKey; one with the store's own key first) is that
+   * one; any other name is a new one, checked here (one line, the length, the
+   * limit) and made by `initiativeOfPick` only once the card write can no
+   * longer be refused, so a refused card leaves no initiative behind.
+   */
+  private initiativePick(value: unknown): { id: string | null } | { make: string } {
+    if (typeof value !== "string") throw new InboxError("validation_error", "initiative: a name, or \"\" for none.", { field: "initiative" });
+    if (value.trim() === "") return { id: null };
+    const name = this.cardText(value, "initiative", INBOX_INITIATIVE_NAME_MAX);
+    const live = this.initiatives().filter((i) => i.deleted_at === null);
+    const exact = live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name));
+    const loose = exact ?? live.find((i) => inboxInitiativeMatchKey(i.name) === inboxInitiativeMatchKey(name));
+    if (loose) return { id: loose.id };
+    this.checkInitiativeRoom();
+    return { make: name };
+  }
+
+  private initiativeOfPick(pick: { id: string | null } | { make: string }, by: InboxAuthor): string | null {
+    return "make" in pick ? this.appendNewInitiative(pick.make, by).id : pick.id;
   }
 
   /** The person renamed an initiative: every card in it reads the new name (they name it by id). */
@@ -6428,13 +6465,17 @@ export class InboxStore {
     send_thread_id?: unknown;
     /** The person's New card on a Board filtered to an initiative: it starts in that one (an `ini_` id; null or absent: none). */
     initiative?: unknown;
+    /** The card tool's `initiative` (anyone, agents included): a name, matched or made (initiativePick); `""` is none. */
+    initiative_name?: unknown;
   }): { card: InboxCard; replayed: boolean } {
     const project = this.projectsById.get(input.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     const byAgent = input.by.kind === "agent";
     const givenInitiative = input.initiative !== undefined && input.initiative !== null;
     if (givenInitiative && byAgent) throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.", { field: "initiative" });
-    const initiative = givenInitiative ? this.liveInitiative(input.initiative).id : null;
+    const givenName = input.initiative_name !== undefined && input.initiative_name !== null;
+    if (givenInitiative && givenName) throw new InboxError("validation_error", "initiative: an id or a name, not both.", { field: "initiative" });
+    const initiativeById = givenInitiative ? this.liveInitiative(input.initiative).id : null;
     const sending = input.send_thread_id !== undefined && input.send_thread_id !== null;
     if (sending && byAgent) throw new InboxError("validation_error", "thread_id: only the person sends a card to an agent.", { field: "thread_id" });
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
@@ -6467,6 +6508,8 @@ export class InboxStore {
         return { card: known, replayed: true };
       }
     }
+    // Checked here, after a replay answered (a retry makes no initiative), and made only just before the card is written.
+    const pick = givenName ? this.initiativePick(input.initiative_name) : null;
     // Sent to an agent: Todo (the person asked for it). Otherwise an agent's card is work it took on (Todo), the person's an idea (Backlog).
     const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
     if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
@@ -6478,6 +6521,7 @@ export class InboxStore {
     const refs = this.cardRefs([], input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
+    const initiative = pick ? this.initiativeOfPick(pick, input.by) : initiativeById;
     const at = this.stamp();
     const card: InboxCard = {
       id: inboxId("crd"),
@@ -6535,6 +6579,8 @@ export class InboxStore {
       reason?: unknown;
       restore?: boolean;
       notes?: unknown;
+      /** The card tool's `initiative` (anyone): a name, matched or made (initiativePick); `""` takes the card out. */
+      initiative_name?: unknown;
     },
   ): InboxCard {
     const card = this.cards.get(id);
@@ -6550,9 +6596,10 @@ export class InboxStore {
       !(input.prs && input.prs.length > 0) &&
       !(input.refs && input.refs.length > 0) &&
       input.notes === undefined &&
+      !given(input.initiative_name) &&
       !input.restore
     ) {
-      throw new InboxError("validation_error", "Nothing to change: pass column, say, you, title, thread_id or pr.");
+      throw new InboxError("validation_error", "Nothing to change: pass column, say, you, title, thread_id, pr or initiative.");
     }
     let column = card.column;
     if (input.restore) {
@@ -6604,6 +6651,9 @@ export class InboxStore {
     const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
+    // Made (when new) only now, with nothing left to refuse the card's write.
+    const pick = given(input.initiative_name) ? this.initiativePick(input.initiative_name) : null;
+    const picked = pick ? { initiative: this.initiativeOfPick(pick, input.by) } : {};
     const at = this.stamp();
     // Leaving a live column (or Done) for Dropped remembers it, so restoring goes back there.
     const asideFrom =
@@ -6630,6 +6680,7 @@ export class InboxStore {
       dropped,
       aside_from: asideFrom,
       notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
+      ...picked,
       // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
       ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };

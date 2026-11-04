@@ -23,6 +23,8 @@ import {
   inboxCardRefsOf,
   inboxCardColumnOf,
   inboxCardTitleHint,
+  INBOX_CARD_INITIATIVE_FIELD,
+  INBOX_CARD_INITIATIVE_RULE,
   isInboxCardDropUnseen,
   isInboxCardPersonColumn,
   type InboxAuthor,
@@ -59,9 +61,11 @@ function columnInput(value: unknown): unknown {
   return inboxCardColumnOf(value) ?? value;
 }
 
-/** One card as one line of text: every fact an agent acts on. */
-export function cardLineText(card: InboxCardWire): string {
+/** One card as one line of text: every fact an agent acts on. `initiativeName` names its initiative (a live one; the wire nulls a deleted one). */
+export function cardLineText(card: InboxCardWire, initiativeName: (id: string) => string | null = () => null): string {
   const parts = [`- ${card.id}`, JSON.stringify(card.title), INBOX_CARD_COLUMN_LABELS[card.column]];
+  const initiative = card.initiative ? initiativeName(card.initiative) : null;
+  if (initiative) parts.push(`initiative ${JSON.stringify(initiative)}`);
   if (card.you && isInboxCardPersonColumn(card.column)) parts.push(`You: ${JSON.stringify(card.you)}`);
   if (card.said) parts.push(`said ${JSON.stringify(card.said)}`);
   parts.push(`heard ${shortTime(card.heard_at)}`);
@@ -76,6 +80,26 @@ export function cardLineText(card: InboxCardWire): string {
   return parts.join(" · ");
 }
 
+/**
+ * The live initiatives, oldest first, each with how many cards it holds on
+ * the whole Board (every project: an initiative crosses them; cancelled cards
+ * left out), so an agent reuses one instead of making a near-duplicate
+ * (INBOX_CARD_INITIATIVE_RULE: "list shows them"). Empty when there are none.
+ */
+export function cardInitiativesSummary(store: InboxStore): { line: string; initiatives: { id: string; name: string; cards: number }[] } {
+  const live = store.initiatives().filter((initiative) => initiative.deleted_at === null);
+  if (live.length === 0) return { line: "", initiatives: [] };
+  const counts = new Map<string, number>();
+  for (const card of store.listCards()) {
+    if (card.column === "dropped") continue;
+    const id = store.cardWire(card).initiative;
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const initiatives = live.map((initiative) => ({ id: initiative.id, name: initiative.name, cards: counts.get(initiative.id) ?? 0 }));
+  const line = `Initiatives: ${initiatives.map((i) => `${i.name} (${i.cards} card${i.cards === 1 ? "" : "s"})`).join(", ")}.`;
+  return { line, initiatives };
+}
+
 /** The fields a tool call carries for one card call. */
 export interface CardCallInput {
   op: InboxCardOp;
@@ -88,6 +112,7 @@ export interface CardCallInput {
   pr?: string;
   ref?: string;
   reason?: string;
+  initiative?: string;
   idempotency_key?: string;
   asked_by?: "me" | "anyone";
   include_resolved?: boolean;
@@ -114,9 +139,9 @@ function cardInScope(store: InboxStore, id: string | undefined, projectIds: Read
 
 /** Fields each op takes; any other is refused by name (a column on a say would otherwise be dropped silently). */
 export const INBOX_CARD_OP_FIELDS: Record<InboxCardOp, readonly (keyof CardCallInput)[]> = {
-  create: ["title", "column", "say", "you", "thread_id", "pr", "ref", "idempotency_key"],
+  create: ["title", "column", "say", "you", "thread_id", "pr", "ref", "initiative", "idempotency_key"],
   move: ["card_id", "column", "say", "you", "thread_id", "pr", "ref", "reason"],
-  say: ["card_id", "say", "you", "title"],
+  say: ["card_id", "say", "you", "title", "initiative"],
   link: ["card_id", "thread_id", "pr", "ref", "say"],
   ship: ["card_id", "say", "pr", "ref", "thread_id"],
   drop: ["card_id", "reason", "say"],
@@ -161,10 +186,11 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const session = input.agent_session?.trim() || null;
   const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: inboxStoredAgentName(input.agent_name) };
   // A title that reads like a sentence gets a hint after the card line (approved 2026-10-27; never refused).
+  const initiativeName = (id: string) => store.initiative(id)?.name ?? null;
   const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);
     return {
-      text: `${verb}:\n${cardLineText(wire)}${hint ? `\n${hint}` : ""}`,
+      text: `${verb}:\n${cardLineText(wire, initiativeName)}${hint ? `\n${hint}` : ""}`,
       structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}) },
     };
   };
@@ -182,9 +208,11 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     const parked = cards.some((card) => card.column === "backlog" && card.moved_by?.kind === "person")
       ? "\nA card the person put in Backlog is not asked for yet: leave its work alone until they send it to you."
       : "";
+    const summary = cardInitiativesSummary(store);
+    const lines = cards.map((card) => cardLineText(card, initiativeName)).join("\n");
     return {
-      text: cards.length > 0 ? `${head}\n${cards.map(cardLineText).join("\n")}${parked}` : head,
-      structured: { project: { id: project.id, name: project.name, root: project.root }, cards, total: cards.length },
+      text: `${cards.length > 0 ? `${head}\n${lines}${parked}` : head}${summary.line ? `\n${summary.line}` : ""}`,
+      structured: { project: { id: project.id, name: project.name, root: project.root }, cards, total: cards.length, initiatives: summary.initiatives },
     };
   }
 
@@ -213,13 +241,16 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       prs: input.pr ? [input.pr] : [],
       refs: input.ref ? [input.ref] : [],
       idempotency_key: input.idempotency_key,
+      initiative_name: input.initiative,
     });
     return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed }, card.title);
   }
 
   const card = cardInScope(store, input.card_id, projectIds);
   if (input.op === "move" && !input.column) throw new InboxError("validation_error", "column: where the card goes (move).", { field: "column" });
-  if (input.op === "say" && !input.say && !input.you && !input.title) throw new InboxError("validation_error", "say: your last word (or `you`, what the person owes; or `title`).", { field: "say" });
+  if (input.op === "say" && !input.say && !input.you && !input.title && input.initiative === undefined) {
+    throw new InboxError("validation_error", "say: your last word (or `you`, what the person owes; `title`; or `initiative`).", { field: "say" });
+  }
   if (input.op === "link" && !input.thread_id && !input.pr && !input.ref) throw new InboxError("validation_error", "thread_id, pr or ref: what to link.", { field: "thread_id" });
   const column = input.op === "ship" ? "done" : input.op === "drop" ? "dropped" : input.column;
   const next = store.updateCard(card.id, {
@@ -232,6 +263,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     prs: input.pr ? [input.pr] : [],
     refs: input.ref ? [input.ref] : [],
     reason: input.reason,
+    initiative_name: input.initiative,
   });
   const verb = next.column !== card.column ? `Moved to ${INBOX_CARD_COLUMN_LABELS[next.column]}` : "Updated";
   return answer(verb, store.cardWire(next), {}, input.title ? next.title : null);
@@ -256,6 +288,7 @@ export function registerInboxCardTool(server: McpServer, context: InboxMcpContex
           pr: z.string().optional().describe("owner/repo#123 or a PR URL."),
           ref: z.string().optional().describe("A link: owner/repo#123, or any http(s) URL with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; Jira and YouTrack issue links show their key; any other link shows as a plain link."),
           reason: z.string().optional().describe("Why it is dropped."),
+          initiative: z.string().optional().describe(`${INBOX_CARD_INITIATIVE_FIELD} ${INBOX_CARD_INITIATIVE_RULE}`),
           thread_id: z.string().optional().describe("A thread or message id to link; create takes its subject when no title. Link the thread where the person makes the call."),
           idempotency_key: z.string().optional().describe("Create: the same key answers the first card."),
           asked_by: z.enum(["me", "anyone"]).optional().describe("List: \"me\" (default) or \"anyone\"."),

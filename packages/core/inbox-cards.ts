@@ -116,6 +116,25 @@ export const INBOX_BOARD_REQUEST_OPEN = "<plannotator-board-request>";
 export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
 
 /**
+ * When an agent puts a card in an initiative (the owner, q-a9c87ac3,
+ * 2026-11-04: "only if it's a true initiative that's going to span a lot of
+ * work… Not everything requires an initiative… use smart judgment, don't
+ * overthink it"). Fixed text: the card tool's `initiative` field, `plannotator
+ * card --help`, `plannotator inbox --help`, the Board request, the Board's
+ * prompt and the plannotator skill carry it whole, so they cannot drift.
+ * Words approved by the owner (q-f1ff983a, msg_01M6MCACRRYAJJ3PNS25BH4AZ7,
+ * with "Not all cards need an initiative:" for the draft's opening). Change
+ * them here only (the skill, being markdown, pastes the rule;
+ * plannotator-skill-reference.test.ts checks it still does).
+ */
+export const INBOX_CARD_INITIATIVE_RULE =
+  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it.";
+
+/** What the `initiative` field takes, before the rule. */
+export const INBOX_CARD_INITIATIVE_FIELD =
+  'The card\'s initiative, by name: an existing one (case and spaces ignored) or a new one; "" takes the card out.';
+
+/**
  * What an agent receives after the words of a message the person sent with
  * compose's Board chip on: the agent makes the card or cards itself, for
  * what was asked (owner, 2026-10-27: "create board card(s) depending on the
@@ -128,7 +147,7 @@ export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
 export function inboxBoardRequestBlock(threadId: string): string {
   return [
     INBOX_BOARD_REQUEST_OPEN,
-    `The person turned on Board tracking for this thread (thread_id ${threadId}). If no Board card links it yet (card op list, asked_by anyone, shows them), create card(s) for the work they asked for and link each to it; if one does, keep that one current instead of making another. How: your Inbox card tool, or \`plannotator card --help\`.`,
+    `The person turned on Board tracking for this thread (thread_id ${threadId}). If no Board card links it yet (card op list, asked_by anyone, shows them), create card(s) for the work they asked for and link each to it; if one does, keep that one current instead of making another. ${INBOX_CARD_INITIATIVE_RULE} How: your Inbox card tool, or \`plannotator card --help\`.`,
     INBOX_BOARD_REQUEST_CLOSE,
   ].join("\n");
 }
@@ -310,10 +329,11 @@ export interface InboxCard {
    */
   done_prs?: string[] | null;
   /**
-   * The Board initiative the person put the card in (approval
-   * "board-initiatives"): an `ini_` id, or null for none. Absent on a line
-   * written before initiatives (readInboxCard reads it as null). Only the
-   * person sets it; a deleted initiative reads as none on the wire.
+   * The Board initiative the card is in (approval "board-initiatives"): an
+   * `ini_` id, or null for none. Absent on a line written before initiatives
+   * (readInboxCard reads it as null). The person sets it by id; an agent by
+   * name (the card tool's `initiative`). The last one to set it wins. A
+   * deleted initiative reads as none on the wire.
    */
   initiative?: string | null;
 }

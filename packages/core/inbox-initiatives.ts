@@ -12,7 +12,10 @@
  * initiative is deleted reads as none (the store's `cardWire`), and its
  * history still names it.
  *
- * The person's only: agents neither make nor set one (no agent field yet).
+ * The person names, renames and deletes them. An agent puts its own card in
+ * one by name through the card tool's `initiative` (approval
+ * "board-initiatives", "Agents and initiatives"): a name no live initiative
+ * matches makes a new one, the only way an agent makes one.
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
@@ -60,6 +63,17 @@ export function isInboxInitiativeRecord(value: unknown): value is InboxInitiativ
 /** The key two names are the same by: case and surrounding space ignored. */
 export function inboxInitiativeNameKey(name: string): string {
   return name.trim().toLocaleLowerCase();
+}
+
+/**
+ * The key an agent's name for an initiative (the card tool's `initiative`)
+ * matches a live one by: case and every space ignored, so "code review",
+ * "Code  Review" and "CodeReview" all reuse "Code review" rather than make a
+ * near-duplicate. Wider than inboxInitiativeNameKey (what two names may not
+ * share), so an exact match there is tried first.
+ */
+export function inboxInitiativeMatchKey(name: string): string {
+  return inboxInitiativeNameKey(name).replace(/\s+/gu, "");
 }
 
 /**

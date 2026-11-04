@@ -414,6 +414,48 @@ describe("the Board page's routes: New card and the look", () => {
     expect(again).toMatchObject({ card: { id: ok.card.id }, replayed: true });
     expect(server.store.listCards().filter((c) => c.title === "Retry budget")).toHaveLength(1);
   });
+
+  // Approval "board-initiatives", "Agents and initiatives": through the real tool, an agent names an initiative; list
+  // shows each card's and the live ones with counts (what reuse depends on); rename and delete have no op.
+  test("an agent's initiative: joins by name, makes a new one, \"\" takes it out, and list shows them", async () => {
+    const { card, base } = await world();
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const billing = ((await (await post("/api/inbox/initiatives", { name: "Billing" })).json()) as { initiative: { id: string } }).initiative.id;
+
+    const joined = await card({ op: "create", title: "Invoices endpoint", initiative: "billing" });
+    expect(joined.structuredContent.card.initiative).toBe(billing);
+    expect(joined.content[0]!.text).toContain('initiative "Billing"');
+    const fresh = await card({ op: "create", title: "Schema step", initiative: "Code review" });
+    const review = fresh.structuredContent.card.initiative as string;
+    expect(review).toMatch(/^ini_/);
+    expect(review).not.toBe(billing);
+
+    const listed = await card({ op: "list" });
+    expect(listed.content[0]!.text).toContain("Initiatives: Billing (1 card), Code review (1 card).");
+    expect(listed.structuredContent.initiatives).toEqual([
+      { id: billing, name: "Billing", cards: 1 },
+      { id: review, name: "Code review", cards: 1 },
+    ]);
+
+    const id = joined.structuredContent.card.id as string;
+    const out = await card({ op: "say", card_id: id, initiative: "" });
+    expect(out.isError).toBeUndefined();
+    expect(out.structuredContent.card.initiative).toBeNull();
+    const opened = (await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { history: { kind: string; initiative?: string | null; by: { kind: string; name?: string } }[] };
+    expect(opened.history.filter((entry) => entry.kind === "initiative").map((entry) => [entry.initiative, entry.by.kind, entry.by.name])).toEqual([
+      [null, "agent", "Claude Code"],
+    ]);
+
+    // Only create and say take it; there is no op to rename or delete one.
+    expect((await card({ op: "move", card_id: id, column: "in_progress", initiative: "Billing" })).content[0]!.text).toContain("initiative: op move does not take it");
+    expect((await card({ op: "rename", initiative: "Billing" })).isError).toBe(true);
+    const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as { initiatives: { name: string; deleted_at: string | null }[] };
+    expect(model.initiatives.map((i) => [i.name, i.deleted_at])).toEqual([
+      ["Billing", null],
+      ["Code review", null],
+    ]);
+  });
 });
 
 // The action held back: the Inbox does not serve the card tool, and a card call says so.

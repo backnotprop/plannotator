@@ -32,6 +32,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_CONFIG } from "@plannotator/shared/agents";
+import { INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
 import {
   formatTopLevelHelp,
@@ -333,4 +334,11 @@ test("no shipped skill teaches thread steps, which are off by default", () => {
     const text = readFileSync(join(root, skill), "utf-8");
     expect({ skill, mentions: text.match(feature)?.[0] ?? null }).toEqual({ skill, mentions: null });
   }
+});
+
+// The initiative rule lives once (INBOX_CARD_INITIATIVE_RULE); the skill is markdown, so it pastes the rule. An edit
+// to the constant that misses the skill (or the reverse) would teach agents two different rules.
+test("the skill's card section carries the initiative rule word for word", () => {
+  expect(skillDoc).toContain(INBOX_CARD_INITIATIVE_RULE);
+  expect(skillDoc).toContain("--initiative <name>");
 });

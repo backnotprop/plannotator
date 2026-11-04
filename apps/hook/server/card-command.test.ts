@@ -238,5 +238,8 @@ describe("parseCardCommand", () => {
     expect(parseCardCommand(["say", "crd_x", "a", "--say", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["create"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["list", "--all"])).toMatchObject({ ok: true, args: { op: "list", include_resolved: true } });
+    // --initiative names one; "" (take the card out) reaches the tool as "", not as a missing value.
+    expect(parseCardCommand(["create", "Invoices", "--initiative", "Billing"])).toMatchObject({ ok: true, args: { op: "create", title: "Invoices", initiative: "Billing" } });
+    expect(parseCardCommand(["say", "crd_x", "--initiative", ""])).toMatchObject({ ok: true, args: { op: "say", card_id: "crd_x", initiative: "" } });
   });
 });

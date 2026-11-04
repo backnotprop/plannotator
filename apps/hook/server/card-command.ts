@@ -45,6 +45,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--key": "idempotency_key",
   "--reason": "reason",
   "--title": "title",
+  "--initiative": "initiative",
   "--project": "project",
 };
 

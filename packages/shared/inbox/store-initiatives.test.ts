@@ -170,3 +170,76 @@ describe("initiatives: the store", () => {
     expect(store.renameInitiative(shape.id, "SHAPE").name).toBe("SHAPE");
   });
 });
+
+// Approval "board-initiatives", "Agents and initiatives" (q-b3b9c89c): an agent puts its card in an initiative by
+// name (the card tool's `initiative`, here `initiative_name`), and makes one only that way. The failures guarded: a
+// near-duplicate made for a name that differs only in case or spaces; a refused card that leaves an initiative
+// behind; the 50 limit or the name rules skipped for agents; an agent that renames, deletes or sets by id.
+describe("initiatives: an agent's card names one", () => {
+  test("an existing name joins it, ignoring case and spaces; an unknown one makes it; \"\" takes the card out", () => {
+    const { store, project } = world();
+    const review = store.createInitiative({ name: "Code review", by: PERSON });
+    const joined = store.createCard({ project_id: project.id, by: AGENT, title: "Diff wrap", initiative_name: "  CODE review " }).card;
+    expect(joined.initiative).toBe(review.id);
+    const loose = store.createCard({ project_id: project.id, by: AGENT, title: "Hover", initiative_name: "codereview" }).card;
+    expect(loose.initiative).toBe(review.id);
+    expect(store.initiatives().length).toBe(1);
+
+    const billing = store.createCard({ project_id: project.id, by: AGENT, title: "Invoices", initiative_name: "Billing" }).card;
+    const made = store.initiatives().find((i) => i.name === "Billing")!;
+    expect(made.created_by).toEqual(AGENT);
+    expect(billing.initiative).toBe(made.id);
+    // The agent's say moves it, and its history names the agent.
+    store.updateCard(joined.id, { by: AGENT, initiative_name: "billing" });
+    expect(store.card(joined.id)!.initiative).toBe(made.id);
+    store.updateCard(joined.id, { by: AGENT, initiative_name: "" });
+    expect(store.cardWire(store.card(joined.id)!).initiative).toBeNull();
+    const lines = store.cardHistory(joined.id).filter((entry) => entry.kind === "initiative");
+    expect(lines.map((entry) => [entry.kind === "initiative" ? entry.initiative : "?", entry.by.kind])).toEqual([
+      [null, "agent"],
+      [made.id, "agent"],
+    ]);
+    // A say without the field keeps the initiative.
+    store.updateCard(billing.id, { by: AGENT, say: "drafted" });
+    expect(store.card(billing.id)!.initiative).toBe(made.id);
+  });
+
+  test("a refused card or a replay makes no initiative; the name rules and the limit hold for agents", () => {
+    const { store, project } = world();
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "", initiative_name: "Ghost" }))).toBe("validation_error");
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", column: "in_review", initiative_name: "Ghost" }))).toBe("validation_error");
+    expect(store.initiatives()).toEqual([]);
+    store.createCard({ project_id: project.id, by: AGENT, title: "Once", idempotency_key: "k" });
+    store.createCard({ project_id: project.id, by: AGENT, title: "Once", idempotency_key: "k", initiative_name: "Ghost" });
+    expect(store.initiatives()).toEqual([]);
+
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "x".repeat(41) }))).toBe("validation_error");
+    for (let i = 0; i < 50; i++) store.createInitiative({ name: `Effort ${i}`, by: PERSON });
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "One more" }))).toBe("initiative_limit");
+    // At the limit an existing name still joins.
+    expect(store.createCard({ project_id: project.id, by: AGENT, title: "y", initiative_name: "effort 7" }).card.initiative).not.toBeNull();
+  });
+
+  test("an agent still cannot make one directly, set one by id, rename or delete", () => {
+    const { store, project } = world();
+    const shape = store.createInitiative({ name: "Shape", by: PERSON });
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Tokens", initiative_name: "shape" });
+    expect(refusal(() => store.createInitiative({ name: "Mine", by: AGENT }))).toBe("initiative_person_only");
+    expect(refusal(() => store.setCardInitiative(card.id, null, AGENT))).toBe("initiative_person_only");
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative: shape.id }))).toBe("initiative_person_only");
+    // A name in other case joins the initiative; it never renames it.
+    expect(store.initiative(shape.id)!.name).toBe("Shape");
+  });
+
+  test("the last change wins, the person's or an agent's", () => {
+    const { store, project } = world();
+    const shape = store.createInitiative({ name: "Shape", by: PERSON });
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Tokens" });
+    store.setCardInitiative(card.id, shape.id, PERSON);
+    store.updateCard(card.id, { by: AGENT, initiative_name: "Billing" });
+    const billing = store.initiatives().find((i) => i.name === "Billing")!;
+    expect(store.card(card.id)!.initiative).toBe(billing.id);
+    store.setCardInitiative(card.id, shape.id, PERSON);
+    expect(store.card(card.id)!.initiative).toBe(shape.id);
+  });
+});
