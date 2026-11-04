@@ -191,6 +191,8 @@ test('desktop: never on load; at the calm moment the first-visit dialog offers t
   await expect(a.locator(`${DIALOG} [data-board-intro-close]`)).toHaveText('Not now');
   await expect(a.locator(`${DIALOG} [data-board-intro-on]`)).toHaveText('Turn it on');
   await expect(a.locator(`${DIALOG} [data-board-intro-copy]`)).toHaveCount(0);
+  // No line about the prompt in the offer (there is no Copy prompt to point at).
+  await expect(a.locator(`${DIALOG} .ib-bi-q`)).toHaveCount(0);
   await shots(a, 'desktop-{s}-reveal');
   // The second tab reaches its own moment: the Inbox says no.
   await readAndLeave(b, w.ids['refund-window']!);

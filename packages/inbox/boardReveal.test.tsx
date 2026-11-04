@@ -204,6 +204,8 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     expect(switchSaves()).toHaveLength(0);
     // The offer: Not now and Turn it on, never Copy prompt (there is no Board to fill yet).
     expect(dialog()!.querySelector('[data-board-intro-copy]')).toBeNull();
+    // Nor the line about the prompt: it would point at a button the offer does not have.
+    expect(dialog()!.querySelector('.ib-bi-q')).toBeNull();
     expect(dialog()!.querySelector('[data-board-intro-close]')!.textContent).toBe('Not now');
     const on = dialog()!.querySelector<HTMLButtonElement>('[data-board-intro-on]')!;
     expect(on.textContent).toBe('Turn it on');
@@ -223,6 +225,7 @@ describe.skipIf(!hasDom)('the calm moment', () => {
       root.render(<BoardIntro mcpCommand={null} phone={false} onClose={() => {}} />);
     });
     expect(dialog()!.querySelector('[data-board-intro-copy]')).not.toBeNull();
+    expect(dialog()!.querySelector('.ib-bi-q')).not.toBeNull();
     expect(dialog()!.querySelector('[data-board-intro-on]')).toBeNull();
   });
 

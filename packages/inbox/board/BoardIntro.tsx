@@ -37,8 +37,8 @@ export function useCopyBoardPrompt(mcpCommand: readonly string[] | null | undefi
  * Shown once per machine; the header's "?" opens it again.
  *
  * `onTurnOn`: the reveal's offer (the owner, 2026-11-04: reveals are opt-in), shown while the Board is still off. The
- * same picture and words, with "Not now" and "Turn it on" in place of Copy prompt: Turn it on is the only way this
- * dialog turns the Board on; Not now, Escape and a click outside leave it off.
+ * same picture, title and first line, without the prompt line, and "Not now" and "Turn it on" in place of Copy prompt:
+ * Turn it on is the only way this dialog turns the Board on; Not now, Escape and a click outside leave it off.
  */
 export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void; onTurnOn?: () => void }) {
   const { state, copiedOnce, copy } = useCopyBoardPrompt(mcpCommand);
@@ -46,7 +46,7 @@ export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpComman
     return (
       <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
         <BoardIntroArt />
-        <BoardIntroText />
+        <BoardIntroText prompt={false} />
         <div className="ib-bi-acts">
           <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
             Not now
@@ -62,7 +62,7 @@ export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpComman
   return (
     <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
       <BoardIntroArt />
-      <BoardIntroText />
+      <BoardIntroText prompt />
       <div className="ib-bi-acts">
         <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
           {copiedOnce ? 'Done' : 'Not now'}
@@ -80,12 +80,13 @@ export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpComman
   );
 }
 
-function BoardIntroText() {
+/** The title and lines. `prompt`: the line about Copy prompt, only where that button is (never in the offer). */
+function BoardIntroText({ prompt }: { prompt: boolean }) {
   return (
     <div className="ib-bi-text">
       <h2 id="ib-bi-title">Your Board</h2>
       <p id="ib-bi-desc">Work in flight, by stage. Agents keep their cards current.</p>
-      <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>
+      {prompt && <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>}
     </div>
   );
 }
