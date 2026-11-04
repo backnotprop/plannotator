@@ -95,8 +95,10 @@ function isReferencedByContext(url: URL, metadata: PRMetadata, context: PRContex
   return contextMarkdown(context).some((markdown) => {
     const decodedEntities = decodeHtmlEntities(markdown);
     if (needles.some((needle) => decodedEntities.includes(needle))) return true;
-    // An absolute reference written with another scheme or host case, or with
-    // the default port, still names the requested URL.
+    // An absolute reference that differs only in the case of its scheme or
+    // host, or by naming the default port, still names the requested URL.
+    // Nothing else is normalized: an `http://` reference never names an
+    // `https://` URL.
     return [...decodedEntities.matchAll(/https?:\/\/[^\s<>"'`\)\]]+/gi)]
       .some(([reference]) => referenceNamesUrl(reference, url));
   });

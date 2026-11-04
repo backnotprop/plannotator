@@ -1,5 +1,6 @@
 import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
+import { parseSrcset, serializeSrcset } from '@plannotator/ui/utils/srcset';
 import { artifactContentProxyUrl } from '../dock/panels/artifactDocument';
 
 /**
@@ -38,17 +39,13 @@ export function prImageSrc(src: string): string {
 /**
  * A `srcset` with each candidate URL passed through `prImageSrc`, descriptors
  * kept, so a `<picture>`'s dark-mode `<source>` loads through the proxy too.
+ * Candidates are split as the browser splits them, so a `data:` URL's comma
+ * stays inside its URL.
  */
 export function prImageSrcset(srcset: string): string {
-  return srcset
-    .split(',')
-    .map((candidate) => candidate.trim())
-    .filter(Boolean)
-    .map((candidate) => {
-      const [url = '', ...descriptors] = candidate.split(/\s+/);
-      return [prImageSrc(url), ...descriptors].join(' ');
-    })
-    .join(', ');
+  return serializeSrcset(
+    parseSrcset(srcset).map(({ url, descriptors }) => ({ url: prImageSrc(url), descriptors })),
+  );
 }
 
 export const resolvePRImage: ImageResolver = (src) => {

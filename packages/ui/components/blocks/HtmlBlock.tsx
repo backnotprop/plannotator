@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
+import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
@@ -92,20 +93,21 @@ function resolveHostMedia(
  * A `srcset` with every candidate URL put through the host's resolver (its
  * descriptors kept), or null when the resolver calls one `unavailable`, so the
  * browser never picks a candidate the host refused. A relative candidate the
- * resolver leaves alone loads like a relative `<img src>`.
+ * resolver leaves alone loads like a relative `<img src>`. Candidates are split
+ * the way the browser splits them (`parseSrcset`), so a `data:` URL's comma
+ * stays inside its URL.
  */
 function resolveSrcset(srcset: string, resolveImage: ImageResolver): string | null {
-  const candidates: string[] = [];
-  for (const candidate of srcset.split(',').map((part) => part.trim()).filter(Boolean)) {
-    const [url = '', ...descriptors] = candidate.split(/\s+/);
+  const candidates: SrcsetCandidate[] = [];
+  for (const { url, descriptors } of parseSrcset(srcset)) {
     const resolved = resolveImage(url);
     if (resolved?.kind === 'unavailable') return null;
     const src = resolved?.kind === 'src'
       ? resolved.src
       : /^(https?:|data:|blob:)/i.test(url) ? url : getImageSrc(url);
-    candidates.push([src, ...descriptors].join(' '));
+    candidates.push({ url: src, descriptors });
   }
-  return candidates.length > 0 ? candidates.join(', ') : null;
+  return candidates.length > 0 ? serializeSrcset(candidates) : null;
 }
 
 const IMAGE_NOT_FOUND_TITLE = 'Image could not be loaded';

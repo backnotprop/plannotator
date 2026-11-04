@@ -138,6 +138,24 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(refused.innerHTML).not.toContain('dark');
   });
 
+  // A `data:` candidate's comma is part of its URL. Split there, the tail
+  // (`AAAA`) became a relative candidate and an `/api/image?path=AAAA` fetch.
+  test('responsiveImages keeps a data: srcset candidate whole', async () => {
+    const inline = 'data:image/png;base64,AAAA';
+    const html = `<p><img src="https://cdn.test/light.png" srcset="${inline} 2x, https://cdn.test/light@3x.png 3x" alt="inline"></p>`;
+    const asked: string[] = [];
+    const resolveImage = (src: string) => {
+      asked.push(src);
+      return src.startsWith('https:') ? { kind: 'src' as const, src: `/proxy?u=${encodeURIComponent(src)}` } : null;
+    };
+    const el = await render(<RenderedMarkdown markdown={html} resolveImage={resolveImage} responsiveImages />);
+    expect(el.querySelector('img')?.getAttribute('srcset')).toBe(
+      `${inline} 2x, /proxy?u=${encodeURIComponent('https://cdn.test/light@3x.png')} 3x`,
+    );
+    expect(asked).not.toContain('AAAA');
+    expect(el.innerHTML).not.toContain('/api/image');
+  });
+
   test('headingAnchors gives headings deduplicated slug ids', async () => {
     const el = await render(<RenderedMarkdown markdown={DOC} headingAnchors />);
     expect(Array.from(el.querySelectorAll('h1, h2')).map((h) => h.id)).toEqual(['title', 'title-1']);

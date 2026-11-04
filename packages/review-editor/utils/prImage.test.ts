@@ -53,6 +53,15 @@ describe('prImageSrc', () => {
     expect(prImageSrcset(`${dark} 2x, ${badge} 1x`)).toBe(`${proxied(dark)} 2x, ${badge} 1x`);
     expect(prImageSrcset(dark)).toBe(proxied(dark));
   });
+
+  // A comma inside a candidate's URL is not a separator: splitting on it
+  // would turn `data:image/png;base64,AAAA 2x` into two broken candidates.
+  test('a data: candidate keeps the comma in its URL', () => {
+    const dark = 'https://github.com/user-attachments/assets/dark';
+    const inline = 'data:image/png;base64,AAAA';
+    expect(prImageSrcset(`${inline} 2x, ${dark} 1x`)).toBe(`${inline} 2x, ${proxied(dark)} 1x`);
+    expect(prImageSrcset(`${dark} 1x,${inline} 2x`)).toBe(`${proxied(dark)} 1x, ${inline} 2x`);
+  });
 });
 
 describe('proxiesGitHubImages', () => {
