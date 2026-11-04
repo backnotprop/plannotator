@@ -57,7 +57,7 @@ export interface UniqueMix {
 }
 
 export function seedInboxSearchWorld(dataDir: string, shape: SeedShape = WORST_CASE, seed = 1, unique: UniqueMix = { share: 0, kind: "ids" }): { store: InboxStore; textChars: number; threadIds: string[] } {
-  refuseRealDataDir(dataDir, "scripts/inbox-search-bench.ts");
+  refuseRealDataDir(dataDir, "scripts/inbox-large-store.ts");
   const random = rng(seed);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
   const invented = Array.from({ length: 4000 }, () => Array.from({ length: 2 + Math.floor(random() * 3) }, () => pick(SYLLABLES)).join(""));
