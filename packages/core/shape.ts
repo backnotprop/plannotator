@@ -849,7 +849,6 @@ function checkExampleStep(
 
   const inputs: ShapeExampleInput[] = [];
   const ins = c.list(st.inputs, `${f}.inputs`, SHAPE_LIMITS.exampleRows);
-  if (st.inputs === undefined) c.fail(`${f}.inputs`, 'is required (a list; it may be empty)');
   (ins ?? []).forEach((v, i) => {
     const vf = `${f}.inputs[${i}]`;
     if (!isRecord(v)) return c.fail(vf, 'must be { name, value, type, reading, from }');
@@ -863,7 +862,6 @@ function checkExampleStep(
 
   const checks: ShapeExampleCheck[] = [];
   const cl = c.list(st.checks, `${f}.checks`, SHAPE_LIMITS.exampleRows);
-  if (st.checks === undefined) c.fail(`${f}.checks`, 'is required (a list, in code order; it may be empty)');
   let failed = false;
   (cl ?? []).forEach((k, i) => {
     const kf = `${f}.checks[${i}]`;

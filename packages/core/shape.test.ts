@@ -284,6 +284,13 @@ describe('checkShapeBoard: examples on How it works', () => {
     expect(out[0]!.steps[1]!.arrow).toBe('hot');
   });
 
+  test('a step that takes nothing in and checks nothing may leave both lists out', () => {
+    const r = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ inputs: undefined, checks: undefined })] }]);
+    if (!r.ok) throw new Error(r.errors.join('\n'));
+    const kept = r.value.views.how!.examples![0]!.steps[0]!;
+    expect([kept.inputs, kept.checks]).toEqual([[], []]);
+  });
+
   test('a step must light a part or an arrow the drawing has, in the tall drawing too', () => {
     const r = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ part: 'how-kettle' }), step({ part: undefined, arrow: 'cold' })] }]);
     expect(r.ok).toBe(false);

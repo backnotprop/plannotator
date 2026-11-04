@@ -76,9 +76,9 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 - **views.how** (How it works, optional): one precise diagram that answers three questions: when it starts, how it is processed, and what it produces. Give every arrow a verb. 4 to 8 boxes. Use \`width\` and \`height\` for a fixed canvas the board scales to fit.
 - **views.how.examples** (optional): when How it works has a branch, add one example per way it can go, named by where it ends ("It opens", "Nothing shows"). The person follows each one through your diagram, step by step. Read every value, line and constant from the code; run nothing. An example is \`{ name, title, lead, steps }\`: \`title\` is the case in a line, \`lead\` what happens in a sentence. Each step:
   - \`part\` (a \`data-mark\`) and/or \`arrow\` (a \`data-edge\`): what it lights. \`tag\`: the value written on it, in a few words. \`text\`: what happens, in one plain sentence.
-  - \`inputs\`: \`[{ name, value, type, reading, from }]\`. \`from\` is \`{ path, line }\`, or \`{ step: n }\` for an earlier step's output.
-  - \`signature\`: the function as declared. \`code\`: its \`{ path, line }\`.
-  - \`checks\`, in code order: \`[{ code, constant, saw, result }]\`. \`result\` is \`pass\`, \`fail\` or \`not-reached\`. Mark the check that decided the step \`"decides": true\`; give a failing one its \`short\` ("20_000 short (20 s)").
+  - \`inputs\`: \`[{ name, value, type, reading, from }]\`. \`from\` is \`{ path, line }\`, \`{ step: n }\` for an earlier step's output, or a few words.
+  - \`signature\`: name, parameters and return type, no keywords: \`sound(r: Reading): Sound\`. \`code\`: its \`{ path, line }\`.
+  - \`checks\`, in code order: \`[{ code, constant, saw, result }]\`. A check is a condition the code needs to go on (\`a || b\` is one check). \`result\` is \`pass\`, \`fail\` (the code stops there; later checks are \`not-reached\`) or \`not-reached\`. Mark the check that decided the step \`"decides": true\`; give a failing one its \`short\` ("20_000 short (20 s)").
   - \`output\`: \`{ name, value, type }\`.
 - **views.reqs** (Requirements, optional): short lines in groups. Inline Markdown: \`**bold**\`, \`code\`, links, and \`[^n]\` for reference n.
 - **views.code** (Code, optional): a Guided Review of the change. Leave it out unless the person asks.
@@ -87,7 +87,7 @@ DRAFT. The person wants to see the work in this thread the way you see it, so th
 ## Drawing rules
 
 - \`data-mark="id"\` on each part the person may point at. Keep the id across versions.
-- \`data-edge="id"\` on an arrow an example takes, and on its words.
+- \`data-edge="id"\` on an arrow an example takes, and the same id on its words.
 - \`data-step="N"\` on parts that should appear together; steps arrive in number order, the order you would explain them aloud.
 - \`<span data-ref="n"></span>\` puts reference bubble n on the drawing.
 - Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, and the one accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill). Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"dash"\`, and \`"t-acc"\` / \`"t-grey"\` for text.
