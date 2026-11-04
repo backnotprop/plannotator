@@ -123,6 +123,25 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(typeof handle.current?.print).toBe('function');
   });
 
+  // The owner's rule: a new sheet per section only for a page that carries
+  // the host-theme marker (Plannotator's own explainers). An arbitrary page
+  // of many short sections must not print one per sheet; every page still
+  // gets the no-clip rule.
+  test('section page breaks are injected only into a document with the host-theme marker', async () => {
+    const body = '<body><section>One</section><section>Two</section></body></html>';
+    const marked = await mount({
+      rawHtml: `<!doctype html><html><head><meta name="plannotator-theme" content="host"></head>${body}`,
+    });
+    const markedSrcdoc = marked.iframe.getAttribute('srcdoc') ?? '';
+    expect(markedSrcdoc).toContain('section ~ section');
+    expect(markedSrcdoc).toContain('overflow: visible !important');
+
+    const plain = await mount({ rawHtml: `<!doctype html><html><head><title>FAQ</title></head>${body}` });
+    const plainSrcdoc = plain.iframe.getAttribute('srcdoc') ?? '';
+    expect(plainSrcdoc).not.toContain('section ~ section');
+    expect(plainSrcdoc).toContain('overflow: visible !important');
+  });
+
   test('the srcdoc loads the bridge by URL instead of inlining it', async () => {
     const { iframe } = await mount({ bridgeScriptUrl: ASSET_URL });
     const srcdoc = iframe.getAttribute('srcdoc') ?? '';

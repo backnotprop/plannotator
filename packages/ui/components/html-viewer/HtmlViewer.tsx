@@ -563,7 +563,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(injectPrintDefaults(rawHtml), injection);
+      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     useLayoutEffect(() => {

@@ -22,6 +22,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  injectPrintDefaults,
 } from "./srcdoc";
 
 const HOST_TOKENS = {
@@ -5060,5 +5061,44 @@ describe("injectIntoHead", () => {
     // Other meta tags survive untouched.
     const keep = '<meta http-equiv="refresh" content="0"><meta charset="utf-8">';
     expect(injectIntoHead(`<head>${keep}</head>`, "[X]")).toContain(keep);
+  });
+});
+
+describe("injectPrintDefaults", () => {
+  const STYLE = /<style>[\s\S]*?<\/style>/;
+  const styleAt = (html: string) => html.search(STYLE);
+
+  // Before the doctype, the page would render in quirks mode on screen.
+  test("a document with a doctype and no <head> gets the style after the doctype", () => {
+    const out = injectPrintDefaults("<!DOCTYPE html>\n<p>no head</p>");
+    expect(out.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(styleAt(out)).toBe("<!DOCTYPE html>".length);
+    expect(out.endsWith("\n<p>no head</p>")).toBe(true);
+  });
+
+  test("a comment before the doctype is not mistaken for the insertion point", () => {
+    const out = injectPrintDefaults("<!-- built by x --><!doctype html><p>body</p>");
+    expect(styleAt(out)).toBe("<!-- built by x --><!doctype html>".length);
+  });
+
+  test("a <head> inside a comment or an early script is skipped for the real one", () => {
+    const real = "<head><title>t</title>";
+    const commented = `<!doctype html><!-- <head> moved below --><html>${real}</head><body></body></html>`;
+    const out = injectPrintDefaults(commented);
+    expect(out).toContain("<!-- <head> moved below -->");
+    expect(styleAt(out)).toBe(commented.indexOf(real) + "<head>".length);
+
+    const scripted = `<script>document.write("<head>")</script><html>${real}</head></html>`;
+    expect(styleAt(injectPrintDefaults(scripted))).toBe(scripted.indexOf(real) + "<head>".length);
+  });
+
+  test("a <head> with attributes takes the style just inside it, ahead of author styles", () => {
+    const html = '<!doctype html><html><head lang="en"><style>@layer a{}</style></head></html>';
+    const out = injectPrintDefaults(html);
+    expect(styleAt(out)).toBe(html.indexOf('<head lang="en">') + '<head lang="en">'.length);
+  });
+
+  test("a fragment with no doctype and no <head> gets the style first", () => {
+    expect(styleAt(injectPrintDefaults("<p>x</p>"))).toBe(0);
   });
 });
