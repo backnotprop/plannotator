@@ -1,7 +1,7 @@
 /**
  * Stub pages for apps/hook/dist, for tests that run the CLI from source.
  *
- * The CLI imports apps/hook/dist/{index,review,inbox}.html at module load; a
+ * The CLI imports apps/hook/dist/{index,review,inbox,shape}.html at module load; a
  * checkout that never ran `build:hook` (CI's test job) has none of them. A
  * test writes a stub for each one missing and removes exactly those stubs
  * afterwards: each stub carries a marker, so a real page a build wrote
@@ -16,7 +16,7 @@ export const HOOK_DIST_DIR = resolve(import.meta.dirname, "..", "..", "apps", "h
 /** What a stub page holds, marked so `removeStubbedHtml` can tell it from a real build. */
 export const STUB_HTML = "<!doctype html><title>test</title><!-- plannotator test stub: tests/helpers/hook-dist-stub.ts -->";
 
-const PAGES = ["index.html", "review.html", "inbox.html"] as const;
+const PAGES = ["index.html", "review.html", "inbox.html", "shape.html"] as const;
 
 /** Write a marked stub for each built page that is missing. Returns what to pass to `removeStubbedHtml`. */
 export function stubHookDistHtml(): string[] {

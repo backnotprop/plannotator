@@ -502,3 +502,4 @@ packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/inbox/shape/standalone/ShapePage.test.tsx

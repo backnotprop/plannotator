@@ -370,6 +370,16 @@ One engine for both runtimes, `packages/shared/file-browser-watch-core.ts` (vend
 | `/api/inbox/outbox` | GET | `{ waiting, notices }`: writes held for linked machines, and refusals or losses not dismissed. Each entry is `{ key, machine, route, state, queued_at, settled_at, status, answer, notice, dismissed, words, thread, machine_name }`: `words` is what a held reply or message says (cut at 2,000 characters, then "…"; null for any other write), `thread` the thread the window named in `X-Plannotator-Thread` when it sent the write (null when not named), `machine_name` the machine's name once its link is gone (null while linked); `POST /api/inbox/outbox/:key/dismiss` dismisses one |
 | `/api/inbox/control/machines[/offer\|/link\|/unlink]` | GET / POST | The CLI's `plannotator inbox link` / `unlink` (the registry's bearer token) |
 
+### Shapes Server (`packages/server/shape.ts`)
+
+Shape's page for people without the Inbox (`plannotator shape open`; see "Shape" in `guides-and-shared-ui.md`). Bun only, like the Inbox (Pi has no trigger for it; `apps/pi-extension/server/serverShape.ts` stays unmounted). One per data dir, named by `shapes/server.json` (`{ v, pid, port, url, version, started }`; a stopped server leaves `pid: 0`, so the next start takes the same port and nothing reads it as running). Binds `127.0.0.1` only; the Host allowlist runs local-only before every route, so every request that passes is this computer's (no tailnet listener, no guest). It exits 30 minutes after the last page closed (the page's event stream is the count).
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | The page (`apps/hook/dist/shape.html`, the Inbox window's CSP and `X-Frame-Options: DENY`) |
+| `/api/shape-server` | GET | `{ shape_server: 1, version, serverSession, on }`: the CLI's reuse check and the page's `serverSession`. Another site: `403` |
+| `/api/shapes`, `/api/shapes/*` | GET / POST | The Inbox's Shape routes above, the same handler (`createBunShapeRoutes`). Off (config `inboxShape` not true, read per request): `404` as if absent. Another site: `403`, reads included. A POST carrying another server's `serverSession`: `409 session_mismatch`, nothing saved |
+
 ### Host session control
 
 `GET /api/host/status` and `POST /api/host/close` (`packages/shared/host-control.ts`,
