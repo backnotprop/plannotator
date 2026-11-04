@@ -2664,6 +2664,13 @@ Settings → General gains a **Hide the repository owner** switch, off by defaul
 - **`DocBadges`** and **`PlanDiffViewer`** read the setting for the repository chip's text. `repoInfo` is unchanged, and so is the chip at the default.
 - **`Settings`** gains **`hideRepoOwnerSetting?: boolean`** (default false) to hide the row.
 
+## Ctrl+C / Cmd+C after the highlight (next ui release; behavior fix, additive export, no core change)
+
+Ctrl+C / Cmd+C copied the selected words only while the selection toolbar was up. Once the comment composer opened (its textarea takes the focus) it copied nothing, and the same held for the HTML composer, the plan diff's block composer and code review's line composer. Every host gets the fix; there is no prop.
+
+- **`utils/highlightCopy`** (new): **`useHighlightCopy(text)`** writes `text` into the page's `copy` event while it is non-empty; **`writeHighlightCopy(event, text)`** and **`copyHasOwnSelection(event)`** are the rule. The copy is plain text, as Ctrl+C at the toolbar stage always was (rich text is the Copy button's alone). Text the person selected in an input or textarea, or anywhere in the page, always copies natively, and an event another handler took is left alone.
+- **`Viewer`** copies the selection while its toolbar is up (as before) and while that selection's composer is open. **`HtmlViewer`** copies the composer's selected text (or a pinned element's text) while the composer is shown. **`PlanCleanDiffView`** copies the words dragged over when a click opened a block composer.
+
 ## The law (guardrails for anyone editing `@plannotator/ui`)
 
 These are enforced socially and, where possible, by CI. They exist because a prior from-scratch reimplementation of this UI broke the app and was reverted.

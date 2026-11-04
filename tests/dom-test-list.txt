@@ -512,3 +512,8 @@ packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/review-editor/components/MarkdownBody.prImages.test.tsx
+packages/ui/utils/highlightCopy.test.ts
+packages/ui/components/Viewer.highlightCopy.test.tsx
+packages/ui/components/plan-diff/PlanCleanDiffView.highlightCopy.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.highlightCopy.test.tsx
+packages/review-editor/components/ToolbarHost.highlightCopy.test.tsx
