@@ -180,6 +180,58 @@ test("the switch is a boolean, and only from this computer's page", async () => 
   expect((await w.settings()).board).toEqual({ on: false });
 });
 
+/** An event stream's `event: capabilities` frames, as they arrive, and whether it said hello. */
+function capabilityFrames(response: Response) {
+  const frames: Record<string, unknown>[] = [];
+  const state = { hello: false };
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const done = (async () => {
+    for (;;) {
+      const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      let cut: number;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        const event = /^event: (.+)$/m.exec(block)?.[1];
+        if (event === "hello") state.hello = true;
+        if (event === "capabilities") frames.push(JSON.parse(/^data: (.*)$/m.exec(block)![1]!) as Record<string, unknown>);
+      }
+    }
+  })();
+  return { frames, state, stop: async () => (await reader.cancel().catch(() => {}), await done) };
+}
+
+async function until(ready: () => boolean): Promise<void> {
+  const end = Date.now() + 5_000;
+  while (!ready()) {
+    if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+    await Bun.sleep(5);
+  }
+}
+
+// Review of #2598, finding 4 (the owner: settings sync everywhere): a Board turned on in one window (Settings, or a
+// reveal's "Turn it on") shows its row in every other one (the phone, another tab) without a reload.
+test("the switch tells every window at once (`event: capabilities` carries the Board), only on a change, never an agent's stream", async () => {
+  const w = await world();
+  const phone = capabilityFrames(await fetch(`${w.base}/api/inbox/events?window=board-phone`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+  const agent = capabilityFrames(await fetch(`${w.base}/api/inbox/events`));
+  await until(() => phone.state.hello && agent.state.hello);
+  expect((await w.setBoard(true)).status).toBe(200);
+  await until(() => phone.frames.length >= 1);
+  expect(phone.frames[0]!.board).toEqual({ on: true });
+  // The same state again says nothing; a change does, so the stream has caught up past the repeat.
+  expect((await w.setBoard(true)).status).toBe(200);
+  expect((await w.setBoard(false)).status).toBe(200);
+  await until(() => phone.frames.length >= 2);
+  expect(phone.frames.map((frame) => frame.board)).toEqual([{ on: true }, { on: false }]);
+  expect(agent.frames).toHaveLength(0);
+  await Promise.all([phone.stop(), agent.stop()]);
+});
+
 // Review of #2522, finding 7: the window states the tool's size with the Board on (INBOX_TOOL_COST_WITH_BOARD);
 // what regresses is card text that grows the entry every request carries while that number goes stale.
 test("the agent tool's entry with the Board on stays within 5% of the size the window states", async () => {

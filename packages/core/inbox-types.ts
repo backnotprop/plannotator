@@ -41,6 +41,8 @@ export * from "./inbox-steps";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Pull requests (code review in the Inbox, phase 2), the same way.
+export * from "./inbox-pulls";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -1534,6 +1536,17 @@ export interface InboxThread {
    * thread's. Absent from an older Inbox and from the MCP tools.
    */
   archive_seq?: number | null;
+  /**
+   * The window's read only: every pull request the person handed to this thread is a teammate's (Pull requests'
+   * Hand to an agent; the Inbox's own pull list said so when the owner was kept). Its reviews take no verdict:
+   * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
+   */
+  pull_theirs?: true;
+  /**
+   * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
+   * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
+   */
+  pull_keys?: string[];
   messages: InboxMessageWire[];
 }
 
@@ -2419,6 +2432,12 @@ export interface InboxDraft {
    * any other draft.
    */
   card?: { id: string; title: string };
+  /**
+   * The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread.
+   * `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review
+   * line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
+   */
+  pulls?: { keys: string[]; projects: string[]; ask_line: string };
   /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
   board_request?: true;
 }

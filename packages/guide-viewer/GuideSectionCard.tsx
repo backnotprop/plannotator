@@ -291,8 +291,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   return withTab(
     <div ref={cardRef} data-guide-section={index} style={tabbedCardStyle} className="scroll-mt-4 overflow-clip rounded-lg border border-border/50 bg-card">
       {/* Stacked below md; a proportional chapter column on tablets; the fixed 440px column from lg up (desktop unchanged). */}
-      <div className="md:grid md:grid-cols-[minmax(260px,36%)_minmax(0,1fr)] lg:grid-cols-[440px_minmax(0,1fr)]">
-        <div className="border-b border-border/40 md:border-b-0 md:border-r">
+      <div data-guide-section-grid="" className="md:grid md:grid-cols-[minmax(260px,36%)_minmax(0,1fr)] lg:grid-cols-[440px_minmax(0,1fr)]">
+        <div data-guide-section-narrative="" className="border-b border-border/40 md:border-b-0 md:border-r">
           <div className="px-4 py-4 md:sticky md:top-0 md:flex md:max-h-[calc(100dvh-48px)] md:flex-col md:overflow-y-auto md:overflow-x-hidden md:px-6 md:py-5">
             <div className="flex items-start gap-2 md:flex-none">
               <h3 className="flex-1 text-[15px] font-semibold leading-snug text-foreground [text-wrap:balance]">

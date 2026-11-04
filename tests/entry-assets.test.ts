@@ -196,8 +196,9 @@ describe('review entry assets', () => {
           ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
-    // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`.
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx'];
+    // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
+    // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`.
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
@@ -205,6 +206,10 @@ describe('review entry assets', () => {
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
     expect(read('packages/inbox/shape/ShapeParts.tsx')).toContain("lazy(() => import('#shape-board'))");
+    // The posting dialog waits for the review's ending, and nothing else imports it.
+    expect(read('packages/inbox/pulls/PostEnding.tsx')).toContain("lazy(() => import('#platform-post'))");
+    const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;
+    expect(walk('packages/inbox').filter((path) => post.test(read(path)))).toEqual([]);
     // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
     const board = /^import\s+(?!type\b)[^;]*from\s+['"]@plannotator\/ui\/components\/shape(?:\/ShapeSurface)?['"]/m;
     expect(walk('packages/inbox').filter((path) => path !== 'packages/inbox/shape/ShapeBoard.tsx' && board.test(read(path)))).toEqual([]);
