@@ -59,7 +59,7 @@ export function computeMenuPlacement(
   options: { boundaryTop?: number; prefer?: 'above' | 'below'; maxListHeight?: number } = {},
 ): MenuPlacement {
   const boundaryTop = options.boundaryTop ?? 0;
-  const cap = options.maxListHeight ?? MAX_LIST_HEIGHT;
+  const cap = Number.isFinite(options.maxListHeight) ? options.maxListHeight! : MAX_LIST_HEIGHT;
   const spaceAbove = anchorRect.top - boundaryTop - MENU_GAP - MENU_VIEWPORT_MARGIN - chromeHeight;
   const spaceBelow = viewportHeight - anchorRect.bottom - MENU_GAP - MENU_VIEWPORT_MARGIN - chromeHeight;
   const needed = Math.min(naturalListHeight, cap);
@@ -73,7 +73,9 @@ export function computeMenuPlacement(
   const available = space(direction);
   return {
     direction,
-    maxListHeight: Math.max(0, Math.min(cap, Math.round(available))),
+    // A NaN reading (a host's boundary or cap mid-rotation) keeps the cap: NaN never equals itself, so the
+    // equality-guarded setPlacement below would re-render forever (React error 185, the page goes blank).
+    maxListHeight: Number.isFinite(available) ? Math.max(0, Math.min(cap, Math.round(available))) : cap,
   };
 }
 

@@ -8,7 +8,8 @@
  *    folded Snoozed band; the toast's Undo puts it back;
  *  - the thread header's clock (approval "inbox-thread-header"; off a phone
  *    it, not the ⋯ menu, holds Snooze): Pick a time, two lists, by mouse, wheel and keys;
- *    the thread says "Snoozed until …" and Unsnooze ends it;
+ *    the row leaves for the band at once while the thread stays open and says
+ *    "Snoozed until …" (approval "inbox-snooze-moves-row"); Unsnooze ends it;
  *  - a Stopped thread: the folded band shows the triangle;
  *  - an agent's new question does not end a snooze; the person's reply does;
  *  - the return at its time (a short `until` through the window's own
@@ -238,10 +239,13 @@ test("the header's clock: Pick a time, two lists by mouse, wheel and keys; the t
   // Open, it says until when; the thread stays open and snoozed (opening never ends it).
   const line = page.locator('[data-snooze-line]');
   await expect(line).toContainText(/^Snoozed until \w{3} 4:00 PM|^Snoozed until \w{3} \d+, 4:00 PM/);
-  // With the thread open the list holds still: the row says until when in place, and goes to the band later.
-  await expect(row(page, threads.release).locator('[data-snoozed-until]')).toContainText('4:00 PM');
-  expect(await groupOf(page, threads.release)).toBe('waiting');
-  // A reload keeps it open and snoozed; the list read fresh draws it in the band.
+  // The person's own snooze moves its row even with the thread open (approval "inbox-snooze-moves-row"): it leaves
+  // Waiting on you at once for the folded band, which counts it, and the thread stays open.
+  await expect(row(page, threads.release)).toHaveCount(0);
+  await expect(bandButton(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(bandButton(page)).toContainText('Snoozed 1');
+  await expect(page).toHaveURL(new RegExp(`thread=${threads.release}`));
+  // A reload keeps it open and snoozed, its row still in the band.
   await page.reload();
   await expect(page.locator('[data-snooze-line]')).toBeVisible();
   await bandButton(page).click();
