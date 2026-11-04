@@ -514,4 +514,8 @@ packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
+packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
+packages/ui/components/CodeFilePopout.commentDraft.test.tsx
+packages/ui/components/ImageLightbox.regionDraft.test.tsx
 packages/review-editor/components/MarkdownBody.prImages.test.tsx

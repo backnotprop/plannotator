@@ -116,6 +116,14 @@ export const SHAPE_ASK_NOT_SENT = 'That question did not go through. Try again.'
 
 const key = (view: string, id: string) => `${view}/${id}`;
 
+/**
+ * The composer's draft key (CommentPopover `draftKey`): one draft per shape and
+ * target. A part is its view, mark id and the words chosen; the whole board or
+ * a whole view has no id and no words.
+ */
+const shapeCommentDraftKey = (shapeId: string, t: Pick<Target, 'view' | 'id' | 'text'>) =>
+  `shape:${shapeId}:${t.view ?? 'board'}:${t.id ?? ''}:${t.text}`;
+
 function marksFor(all: MarkState, view: ShapeViewId): MarkState {
   const pick = (s: ReadonlySet<string>) => new Set([...s].filter((k) => k.startsWith(`${view}/`)).map((k) => k.slice(view.length + 1)));
   return { fresh: pick(all.fresh), erasing: pick(all.erasing), noted: pick(all.noted) };
@@ -815,6 +823,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               contextText={quoteLabel(target)}
               isGlobal={false}
               allowImages={false}
+              // The words typed for this part survive a close (Escape, X) and come back when it is chosen again.
+              draftKey={shapeCommentDraftKey(id, target)}
               submitLabel="Change it"
               askAILabel="Ask"
               initialText={target.retry?.text}
@@ -843,6 +853,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               isGlobal
               headerText={general.view ? `${shapeViewLabel(general.view)} · the whole guide` : 'The whole board'}
               allowImages={false}
+              draftKey={shapeCommentDraftKey(id, { view: general.view, id: null, text: '' })}
               submitLabel="Change it"
               askAILabel="Ask"
               initialText={general.retry?.text}
