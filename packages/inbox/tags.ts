@@ -12,9 +12,13 @@
  * two would still read the same.
  */
 import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type InboxTag, type InboxThread } from '@plannotator/core/inbox-types';
-import type { MentionPerson } from '@plannotator/ui/utils/mentions';
+import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
+import { shortLabel } from './sessionLabels';
 import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+
+/** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
+export const TAG_LABEL_MAX = 40;
 
 /** The group heading of the agents that read the Inbox only (MCP): never woken. */
 export const TAG_READERS_GROUP = 'Reads the Inbox, not woken';
@@ -44,7 +48,8 @@ export interface TagOption {
 /** The person's name for an agent: an MCP agent's own name, else its host's, else "An agent". */
 export function agentName(host: string | null | undefined, name?: string | null): string {
   if (name) return name;
-  if (host) return INBOX_HOST_NAMES[host] ?? host;
+  // Own keys only: a host string like "constructor" is its own name, never Object's.
+  if (host) return Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host;
   return 'An agent';
 }
 
@@ -83,19 +88,31 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
     ...readers.sort((a, b) => Number(b.session === owner) - Number(a.session === owner)),
   ];
   const used = new Map<string, number>();
+  // A live session's own label (issue #2450): what the person named it, as the To picker shows it. Cut in the middle
+  // past TAG_LABEL_MAX, so the `@` token stays a short line (the reply route takes a tag's label up to 120).
+  const named = (s: TaggableSession) => (s.kind === 'live' && typeof s.label === 'string' ? shortLabel(sanitizeMentionLabel(s.label), TAG_LABEL_MAX) || null : null);
+  const unnamedLabel = (s: TaggableSession, agent: string) => {
+    // Only rows that can be tagged collide in the text: a session on an older Plannotator never makes Pi read "Pi (infra)".
+    // Named sessions count too, so an unnamed one beside them reads exactly as it did.
+    const sameAgent = sorted.filter((o) => (o.taggable || o === s) && agentName(o.host, o.kind === 'mcp' ? o.name : null) === agent);
+    if (s.session === owner || sameAgent.length < 2) return agent;
+    const here = !s.project || s.project.id === threadProjectId;
+    return here ? `${agent} (another session)` : `${agent} (${s.project!.name})`;
+  };
+  const plainLabels = new Set(sorted.filter((o) => o.taggable && !named(o)).map((o) => unnamedLabel(o, agentName(o.host, o.kind === 'mcp' ? o.name : null))));
   return sorted.map((s) => {
     const agent = agentName(s.host, s.kind === 'mcp' ? s.name : null);
-    // Only rows that can be tagged collide in the text: a session on an older Plannotator never makes Pi read "Pi (infra)".
-    const sameAgent = sorted.filter((o) => (o.taggable || o === s) && agentName(o.host, o.kind === 'mcp' ? o.name : null) === agent);
-    let label = agent;
-    if (s.session !== owner && sameAgent.length > 1) {
-      const here = !s.project || s.project.id === threadProjectId;
-      label = here ? `${agent} (another session)` : `${agent} (${s.project!.name})`;
-    }
+    const own = named(s);
+    let label = own ?? unnamedLabel(s, agent);
+    // Two sessions named alike, or a name that reads as another row's ("Pi"): the agent after it.
+    if (own && (plainLabels.has(own) || sorted.some((o) => o !== s && o.taggable && named(o) === own))) label = `${own} (${agent})`;
     // Two that would still read the same (two Pi sessions in infra): the later ones say "another session".
     const seen = used.get(label) ?? 0;
     used.set(label, seen + 1);
-    if (seen > 0) {
+    if (seen > 0 && own) {
+      // Two Claude Code sessions both named "Fix login": "Fix login (Claude Code 2)".
+      label = `${own} (${agent} ${seen + 1})`;
+    } else if (seen > 0) {
       const inner = label.endsWith(')') ? label.slice(label.lastIndexOf('(') + 1, -1) : null;
       label = inner === null ? `${agent} (another session)` : inner === 'another session' ? `${agent} (another session ${seen + 1})` : `${agent} (${inner}, another session)`;
     }

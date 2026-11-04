@@ -1,7 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { InboxApiError, inboxApi, type LiveSessionsModel } from '../api';
 import { HostMark, Icon } from '../icons';
+import { shortLabel } from '../sessionLabels';
 import { busyWord, hostLabel, startedLine } from './model';
+
+/** The longest label the Send button names, in characters; cut in the middle past it, so the button stays one line on a phone. */
+const SEND_LABEL_MAX = 24;
 
 /** After a move: the moved message's delivery line, else the thread's heading; never the page. */
 function focusAfterMove(messageId: string): void {
@@ -55,6 +59,15 @@ export function SendToAnotherSession({
   const others = (live?.sessions ?? []).filter((s) => s.session !== ended.session);
   // The selection stays on its session across re-reads; one that left falls back to the first.
   const chosen = others.find((s) => s.session === selected) ?? others[0] ?? null;
+  // Two sessions with one label (a label is display only, and a session can name itself like another): each of
+  // them says its agent before the label, so the rows and the button never read alike for two different targets.
+  const labelKey = (label: string | undefined) => (label ? label.trim().toLowerCase() : null);
+  const shared = new Set(
+    others
+      .map((s) => labelKey(s.label))
+      .filter((key, index, keys): key is string => key !== null && keys.indexOf(key) !== index),
+  );
+  const agentFirst = (label: string | undefined, host: string) => (shared.has(labelKey(label) ?? '') ? `${hostLabel(host)} · ` : '');
 
   useEffect(() => {
     if (!open) return;
@@ -139,12 +152,25 @@ export function SendToAnotherSession({
                   }}
                 />
                 <HostMark host={session.host} />
-                <span>
-                  <span className="ib-t">
-                    {hostLabel(session.host)} · {startedLine(session)}
+                {session.label ? (
+                  // A named session (issue #2450): its label on top, cut with "…" (the whole of it on hover), the agent under it.
+                  <span className="ib-opt-txt">
+                    <span className="ib-t" data-session-label="" title={`${agentFirst(session.label, session.host)}${session.label}`}>
+                      {agentFirst(session.label, session.host)}
+                      <bdi>{session.label}</bdi>
+                    </span>
+                    <span className="ib-d">
+                      {hostLabel(session.host)} · {startedLine(session)} · {busyWord(session)}
+                    </span>
                   </span>
-                  <span className="ib-d">{busyWord(session)}</span>
-                </span>
+                ) : (
+                  <span>
+                    <span className="ib-t">
+                      {hostLabel(session.host)} · {startedLine(session)}
+                    </span>
+                    <span className="ib-d">{busyWord(session)}</span>
+                  </span>
+                )}
               </label>
             ))}
           </fieldset>
@@ -157,7 +183,15 @@ export function SendToAnotherSession({
             {chosen && (
               <button type="submit" className="ib-btn ib-pri" disabled={busy} data-readdress-send="">
                 <Icon name="send" size={15} />
-                Send to {hostLabel(chosen.host)}
+                {chosen.label ? (
+                  // One flex item, so the button's gap does not open between "Send to" and the label.
+                  <span>
+                    Send to {agentFirst(chosen.label, chosen.host)}
+                    <bdi>{shortLabel(chosen.label, SEND_LABEL_MAX)}</bdi>
+                  </span>
+                ) : (
+                  <>Send to {hostLabel(chosen.host)}</>
+                )}
               </button>
             )}
             <button type="button" className="ib-btn ib-ghost" onClick={close}>
