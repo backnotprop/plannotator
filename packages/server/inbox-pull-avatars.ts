@@ -8,7 +8,7 @@
  * runs.
  * - https only; at most 3 redirects, each https. The URL's host must be public (as the favicons check it) unless it
  *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own), on
- *   the forge's own port (the one its host names, else 443).
+ *   the forge's own port (the avatar URL's when the forge returned one on its name, else 443).
  * - One deadline for the whole fetch (4 s); at most 256 KB a picture.
  * - Only an image: `image/*` declared, and bytes that sniff as PNG, JPEG, GIF or WebP; never SVG.
  * - Under the test sandbox (`PLANNOTATOR_TEST_SANDBOX`) only, an `http://127.0.0.1:<port>/` or
@@ -20,7 +20,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { join } from "node:path";
@@ -64,6 +64,8 @@ export interface PullAvatars {
   allowOnly(lists: readonly { host: string; avatars: Readonly<Record<string, string>> }[]): void;
   /** Whether a login is one the list returned on that host. */
   known(host: string, login: string): boolean;
+  /** How many misses memory holds (each kept an hour, then dropped): the map's bound, read by its test. */
+  missesHeld(): number;
   get(host: string, login: string): Promise<PullAvatarResult>;
 }
 
@@ -163,10 +165,16 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     return trimming;
   }
 
-  /** `replaced`: the bytes of the picture this one replaces on disk (0 for none). */
-  function writeDisk(key: string, url: string, type: string, body: Uint8Array, replaced: number): void {
+  function writeDisk(key: string, url: string, type: string, body: Uint8Array): void {
+    let replaced = 0;
     try {
       mkdirSync(options.dir, { recursive: true });
+      // The picture this one replaces, as it is on disk now (a trim may have dropped it since it was read): one stat.
+      try {
+        replaced = statSync(`${fileOf(key)}.img`).size;
+      } catch {
+        replaced = 0;
+      }
       writeFileSync(`${fileOf(key)}.img`, body);
       writeFileSync(`${fileOf(key)}.json`, JSON.stringify({ type, at: now(), url }));
     } catch {
@@ -194,14 +202,17 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       return { ok: false, miss: "not_https" };
     }
     if (!fetchable(url)) return { ok: false, miss: "not_https" };
-    const forge = forgeOrigin(host);
+    // The forge's own origin: its name (the list's host, which carries no port) on the port of the avatar URL the forge
+    // itself returned when that URL is on its name (a self-managed forge on :8443 serves its avatars there), else 443.
+    const named = forgeOrigin(host);
+    const forge = named ? { hostname: named.hostname, port: url.hostname === named.hostname ? url.port : named.port } : null;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const aborted = new Promise<never>((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true }));
     aborted.catch(() => {});
     const deadline = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, aborted]);
     // The forge's own host may be private (an enterprise forge on its network); any other host must be public. The
-    // forge is matched by name and port: its own URL's port when it names one, else https's default only.
+    // forge is matched by name and port: a redirect to another port on its name is not the forge.
     const allowed = async (target: URL) =>
       (target.protocol === "http:" && sandbox && LOOPBACK.has(target.hostname)) ||
       (!!forge && target.protocol === "https:" && target.hostname === forge.hostname && target.port === forge.port) ||
@@ -264,6 +275,7 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       for (const key of [...urls.keys()]) if (!listed.has(key.slice(0, key.indexOf("\n")))) urls.delete(key);
       for (const { host, avatars } of lists) allow(host, avatars);
     },
+    missesHeld: () => misses.size,
     known(host, login) {
       return urls.has(keyOf(host, login));
     },
@@ -282,7 +294,7 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
         .then((result): PullAvatarResult => {
           if (result.ok) {
             misses.delete(key);
-            writeDisk(key, url, result.type, result.body, disk?.body.byteLength ?? 0);
+            writeDisk(key, url, result.type, result.body);
             return result;
           }
           rememberMiss(key, result.miss);

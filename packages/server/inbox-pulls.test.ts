@@ -19,12 +19,12 @@
  *    stack not running from the stack's base to that layer's head; a diff
  *    asked for a PR the list never named reaching the CLI.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -166,6 +166,11 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
+  // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
+  let repo: { display: string; host: string } | null = options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" };
+  const setRepo = (next: typeof repo) => {
+    repo = next;
+  };
   const server = await startInboxServer({
     dataDir,
     phones: false,
@@ -175,7 +180,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     ...(options.board === undefined ? {} : { board: options.board }),
     ...(options.avatars ? { pullAvatars: options.avatars } : {}),
     refRunner: f.run,
-    readProjectRepo: async () => (options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" }),
+    readProjectRepo: async () => repo,
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -195,7 +200,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, project_id: projectId, validate_only: true }) });
   const review = (fields: Record<string, unknown>) =>
     fetch(`${base}/api/inbox/pulls/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
-  return { root, project, dataDir, base, server, forge: f, post, send, pulls, own, check, review, setCodeReview };
+  return { root, project, dataDir, base, server, forge: f, post, send, pulls, own, check, review, setCodeReview, setRepo };
 }
 
 const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
@@ -1211,6 +1216,33 @@ describe("GET /api/inbox/pulls/avatar", () => {
     const crossSite = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`, { headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" } });
     expect(crossSite.status).toBe(403);
     expect(s.fetched).toEqual([]);
+  });
+
+  test("a host the next list does not name keeps no author: its pictures are refused and nothing is fetched", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    await w.pulls();
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
+    // The project's origin goes (removed, or no longer on github.com): once the Inbox reads the origin again (its
+    // cache past its age), the next list names no host at all.
+    w.setRepo(null);
+    setSystemTime(new Date(Date.now() + INBOX_REPO_TTL_MS + 60_000));
+    try {
+      let hosts = 1;
+      for (let i = 0; i < 100 && hosts > 0; i++) {
+        hosts = ((await (await w.pulls()).json()) as { hosts: unknown[] }).hosts.length;
+        if (hosts > 0) await new Promise((done) => setTimeout(done, 10));
+      }
+      expect(hosts).toBe(0);
+      const fetched = s.fetched.length;
+      const gone = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`);
+      expect(gone.status).toBe(404);
+      expect(((await gone.json()) as { code: string }).code).toBe("avatar_unknown");
+      expect(s.fetched.length).toBe(fetched);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test("a picture the forge does not give is a miss (the window shows initials), and nothing runs while Code review is off", async () => {

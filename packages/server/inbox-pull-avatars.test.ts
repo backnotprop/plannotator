@@ -11,7 +11,7 @@
  *  - loopback http fetched outside the test sandbox.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
@@ -218,17 +218,25 @@ describe("PR authors' pictures", () => {
     const dir = tempDir();
     let now = 1_000_000;
     const s = scripted(() => new Response(png(1000), { headers: { "content-type": "image/png" } }));
-    const first = createPullAvatars({ ...s.options, dir, now: () => now, capBytes: 10_000 });
+    const first = createPullAvatars({ ...s.options, dir, now: () => now, capBytes: 3500 });
     first.allow("github.com", { a: `${URL_A}&a`, b: `${URL_A}&b`, c: `${URL_A}&c` });
     for (const login of ["a", "b", "c"]) {
       now += 1000;
       expect((await first.get("github.com", login)).ok).toBe(true);
     }
     expect(await settledImages(dir, 3)).toHaveLength(3);
-    // A new picture for "c" replaces its bytes: counted once, not twice.
+    // Let the first write's read of the folder finish: from here the size is the one kept, 3000 of 3500.
+    await new Promise((done) => setTimeout(done, 100));
+    // A picture this Inbox did not write (and so did not count): the folder holds 4000 now, but only a read would say.
+    writeFileSync(join(dir, "planted.img"), png(1000));
+    writeFileSync(join(dir, "planted.json"), JSON.stringify({ type: "image/png", at: 0, url: "x" }));
+    // A new picture for "c" replaces its 1000 bytes: the kept size stays 3000, under the cap, so the folder is not
+    // read and the planted file stays. Counted twice (or the old bytes added), it would read 5000 and trim the folder.
     now += 25 * 60 * 60 * 1000;
     expect((await first.get("github.com", "c")).ok).toBe(true);
-    expect(await settledImages(dir, 3)).toHaveLength(3);
+    await new Promise((done) => setTimeout(done, 100));
+    expect(readdirSync(dir).filter((n) => n.endsWith(".img"))).toHaveLength(4);
+    expect(readdirSync(dir)).toContain("planted.img");
     // The next Inbox has a smaller cap: its first write reads the folder and drops the oldest down to it.
     const next = createPullAvatars({ ...s.options, dir, now: () => now, capBytes: 2500 });
     next.allow("github.com", { d: `${URL_A}&d` });
@@ -237,6 +245,18 @@ describe("PR authors' pictures", () => {
     const kept = await settledImages(dir, 2);
     expect(kept).toHaveLength(2);
     expect(kept.reduce((sum, n) => sum + statSync(join(dir, n)).size, 0)).toBeLessThanOrEqual(2500);
+  });
+
+  test("misses are dropped after their hour: memory holds only the ones still remembered", async () => {
+    const s = scripted(() => new Response("nope", { status: 404 }));
+    let now = 1_000_000;
+    const avatars = createPullAvatars({ ...s.options, dir: tempDir(), now: () => now });
+    avatars.allow("github.com", { a: `${URL_A}&a`, b: `${URL_A}&b`, c: `${URL_A}&c`, d: `${URL_A}&d` });
+    for (const login of ["a", "b", "c"]) expect(await avatars.get("github.com", login)).toEqual({ ok: false, miss: "status" });
+    expect(avatars.missesHeld()).toBe(3);
+    now += 2 * 60 * 60 * 1000;
+    expect(await avatars.get("github.com", "d")).toEqual({ ok: false, miss: "status" });
+    expect(avatars.missesHeld()).toBe(1);
   });
 
   describe("redirects", () => {
@@ -295,13 +315,24 @@ describe("PR authors' pictures", () => {
       onDefault.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3" });
       expect((await onDefault.get("ghe.corp.example", "ana")).ok).toBe(true);
 
-      // A forge whose URL names its port (ghe.corp.example:8443): that port is the forge's, 443 is not.
-      const ported = scripted((url) => (url.endsWith(":8443/avatars/u/3") ? redirect("https://ghe.corp.example/x.png") : picture()));
+      // A self-managed forge on :8443. The list's host never carries a port (`ghe.corp.example`); the avatar URLs the
+      // forge returned do. Its pictures on :8443 are its own; a redirect from there to 443 (or :9443) is not the forge.
+      const ported = scripted((url) =>
+        url.endsWith("/avatars/u/4") ? redirect("https://ghe.corp.example/x.png") : url.endsWith("/avatars/u/5") ? redirect("https://ghe.corp.example:9443/x.png") : url.endsWith("/avatars/u/6") ? redirect("https://ghe.corp.example:8443/y.png") : picture(),
+      );
       ported.options.lookup = privateNames;
       const onPort = createPullAvatars({ ...ported.options, dir: tempDir() });
-      onPort.allow("ghe.corp.example:8443", { ana: "https://ghe.corp.example:8443/avatars/u/3", bo: "https://ghe.corp.example:8443/avatars/u/4" });
-      expect(await onPort.get("ghe.corp.example:8443", "ana")).toEqual({ ok: false, miss: "not_public" });
-      expect((await onPort.get("ghe.corp.example:8443", "bo")).ok).toBe(true);
+      onPort.allow("ghe.corp.example", {
+        ana: "https://ghe.corp.example:8443/avatars/u/3",
+        bo: "https://ghe.corp.example:8443/avatars/u/4",
+        cy: "https://ghe.corp.example:8443/avatars/u/5",
+        di: "https://ghe.corp.example:8443/avatars/u/6",
+      });
+      expect((await onPort.get("ghe.corp.example", "ana")).ok).toBe(true);
+      expect(await onPort.get("ghe.corp.example", "bo")).toEqual({ ok: false, miss: "not_public" });
+      expect(await onPort.get("ghe.corp.example", "cy")).toEqual({ ok: false, miss: "not_public" });
+      // Within its own port, a redirect is followed.
+      expect((await onPort.get("ghe.corp.example", "di")).ok).toBe(true);
     });
   });
 });
