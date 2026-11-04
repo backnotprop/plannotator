@@ -19,17 +19,30 @@
  *    stack not running from the stack's base to that layer's head; a diff
  *    asked for a PR the list never named reaching the CLI.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, GITHUB_SEARCH_MAX_CHARS, githubPullSearches, INBOX_PULL_DIFF_MAX_BYTES, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls, safeBranch } from "./inbox-pulls";
+import {
+  compareBranch,
+  createInboxPulls,
+  GITHUB_SEARCH_MAX_CHARS,
+  githubPullSearches,
+  INBOX_PULL_DIFF_MAX_BYTES,
+  INBOX_PULLS_FRESH_MS,
+  linkInboxPulls,
+  parseGithubPulls,
+  parseGitlabPulls,
+  previewOf,
+  safeBranch,
+} from "./inbox-pulls";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
 import type { PRRuntime } from "@plannotator/shared/pr-provider";
+import type { PullAvatarOptions } from "./inbox-pull-avatars";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -142,7 +155,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -153,6 +166,11 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
+  // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
+  let repo: { display: string; host: string } | null = options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" };
+  const setRepo = (next: typeof repo) => {
+    repo = next;
+  };
   const server = await startInboxServer({
     dataDir,
     phones: false,
@@ -160,8 +178,9 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     ...(options.codeReview === undefined ? {} : { codeReview: options.codeReview }),
     ...(options.tailscale ? { tailscale: options.tailscale } : {}),
     ...(options.board === undefined ? {} : { board: options.board }),
+    ...(options.avatars ? { pullAvatars: options.avatars } : {}),
     refRunner: f.run,
-    readProjectRepo: async () => (options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" }),
+    readProjectRepo: async () => repo,
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -181,7 +200,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, project_id: projectId, validate_only: true }) });
   const review = (fields: Record<string, unknown>) =>
     fetch(`${base}/api/inbox/pulls/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
-  return { root, project, dataDir, base, server, forge: f, post, send, pulls, own, check, review, setCodeReview };
+  return { root, project, dataDir, base, server, forge: f, post, send, pulls, own, check, review, setCodeReview, setRepo };
 }
 
 const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
@@ -442,7 +461,7 @@ describe("the reader", () => {
   test("no repository, no call at all", async () => {
     const f = forge();
     const pulls = createInboxPulls({ run: f.run });
-    expect(await pulls.list([])).toEqual({ fetched_at: null, hosts: [], pulls: [] });
+    expect(await pulls.list([])).toEqual({ fetched_at: null, hosts: [], pulls: [], clis: {}, unsigned: [] });
     expect(f.calls).toEqual([]);
   });
 });
@@ -665,6 +684,212 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
   test("branch names a compare would misread are refused", () => {
     for (const bad of ["-x", "/x", "a..b", "a:b", "a~1", "a^", "a b", "a@{1}", ""]) expect(safeBranch(bad)).toBe(false);
     for (const good of ["retry/schedule", "feat-2", "release_1.2"]) expect(safeBranch(good)).toBe(true);
+  });
+});
+
+// --- the worst-case stress test (break-ui on #2590): what the list must say when it can't read everything ---
+
+describe("the worst case (break-ui on #2590)", () => {
+  const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+
+  test("a host that times out on the first read: marked unavailable with no last read (its PRs aren't shown); after one answer, a failure says when that answer was read", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    // gh stopped at the list's time limit: nothing it said names a cause.
+    f.fail = "context deadline exceeded";
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    const first = await pulls.list(repos);
+    expect(first.pulls).toEqual([]);
+    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable" }]);
+    now += 31_000;
+    f.fail = null;
+    expect((await pulls.list(repos)).pulls).toHaveLength(3);
+    const readAt = new Date(now).toISOString();
+    now += INBOX_PULLS_FRESH_MS;
+    f.fail = "GraphQL: API rate limit already exceeded for user ID 48213.";
+    const limited = await pulls.list(repos);
+    expect(limited.pulls).toHaveLength(3);
+    expect(limited.hosts[0]).toMatchObject({ error: "rate_limited", last_read: readAt });
+  });
+
+  test("gh not installed is told apart from gh signed out; the host it would have asked is listed as unsigned", async () => {
+    const missing: RefRunner = async (cli) => ({ stdout: "", stderr: `${cli}: not found`, exitCode: 127 });
+    const none = await createInboxPulls({ run: missing }).list(repos);
+    expect(none.clis).toEqual({ gh: "missing", glab: "missing" });
+    expect(none.unsigned).toEqual(["github.com"]);
+    const signedOut: RefRunner = async (cli) => ({ stdout: "", stderr: cli === "gh" ? "You are not logged into any GitHub hosts. To log in, run: gh auth login" : "No GitLab instance is authenticated", exitCode: 1 });
+    const out = await createInboxPulls({ run: signedOut }).list(repos);
+    expect(out.clis).toEqual({ gh: "signed_out", glab: "signed_out" });
+    expect(out.unsigned).toEqual(["github.com"]);
+    expect(out.hosts).toEqual([]);
+  });
+
+  test("more open PRs than the searches answer: the host says how many the list shows, of how many (searches limited to the projects)", async () => {
+    const many = (from: number, n: number) => Array.from({ length: n }, (_, i) => ghPull(from + i, { headRefName: `b${from + i}` }));
+    const answer = { data: { viewer: { login: "dana" }, requested: { issueCount: 61, nodes: many(2000, 50) }, authored: { issueCount: 72, nodes: many(1000, 50) }, merged: { nodes: [] } } };
+    const f = forge(answer);
+    const listed = await createInboxPulls({ run: f.run }).list(repos);
+    // The searches were limited to the project's repository (`repo:`): every PR they found is the project's.
+    expect(f.graphql()[0]!.args.some((a) => a.startsWith("authored=") && a.includes(" repo:northwind/billing-svc"))).toBe(true);
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 100, total: 133 });
+    // Nothing left out: no count said.
+    expect(parseGithubPulls(JSON.stringify(GH_ANSWER), "github.com")!.capped).toBeUndefined();
+    expect((await createInboxPulls({ run: forge().run }).list(repos)).hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("the count says what the list shows: searches not limited to the projects (GitLab) give no total", async () => {
+    // jun's MRs: two found in the project, the rest of the 60 anywhere on gitlab.com.
+    const answer = {
+      data: {
+        currentUser: {
+          username: "dana",
+          requested: { count: 40, nodes: [GL_MR(1), GL_MR(2, { project: { fullPath: "elsewhere/thing" }, webUrl: "https://gitlab.com/elsewhere/thing/-/merge_requests/2" })] },
+          authored: { count: 20, nodes: [GL_MR(3, { author: { username: "dana" } })] },
+          merged: { nodes: [] },
+        },
+      },
+    };
+    const parsed = parseGitlabPulls(JSON.stringify(answer), "gitlab.com")!;
+    expect(parsed.capped).toEqual({ shown: 3, total: 60 });
+    const run: RefRunner = async (cli, args) => {
+      if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "not logged in", exitCode: 1 };
+    };
+    const listed = await createInboxPulls({ run }).list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+    expect(listed.pulls.map((p) => p.number).sort()).toEqual([1, 3]);
+    // Two shown, not "3 of 60": how many of the other 57 are the project's is not known.
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 2, total: null });
+  });
+
+  test("two lists at once each keep their own CLI states: a second list never wipes what the first found", async () => {
+    // gh is not installed. glab is signed in to gitlab.com, and its graphql answers only when let go. The first list
+    // covers github.com (gh missing) and gitlab.com; while glab's graphql is held, a second list for gitlab.com starts.
+    // Were the CLI states shared, the second would reset them and the first would say nothing of gh (which the window
+    // reads as "gh isn't signed in").
+    let letGo: () => void = () => {};
+    const held = new Promise<void>((done) => (letGo = done));
+    let graphqlAsked = false;
+    const answer = { data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(1, { author: { username: "dana" } })] }, merged: { nodes: [] } } } };
+    const run: RefRunner = async (cli, args) => {
+      if (cli === "gh") return { stdout: "", stderr: "gh: not found", exitCode: 127 };
+      if (args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (args.includes("graphql")) {
+        graphqlAsked = true;
+        await held;
+        return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    const ledger = { host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_2" };
+    const pulls = createInboxPulls({ run });
+    const firstList = pulls.list([...repos, ledger]);
+    while (!graphqlAsked) await new Promise((done) => setTimeout(done, 1));
+    const secondList = pulls.list([ledger]);
+    await new Promise((done) => setTimeout(done, 5));
+    letGo();
+    const [first, second] = await Promise.all([firstList, secondList]);
+    expect(first.clis.gh).toBe("missing");
+    expect(first.clis.glab).toBe("signed_in");
+    expect(first.unsigned).toEqual(["github.com"]);
+    expect(second.clis).toEqual({ glab: "signed_in" });
+    expect(second.unsigned).toEqual([]);
+  });
+
+  test("the repository's default branch is read (GitHub `defaultBranchRef`, GitLab `rootRef`); absent when the forge does not say", () => {
+    const gh = parseGithubPulls(JSON.stringify(answerOf([ghPull(1, { baseRepository: { defaultBranchRef: { name: "next" } } }), ghPull(2)])), "github.com")!;
+    expect(gh.pulls.find((p) => p.number === 1)!.default_branch).toBe("next");
+    expect("default_branch" in gh.pulls.find((p) => p.number === 2)!).toBe(false);
+    const gl = parseGitlabPulls(
+      JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(4, { project: { fullPath: "northwind/data/ledger", repository: { rootRef: "trunk" } } })] }, merged: { nodes: [] } } } }),
+      "gitlab.com",
+    )!;
+    expect(gl.pulls[0]!.default_branch).toBe("trunk");
+  });
+
+  test("authors' pictures stay on the server: only the authors of PRs the list shows, GitLab's relative paths made absolute", async () => {
+    const gl = parseGitlabPulls(
+      JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(5, { author: { username: "jun", avatarUrl: "/uploads/-/system/user/avatar/7/a.png" } })] }, authored: { nodes: [] }, merged: { nodes: [] } } } }),
+      "gitlab.example.org",
+    )!;
+    expect(gl.avatars).toEqual({ jun: "https://gitlab.example.org/uploads/-/system/user/avatar/7/a.png" });
+    const answer = answerOf(
+      [ghPull(1, { author: { login: "dana", avatarUrl: "https://avatars.githubusercontent.com/u/1" } }), ghPull(9, { author: { login: "outsider", avatarUrl: "https://avatars.githubusercontent.com/u/9" }, repository: { nameWithOwner: "elsewhere/thing" } })],
+      [ghPull(2, { author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2" } })],
+    );
+    const pulls = createInboxPulls({ run: forge(answer).run });
+    const listed = await pulls.list(repos);
+    // The answer itself carries no URL: the window asks the Inbox.
+    expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
+    expect(pulls.avatarUrls("github.com")).toEqual({ dana: "https://avatars.githubusercontent.com/u/1", tomas: "https://avatars.githubusercontent.com/u/2" });
+    expect(pulls.avatarUrls("gitlab.com")).toEqual({});
+  });
+
+  test("a conflicting PR says so (GitHub `mergeable`, GitLab `conflicts`); an unknown one says nothing", () => {
+    const gh = parseGithubPulls(JSON.stringify(answerOf([ghPull(1, { mergeable: "CONFLICTING" }), ghPull(2, { mergeable: "UNKNOWN" }), ghPull(3, { mergeable: "MERGEABLE" })])), "github.com")!;
+    const by = Object.fromEntries(gh.pulls.map((p) => [p.number, p]));
+    expect(by[1]!.conflicts).toBe(true);
+    expect(by[2]!.conflicts).toBeUndefined();
+    expect(by[3]!.conflicts).toBe(false);
+    const gl = parseGitlabPulls(JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(4, { conflicts: true })] }, merged: { nodes: [] } } } }), "gitlab.com")!;
+    expect(gl.pulls[0]!.conflicts).toBe(true);
+  });
+
+  test("a non-ASCII branch (a valid git branch) is compared, percent-encoded; one git refuses is still refused and runs nothing", async () => {
+    const answer = answerOf([
+      ghPull(330, { headRefName: "übersetzung/fehlermeldungen" }),
+      ghPull(331, { headRefName: "fehlermeldungen-im-dashboard", baseRefName: "übersetzung/fehlermeldungen" }),
+      ghPull(340, { headRefName: "bad..name" }),
+      ghPull(341, { headRefName: "on-bad", baseRefName: "bad..name" }),
+    ]);
+    const f = forge(answer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list(repos);
+    const diff = await pulls.diff("github.com/northwind/billing-svc#331", "stack");
+    expect(diff.patch).toBe("diff of repos/northwind/billing-svc/compare/main...fehlermeldungen-im-dashboard\n");
+    await pulls.diff("github.com/northwind/billing-svc#330", "stack");
+    expect(f.calls.at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
+    const before = f.calls.length;
+    await expect(pulls.diff("github.com/northwind/billing-svc#340", "stack")).rejects.toMatchObject({ code: "pull_diff_failed" });
+    expect(f.calls.length).toBe(before);
+    for (const bad of ["-x", "a..b", "a:b", "a~1", "a b", "a@{1}", "x.lock", "a//b", "‮evil", ""]) expect(compareBranch(bad)).toBe(false);
+    for (const good of ["übersetzung/fehlermeldungen", "日本語/ブランチ", "feat#12", "release/2026.10"]) expect(compareBranch(good)).toBe(true);
+  });
+
+  test("the last words keep code as written: no underscore or backtick turned into a space", () => {
+    expect(previewOf("Layer 3 fails `settle_batch()` on EUR→JPY. Rebased from `main`.")).toBe("Layer 3 fails settle_batch() on EUR→JPY. Rebased from main.");
+    expect(previewOf("## Status\n\n> **Done:** the _retry_ layer, see [the PR](https://x.test/1)\n- one\n- two")).toBe("Status Done: the retry layer, see the PR one two");
+    expect(previewOf("snake_case_name and 2*3*4")).toBe("snake_case_name and 2*3*4");
+  });
+
+  test("an agent that sent with a wake and polls no more is marked ended; a live one and an MCP-only one are not", () => {
+    const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1), ghPull(2), ghPull(3)])), "github.com")!.pulls;
+    const message = (id: string, thread: string, n: number, session: string, wakes: boolean) => ({
+      id,
+      thread_id: thread,
+      project_id: "prj_1",
+      created_at: "2026-11-03T10:00:00.000Z",
+      author: { kind: "agent", host: "opencode", session, name: "OpenCode" },
+      body: `Up: https://github.com/northwind/billing-svc/pull/${n}`,
+      ...(wakes ? { wakes: true } : {}),
+    });
+    const messages = new Map([
+      ["m1", message("m1", "t1", 1, "ses_gone", true)],
+      ["m2", message("m2", "t2", 2, "ses_live", true)],
+      ["m3", message("m3", "t3", 3, "ses_mcp", false)],
+    ]);
+    const store = {
+      threadsOf: () => [...messages.values()].map((m) => ({ thread_id: m.thread_id, last_at: m.created_at })),
+      threadMessageIds: (thread: string) => [...messages.values()].filter((m) => m.thread_id === thread).map((m) => m.id),
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+      sessionLive: (session: string) => session === "ses_live",
+    };
+    const links = linkInboxPulls(pull, store, new Map([["github.com/northwind/billing-svc", ["prj_1"]]]));
+    expect(links["github.com/northwind/billing-svc#1"]!.agent).toMatchObject({ session: "ses_gone", ended: true });
+    expect(links["github.com/northwind/billing-svc#2"]!.agent!.ended).toBeUndefined();
+    expect(links["github.com/northwind/billing-svc#3"]!.agent!.ended).toBeUndefined();
   });
 });
 
@@ -938,5 +1163,104 @@ describe("who may read it", () => {
       if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
       else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
     }
+  });
+});
+
+// --- the authors' pictures (the owner on #2608: the row's top-left spot is the author's picture) ---
+
+describe("GET /api/inbox/pulls/avatar", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const pictured = answerOf(
+    [ghPull(412, { headRefName: "retry/schedule", author: { login: "dana", avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4" } })],
+    [ghPull(880, { headRefName: "rtl", author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4" } })],
+  );
+  const scripted = () => {
+    const fetched: string[] = [];
+    const options: Partial<PullAvatarOptions> = {
+      fetch: async (url) => {
+        fetched.push(url);
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      },
+      lookup: async () => ["185.199.108.133"],
+    };
+    return { fetched, options };
+  };
+
+  test("a listed author's picture comes from the Inbox's own origin, fetched once from the URL the forge gave", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    expect((await w.pulls()).status).toBe(200);
+    const res = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG);
+    // The person's own picture too; the second ask of a picture is the cache's.
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(200);
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
+    expect(s.fetched).toEqual(["https://avatars.githubusercontent.com/u/2?v=4", "https://avatars.githubusercontent.com/u/1?v=4"]);
+  });
+
+  test("a login the list did not show is 404 and nothing is fetched; another site's page is refused", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    // Before any list: no one is known.
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).json()) as { code: string }).code).toBe("avatar_unknown");
+    await w.pulls();
+    const unknown = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=mallory`);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { code: string }).code).toBe("avatar_unknown");
+    const crossSite = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`, { headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" } });
+    expect(crossSite.status).toBe(403);
+    expect(s.fetched).toEqual([]);
+  });
+
+  test("a host the next list does not name keeps no author: its pictures are refused and nothing is fetched", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    await w.pulls();
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
+    // The project's origin goes (removed, or no longer on github.com): once the Inbox reads the origin again (its
+    // cache past its age), the next list names no host at all.
+    w.setRepo(null);
+    setSystemTime(new Date(Date.now() + INBOX_REPO_TTL_MS + 60_000));
+    try {
+      let hosts = 1;
+      for (let i = 0; i < 100 && hosts > 0; i++) {
+        hosts = ((await (await w.pulls()).json()) as { hosts: unknown[] }).hosts.length;
+        if (hosts > 0) await new Promise((done) => setTimeout(done, 10));
+      }
+      expect(hosts).toBe(0);
+      const fetched = s.fetched.length;
+      const gone = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`);
+      expect(gone.status).toBe(404);
+      expect(((await gone.json()) as { code: string }).code).toBe("avatar_unknown");
+      expect(s.fetched.length).toBe(fetched);
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("a picture the forge does not give is a miss (the window shows initials), and nothing runs while Code review is off", async () => {
+    const s = scripted();
+    s.options.fetch = async (url) => {
+      s.fetched.push(url);
+      return new Response("gone", { status: 404 });
+    };
+    const w = await world({ answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    expect((await w.setCodeReview(true)).status).toBe(200);
+    await w.pulls();
+    const miss = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`);
+    expect(miss.status).toBe(404);
+    expect((await miss.json()) as unknown).toMatchObject({ code: "avatar_miss", miss: "status" });
+    await w.setCodeReview(false);
+    const before = s.fetched.length;
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(409);
+    expect(s.fetched.length).toBe(before);
   });
 });

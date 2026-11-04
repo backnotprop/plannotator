@@ -21,6 +21,7 @@ import {
   type InboxPullStack,
 } from '@plannotator/core/inbox-types';
 import { agentName } from '../tags';
+import { stackLink, startLayer } from './topology';
 
 export { inboxPullLabel };
 
@@ -43,34 +44,6 @@ export const isOpenPull = inboxPullIsOpen;
 /** A stack's layers still to land, bottom first (a merged or closed one is done). */
 export function openLayers(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
   return stack.layers.filter(isOpenPull);
-}
-
-/** The agent's thread behind a stack: the topmost open layer's link, else any layer's. */
-export function stackLink(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
-  for (let i = stack.layers.length - 1; i >= 0; i--) {
-    const layer = stack.layers[i]!;
-    if (isOpenPull(layer) && links[layer.key]) return links[layer.key]!;
-  }
-  return stack.layers.map((l) => links[l.key]).find((l): l is InboxPullLink => !!l) ?? null;
-}
-
-/**
- * Where a verdict on one layer goes: that layer's own agent thread, else the stack's (among the person's own
- * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge). In a
- * tree the stack's thread is only that of a layer above it on its own chain (whose diff holds it): a thread handed #412
- * and #414 was never told about their sibling #413, so #413 has no agent until it is linked itself.
- */
-export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
-  if (!layer.mine) return null;
-  if (links[layer.key]) return links[layer.key]!;
-  const open = openLayers(stack);
-  const tree = isTree(open);
-  for (let i = stack.layers.length - 1; i >= 0; i--) {
-    const other = stack.layers[i]!;
-    if (!other.mine || !isOpenPull(other) || !links[other.key]) continue;
-    if (!tree || !isOpenPull(layer) || chainTo(open, other).includes(layer)) return links[other.key]!;
-  }
-  return null;
 }
 
 /** The open layer a layer is based on (its base is that layer's head), or null. */
@@ -97,15 +70,18 @@ export function linkAgentName(link: InboxPullLink | null): string | null {
 }
 
 /**
- * The stack's name: the thread's subject when the agent opened it there (`url`: the agent named its own work),
- * else its lowest open layer's title. A thread the person handed it to (`owner`) takes its subject from the
- * hand-off's first line ("You're being asked to help me review…"), never the stack's name; its thread name
- * (`pullHandoffThreadName`) is made from this title.
+ * The stack's name: the thread's subject when the agent opened the stack there (`url`: the agent named its own work,
+ * and that thread links the stack's lowest open layer), else its lowest open layer's title. A thread that linked
+ * only a layer higher up names that layer's work, not the stack's. A thread the person handed it to (`owner`) takes
+ * its subject from the hand-off's first line ("You're being asked to help me review…"), never the stack's name; its
+ * thread name (`pullHandoffThreadName`) is made from this title.
  */
-export function stackTitle(stack: InboxPullStack, link: InboxPullLink | null): string {
+export function stackTitle(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): string {
   const open = openLayers(stack);
   if (open.length === 1) return open[0]!.title;
-  return (link?.via === 'url' && link.thread_subject) || (inboxPullLandsNext(stack) ?? stack.layers[stack.layers.length - 1]!).title;
+  const root = inboxPullLandsNext(stack);
+  const link = root ? links[root.key] : undefined;
+  return (link?.via === 'url' && link.thread_subject) || (root ?? stack.layers[stack.layers.length - 1]!).title;
 }
 
 /** The Inbox projects a stack's repository is (two clones of one origin are two). */
@@ -293,7 +269,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
  * `stack` is the hand-off's (`handoffStack`), `whole` the stack it is from: "#412 to #414" only for a straight run of
  * `whole`'s open layers; a tree's chain that skips one (#413) lists its numbers instead, "Review #412, #414: <title>".
  */
-export function pullHandoffThreadName(stack: InboxPullStack, link: InboxPullLink | null, whole: InboxPullStack = stack): string {
+export function pullHandoffThreadName(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>> | null, whole: InboxPullStack = stack): string {
   const layers = handoffLayers(stack);
   const labels = layers.map(inboxPullLabel);
   const all = openLayers(whole);
@@ -301,7 +277,7 @@ export function pullHandoffThreadName(stack: InboxPullStack, link: InboxPullLink
   const straight = at >= 0 && layers.every((l, i) => all[at + i]?.key === l.key);
   const numbers = labels.length === 1 ? labels[0]! : straight ? `${labels[0]} to ${labels[labels.length - 1]}` : numberList(labels);
   const head = `Review ${numbers}: `;
-  return `${head}${cutText(pullTitleLine(stackTitle(stack, link)), INBOX_THREAD_NAME_MAX - [...head].length)}`;
+  return `${head}${cutText(pullTitleLine(stackTitle(stack, links ?? {})), INBOX_THREAD_NAME_MAX - [...head].length)}`;
 }
 
 /** A tree hand-off's numbers in its thread's name stay within this many characters. */
@@ -330,16 +306,6 @@ function stackAuthors(layers: readonly InboxPull[]): string {
   return `- Authors: ${[...by].map(([who, labels]) => `${who} (${labels.join(', ')})`).join(', ')}`;
 }
 
-/** The repository's own name (`billing-svc` for `northwind/billing-svc`). */
-export function repoName(repo: string): string {
-  return repo.slice(repo.lastIndexOf('/') + 1);
-}
-
-/** "Open on GitHub" / "Open on GitLab". */
-export function forgeName(stack: Pick<InboxPullStack, 'platform'>): string {
-  return stack.platform === 'gitlab' ? 'GitLab' : 'GitHub';
-}
-
 const possessive = (name: string) => (name.endsWith('s') ? `${name}'` : `${name}'s`);
 
 /** Why a PR is where it is, in words ("Tomas asked for your review"). */
@@ -357,6 +323,8 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
       return 'Changes requested';
     case 'failing':
       return 'Checks failed';
+    case 'conflicts':
+      return 'Has conflicts';
     case 'approved':
       return `${pull.approved_by ?? 'Approved'}${pull.approved_by ? ' approved' : ''}${pull.checks === 'success' ? ' · checks passed' : ''}`;
     case 'approved_running':
@@ -374,23 +342,35 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
   }
 }
 
-/** A stack row's third line: "3 open, 1 merged · start at #412" (a stack of one says why it waits, after its number). */
-export function rowLine(item: InboxPullItem, link: InboxPullLink | null): string {
+/** A row's third line in parts: what it is ("#412", "3 open, 1 merged"), the agent that has it, and why it waits. */
+export interface RowMeta {
+  lead: string;
+  /** The agent tied to it ("Claude Code has it"), drawn with its mark; null when none is. */
+  agent: { name: string; host: string | null; words: string } | null;
+  rest: string;
+}
+
+/**
+ * A row's third line: "#48201 · Claude Code has it · checks running", "3 open, 1 merged · Codex opened it · start at
+ * #412". The agent follows what the row is, before why it waits; an agent whose session ended "had it".
+ */
+export function rowMeta(item: InboxPullItem, link: InboxPullLink | null): RowMeta {
+  const name = link?.agent ? linkAgentName(link) : null;
+  const agent = name && link?.agent ? { name, host: link.agent.host, words: link.via !== 'owner' ? 'opened it' : link.agent.ended ? 'had it' : 'has it' } : null;
+  // Mid-line the reason starts lower case, but never an agent's name ("Your agent opened it").
+  const why = item.reason === 'agent_ready' ? (agent ? 'your review' : reasonWords(item, link)) : reasonWords(item, link).replace(/^./, (c) => c.toLowerCase());
+  if (item.stack.layers.length === 1) return { lead: inboxPullLabel(item.focus), agent, rest: why };
   const open = openLayers(item.stack);
-  // Mid-line the reason starts lower case, but never an agent's name ("Claude Code has it").
-  const reason = () => (item.reason === 'agent_ready' ? reasonWords(item, link) : reasonWords(item, link).replace(/^./, (c) => c.toLowerCase()));
-  if (item.stack.layers.length === 1) return `${inboxPullLabel(item.focus)} · ${reason()}`;
   const merged = item.stack.layers.filter((l) => l.state === 'merged').length;
   const counts = `${open.length} open${merged > 0 ? `, ${merged} merged` : ''}`;
   const start = startLayer(item.stack);
-  if (item.move === 'on_you' && start) return `${counts} · start at ${inboxPullLabel(start)}`;
-  return `${counts} · ${reason()}`;
+  return { lead: counts, agent, rest: item.move === 'on_you' && start ? `start at ${inboxPullLabel(start)}` : why };
 }
 
-/** Where "Open the diff" starts (layer by layer): the next layer to land that is not a draft, else the next to land. */
-export function startLayer(stack: InboxPullStack): InboxPull | null {
-  const open = openLayers(stack);
-  return open.find((l) => l.state === 'open') ?? open[0] ?? null;
+/** The row's third line as one string (what a screen reader and the tests read). */
+export function rowLine(item: InboxPullItem, link: InboxPullLink | null): string {
+  const meta = rowMeta(item, link);
+  return [meta.lead, meta.agent ? `${meta.agent.name} ${meta.agent.words}` : null, meta.rest].filter(Boolean).join(' · ');
 }
 
 /** A layer's status pill in the stack view, or null for none. */
@@ -399,6 +379,7 @@ export function layerPill(pull: InboxPull): { text: string; tone: 'you' | 'ok' |
   if (pull.state === 'draft') return { text: 'Draft', tone: 'quiet' };
   if (pull.requested && !pull.mine) return { text: 'Your review', tone: 'you' };
   if (pull.review === 'changes_requested') return { text: 'Changes requested', tone: 'bad' };
+  if (pull.conflicts === true) return { text: 'Conflicts', tone: 'bad' };
   if (pull.review === 'approved') return { text: 'Approved', tone: 'ok' };
   if (pull.mine) return { text: 'Your review', tone: 'you' };
   return { text: 'No reviews yet', tone: 'quiet' };
@@ -409,19 +390,15 @@ export function checksWords(pull: Pick<InboxPull, 'checks'>): string | null {
   return pull.checks === 'success' ? 'Checks passed' : pull.checks === 'failure' ? 'Checks failed' : pull.checks === 'pending' ? 'Checks running' : null;
 }
 
-/** "After #412" (on another layer), "Based on main" (the next to land), or null. */
-export function layerBaseWords(pull: InboxPull, stack: InboxPullStack): string | null {
-  const under = stack.layers.find((l) => l.head === pull.base && l.key !== pull.key);
-  if (under && under.state !== 'merged') return `After ${inboxPullLabel(under)}`;
-  if (under) return `On ${inboxPullLabel(under)}, merged`;
-  return inboxPullLandsNext(stack)?.key === pull.key && stack.layers.length > 1 ? `Based on ${pull.base}` : null;
+/** "pull request" / "merge request". */
+export function pullNounWord(platform: InboxPull['platform']): 'pull request' | 'merge request' {
+  return platform === 'gitlab' ? 'merge request' : 'pull request';
 }
 
-/** The layer after this one in landing order, among the open ones; null at the top. */
-export function nextLayer(stack: InboxPullStack, key: string): InboxPull | null {
-  const open = openLayers(stack);
-  const at = open.findIndex((l) => l.key === key);
-  return at >= 0 ? (open[at + 1] ?? null) : null;
+/** The stack view's ladder heading: "Landing order" for more than one layer, else "Pull request" / "Merge request". */
+export function ladderHeading(stack: InboxPullStack): string {
+  if (stack.layers.length > 1) return 'Landing order';
+  return stack.platform === 'gitlab' ? 'Merge request' : 'Pull request';
 }
 
 /** The stack (and its row) holding a PR or a stack id. */
