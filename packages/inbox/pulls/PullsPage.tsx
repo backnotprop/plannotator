@@ -13,13 +13,15 @@
  *   behind it and its thread, or "No agent yet" with Hand to an agent (one
  *   of the project's live sessions) and Launch an agent (compose's own launch,
  *   while the Inbox can launch); a Board chip only when the Board is on and a
- *   card links it; "Review layer by layer" (phase 1's review mode, on that
- *   layer) and "Whole stack"; Reply at the foot goes into the agent's thread.
+ *   card links it; the purple Review hands it to the picked agent, and "Open
+ *   the diff" (phase 1's review mode, layer by layer) with "Whole stack" sits
+ *   beside it in every state, as each layer's row does; Reply at the foot goes
+ *   into the agent's thread.
  *   No merge button.
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullLandsNext, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
@@ -337,6 +339,21 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // "Hand to another agent": the two lines open again, under the agent that has it.
   const [rehand, setRehand] = useState(false);
   useEffect(() => setRehand(false), [stack.id]);
+  // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
+  const openDiff = start ? (
+    <>
+      <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
+        <Icon name="code" size={15} />
+        Open the diff
+      </button>
+      {many && (
+        <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, top.key, 'stack')} data-pulls-review-stack="">
+          <Icon name="layers" size={15} />
+          Whole stack
+        </button>
+      )}
+    </>
+  ) : null;
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -446,26 +463,18 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             }}
             onCancel={link ? () => setRehand(false) : undefined}
             onReload={props.state.reload}
+            diff={openDiff}
           />
         )}
-        {openLayers.length > 0 && start && (
+        {openLayers.length > 0 && link && !rehand && (
           <div className="ib-pr-actions">
-            {reviewGuide ? (
+            {reviewGuide && (
               // The agent's guided review arrived: it is the review (phase 1's Start review), a stack's chapters its layers.
-              <button type="button" className="ib-btn ib-pri" onClick={() => props.onOpenGuide(link!.thread_id, reviewGuide.message_id)} data-pulls-start-review="">
+              <button type="button" className="ib-btn ib-pri" onClick={() => props.onOpenGuide(link.thread_id, reviewGuide.message_id)} data-pulls-start-review="">
                 Start review
               </button>
-            ) : (
-              <button type="button" className="ib-btn ib-pri" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-review-layers="">
-                {many ? 'Review layer by layer' : 'Review'}
-              </button>
             )}
-            {many && (
-              <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, top.key, 'stack')} data-pulls-review-stack="">
-                <Icon name="layers" size={15} />
-                Whole stack
-              </button>
-            )}
+            {openDiff}
           </div>
         )}
         <div className="ib-pr-order">
@@ -503,10 +512,12 @@ interface HandTargets {
 type HandSession = InboxComposeSession & { project_id: string };
 
 /**
- * The hand-off, inline (the owner's pick, take B): "Ask for" a guided review (the default) or the person's own curation,
- * then "Hand to" one of the project's live agents, each a pill, and "+ New agent" (compose's launch, shown only while
- * the Inbox can). No menu: every choice shows, nothing opens over the page. Once an agent has the PR, "Hand to another
- * agent" opens it again as "Hand again for", without the agent that has it.
+ * The hand-off, inline (the owner's pick, take B, with the owner's A2 actions): "Ask for" a guided review (the default)
+ * or the person's own curation, then "Agent": the project's live agents, each a pill that picks it (the last one handed
+ * to is picked first), and "+ New agent" (compose's launch, shown only while the Inbox can). The purple Review hands it
+ * to the picked agent; with no live agent, it launches a new one. It never opens the diff: "Open the diff" beside it
+ * does. No menu: every choice shows, nothing opens over the page. Once an agent has the PR, "Hand to another agent"
+ * opens it again as "Hand again for", without the agent that has it.
  *
  * A pick is checked with the Inbox first (these PRs, an agent in that project), then the hand-off goes to that session
  * as a new thread, then the thread is kept as the PRs' owner with the ask; a refusal before the send sends nothing.
@@ -523,6 +534,7 @@ function HandLine({
   onHanded,
   onCancel,
   onReload,
+  diff,
 }: {
   stack: InboxPullStack;
   projects: readonly string[];
@@ -534,6 +546,8 @@ function HandLine({
   onHanded: (session: string) => void;
   onCancel?: () => void;
   onReload: () => void;
+  /** "Open the diff" (and Whole stack), beside Review. */
+  diff: ReactNode;
 }) {
   const [targets, setTargets] = useState<HandTargets | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -593,6 +607,7 @@ function HandLine({
         await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
       }
       keyRef.current = null;
+      rememberPullAgent(session.session);
       onHanded(session.session);
     } catch (cause) {
       setError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'It was not handed over.');
@@ -602,9 +617,13 @@ function HandLine({
   };
   const sessions = (targets?.sessions ?? []).filter((s) => !owners.includes(s.session));
   const canLaunch = launch && targets?.launch === true;
+  // The picked agent: the person's pick, else the last one handed to, else the first live one.
+  const [pickedSession, setPickedSession] = useState<string | null>(null);
+  const picked = sessions.find((s) => s.session === pickedSession) ?? sessions.find((s) => s.session === lastPullAgent()) ?? sessions[0] ?? null;
+  const canReview = targets !== null && (picked !== null || canLaunch);
   return (
     <div
-      className="ib-pr-hgrid"
+      className="ib-pr-handoff"
       data-pulls-handoff={launch ? 'first' : 'again'}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && onCancel) {
@@ -613,67 +632,102 @@ function HandLine({
         }
       }}
     >
-      <span className="ib-pr-lab">{lead}</span>
-      <div className="ib-pr-hline" data-pulls-ask-choice={askKind}>
-        <div className="ib-seg ib-seg-sm" role="radiogroup" aria-label="Ask for">
-          {(['guide', 'custom'] as const).map((value) => (
-            <label key={value} className="ib-seg-o" data-on={askKind === value ? '' : undefined} data-pulls-ask-option={value}>
-              <input type="radio" name={askName} checked={askKind === value} onChange={() => setAskKind(value)} />
-              {value === 'guide' ? 'Guided review' : 'Custom curation'}
-            </label>
+      <div className="ib-pr-hgrid">
+        <span className="ib-pr-lab">{lead}</span>
+        <div className="ib-pr-hline" data-pulls-ask-choice={askKind}>
+          <div className="ib-seg ib-seg-sm" role="radiogroup" aria-label="Ask for">
+            {(['guide', 'custom'] as const).map((value) => (
+              <label key={value} className="ib-seg-o" data-on={askKind === value ? '' : undefined} data-pulls-ask-option={value}>
+                <input type="radio" name={askName} checked={askKind === value} onChange={() => setAskKind(value)} />
+                {value === 'guide' ? 'Guided review' : 'Custom curation'}
+              </label>
+            ))}
+          </div>
+          {askKind === 'custom' && (
+            <input
+              type="text"
+              className="ib-pr-askin"
+              value={words}
+              maxLength={PULL_HANDOFF_CUSTOM_MAX}
+              placeholder="/review-curate …"
+              aria-label="Custom curation"
+              onChange={(event) => setWords(event.target.value)}
+              data-pulls-ask-words=""
+            />
+          )}
+        </div>
+        <span className="ib-pr-lab">Agent</span>
+        <div className="ib-pr-hline" role="group" aria-label="Agent">
+          {sessions.map((session) => (
+            <button
+              type="button"
+              className="ib-pr-agbtn"
+              key={session.session}
+              data-pulls-hand-session={session.session}
+              aria-pressed={picked?.session === session.session}
+              disabled={sending !== null}
+              onClick={() => setPickedSession(session.session)}
+            >
+              <HostMark host={session.host} />
+              {`${hostLabel(session.host)}${session.label ? ` · ${session.label}` : ''}`}
+              {session.busy && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
+            </button>
           ))}
+          {canLaunch && (
+            <button
+              type="button"
+              className="ib-pr-agbtn ib-new"
+              disabled={sending !== null || waiting}
+              onClick={(event) => onLaunch(pullHandoffMessage(stack, ask), event.currentTarget)}
+              data-pulls-launch=""
+            >
+              <Icon name="plus" size={14} />
+              New agent
+            </button>
+          )}
+          {targets && sessions.length === 0 && !canLaunch && <span className="ib-mut">No live agent in this project</span>}
         </div>
-        {askKind === 'custom' && (
-          <input
-            type="text"
-            className="ib-pr-askin"
-            value={words}
-            maxLength={PULL_HANDOFF_CUSTOM_MAX}
-            placeholder="/review-curate …"
-            aria-label="Custom curation"
-            onChange={(event) => setWords(event.target.value)}
-            data-pulls-ask-words=""
-          />
+        {error && (
+          <div className="ib-error ib-pr-hgrid-err" role="alert">
+            {error}
+          </div>
         )}
       </div>
-      <span className="ib-pr-lab">Hand to</span>
-      <div className="ib-pr-hline" role="group" aria-label="Hand to">
-        {sessions.map((session) => (
-          <button
-            type="button"
-            className="ib-pr-agbtn"
-            key={session.session}
-            data-pulls-hand-session={session.session}
-            disabled={sending !== null || waiting}
-            aria-busy={sending === session.session || undefined}
-            onClick={() => void hand(session)}
-          >
-            <HostMark host={session.host} />
-            {sending === session.session ? 'Handing it over…' : `${hostLabel(session.host)}${session.label ? ` · ${session.label}` : ''}`}
-            {session.busy && sending !== session.session && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
-          </button>
-        ))}
-        {canLaunch && (
-          <button
-            type="button"
-            className="ib-pr-agbtn ib-new"
-            disabled={sending !== null || waiting}
-            onClick={(event) => onLaunch(pullHandoffMessage(stack, ask), event.currentTarget)}
-            data-pulls-launch=""
-          >
-            <Icon name="plus" size={14} />
-            New agent
-          </button>
-        )}
-        {targets && sessions.length === 0 && !canLaunch && <span className="ib-mut">No live agent in this project</span>}
+      <div className="ib-pr-actions">
+        <button
+          type="button"
+          className="ib-btn ib-pri"
+          disabled={sending !== null || waiting || !canReview}
+          aria-busy={sending !== null || undefined}
+          onClick={(event) => {
+            if (picked) void hand(picked);
+            else if (canLaunch) onLaunch(pullHandoffMessage(stack, ask), event.currentTarget);
+          }}
+          data-pulls-review={picked ? picked.session : canLaunch ? 'new' : ''}
+        >
+          {sending !== null ? 'Handing it over…' : 'Review'}
+        </button>
+        {diff}
       </div>
-      {error && (
-        <div className="ib-error ib-pr-hgrid-err" role="alert">
-          {error}
-        </div>
-      )}
     </div>
   );
+}
+
+const PULL_AGENT_KEY = 'plannotator-inbox-pr-agent';
+/** The session the person last handed a PR to: picked first next time while it is live. */
+function lastPullAgent(): string | null {
+  try {
+    return window.localStorage.getItem(PULL_AGENT_KEY);
+  } catch {
+    return null;
+  }
+}
+function rememberPullAgent(session: string): void {
+  try {
+    window.localStorage.setItem(PULL_AGENT_KEY, session);
+  } catch {
+    // Private mode: nothing is kept, the first live agent is picked.
+  }
 }
 
 function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; onReview: () => void }) {
@@ -732,8 +786,12 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
       {merged || layer.state === 'closed' ? (
         <div className="ib-pr-lrow">{body}</div>
       ) : (
-        <button type="button" className="ib-pr-lrow" onClick={onReview} aria-label={`Review ${inboxPullLabel(layer)} ${layer.title}${next ? ', lands next' : ''}`}>
+        <button type="button" className="ib-pr-lrow" onClick={onReview} aria-label={`Open the diff of ${inboxPullLabel(layer)} ${layer.title}${next ? ', lands next' : ''}`}>
           {body}
+          <span className="ib-pr-lgo" aria-hidden="true">
+            Open diff
+            <Icon name="chevR" size={13} />
+          </span>
         </button>
       )}
     </li>

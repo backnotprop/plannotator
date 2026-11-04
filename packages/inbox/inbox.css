@@ -7497,6 +7497,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-agbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .pn-inbox .ib-pr-agbtn:disabled { opacity: 0.55; cursor: default; }
 .pn-inbox .ib-pr-agbtn.ib-new { padding-left: 10px; border-style: dashed; color: var(--muted-foreground); }
+/* The picked agent, the one Review hands it to: tinted as an on button is (oklab, so light mode stays violet). */
+.pn-inbox .ib-pr-agbtn[aria-pressed="true"], .pn-inbox .ib-pr-agbtn[aria-pressed="true"]:hover:not(:disabled) { border-color: color-mix(in oklab, var(--primary) 55%, transparent); background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--primary); }
 .ib-pr-busy { width: 6px; height: 6px; border-radius: 50%; background: var(--success, #16a34a); }
 .ib-pr-hgrid-err { grid-column: 1 / -1; }
 .pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
@@ -7512,8 +7514,15 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-ladder::before { content: ""; position: absolute; left: 17px; top: 18px; bottom: 12px; width: 2px; border-radius: 1px; background: color-mix(in oklch, var(--border) 85%, transparent); }
 .ib-pr-layer { position: relative; }
 .pn-inbox .ib-pr-lrow { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px 10px 10px 8px; border-radius: 10px; text-align: left; color: var(--foreground); }
-.pn-inbox button.ib-pr-lrow:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 55%, transparent)); }
 .pn-inbox button.ib-pr-lrow:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* A row opens its diff: "Open diff ›" at its end, quiet until the row is under the pointer or focused. */
+.ib-pr-lgo { display: inline-flex; align-items: center; gap: 3px; flex: none; align-self: center; margin-left: 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox button.ib-pr-lrow:focus-visible .ib-pr-lgo { color: var(--primary); }
+/* Only under a real pointer: a tap leaves no outline behind on a phone. */
+@media (hover: hover) {
+  .pn-inbox button.ib-pr-lrow:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 55%, transparent)); box-shadow: inset 0 0 0 1px var(--border); }
+  .pn-inbox button.ib-pr-lrow:hover .ib-pr-lgo { color: var(--primary); }
+}
 .ib-pr-lmark { position: relative; z-index: 1; width: 20px; height: 22px; align-items: center; justify-content: center; background: var(--card); }
 .ib-pr-lmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ib-pr-l1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--ib-fs-14-5, 14.5px); line-height: 22px; }
@@ -7590,6 +7599,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-hline .ib-seg-sm .ib-seg-o { height: 40px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
+  .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
+  /* Review and Open the diff, each a full line, as the hand-off lines above them. */
+  .ib-pr-handoff .ib-pr-actions > .ib-btn { flex: 1 1 100%; justify-content: center; }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
   .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }

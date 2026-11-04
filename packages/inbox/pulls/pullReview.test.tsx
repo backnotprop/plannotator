@@ -554,9 +554,11 @@ function Page({
   onHanded,
   onOpenGuide,
   onOpenCard,
+  onReview,
 }: {
   answer: InboxPullsAnswer;
   stackId: string;
+  onReview?: (stackId: string, key: string, scope: 'layer' | 'stack') => void;
   onLaunch?: (keys: readonly string[], projects: readonly string[], body: string, askLine: string) => void;
   onHanded?: (session: string) => void;
   onOpenGuide?: (thread: string, message: string) => void;
@@ -573,7 +575,7 @@ function Page({
         phone={false}
         onOpenStack={() => {}}
         onProject={() => {}}
-        onReview={() => {}}
+        onReview={(id, key, scope) => onReview?.(id, key, scope)}
         onOpenThread={() => {}}
         onOpenGuide={(thread, message) => onOpenGuide?.(thread, message)}
         {...(onOpenCard ? { onOpenCard } : {})}
@@ -586,6 +588,12 @@ function Page({
 
 const sentPaths = () => posted.map((p) => p.path.replace(/^.*\/api\/inbox/, ''));
 
+/** Pick an agent's pill, then the purple Review: the hand-off goes to the picked agent. */
+async function handTo(session: string) {
+  await act(async () => el(`[data-pulls-hand-session="${session}"]`).click());
+  await act(async () => el('[data-pulls-review]').click());
+}
+
 test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's live sessions; checked, then sent with the guided review's ask, then kept as the stack's", async () => {
   const handed: string[] = [];
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onHanded={(s) => handed.push(s)} />);
@@ -596,7 +604,7 @@ test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's li
   expect(document.querySelector('[data-pulls-launch]')).toBeNull();
   expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
   expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
-  await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
+  await handTo('ses_billing');
   await settle();
   // The check runs first, so a PR the Inbox would refuse to keep never reaches the agent.
   expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/pulls/owner']);
@@ -618,14 +626,14 @@ test.skipIf(!hasDom)('Custom curation: the person\'s words ride /review-curate, 
   mount(<Page answer={{ ...model, links: {} }} stackId={single.key} />);
   await settle();
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  // No words yet: no agent can be picked.
-  expect(el<HTMLButtonElement>('[data-pulls-hand-session="ses_web"]').disabled).toBe(true);
+  // No words yet: Review sends nothing.
+  expect(el<HTMLButtonElement>('[data-pulls-review]').disabled).toBe(true);
   const input = el<HTMLInputElement>('[data-pulls-ask-words]');
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'only the fallback chain, and its tests');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => el('[data-pulls-hand-session="ses_web"]').click());
+  await handTo('ses_web');
   await settle();
   expect(String(posted.find((p) => p.path.endsWith('/messages'))!.body.body)).toContain('/review-curate only the fallback chain, and its tests');
   expect(posted.at(-1)!.body).toMatchObject({ ask: 'custom' });
@@ -635,7 +643,7 @@ test.skipIf(!hasDom)('a refused check sends nothing; a stack past the hand-off l
   const many = Array.from({ length: 21 }, (_, i) => pull(500 + i, { head: `l${i}`, base: i === 0 ? 'main' : `l${i - 1}` }));
   mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
+  await handTo('ses_billing');
   await settle();
   expect(posted).toEqual([]);
   expect(el('[data-pulls-handoff] [role="alert"]').textContent).toContain('more than 20');
@@ -654,12 +662,80 @@ test.skipIf(!hasDom)('Launch an agent opens compose with the hand-off, the stack
   expect(posted).toEqual([]);
 });
 
+test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the diff; a pill only picks; the last agent is picked first next time', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
+  const reviewed: string[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
+  await settle();
+  const pressed = () => [...document.querySelectorAll('[data-pulls-hand-session][aria-pressed="true"]')].map((b) => b.getAttribute('data-pulls-hand-session'));
+  // Nothing handed yet: the first live agent is picked.
+  expect(pressed()).toEqual(['ses_a']);
+  expect(el('[data-pulls-review]').textContent).toBe('Review');
+  await act(async () => el('[data-pulls-hand-session="ses_b"]').click());
+  await settle();
+  expect(posted).toEqual([]);
+  expect(pressed()).toEqual(['ses_b']);
+  await act(async () => el('[data-pulls-review]').click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith('/messages'))!.body.to).toEqual({ host: 'claude-code', session: 'ses_b' });
+  expect(reviewed).toEqual([]);
+  act(() => root?.unmount());
+  host?.remove();
+  posted.length = 0;
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  expect(pressed()).toEqual(['ses_b']);
+});
+
+test.skipIf(!hasDom)('with no live agent, Review launches a new one with the chosen ask', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const launched: string[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
+  await settle();
+  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
+  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
+  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'just the retry loop');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => el('[data-pulls-review]').click());
+  expect(launched).toHaveLength(1);
+  expect(launched[0]).toContain('/review-curate just the retry loop');
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('Open the diff, in every state, and each open row go straight to the review mode (layer by layer for a stack)', async () => {
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
+  const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true } };
+  const states: [string, Record<string, InboxPullLink>][] = [
+    ['before', {}],
+    ['on the way', { [stack[2]!.key]: owned }],
+    ['arrived', { [stack[2]!.key]: arrived }],
+  ];
+  const first = stack.find((l) => l.state === 'open')!;
+  for (const [name, links] of states) {
+    const reviewed: string[] = [];
+    mount(<Page answer={{ ...model, links }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
+    await settle();
+    await act(async () => el('[data-pulls-open-diff]').click());
+    expect([name, reviewed]).toEqual([name, [`${first.key}:layer`]]);
+    await act(async () => el(`[data-pulls-layer="${stack[2]!.key}"] button`).click());
+    expect([name, reviewed.at(-1)]).toEqual([name, `${stack[2]!.key}:layer`]);
+    expect(el(`[data-pulls-layer="${stack[2]!.key}"] .ib-pr-lgo`).textContent).toBe('Open diff');
+    expect([name, posted]).toEqual([name, []]);
+    if (name === 'arrived') expect(el('[data-pulls-start-review]').closest('.ib-pr-actions')!.querySelector('[data-pulls-open-diff]')).not.toBeNull();
+    act(() => root?.unmount());
+    host?.remove();
+  }
+});
+
 test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the words forbid pushing and approving", async () => {
   const theirs = model.pulls.find((p) => p.number === 880)!;
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={theirs.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand-session="ses_web"]').click());
+  await handTo('ses_web');
   await settle();
   const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
   expect(body).toContain("tomas's");
@@ -682,7 +758,7 @@ test.skipIf(!hasDom)('owned: "guided review on the way", Hand to another agent; 
   expect(document.querySelector('[data-pulls-rehand]')).toBeNull();
   expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
   expect(document.querySelector('[data-pulls-launch]')).toBeNull();
-  await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
+  await handTo('ses_billing');
   await settle();
   expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
   expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
