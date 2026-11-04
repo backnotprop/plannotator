@@ -103,10 +103,33 @@ describe('Show me model', () => {
     expect(shiftLines([50, 52], round1, swapped)).toEqual([80, 82]);
   });
 
+  test("an earlier round's lines are not placed on other code: a deleted block, a line added beside it, a repeated line (the delta-6 repros)", () => {
+    const round1 = new Map(Array.from({ length: 10 }, (_, i) => [i + 1, `line ${i + 1}`] as const));
+    const round2 = (...texts: string[]) => new Map(texts.map((text, i) => [i + 1, text] as const));
+    const rest = (from: number) => Array.from({ length: 11 - from }, (_, i) => `line ${from + i}`);
+    // (a) Lines 4–6 deleted, the line above kept: 4–6 is other code now.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', ...rest(7)))).toBeNull();
+    // (b) A line added between the guide and the block, line 5 edited: the block is at 5–7.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'added', 'line 4', 'line 5, edited', 'line 6', ...rest(7)))).toEqual([5, 7]);
+    // The same with every line of the block edited: the added line may be part of it or not, so no place.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'added', 'edited 4', 'edited 5', 'edited 6', ...rest(7)))).toBeNull();
+    // A line added inside the block, its ends kept (the fix inside what the picture showed): the block grew.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'line 4', 'added', 'line 5, edited', 'line 6', ...rest(7)))).toEqual([4, 7]);
+    // Edited in place, the lines around it kept: the same numbers.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'edited 4', 'edited 5', 'edited 6', ...rest(7)))).toEqual([4, 6]);
+    // (c) `return null;` and `}` are shown once in each diff, but in other functions: the block is gone, nothing below agrees.
+    const before = new Map([[197, 'function kept() {'], [198, '  return null;'], [199, '}'], [200, 'function gone() {'], [201, '  work();'], [202, '  done();'], [203, 'export default gone;']]);
+    const after = new Map([[196, 'const a = 1;'], [197, 'function other() {'], [198, '  if (x) foo();'], [199, '  return null;'], [200, '}'], [201, ''], [202, 'const b = 2;']]);
+    expect(earlierLinesNow([200, 202], before, after)).toBeNull();
+  });
+
   test("a Show me that named its picture has not ended, even before this window has read the picture", () => {
     const idle = { running: false, busy: false, drawn: false };
     expect(showMeEnded({}, idle)).toBe(true);
     expect(showMeEnded({ drawing: 'drw_1' }, idle)).toBe(false);
+    // The list, read again for it, still lacks the picture: it never comes, and the box does not wait on it.
+    expect(showMeEnded({ drawing: 'drw_1' }, { ...idle, lost: true })).toBe(true);
+    expect(showMeEnded({ drawing: 'drw_1', answer: 'words' }, { ...idle, lost: true })).toBe(false);
     expect(showMeEnded({ answer: '' }, idle)).toBe(false);
     expect(showMeEnded({ stopped: true }, idle)).toBe(false);
     expect(showMeEnded({}, { ...idle, running: true })).toBe(false);

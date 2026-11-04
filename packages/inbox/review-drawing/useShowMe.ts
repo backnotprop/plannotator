@@ -95,6 +95,7 @@ export function useShowMe({
   const [view, setView] = useState<{ drawing: string; as: 'sheet' | 'corner'; part: NonNullable<ShowMeState['shown']>['part']; from: ShowMePlace | null } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
+  const [lostDrawing, setLostDrawing] = useState<string | null>(null);
   const live = useRef<{ turn: string; index: number } | null>(null);
   /** What the box sent, to send again when the person picks a busy choice (the same turn, as Ask's retry). */
   const sent = useRef<{ turn: string; question: string; showMe: Parameters<typeof inboxApi.askSend>[3] } | null>(null);
@@ -221,17 +222,30 @@ export function useShowMe({
   // It ended with no picture and no answer: the Ask window's note for the turn (the agent went…), else the chat's
   // own problem (the session is blocked…). A window that is not streaming it (a reload) has no chat: when the Inbox
   // no longer runs the turn and kept nothing, it is the Ask window's "No answer arrived."
-  const boxEnded = !!box?.turn && showMeEnded(boxTurn, { running: boxRunning, busy: !!boxBusy, drawn: !!boxDrawing });
+  // A picture the turn names that the list, read again for it, still does not have (deleted, unreadable) never comes.
+  const boxLost = !!boxTurn?.drawing && lostDrawing === boxTurn.drawing && !boxDrawing;
+  const boxEnded = !!box?.turn && showMeEnded(boxTurn, { running: boxRunning, busy: !!boxBusy, drawn: !!boxDrawing, lost: boxLost });
   const boxFailed = boxEnded
-    ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && live.current?.turn !== box?.turn ? 'No answer arrived.' : null))
+    ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && (boxLost || live.current?.turn !== box?.turn) ? 'No answer arrived.' : null))
     : null;
   // The turn names its picture and this window's list has not got it (the two are read apart): read the list again.
   useEffect(() => {
-    if (!boxTurn?.drawing || boxDrawing) return;
+    const named = boxTurn?.drawing;
+    if (!named || boxDrawing) return;
+    let current = true;
     inboxApi.reviewDrawings(reviewId).then(
-      (read) => setDrawings(read.drawings),
-      () => {},
+      (read) => {
+        if (!current) return;
+        setDrawings(read.drawings);
+        if (!read.drawings.some((drawing) => drawing.id === named)) setLostDrawing(named);
+      },
+      () => {
+        if (current) setLostDrawing(named);
+      },
     );
+    return () => {
+      current = false;
+    };
   }, [boxTurn?.drawing, !!boxDrawing]); // eslint-disable-line react-hooks/exhaustive-deps
   // The box goes back to its words, with the note, ready to send again.
   useEffect(() => {
@@ -250,6 +264,7 @@ export function useShowMe({
    */
   const open = (place: ShowMePlace) => {
     setProblem(null);
+    openWhenRead.current = null;
     const drawn = drawings.filter((drawing) => showMeSamePlace(drawing, place)).at(-1);
     if (drawn) {
       opened.current.add(drawn.id);
@@ -295,6 +310,7 @@ export function useShowMe({
    */
   const again = (drawing: InboxReviewDrawing, place?: ShowMePlace) => {
     setProblem(null);
+    openWhenRead.current = null;
     setView(null);
     setBox({ place: place ?? { file: drawing.file, lines: drawing.lines }, words: drawing.words ?? '', turn: null, ...(drawing.round < round ? { again: drawing.round } : {}) });
   };
@@ -378,10 +394,16 @@ export function useShowMe({
     send,
     busyChoice,
     stop,
-    closeBox: () => setBox(null),
+    closeBox: () => {
+      openWhenRead.current = null;
+      setBox(null);
+    },
     /** A part was clicked: the picture shrinks to the corner card. */
     toCorner: (part: NonNullable<ShowMeState['shown']>['part']) => setView((current) => (current ? { ...current, as: 'corner', part } : current)),
     grow: () => setView((current) => (current ? { ...current, as: 'sheet' } : current)),
-    closePicture: () => setView(null),
+    closePicture: () => {
+      openWhenRead.current = null;
+      setView(null);
+    },
   };
 }

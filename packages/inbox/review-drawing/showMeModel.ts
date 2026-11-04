@@ -202,11 +202,13 @@ export function anchorLines(
 
 /**
  * Lines an earlier round asked about whose text changed since, where they
- * are in this round: shifted by the lines added or removed above them. The
- * offset is the one of the nearest line above the block (else below it) that
- * both rounds' diffs show once, with lines kept in the same order on both
- * sides. Null when there is no such line, or the earlier diff did not show
- * the block.
+ * are in this round. Guides are lines both rounds' diffs show once, kept in
+ * the same order on both sides. Each end of the block is found by its own
+ * line when that is a guide, else by the nearest guide past it with the lines
+ * between unchanged. A guide is needed above and below the block. The block
+ * may change in size only when both its ends are guides: else lines were added
+ * or removed beside it, and it is not known where. Null whenever it is not
+ * known: a fresh Show me is always safe, an old picture on other code is not.
  */
 export function shiftLines(
   lines: readonly [number, number],
@@ -214,21 +216,47 @@ export function shiftLines(
   after: ReadonlyMap<number, string> | undefined,
 ): [number, number] | null {
   if (!before || !after) return null;
-  for (let n = lines[0]; n <= lines[1]; n++) if (before.get(n) === undefined) return null;
+  const [first, last] = lines;
+  for (let n = first; n <= last; n++) if (before.get(n) === undefined) return null;
+  const kept = guideLines(before, after);
+  const guide = new Map(kept);
+  const above = kept.filter(([n]) => n < first).at(-1);
+  const below = kept.find(([n]) => n > last);
+  if (!above || !below) return null;
+  const unchanged = (from: number, to: number, count: number) => {
+    for (let i = 0; i < count; i++) {
+      const text = before.get(from + i);
+      if (text === undefined || after.get(to + i) !== text) return false;
+    }
+    return true;
+  };
+  const startFound = guide.get(first);
+  const start = startFound ?? above[1] + (first - above[0]);
+  if (startFound === undefined && !unchanged(above[0] + 1, above[1] + 1, first - above[0] - 1)) return null;
+  const endFound = guide.get(last);
+  const end = endFound ?? below[1] - (below[0] - last);
+  if (endFound === undefined && !unchanged(last + 1, end + 1, below[0] - last - 1)) return null;
+  if ((startFound === undefined || endFound === undefined) && end - start !== last - first) return null;
+  if (start <= above[1] || end >= below[1] || start > end) return null;
+  for (let n = start; n <= end; n++) if (after.get(n) === undefined) return null;
+  return [start, end];
+}
+
+/** Lines both diffs show once (not blank), as [earlier, now] pairs kept in the same order on both sides (the longest such run). */
+function guideLines(before: ReadonlyMap<number, string>, after: ReadonlyMap<number, string>): [number, number][] {
   const once = (side: ReadonlyMap<number, string>) => {
     const seen = new Map<string, number | null>();
     for (const [n, text] of side) if (text.trim()) seen.set(text, seen.has(text) ? null : n);
     return seen;
   };
-  const was = once(before);
   const now = once(after);
   const pairs: [number, number][] = [];
-  for (const [text, n] of was) {
+  for (const [text, n] of once(before)) {
     const m = now.get(text);
-    if (n !== null && m !== undefined && m !== null && (n < lines[0] || n > lines[1])) pairs.push([n, m]);
+    if (n !== null && m !== undefined && m !== null) pairs.push([n, m]);
   }
   pairs.sort((a, b) => a[0] - b[0]);
-  // The pairs in the same order on both sides (the longest such run): a line that moved past others is no guide.
+  // A line that moved past others is no guide.
   const tails: number[] = [];
   const prev: number[] = [];
   for (let i = 0; i < pairs.length; i++) {
@@ -244,10 +272,7 @@ export function shiftLines(
   }
   const kept: [number, number][] = [];
   for (let i = tails.length ? tails[tails.length - 1]! : -1; i >= 0; i = prev[i]!) kept.unshift(pairs[i]!);
-  const guide = kept.filter(([n]) => n < lines[0]).at(-1) ?? kept.find(([n]) => n > lines[1]);
-  if (!guide) return null;
-  const offset = guide[1] - guide[0];
-  return [lines[0] + offset, lines[1] + offset];
+  return kept;
 }
 
 /**
@@ -267,13 +292,14 @@ export function earlierLinesNow(
 /**
  * Whether the Show me the box sent ended with nothing to show: not running,
  * not waiting on a busy agent, no answer, not stopped, and no picture. A
- * turn that names its drawing has one, even before this window has read it.
+ * turn that names its drawing has one, even before this window has read it,
+ * unless the list, read again for it, still does not have it (`lost`).
  */
 export function showMeEnded(
   turn: { answer?: string; stopped?: boolean; drawing?: string } | undefined,
-  now: { running: boolean; busy: boolean; drawn: boolean },
+  now: { running: boolean; busy: boolean; drawn: boolean; lost?: boolean },
 ): boolean {
-  return !now.running && !now.busy && !now.drawn && !turn?.drawing && !turn?.stopped && turn?.answer === undefined;
+  return !now.running && !now.busy && !now.drawn && (!turn?.drawing || !!now.lost) && !turn?.stopped && turn?.answer === undefined;
 }
 
 /**
