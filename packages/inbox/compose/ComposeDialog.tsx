@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -70,6 +70,7 @@ import {
   type ComposeStart,
 } from './model';
 import { newUuid } from '../uuid';
+import { pullLaunchAsk } from '../pulls/model';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -89,6 +90,13 @@ export interface ComposeRequest {
    * it later from Drafts still links the thread.
    */
   card?: { id: string; title: string } | null;
+  /**
+   * Pull requests' Launch an agent: the PRs (a stack's open layers) the new thread is for, with the hand-off's words
+   * in `body`. The window keeps the sent thread as their agent's (`ComposeSent.pullKeys`). Not kept with a draft.
+   */
+  pulls?: InboxDraft['pulls'] | null;
+  /** The thread's name as compose opens (Launch an agent: `pullHandoffThreadName`), as if the person had typed it. */
+  threadName?: string;
 }
 
 export interface ComposeSent {
@@ -102,6 +110,10 @@ export interface ComposeSent {
   cardId?: string | null;
   /** It started a new agent session (launch), rather than going to a live one. */
   launched?: boolean;
+  /** The PRs the thread was started for (`ComposeRequest.pulls`): hand them to it. */
+  pullKeys?: readonly string[] | null;
+  /** What the hand-off asked for: its guided-review line still in the words, or the person's own curation. */
+  pullAsk?: 'guide' | 'custom' | null;
 }
 
 /**
@@ -176,13 +188,15 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : ''));
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
+  // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
+  const pulls = request.pulls ?? request.draft?.pulls ?? null;
   // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
   // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
   const [boardOn, setBoardOn] = useState(() => (request.draft ? request.draft.board_request === true : composeBoardChoice()));
   const boardChip = props.board === true && !card;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
-  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft));
+  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ? { thread_name: request.threadName } : null)));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
@@ -200,7 +214,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const drop = useFileDrop(files.add, takesFiles);
   const { model, load } = useComposeSessions(true, transport?.sessions);
   const voice = useVoiceSession();
-  const projects = model?.projects ?? [];
+  const projects = useMemo(() => (model?.projects ?? []).filter((g) => !pulls || (g.project.id !== null && pulls.projects.includes(g.project.id))), [model, pulls]);
   const target = findTarget(projects, chosen);
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
@@ -334,6 +348,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Nothing sent: pick a folder to start in.');
       return;
     }
+    if (target && pulls && !(target.project.id && pulls.projects.includes(target.project.id))) {
+      setError("Nothing sent: the pull request's agent works in its own project.");
+      return;
+    }
     if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
       setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
@@ -380,7 +398,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             projectName: start.project.name,
           }
         : { session: target!.session, host: target!.host, projectName: target!.project.name };
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, ...(start ? { launched: true } : {}) });
+      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}) });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
@@ -425,7 +443,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // A long paste keeps where it goes back in the words, so a reopened draft still offers Put back.
       const pasted = new Map(files.pastedDraft(body).map((file) => [file.upload_id, file]));
       const draftFiles = uploadIds.map((id) => pasted.get(id) ?? id);
-      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
+      const result = await inboxApi.saveDraft(draftId.current, { body, to, project, files: draftFiles, base, thread_name: threadName, ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) });
       setDraft(result.draft);
       setConflict(null);
       return result.draft;

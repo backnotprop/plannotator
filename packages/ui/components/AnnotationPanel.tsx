@@ -1344,6 +1344,8 @@ const CodeAnnotationCard: React.FC<{
     ? `line ${annotation.lineStart}`
     : `lines ${annotation.lineStart}-${annotation.lineEnd}`;
   const fileName = basenameFromPath(annotation.filePath);
+  // A comment on the whole review (a guided review's global comment): no file, no lines.
+  const isGlobal = annotation.scope === 'general';
 
   const handleCancelEdit = () => {
     setIsEditing(false);
@@ -1369,7 +1371,9 @@ const CodeAnnotationCard: React.FC<{
     >
       {/* Header: type word + author · time + actions */}
       <div className="mb-1.5 flex items-center gap-1.5">
-        <span className="text-[11px] font-medium text-primary">Code</span>
+        {isGlobal
+          ? <span className={cn('text-[11px] font-medium', TYPE_COLOR[AnnotationType.GLOBAL_COMMENT])}>{TYPE_LABEL[AnnotationType.GLOBAL_COMMENT]}</span>
+          : <span className="text-[11px] font-medium text-primary">Code</span>}
         <CardByline author={annotation.author} isMe={isMe} timestamp={annotation.createdAt} />
         {!readOnly && (
           <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
@@ -1397,12 +1401,14 @@ const CodeAnnotationCard: React.FC<{
         )}
       </div>
 
-      {/* File / line meta */}
-      <HostTitle title={annotation.filePath}>
-        <div className="rounded px-2 py-1 bg-surface-1 font-mono text-[11px] text-muted-foreground truncate">
-          {fileName} · {lineRange}
-        </div>
-      </HostTitle>
+      {/* File / line meta (a global comment has neither) */}
+      {!isGlobal && (
+        <HostTitle title={annotation.filePath}>
+          <div className="rounded px-2 py-1 bg-surface-1 font-mono text-[11px] text-muted-foreground truncate">
+            {fileName} · {lineRange}
+          </div>
+        </HostTitle>
+      )}
 
       {annotation.originalCode && (
         <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">

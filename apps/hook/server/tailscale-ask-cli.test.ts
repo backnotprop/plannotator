@@ -83,6 +83,8 @@ afterEach(async () => {
     await running.proc.exited;
     running = null;
   }
+  // What start({ config }) wrote.
+  rmSync(join(root, "data", "config.json"), { force: true });
 });
 
 afterAll(() => {
@@ -93,18 +95,26 @@ afterAll(() => {
 const statePath = () => join(root, "serve.json");
 const mappings = (): Record<string, string> => (existsSync(statePath()) ? JSON.parse(readFileSync(statePath(), "utf8")) : {});
 
-/** Start `plannotator annotate notes.md [...flags]` as a host would, and wait for its ready line. */
-async function start(
-  flags: string[],
-  options: { bridge?: boolean; mode?: "tagged" | "serve-off"; argv?: string[]; cwd?: string } = {},
-): Promise<{ port: number; ready: Json }> {
+interface StartOptions {
+  bridge?: boolean;
+  mode?: "tagged" | "serve-off";
+  argv?: string[];
+  cwd?: string;
+  /** Merged last into the CLI's environment. */
+  env?: Record<string, string | undefined>;
+  /** Written to the scratch data dir's config.json (removed in afterEach). */
+  config?: Json;
+}
+
+/** The scripted `tailscale` first on PATH, a sandboxed data dir, no browser: the CLI's environment. */
+function cliEnv(options: StartOptions, readyFile: string): Record<string, string | undefined> {
   rmSync(statePath(), { force: true });
   writeFileSync(
     join(root, "bin", "tailscale"),
     `#!/bin/sh\nexec '${process.execPath}' '${join(root, "fake-tailscale.mjs")}' '${statePath()}' '${join(root, "calls.txt")}' '${options.mode ?? "owner"}' "$@"\n`,
   );
   chmodSync(join(root, "bin", "tailscale"), 0o755);
-  const readyFile = join(root, `ready-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  if (options.config) writeFileSync(join(root, "data", "config.json"), JSON.stringify(options.config));
   const env: Record<string, string | undefined> = {
     ...process.env,
     PATH: `${join(root, "bin")}:${process.env.PATH ?? ""}`,
@@ -122,9 +132,15 @@ async function start(
     env.PLANNOTATOR_SESSION_BRIDGE_HOST = "claude-code";
     env.PLANNOTATOR_SESSION_BRIDGE_MODES = "turn";
   }
+  return { ...env, ...(options.env ?? {}) };
+}
+
+/** Start `plannotator annotate notes.md [...flags]` as a host would, and wait for its ready line. */
+async function start(flags: string[], options: StartOptions = {}): Promise<{ port: number; ready: Json }> {
+  const readyFile = join(root, `ready-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const proc = Bun.spawn([process.execPath, cliEntry, ...(options.argv ?? ["annotate", "notes.md"]), ...flags], {
     cwd: options.cwd ?? root,
-    env,
+    env: cliEnv(options, readyFile),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -422,5 +438,57 @@ describe("--tailscale when Tailscale Serve is off for the tailnet", () => {
     expect(mappings()).toEqual({});
     // Nothing was published, so there was nothing to take down.
     expect(readFileSync(join(root, "calls.txt"), "utf8")).not.toContain("off");
+  });
+});
+
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" turn --tailscale on without
+// the flag (#2533). The failure guarded: the CLI wiring stops reading them (a
+// session an agent starts opens locally, or skips the owner rule), the per-run
+// opt-out stops winning over the config key, or a subcommand that has no
+// tailnet transport starts refusing to run while the variable is set.
+describe('PLANNOTATOR_TAILSCALE / config "tailscale" (#2533)', () => {
+  const serveCalls = () =>
+    (existsSync(join(root, "calls.txt")) ? readFileSync(join(root, "calls.txt"), "utf8") : "").split("\n").filter((line) => line.startsWith("serve --bg"));
+
+  unix("PLANNOTATOR_TAILSCALE=1 publishes without the flag, under the same owner rule", async () => {
+    rmSync(join(root, "calls.txt"), { force: true });
+    const { port, ready } = await start([], { bridge: false, env: { PLANNOTATOR_TAILSCALE: "1" } });
+    expect(ready.url).toBe(`https://${MAGIC}:${port}`);
+    expect(ready.tailnet).toEqual({ ask: false });
+    expect(serveCalls()).toEqual([`serve --bg --https=${port} http://127.0.0.1:${port}`]);
+    // The owner's tab gets hover cards; a guest does not.
+    const refUrl = `/api/ref?url=${encodeURIComponent("https://example.com/not-a-ref")}`;
+    expect((await throughServe(port, refUrl)).status).toBe(422);
+    const guest = await throughServe(port, refUrl, { login: "guest@example.com" });
+    expect([guest.status, ((await guest.json()) as Json).code]).toEqual([404, "ref_cards_disabled"]);
+    const proc = running!.proc;
+    running = null;
+    proc.kill("SIGTERM");
+    await proc.exited;
+    const stderr = await new Response(proc.stderr as ReadableStream).text();
+    expect(stderr).toContain("Publishing over your tailnet (PLANNOTATOR_TAILSCALE)");
+  }, 30_000);
+
+  unix('config "tailscale": true with PLANNOTATOR_TAILSCALE=0 stays local', async () => {
+    rmSync(join(root, "calls.txt"), { force: true });
+    const { port, ready } = await start([], { bridge: false, config: { tailscale: true }, env: { PLANNOTATOR_TAILSCALE: "0" } });
+    expect(ready.url).toBe(`http://localhost:${port}`);
+    expect(ready.tailnet).toBeUndefined();
+    expect(serveCalls()).toEqual([]);
+  });
+
+  unix("a subcommand without the tailnet transport ignores PLANNOTATOR_TAILSCALE", async () => {
+    rmSync(join(root, "calls.txt"), { force: true });
+    const proc = Bun.spawn([process.execPath, cliEntry, "sessions"], {
+      cwd: root,
+      env: cliEnv({ bridge: false, env: { PLANNOTATOR_TAILSCALE: "1" } }, join(root, "ready-unused")),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    expect(stderr).not.toContain("--tailscale is only supported");
+    expect(stderr).not.toContain("Publishing over your tailnet");
+    expect(code).toBe(0);
+    expect(serveCalls()).toEqual([]);
   });
 });

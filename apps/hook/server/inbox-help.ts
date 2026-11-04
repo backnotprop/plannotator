@@ -27,10 +27,12 @@ import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
-import { INBOX_CONTRACT_EXAMPLE, INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS } from "@plannotator/server/inbox-mcp";
+import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, inboxServedTools } from "@plannotator/server/inbox-mcp";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
+import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
@@ -163,6 +165,17 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- A card the person put in backlog is theirs to move: you cannot move it out (`card_backlog_person_only`), and only the person restores a card they dropped (`card_dropped_by_person`); you can still `say` and `link` on such a card. Leave its work alone until they send it to you. A card or thread of another project is refused (`card_other_project`): pass that project's `project_path`.",
     ],
   },
+  // Thread steps (approval "inbox-thread-steps"): shown only while the person has them on (formatInboxHelp's `steps`).
+  steps: {
+    args: ["thread_id", "steps"],
+    lines: [
+      `steps: ${INBOX_STEPS_LEAD}`,
+      "- `thread_id`: the thread (or a message id in it), from send_message's result. `steps`: the whole list, `[{ \"step\": \"Replay the failures in staging\", \"status\": \"doing\", \"note\": \"38 of 40 recovered\" }, ...]`; `[]` clears it. At most 12 steps, 80 characters per step and per note, one line each; past that nothing is written (`validation_error` naming the step).",
+      "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
+      "- A reply in that thread wakes you with one line, \"Your steps here: 3 of 6 done; doing: X. Update them if that changed.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
+      "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
+    ],
+  },
 };
 
 const SECTION_LABEL = (id: InboxSectionId): string => INBOX_SECTIONS.find((section) => section.id === id)?.label ?? id;
@@ -229,20 +242,46 @@ export interface InboxHelpOptions {
    * section and no Board bullet, as the Inbox serves no `card` action then.
    */
   board?: boolean;
+  /**
+   * The person turned thread steps on (config.json `inboxSteps`, read by the
+   * caller). Off (the default), the guide says nothing of steps: no `steps`
+   * section, no `steps` field on send_message and no command line, as the
+   * Inbox serves none of it then (approval "inbox-thread-steps").
+   */
+  steps?: boolean;
+  /**
+   * The person turned code review on (config.json `inboxCodeReview`, read by
+   * the caller). Off (the default), the guide says nothing of it: no `review`
+   * field on submit_guide, as the Inbox serves none then (approval
+   * "inbox-code-review-direction").
+   */
+  codeReview?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
   return platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "linux";
 }
 
-function toolBlock(name: InboxMcpToolName): string[] {
+function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): string[] {
   const guide = TOOL_GUIDE[name];
-  const args = guide.args.length > 0 ? [`Arguments: ${guide.args.map(code).join(", ")}.`, ""] : [];
-  return [`### ${name}`, "", ...args, ...guide.lines, ""];
+  // send_message's `steps` field exists only while steps are on.
+  const withSteps = steps && name === "send_message";
+  // submit_guide's `review` field exists only while code review is on.
+  const withReview = codeReview && name === "submit_guide";
+  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review"] : [])];
+  const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
+  const lines = [
+    ...guide.lines,
+    ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
+    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`] : []),
+  ];
+  return [`### ${name}`, "", ...args, ...lines, ""];
 }
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
+  const steps = options.steps === true;
+  const codeReview = options.codeReview === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
@@ -335,7 +374,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "Agents ask, the person decides: no tool answers a question, approves or sends anything for the person. A refusal comes back as an error whose text starts with a code, `<code>: <message>`.",
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
-    ...(board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS).flatMap(toolBlock),
+    // `steps` only while the person has thread steps on.
+    ...inboxServedTools({ board, steps }).flatMap((name) => toolBlock(name, steps, codeReview)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -457,7 +497,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `${self} inbox call [--session <id>] <action> [<json> | -]`,
     "```",
     "",
-    `- Actions: ${INBOX_CALL_ACTIONS.map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => steps || action !== "steps").map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
     "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
     "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
     "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names, and the same as your tool: your threads and cards, your name, the person's reply reaches you. Claude Code, Pi, Codex, Qwen Code and DeepSeek Harness each name theirs. A DeepSeek Harness subagent's shell names the session the subagent works for only while Plannotator's plugin runs its Inbox connection in that DSH (the inbox tool on, and the Inbox run once; the shell then has `DSH_PLANNOTATOR_SESSION_ID`); otherwise it names the subagent's own session. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. In a Claude Code or Pi session, a call with no `project_path` files under your session's project, as your tool does, whatever folder the shell is in; name `project_path` only for another project. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",
@@ -466,6 +506,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "```text",
     INBOX_COMMAND_USAGE,
+    // Thread steps from a shell, only while the person has them on.
+    ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
     "```",
     "",
     "`--tailscale` is the person's choice: never add it to a start you run. The MCP server and the agent tools answer only on this computer.",

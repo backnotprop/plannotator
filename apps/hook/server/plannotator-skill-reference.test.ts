@@ -319,3 +319,18 @@ describe("plannotator skill: question authoring section", () => {
     }
   });
 });
+
+// Thread steps (approval "inbox-thread-steps") are off by default, and an optional feature's instructions reach an
+// agent only while it is on: the tool text and `plannotator inbox --help` teach steps then. A skill is shipped text
+// every agent reads whatever the person chose, so no shipped skill may name the feature. (The bare word stays fine
+// elsewhere: "follow its two steps" for T3, a plan's "Ordered steps".)
+test("no shipped skill teaches thread steps, which are off by default", () => {
+  const root = join(import.meta.dir, "../../skills");
+  const skills = [...new Bun.Glob("**/SKILL.md").scanSync({ cwd: root })];
+  expect(skills).toContain(join("core", "plannotator", "SKILL.md"));
+  const feature = /`steps`|inbox steps|thread steps|steps action|steps_off|steps field|\bsteps\s*:\s*\[/i;
+  for (const skill of skills) {
+    const text = readFileSync(join(root, skill), "utf-8");
+    expect({ skill, mentions: text.match(feature)?.[0] ?? null }).toEqual({ skill, mentions: null });
+  }
+});

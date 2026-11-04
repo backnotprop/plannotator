@@ -380,7 +380,6 @@ function buildFeedbackSpec(input: DecisionSpecInput, approvalFlow: boolean): Dec
  * never emitted — the dialog owns what happens to unsent annotations.
  */
 function buildPlatformSpec(input: DecisionSpecInput, platform: DecisionPlatformInput): DecisionSpec {
-  const { count } = input;
   const { selfAuthored } = platform;
   const noun = platform.mrLabel === 'MR' ? 'merge request' : 'pull request';
   // Frozen copy (maintainer-approved): the self-approval mute reason.
