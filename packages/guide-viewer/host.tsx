@@ -41,6 +41,11 @@ export interface GuideDiffRendererProps {
   /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
+  /**
+   * Passed only when the guide fits each file's box to its content (GuideView `bare`): the renderer reports the
+   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
+   */
+  onContentHeightChange?: (height: number) => void;
 }
 
 export interface GuideDiffRendererContext {

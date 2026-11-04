@@ -109,6 +109,7 @@ async function renderView(
     onRegenerate?: () => void;
     state?: GuideHostValue<Record<string, unknown>>;
     onFocusFile?: (path: string) => void;
+    bare?: boolean;
   } = {},
 ) {
   const Harness = () => {
@@ -126,6 +127,7 @@ async function renderView(
           focusedFile={focusedFile}
           onFocusFile={handleFocusFile}
           onRegenerate={options.onRegenerate}
+          bare={options.bare}
         />
       </GuideHostProvider>
     );
@@ -506,5 +508,74 @@ describe('GuideView global comments', () => {
     await renderView(makeGuide(), { state: { ...makeState(), globalComments: { comments: [{ id: 'g1', text: 'Split it in two.' }] } } });
     expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
     expect(host!.querySelector('[data-guide-global-comments]')!.textContent).toContain('Split it in two.');
+  });
+});
+
+/** A new file of `rows` lines, as git writes it: five header lines before the hunk. */
+function addedFile(path: string, rows: number): DiffFile {
+  const body = Array.from({ length: rows }, (_, i) => `+line ${i + 1}`).join('\n');
+  return {
+    path,
+    patch: `diff --git a/${path} b/${path}\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,${rows} @@\n${body}\n`,
+    additions: rows,
+    deletions: 0,
+    status: 'added',
+  };
+}
+
+const boxHeight = (path: string) =>
+  host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.height;
+
+describe('GuideView bare (the Inbox PR page)', () => {
+  // Guards the empty band under a short file on the PR page (#2615): the box was sized by an estimate that counted
+  // git's header lines and a 150px floor, so a 5-line file stood in a 304px box.
+  test.skipIf(!hasDom)('a file box is as tall as its diff: the hunk rows first, then the height the renderer reports', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }, { file: 's.ts' }] }] });
+    const files = [addedFile('m.sql', 5), addedFile('s.ts', 10)];
+    await renderView(guide, { bare: true, state: makeState({ files }) });
+    // Before a measure: 5 and 10 rows of 20px, the 33px header, the list's padding and the border, as the browser lays it out.
+    expect(boxHeight('m.sql')).toBe('159px');
+    expect(boxHeight('s.ts')).toBe('259px');
+
+    const report = (path: string) => latestCodeViewProps.filter((p) => (p.files as DiffFile[])[0]?.path === path).at(-1)!.onContentHeightChange as (h: number) => void;
+    // Inline comments or wrapped lines grow the content: the box follows, up to the usual 620px, past which it scrolls.
+    await act(async () => report('m.sql')(300));
+    expect(boxHeight('m.sql')).toBe('302px');
+    await act(async () => report('m.sql')(4000));
+    expect(boxHeight('m.sql')).toBe('620px');
+  });
+
+  // Guards the shared chain's default (the review app, guides.show, the Inbox's guided reviews): unchanged.
+  test.skipIf(!hasDom)('outside bare the box keeps its estimate and the renderer is asked for no height', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
+    await renderView(guide, { state: makeState({ files: [addedFile('m.sql', 5)] }) });
+    expect(boxHeight('m.sql')).toBe('304px');
+    expect(latestCodeViewProps.every((p) => !('onContentHeightChange' in p))).toBe(true);
+  });
+
+  // Guards the owner's choice (q-bfcf3a4a B): on the PR page the Global comment button sits on the Split | Unified
+  // tab's row, not on a row of its own above it; with no tab (a phone) it keeps its own row.
+  test.skipIf(!hasDom)('the Global comment button shares the first card\'s tab row; with no tab it keeps its own row', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'a.ts' }] }] });
+    const globalComments = { comments: [], onAdd: () => {} };
+    const withTab = { ...makeState({ files: [makeFile('a.ts')] }), globalComments, renderSectionTab: (i: number) => (i === 0 ? <div data-testid="switch">Split | Unified</div> : null) };
+
+    await renderView(guide, { bare: true, state: withTab });
+    const buttons = host!.querySelectorAll('[data-guide-global-comment-add]');
+    expect(buttons).toHaveLength(1);
+    const row = buttons[0]!.closest('[data-guide-section-tab]');
+    expect(row).not.toBeNull();
+    expect(row!.querySelector('[data-testid="switch"]')).not.toBeNull();
+    expect(buttons[0]!.closest('[data-guide-section-tab-lead]')).not.toBeNull();
+
+    // A phone: no tab, so the button stays above the content on a row of its own.
+    await renderView(guide, { bare: true, state: { ...makeState({ files: [makeFile('a.ts')] }), globalComments } });
+    expect(host!.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
+    expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
+
+    // Not bare (the review app, the Inbox's guided review): the header keeps the button, the tab keeps its row.
+    await renderView(guide, { state: withTab });
+    expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
+    expect(host!.querySelector('[data-guide-section-tab-lead]')).toBeNull();
   });
 });
