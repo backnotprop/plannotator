@@ -26,7 +26,7 @@ import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type 
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
-import { ShapeThumb } from '@plannotator/ui/components/shape';
+import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';

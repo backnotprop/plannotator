@@ -28,7 +28,7 @@ import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
-import { Pebble } from '@plannotator/ui/components/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'shapes';

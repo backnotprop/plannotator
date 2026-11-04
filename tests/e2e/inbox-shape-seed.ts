@@ -38,7 +38,7 @@ export function shapeWorldEnv(root: string): Record<string, string> {
 }
 
 const css = `
-.card { width: 520px; margin: 40px auto; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--rule), 0 12px 30px -18px rgba(0,0,0,.35); padding: 22px 24px; }
+.card { width: min(520px, calc(100% - 32px)); box-sizing: border-box; margin: 40px auto; border-radius: 14px; background: var(--surface); box-shadow: 0 0 0 1px var(--rule), 0 12px 30px -18px rgba(0,0,0,.35); padding: 22px 24px; }
 .card h3 { margin: 0 0 6px; font-size: 17px; }
 .card p { margin: 0 0 14px; color: var(--ink2); font-size: 14px; }
 .row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--rule); font-size: 14px; }
@@ -52,13 +52,13 @@ const css = `
 `;
 
 function dialogBoard(title: string, claim: string, heading: string, lines: [string, string, boolean][], note: string) {
-  const rows = lines.map(([k, v, on], i) => `<div class="row" data-step="${i + 2}" data-mark="row-${i}"><span>${k}</span><span class="pill${on ? ' on' : ''}">${v}</span></div>`).join('');
+  const rows = lines.map(([k, v, on], i) => `<div class="row" id="row-${i}" data-step="${i + 2}" data-mark="row-${i}"><span>${k}</span><span class="pill${on ? ' on' : ''}">${v}</span></div>`).join('');
   return {
     title,
     claim,
     views: {
       picture: {
-        html: `<div class="wrap"><div class="card" data-step="1" data-mark="card"><h3 data-mark="heading">${heading}</h3><p data-mark="note">${note}</p>${rows}<div class="btns" data-step="9"><span class="btn">Not now</span><span class="btn primary">Turn it on</span></div></div></div>`,
+        html: `<div class="wrap"><div class="card" data-step="1" data-mark="card"><h3 data-mark="heading">${heading}</h3><p data-mark="note">${note} <a href="#row-0" data-link="hash">The first row</a> · <a href="https://example.com/notes" data-link="out">notes</a></p>${rows}<div class="btns" data-step="9"><span class="btn">Not now</span><span class="btn primary">Turn it on</span></div></div></div>`,
         css,
       },
       how: {

@@ -7,7 +7,10 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
-import { Pebble, ShapeGrid, shapeAgo, type ShapeGridItem, type ShapeHost } from '@plannotator/ui/components/shape';
+// The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
