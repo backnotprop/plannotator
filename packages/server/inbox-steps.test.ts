@@ -174,11 +174,9 @@ describe("the event stream", () => {
     await w.setSteps(false);
     await until(() => windowStream.frames.filter((frame) => frame.event === "capabilities").length >= 2);
     const told = windowStream.frames.filter((frame) => frame.event === "capabilities");
-    // The frame carries every window-followed capability (Code review and Shape ride it too, off here).
-    expect(told.map((frame) => JSON.parse(frame.data))).toEqual([
-      { steps: { on: true }, code_review: { on: false }, shape: { on: false } },
-      { steps: { on: false }, code_review: { on: false }, shape: { on: false } },
-    ]);
+    // The frame carries the window-followed capabilities; Code review and Shape, off here, are held for 0.28.50
+    // (inbox.ts heldSwitch) and left out, so a window that never drew their rows does not start to.
+    expect(told.map((frame) => JSON.parse(frame.data))).toEqual([{ steps: { on: true } }, { steps: { on: false } }]);
     // The agent's stream, open all along, never gets one.
     expect(agentStream.frames.some((frame) => frame.event === "capabilities")).toBe(false);
     await Promise.all([windowStream.stop(), agentStream.stop()]);
