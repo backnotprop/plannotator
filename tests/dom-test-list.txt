@@ -58,6 +58,7 @@ packages/ui/components/MermaidBlock.theme.test.tsx
 packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
+packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
 packages/ui/components/ImageLightbox.test.tsx
 packages/ui/components/ImageZoomStage.wheelHint.test.tsx
@@ -233,6 +234,7 @@ packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
 packages/ui/components/blocks/BlockquoteBlock.test.tsx
 packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+packages/ui/components/plan-diff/PlanCleanDiffView.codeDocument.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
 packages/ui/components/AnnotationPanel.questions.test.tsx
 packages/ui/hooks/useActiveSection.test.tsx
@@ -243,6 +245,7 @@ packages/ui/utils/diagramAnchor.test.ts
 packages/ui/utils/diagramAnchorGraphviz.test.ts
 packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.reselectOverlap.test.tsx
 packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx
@@ -333,6 +336,7 @@ packages/ui/hooks/useLinkedDoc.test.tsx
 packages/ui/components/DocBadges.test.tsx
 packages/editor/planDiffAutoExit.test.tsx
 packages/editor/App.archiveReadOnly.test.tsx
+packages/editor/App.codeDocument.test.tsx
 packages/editor/App.refCards.test.tsx
 packages/editor/App.htmlChrome.test.tsx
 packages/editor/App.sidebarTabsAgentTerminal.test.tsx
@@ -492,6 +496,7 @@ packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
+packages/inbox/voiceMiss.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
@@ -506,3 +511,4 @@ packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/review-drawing/ShowMeLayer.test.tsx
 packages/review-editor/components/SelectionChooser.test.tsx
 packages/inbox/review-drawing/ShowMeDrag.test.tsx
+packages/review-editor/components/MarkdownBody.prImages.test.tsx
