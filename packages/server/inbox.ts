@@ -207,8 +207,8 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
-import { createBranchReader, createInboxPulls, InboxPullsError, linkInboxPulls, type InboxPullRepo } from "./inbox-pulls";
-import { runtime as gitRuntime } from "./git";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPullLinks } from "./inbox-pull-links";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -422,8 +422,6 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
-  /** Tests: how Pull requests reads a folder's checked-out branch (default `git rev-parse --abbrev-ref HEAD`, inbox-pulls.ts). */
-  pullBranch?: (folder: string) => Promise<string | null>;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -940,13 +938,48 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
-  const pullBranch = createBranchReader(
-    options.pullBranch ??
-      (async (folder) => {
-        const result = await gitRuntime.runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: folder, timeoutMs: 3_000, interaction: "forbid" });
-        return result.exitCode === 0 ? result.stdout.trim() || null : null;
+  // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
+  const pullOwners = createInboxPullLinks(dataDir);
+  const pullLinkStore: InboxPullLinkStore = {
+    threadsOf: (id) => store.threadsOf(id),
+    threadMessageIds: (id) => store.threadMessageIds(id),
+    message: (id) => store.message(id),
+    threadSubject: (id) => store.threadSubject(id),
+    threadProject: (id) => {
+      const root = store.message(id);
+      return root && root.thread_id === id ? store.canonicalProjectId(root.project_id) : null;
+    },
+  };
+  // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
+  // A project's origin is read once before its first list (the cache is read-behind), so the first open after a
+  // start is not empty; after that the cache's own refresh keeps it.
+  const pullProjects = async (): Promise<{ projectsByRepo: Map<string, string[]>; wanted: InboxPullRepo[] }> => {
+    const projectsByRepo = new Map<string, string[]>();
+    const wanted: InboxPullRepo[] = [];
+    const projectsNow = store.allProjects();
+    const reposNow = await Promise.all(
+      projectsNow.map(async (project) => {
+        const repo = repos.get(project.root);
+        if (repo || pullRepoRead.has(project.root)) return repo;
+        pullRepoRead.add(project.root);
+        return repos.refresh(project.root);
       }),
-  );
+    );
+    for (const [i, project] of projectsNow.entries()) {
+      const repo = reposNow[i];
+      if (!repo?.host) continue;
+      const key = `${repo.host}/${repo.display}`.toLowerCase();
+      const id = store.canonicalProjectId(project.id);
+      const ids = projectsByRepo.get(key);
+      if (ids) {
+        if (!ids.includes(id)) ids.push(id);
+        continue;
+      }
+      projectsByRepo.set(key, [id]);
+      wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: id });
+    }
+    return { projectsByRepo, wanted };
+  };
 
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
@@ -3327,36 +3360,42 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             throw cause;
           }
         }
-        // Every project on a repository (two clones are two projects); the window's filter takes the first.
-        const projectsByRepo = new Map<string, string[]>();
-        const wanted: InboxPullRepo[] = [];
-        // A project's origin is read once before its first list (the cache is read-behind), so the
-        // first open after a start is not empty; after that the cache's own refresh keeps it.
-        const projectsNow = store.allProjects();
-        const reposNow = await Promise.all(
-          projectsNow.map(async (project) => {
-            const repo = repos.get(project.root);
-            if (repo || pullRepoRead.has(project.root)) return repo;
-            pullRepoRead.add(project.root);
-            return repos.refresh(project.root);
-          }),
-        );
-        for (const [i, project] of projectsNow.entries()) {
-          const repo = reposNow[i];
-          if (!repo?.host) continue;
-          const key = `${repo.host}/${repo.display}`.toLowerCase();
-          const id = store.canonicalProjectId(project.id);
-          const ids = projectsByRepo.get(key);
-          if (ids) {
-            if (!ids.includes(id)) ids.push(id);
-            continue;
-          }
-          projectsByRepo.set(key, [id]);
-          wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: id });
-        }
+        const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
-        const links = await linkInboxPulls(listed.pulls, { listCards: () => store.listCards(), threadsOf: (id) => store.threadsOf(id), threadMessageIds: (id) => store.threadMessageIds(id), message: (id) => store.message(id), threadSubject: (id) => store.threadSubject(id), project: (id) => store.project(id), cursor: () => store.cursor() }, projectsByRepo, pullBranch);
-        return json({ serverSession, ...listed, links, projects: Object.fromEntries([...projectsByRepo].map(([key, ids]) => [key, ids[0]!])) });
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
+        const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
+        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
+      }
+      // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
+      // live session, or to an agent it launches) just started for it. The Inbox keeps that choice
+      // (inbox/pull-links.json); verdicts and Reply go there. Same guards as the list.
+      if (path === "/api/inbox/pulls/owner") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const keys = Array.isArray(body.keys) ? body.keys : null;
+        if (!keys || keys.length === 0 || keys.length > 20 || !keys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 600)) {
+          throw new InboxError("validation_error", "keys: 1 to 20 pull request keys from the list.", { field: "keys" });
+        }
+        const threadId = typeof body.thread_id === "string" ? body.thread_id : "";
+        const threadProject = threadId ? pullLinkStore.threadProject(threadId) : null;
+        if (!threadProject) throw new InboxError("validation_error", "thread_id: a thread in the Inbox.", { field: "thread_id" });
+        const { projectsByRepo } = await pullProjects();
+        for (const key of keys as string[]) {
+          const pull = pulls.find(key);
+          if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(threadProject)) {
+            throw new InboxError("validation_error", "thread_id: a thread in a project of that pull request's repository.", { field: "thread_id" });
+          }
+        }
+        pullOwners.set(keys as string[], threadId);
+        return json({ serverSession, ok: true });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:

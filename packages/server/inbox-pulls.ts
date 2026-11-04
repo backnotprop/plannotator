@@ -44,6 +44,7 @@ import {
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
+  type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
   type InboxPullState,
@@ -560,21 +561,13 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
 
 /** The parts of the store linking reads. */
 export interface InboxPullLinkStore {
-  listCards(): InboxCard[];
   threadsOf(projectId: string): { thread_id: string; last_at: string }[];
   threadMessageIds(threadId: string): readonly string[];
   message(id: string): InboxMessage | null;
   threadSubject(threadId: string): string | null;
-  project(id: string): { root: string } | null;
-  cursor(): number;
+  /** The project a thread is in (canonical id), or null when there is no such thread. */
+  threadProject(threadId: string): string | null;
 }
-
-/** Threads read for a branch match: active in this many days. */
-export const INBOX_PULL_BRANCH_DAYS = 14;
-/** At most this many folders are asked their branch per list. */
-export const INBOX_PULL_BRANCH_FOLDERS = 40;
-/** A folder's branch is kept this long. */
-export const INBOX_PULL_BRANCH_MS = 60_000;
 
 function previewOf(body: string): string {
   const text = body
@@ -601,28 +594,21 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
   return { last, guide };
 }
 
-/** Branch names a person's folder sits on between pieces of work: never taken as a PR's head for a branch link. */
-const RESTING_BRANCH = /^(main|master|trunk|develop|dev)$/;
-
 /**
- * Which agent thread each PR is tied to, in order of trust: a Board card
- * that links the PR (its first thread), the PR's URL in an agent's message
- * (the latest, and only in a project of the PR's own repository: another
- * project quoting it is not working on it), or, for the person's own PRs from
- * the repository itself (never a fork, whose branch is not in the folder),
- * the PR's head branch checked out in the folder an agent thread works in
- * (the latest thread per folder; never a resting branch such as `main`).
- * `projectsByRepo`: every Inbox project whose origin is that repository (two
- * clones of one repository are two projects). `branchOf` reads a folder's
- * branch (null when it can't).
+ * Which agent thread each PR is tied to: the owner the person chose (Hand to
+ * an agent, Launch an agent; `owners`, kept by inbox-pull-links.ts), else the
+ * PR's link in an agent's own message in a project of the PR's repository (the
+ * agent opened it; the latest such message). A link in another project's
+ * thread ("depends on org/a#7") is not that project's PR. `projectsByRepo`:
+ * every Inbox project whose origin is that repository (two clones are two
+ * projects). Nothing else ties a PR to a thread: no branch guess, no Board card.
  */
-export async function linkInboxPulls(
+export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  branchOf: (folder: string) => Promise<string | null>,
-  now: number = Date.now(),
-): Promise<Record<string, InboxPullLink>> {
+  owners: ReadonlyMap<string, { thread_id: string }> = new Map(),
+): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
   const wanted = new Set(pulls.map((p) => p.key));
@@ -633,111 +619,63 @@ export async function linkInboxPulls(
     return ref && ref.kind === "pull" ? forgeRefKey(ref) : null;
   };
 
-  // 1. Board cards.
-  const cardOf = new Map<string, InboxCard>();
-  const cardOfThread = new Map<string, InboxCard>();
-  for (const card of store.listCards()) {
-    for (const ref of inboxCardRefsOf(card)) {
-      if (ref.kind !== "pr") continue;
-      const key = keyOfUrl(ref.url);
-      if (key && wanted.has(key) && !cardOf.has(key)) cardOf.set(key, card);
-    }
-    for (const thread of card.threads) if (!cardOfThread.has(thread)) cardOfThread.set(thread, card);
-  }
-
-  // 2. URLs in agents' messages, and 3. the threads whose folders may hold the branch.
-  const projectIds = [...new Set([...projectsByRepo.values()].flat())];
+  // The PR links in agents' own messages, per project of the PR's repository.
   const urlThread = new Map<string, { thread: string; project: string; at: string }>();
-  const folders = new Map<string, { thread: string; project: string; at: string }>();
-  for (const projectId of projectIds) {
-    const root = store.project(projectId)?.root ?? null;
+  for (const projectId of new Set([...projectsByRepo.values()].flat())) {
     for (const summary of store.threadsOf(projectId)) {
-      const recent = now - Date.parse(summary.last_at) < INBOX_PULL_BRANCH_DAYS * 86_400_000;
-      let folder: string | null = null;
       for (const id of store.threadMessageIds(summary.thread_id)) {
         const message = store.message(id);
         if (!message || message.author.kind !== "agent") continue;
-        folder = message.base_path ?? root;
         for (const url of inboxPullUrlsIn(message.body)) {
           const key = keyOfUrl(url);
           if (!key || !wanted.has(key)) continue;
-          // Only a thread of a project on the PR's own repository: "depends on org/a#7" in project B is not B's PR.
           if (!projectsOf(byKey.get(key)!).includes(projectId)) continue;
           const seen = urlThread.get(key);
           if (!seen || seen.at <= message.created_at) urlThread.set(key, { thread: summary.thread_id, project: projectId, at: message.created_at });
         }
       }
-      if (recent && folder) {
-        const seen = folders.get(folder);
-        if (!seen || seen.at < summary.last_at) folders.set(folder, { thread: summary.thread_id, project: projectId, at: summary.last_at });
-      }
     }
   }
 
-  const branchThread = new Map<string, { thread: string; project: string; at: string }>();
-  const branchable = (pull: InboxPull) =>
-    pull.mine &&
-    (pull.state === "open" || pull.state === "draft") &&
-    (pull.head_repo === null || pull.head_repo.toLowerCase() === pull.repo.toLowerCase()) &&
-    !RESTING_BRANCH.test(pull.head);
-  const needBranch = pulls.some((p) => branchable(p) && !cardOf.has(p.key) && !urlThread.has(p.key));
-  if (needBranch) {
-    const newest = [...folders.entries()].sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, INBOX_PULL_BRANCH_FOLDERS);
-    const branches = await Promise.all(newest.map(async ([folder, at]) => ({ at, branch: await branchOf(folder).catch(() => null) })));
-    for (const { at, branch } of branches) {
-      if (!branch || branch === "HEAD") continue;
-      const key = `${at.project}\u0000${branch}`;
-      if (!branchThread.has(key)) branchThread.set(key, at);
-    }
-  }
-
-  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string, card: InboxCard | null): InboxPullLink => {
+  const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
     const { last, guide } = threadFacts(store, threadId);
-    const linkedCard = card ?? cardOfThread.get(threadId) ?? null;
+    // A thread the person just handed over: its agent has not written yet, so it is the session the first message went to.
+    const to = last ? null : (store.message(threadId)?.to ?? null);
     return {
       via,
       thread_id: threadId,
       thread_subject: store.threadSubject(threadId),
       project_id: projectId,
-      agent: last && last.author.kind === "agent" ? { host: last.author.host, session: last.author.session, name: last.author.name } : null,
+      agent: last && last.author.kind === "agent" ? { host: last.author.host, session: last.author.session, name: last.author.name } : to ? { host: to.host, session: to.session, name: null } : null,
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
       guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections } : null,
-      card: linkedCard ? { id: linkedCard.id, title: linkedCard.title, column: linkedCard.column } : null,
     };
   };
 
   for (const pull of pulls) {
-    const card = cardOf.get(pull.key);
-    if (card && card.threads[0]) {
-      links[pull.key] = linkOf("card", card.threads[0], card.project_id, card);
+    const owner = owners.get(pull.key);
+    const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
+    if (owner && ownerProject) {
+      links[pull.key] = linkOf("owner", owner.thread_id, ownerProject);
       continue;
     }
     const url = urlThread.get(pull.key);
-    if (url) {
-      links[pull.key] = linkOf("url", url.thread, url.project, null);
-      continue;
-    }
-    if (branchable(pull)) {
-      // The newest thread on that branch among the projects of the PR's repository.
-      const branch = projectsOf(pull)
-        .map((project) => branchThread.get(`${project}\u0000${pull.head}`))
-        .filter((b): b is { thread: string; project: string; at: string } => !!b)
-        .sort((a, b) => b.at.localeCompare(a.at))[0];
-      if (branch) links[pull.key] = linkOf("branch", branch.thread, branch.project, null);
-    }
+    if (url) links[pull.key] = linkOf("url", url.thread, url.project);
   }
   return links;
 }
 
-/** A folder's checked-out branch through `git rev-parse`, cached per folder for `INBOX_PULL_BRANCH_MS`. */
-export function createBranchReader(git: (folder: string) => Promise<string | null>, now: () => number = Date.now): (folder: string) => Promise<string | null> {
-  const cache = new Map<string, { at: number; branch: Promise<string | null> }>();
-  return (folder) => {
-    const hit = cache.get(folder);
-    if (hit && now() - hit.at < INBOX_PULL_BRANCH_MS) return hit.branch;
-    const branch = git(folder).catch(() => null);
-    cache.set(folder, { at: now(), branch });
-    while (cache.size > 200) cache.delete(cache.keys().next().value!);
-    return branch;
-  };
+/** The Board cards that link the PRs (a card's `pr` or `ref`), by pull key: read only while the Board is on. */
+export function pullCards(pulls: readonly InboxPull[], cards: readonly InboxCard[]): Record<string, InboxPullCard> {
+  const wanted = new Set(pulls.map((p) => p.key));
+  const out: Record<string, InboxPullCard> = {};
+  for (const card of cards) {
+    for (const ref of inboxCardRefsOf(card)) {
+      if (ref.kind !== "pr") continue;
+      const parsed = parseForgeRefUrl(ref.url);
+      const key = parsed && parsed.kind === "pull" ? forgeRefKey(parsed) : null;
+      if (key && wanted.has(key) && !out[key]) out[key] = { id: card.id, title: card.title, column: card.column };
+    }
+  }
+  return out;
 }

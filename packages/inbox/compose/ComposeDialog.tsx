@@ -79,6 +79,11 @@ export interface ComposeRequest {
    * it later from Drafts still links the thread.
    */
   card?: { id: string; title: string } | null;
+  /**
+   * Pull requests' Launch an agent: the PRs (a stack's open layers) the new thread is for, with the hand-off's words
+   * in `body`. The window keeps the sent thread as their agent's (`ComposeSent.pullKeys`). Not kept with a draft.
+   */
+  pulls?: { keys: readonly string[] } | null;
 }
 
 export interface ComposeSent {
@@ -90,6 +95,8 @@ export interface ComposeSent {
   draftId: string | null;
   /** The Board card the thread was created for (`ComposeRequest.card`): link the thread to it. */
   cardId?: string | null;
+  /** The PRs the thread was started for (`ComposeRequest.pulls`): hand them to it. */
+  pullKeys?: readonly string[] | null;
 }
 
 /**
@@ -339,7 +346,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
-      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null });
+      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: props.request.pulls?.keys ?? null });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();

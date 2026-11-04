@@ -5113,6 +5113,11 @@ function Inbox() {
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
+        onLaunch={(keys, body, opener) => openCompose({ body, pulls: { keys } }, opener)}
+        onHanded={(session) => {
+          rememberSent(session);
+          pulls.reload();
+        }}
       />
     );
   } else if (route.page === 'pulls') {
@@ -5830,6 +5835,13 @@ function Inbox() {
                 .editCard(sent.cardId, { op: 'link', thread_id: sent.threadId })
                 .then(() => refreshCards())
                 .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not linked to the card', phoneLead: 'Not linked to the card', detail: 'Open the thread from the Inbox.' }, 7000));
+            }
+            // Launch an agent from Pull requests: the new thread is the PRs' agent's, so verdicts and Reply go there.
+            if (sent.pullKeys && sent.pullKeys.length > 0) {
+              void inboxApi
+                .pullOwner(sent.pullKeys, sent.threadId)
+                .then(() => pulls.reload())
+                .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not tied to the pull request', phoneLead: 'Not tied to the pull request', detail: 'Open the thread from the Inbox.' }, 7000));
             }
           }}
           onSaved={composeSaved}

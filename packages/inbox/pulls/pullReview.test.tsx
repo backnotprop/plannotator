@@ -71,7 +71,6 @@ const link: InboxPullLink = {
   agent: { host: 'claude-code', session: 'ses_1', name: null },
   last: { message_id: LAST, preview: 'The stack is up.', at: '2026-11-03T09:00:00.000Z' },
   guide: null,
-  card: null,
 };
 
 const stack = [
@@ -89,7 +88,8 @@ const model: InboxPullsAnswer = {
     pull(869, { repo: 'northwind/web-app', reviewers: ['jun'], head: 'locale' }),
   ],
   links: { [stack[2]!.key]: link },
-  projects: { 'github.com/northwind/billing-svc': 'prj_1', 'github.com/northwind/web-app': 'prj_2' },
+  projects: { 'github.com/northwind/billing-svc': ['prj_1'], 'github.com/northwind/web-app': ['prj_2'] },
+  cards: {},
 };
 const STACK_ID = stack[2]!.key;
 
@@ -98,20 +98,34 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let asked: { key: string; scope: string }[] = [];
 let posted: { path: string; body: Record<string, unknown> }[] = [];
+const liveSession = (session: string, _project: string) => ({ session, host: 'claude-code', started_at: '2026-11-03T08:00:00.000Z', last_seen_at: '2026-11-03T09:59:00.000Z', busy: false, idle_since: null, last_thread: null });
+/** Compose's live sessions: one in billing-svc (prj_1), one in another project; launch only when a test sets it. */
+let sessionsAnswer: Record<string, unknown> = {};
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   asked = [];
   posted = [];
+  sessionsAnswer = {
+    serverSession: 's',
+    home: '/home/dana',
+    projects: [
+      { project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_billing', 'prj_1')] },
+      { project: { id: 'prj_3', name: 'docs', root: '/home/dana/docs' }, sessions: [liveSession('ses_docs', 'prj_3')] },
+    ],
+  };
   shown.length = 0;
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
       posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
+      if (url.pathname.endsWith('/api/inbox/messages')) return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
+      if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }
+    if (url.pathname.endsWith('/api/inbox/sessions')) return Response.json(sessionsAnswer);
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
@@ -212,7 +226,7 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   mount(
     <SidebarProvider>
     <PullsPage
-      state={{ model, error: null, loading: false, refresh: () => {} }}
+      state={{ model, error: null, loading: false, refresh: () => {}, reload: () => {} }}
       stackId={null}
       project={null}
       projects={[]}
@@ -223,6 +237,8 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
       onReview={() => {}}
       onOpenThread={() => {}}
       onOpenGuide={() => {}}
+      onLaunch={() => {}}
+      onHanded={() => {}}
     />
     </SidebarProvider>,
   );
@@ -295,4 +311,120 @@ test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones
   await settle();
   expect(window.localStorage.getItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`)).toBeNull();
   expect(window.localStorage.getItem(`${store}${layer.key}:layer:${layer.updated_at}`)).not.toBeNull();
+});
+
+// --- ownership is explicit (owner direction on #2590): No agent yet, Hand to an agent, Launch an agent ---
+
+function Page({ answer, stackId, onLaunch, onHanded }: { answer: InboxPullsAnswer; stackId: string; onLaunch?: (keys: readonly string[], body: string) => void; onHanded?: (session: string) => void }) {
+  return (
+    <SidebarProvider>
+      <PullsPage
+        state={{ model: answer, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+        stackId={stackId}
+        project={null}
+        projects={[]}
+        projectNames={new Map()}
+        phone={false}
+        onOpenStack={() => {}}
+        onProject={() => {}}
+        onReview={() => {}}
+        onOpenThread={() => {}}
+        onOpenGuide={() => {}}
+        onLaunch={(keys, body) => onLaunch?.(keys, body)}
+        onHanded={(session) => onHanded?.(session)}
+      />
+    </SidebarProvider>
+  );
+}
+
+test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's live sessions, and the pick starts its thread and keeps it as the stack's", async () => {
+  const handed: string[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onHanded={(s) => handed.push(s)} />);
+  await settle();
+  expect(el('[data-pulls-no-agent]').textContent).toContain('No agent yet');
+  expect(document.querySelector('[data-pulls-reply]')).toBeNull();
+  // Launch shows only while the Inbox can launch (compose's sessions answer says so).
+  expect(document.querySelector('[data-pulls-launch]')).toBeNull();
+  await act(async () => el('[data-pulls-hand]').click());
+  await settle();
+  const offered = [...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'));
+  expect(offered).toEqual(['ses_billing']);
+  await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
+  await settle();
+  const start = posted.find((p) => p.path.endsWith('/api/inbox/messages'))!;
+  expect(start.body.to).toEqual({ host: 'claude-code', session: 'ses_billing' });
+  // The words name every open layer, bottom up, and say verdicts come to this thread.
+  const body = String(start.body.body);
+  expect(body.split('\n').filter((line) => /^\d\. #/.test(line)).map((line) => line.slice(0, 7))).toEqual(['1. #412', '2. #413', '3. #414']);
+  expect(body).toContain(stack[0]!.url);
+  const owner = posted.find((p) => p.path.endsWith('/pulls/owner'))!;
+  expect(owner.body).toMatchObject({ keys: stack.map((l) => l.key), thread_id: 'thr_new' });
+  expect(handed).toEqual(['ses_billing']);
+});
+
+test.skipIf(!hasDom)("Launch an agent opens compose with the hand-off's words and the stack's PRs, once the Inbox can launch", async () => {
+  sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const launched: { keys: readonly string[]; body: string }[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(keys, body) => launched.push({ keys, body })} />);
+  await settle();
+  await act(async () => el('[data-pulls-launch]').click());
+  expect(launched).toHaveLength(1);
+  expect(launched[0]!.keys).toEqual(stack.map((l) => l.key));
+  expect(launched[0]!.body).toContain(stack[2]!.url);
+  expect(posted.filter((p) => p.path.endsWith('/api/inbox/messages'))).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the words forbid pushing and approving", async () => {
+  const theirs = model.pulls.find((p) => p.number === 880)!;
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
+  mount(<Page answer={{ ...model, links: {} }} stackId={theirs.key} />);
+  await settle();
+  expect(el('[data-pulls-no-agent]').textContent).toContain('the verdict stays on GitHub');
+  await act(async () => el('[data-pulls-hand]').click());
+  await settle();
+  await act(async () => el('[data-pulls-hand-session="ses_web"]').click());
+  await settle();
+  const body = String(posted.find((p) => p.path.endsWith('/api/inbox/messages'))!.body.body);
+  expect(body).toContain("tomas's");
+  expect(body).toMatch(/don't push to the branch, comment on the pull request, or approve it/);
+});
+
+test.skipIf(!hasDom)('the Board is optional: no Board chip without a card; a quiet chip when the Board is on and a card links the PR', async () => {
+  mount(<Page answer={model} stackId={STACK_ID} />);
+  await settle();
+  expect(document.querySelector('[data-pulls-card]')).toBeNull();
+  expect(document.querySelector('[data-pulls-thread]')).not.toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  const opened: string[] = [];
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div className="pn-inbox">
+        <SidebarProvider>
+          <PullsPage
+            state={{ model: { ...model, cards: { [stack[1]!.key]: { id: 'crd_1', title: 'Retries', column: 'in_review' } } }, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+            stackId={STACK_ID}
+            project={null}
+            projects={[]}
+            projectNames={new Map()}
+            phone={false}
+            onOpenStack={() => {}}
+            onProject={() => {}}
+            onReview={() => {}}
+            onOpenThread={() => {}}
+            onOpenGuide={() => {}}
+            onOpenCard={(id) => opened.push(id)}
+            onLaunch={() => {}}
+            onHanded={() => {}}
+          />
+        </SidebarProvider>
+      </div>,
+    );
+  });
+  await settle();
+  await act(async () => el('[data-pulls-card="crd_1"]').click());
+  expect(opened).toEqual(['crd_1']);
 });

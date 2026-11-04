@@ -7409,7 +7409,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* Pull requests (approval "inbox-code-review-direction", items 4 and 5; concept B take 1; PullsPage.tsx,
    PullReview.tsx). Drawn only while Settings → Capabilities → Code review is on. The list is the Inbox list's own
-   column, bands and three-line rows; a stack's third line is a chain of the Board's PR marks. The stack view is a
+   column, bands and three-line rows; a stack's third line is a chain of PR marks (the Board's own drawing). The stack view is a
    thread pane's place: a bar, the stack, the landing order, and Reply at the foot. */
 .ib-prlist .ib-lhead { gap: 10px; padding-right: 14px; }
 .ib-prlist .ib-lhead h1 { flex: none; outline: none; }
@@ -7467,6 +7467,13 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-said { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
 .ib-pr-said-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-pr-said p { margin: 6px 0 0; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
+/* No agent yet: Hand to an agent (its menu under the button; a sheet on a phone) and Launch an agent. */
+.ib-pr-noagent-p { color: var(--muted-foreground); }
+.ib-pr-noagent-acts { position: relative; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pn-inbox .ib-pr-noagent-acts > .ib-btn { height: 32px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); background: var(--card); }
+.ib-menu.ib-nmpop.ib-pr-handmenu-d { left: 0; top: calc(100% + 4px); bottom: auto; width: 340px; }
+.ib-pr-handnone { margin: 0; padding: 0 8px 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pn-inbox .ib-menu .ib-mi:disabled { opacity: 0.6; }
 .pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
 .pn-inbox .ib-pr-guide:hover { background: var(--ib-hover-s, var(--muted)); }
 .ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }

@@ -13,6 +13,8 @@ export interface PullsState {
   loading: boolean;
   /** Read the forges again now (the footer's refresh). */
   refresh: () => void;
+  /** Read the list again from the server's cache (a PR was just handed to an agent: its thread is new). */
+  reload: () => void;
 }
 
 /**
@@ -82,5 +84,6 @@ export function usePulls(enabled: boolean): PullsState {
   }, [enabled, read]);
 
   const refresh = useCallback(() => read(true), [read]);
-  return { model, error, loading, refresh };
+  const reload = useCallback(() => read(false), [read]);
+  return { model, error, loading, refresh, reload };
 }

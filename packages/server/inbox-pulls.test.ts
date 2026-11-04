@@ -1,7 +1,7 @@
 /**
  * Pull requests in the Inbox (approval "inbox-code-review-direction", items 4
  * and 5), through a running Inbox's real doors with a scripted gh / glab
- * (`refRunner`) and a scripted branch reader: no real CLI, git or forge.
+ * (`refRunner`): no real CLI or forge.
  *
  * What regresses:
  *  - anything run (gh, glab, git) while Code review is off, or the routes
@@ -11,8 +11,10 @@
  *  - PRs of repositories that are not Inbox projects in the list;
  *  - a second forge read inside the fresh window, or none after a refresh;
  *    a rate limit not holding the host, or the last answer lost on a failure;
- *  - a PR not tied to its agent's thread through a card, its URL, or its
- *    branch (and a teammate's PR tied through a branch name);
+ *  - a PR not tied to the thread the person handed it to, or to its agent's
+ *    own thread through its URL; one tied by anything else (a branch, a
+ *    Board card, another project's thread); a Board card shown while the
+ *    Board is off;
  *  - a layer review opening another diff than the layer's own, or the whole
  *    stack not running from the stack's base to that layer's head; a diff
  *    asked for a PR the list never named reaching the CLI.
@@ -107,7 +109,7 @@ function forge(answer: unknown = GH_ANSWER): Forge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -117,19 +119,14 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const f = forge(options.answer);
-  const branches: string[] = [];
-  const branch = { value: null as string | null };
   const server = await startInboxServer({
     dataDir,
     phones: false,
     ...(options.codeReview === undefined ? {} : { codeReview: options.codeReview }),
     ...(options.tailscale ? { tailscale: options.tailscale } : {}),
+    ...(options.board === undefined ? {} : { board: options.board }),
     refRunner: f.run,
     readProjectRepo: async () => ({ display: "northwind/billing-svc", host: "github.com" }),
-    pullBranch: async (folder) => {
-      branches.push(folder);
-      return branch.value;
-    },
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -143,11 +140,13 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
   const setCodeReview = (on: boolean) =>
     fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code_review: { on } }) });
-  return { root, project, dataDir, base, forge: f, branches, branch, send, pulls, setCodeReview };
+  const own = (keys: string[], threadId: string) =>
+    fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, thread_id: threadId }) });
+  return { root, project, dataDir, base, server, forge: f, send, pulls, own, setCodeReview };
 }
 
 describe("off", () => {
-  test("Code review off (unset): the routes refuse and nothing runs: no gh, no glab, no git", async () => {
+  test("Code review off (unset): the routes refuse and nothing runs: no gh, no glab", async () => {
     const w = await world();
     // A message carrying a PR link, so linking would have work to do.
     await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
@@ -157,9 +156,10 @@ describe("off", () => {
     expect(((await list.json()) as { code: string }).code).toBe("code_review_off");
     const diff = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#412")}&scope=layer`);
     expect(diff.status).toBe(409);
+    const thread = await w.send("Working.", "other");
+    expect((await w.own(["github.com/northwind/billing-svc#412"], thread)).status).toBe(409);
     expect(w.forge.calls.length).toBe(before);
     expect(w.forge.calls.filter((c) => c.args.includes("graphql") || c.args[0] === "api")).toEqual([]);
-    expect(w.branches).toEqual([]);
   });
 
   test("turned off in Settings after a read: the next ask is refused and runs nothing", async () => {
@@ -169,11 +169,9 @@ describe("off", () => {
     expect((await w.pulls()).status).toBe(200);
     expect(w.forge.graphql()).toHaveLength(1);
     const asked = w.forge.calls.length;
-    const branches = w.branches.length;
     expect((await w.setCodeReview(false)).status).toBe(200);
     expect((await w.pulls("?refresh=1")).status).toBe(409);
     expect(w.forge.calls.length).toBe(asked);
-    expect(w.branches.length).toBe(branches);
   });
 });
 
@@ -193,7 +191,8 @@ describe("on", () => {
     expect(answer.links["github.com/northwind/billing-svc#413"]?.thread_id).toBe(thread);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.via).toBe("url");
     expect(answer.links["github.com/northwind/billing-svc#413"]?.agent?.host).toBe("claude-code");
-    // The teammate's PR is never tied through a branch.
+    // Nothing else ties a PR: no thread for the others.
+    expect(answer.links["github.com/northwind/billing-svc#412"]).toBeUndefined();
     expect(answer.links["github.com/northwind/billing-svc#880"]).toBeUndefined();
 
     // Asked again at once: the cache answers, no second query.
@@ -201,13 +200,42 @@ describe("on", () => {
     expect(w.forge.graphql()).toHaveLength(1);
   });
 
-  test("a branch checked out in an agent thread's folder ties the person's PR to that thread", async () => {
+  test("Hand to an agent: the person's choice ties the PRs to that thread, over an agent's URL, and outlives a restart", async () => {
     const w = await world({ codeReview: true });
-    const thread = await w.send("Working on the retry table.", "schedule");
-    w.branch.value = "retry/schedule";
+    const opened = await w.send("Opened https://github.com/northwind/billing-svc/pull/413", "retries");
+    const handed = await w.send("Ready for work.", "handed");
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#412"]).toBeUndefined();
+    const keys = ["github.com/northwind/billing-svc#412", "github.com/northwind/billing-svc#413"];
+    expect((await w.own(keys, handed)).status).toBe(200);
     const answer = (await (await w.pulls()).json()) as InboxPullsAnswer;
-    expect(answer.links["github.com/northwind/billing-svc#412"]).toMatchObject({ via: "branch", thread_id: thread });
-    expect(w.branches).toEqual([w.project]);
+    for (const key of keys) expect(answer.links[key]).toMatchObject({ via: "owner", thread_id: handed });
+    expect(opened).not.toBe(handed);
+    // Kept on disk, so a new Inbox on the same folder still knows it.
+    const saved = JSON.parse(await Bun.file(join(w.dataDir, "inbox", "pull-links.json")).text()) as { links: Record<string, { thread_id: string }> };
+    expect(saved.links[keys[0]!]?.thread_id).toBe(handed);
+  });
+
+  test("Hand to an agent refuses a PR the list never named, a thread that is not there, and no PR at all", async () => {
+    const w = await world({ codeReview: true });
+    const thread = await w.send("Ready.", "handed");
+    await w.pulls();
+    expect((await w.own(["github.com/elsewhere/thing#9"], thread)).status).toBe(404);
+    expect((await w.own(["github.com/northwind/billing-svc#412"], "msg_01M4H6G73M9H3Z32T859E72NOP")).status).toBe(422);
+    expect((await w.own([], thread)).status).toBe(422);
+    expect(await Bun.file(join(w.dataDir, "inbox", "pull-links.json")).exists()).toBe(false);
+  });
+
+  test("the Board is optional: a card that links a PR shows only while the Board is on, and never ties a thread", async () => {
+    for (const board of [false, true]) {
+      const w = await world({ codeReview: true, board });
+      await w.send("Working.", "retries");
+      const project = w.server.store.allProjects()[0]!;
+      w.server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Retries", prs: ["northwind/billing-svc#412"] });
+      const answer = (await (await w.pulls()).json()) as InboxPullsAnswer;
+      expect(answer.links["github.com/northwind/billing-svc#412"]).toBeUndefined();
+      if (board) expect(answer.cards["github.com/northwind/billing-svc#412"]).toMatchObject({ title: "Retries" });
+      else expect(answer.cards).toEqual({});
+    }
   });
 
   test("a layer's diff is its own; the whole stack runs from the stack's base to that layer's head; an unlisted PR runs nothing", async () => {
@@ -355,14 +383,12 @@ async function projects(answer: unknown) {
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const f = forge(answer);
-  const branchOf: Record<string, string> = {};
   const server = await startInboxServer({
     dataDir,
     phones: false,
     codeReview: true,
     refRunner: f.run,
     readProjectRepo: async (dir) => ({ display: dir.endsWith("web-app") ? "northwind/web-app" : "northwind/billing-svc", host: "github.com" }),
-    pullBranch: async (folder) => branchOf[folder] ?? null,
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -374,7 +400,9 @@ async function projects(answer: unknown) {
     return result.structuredContent.thread_id;
   };
   const list = async () => (await (await fetch(`${base}/api/inbox/pulls`)).json()) as InboxPullsAnswer;
-  return { dirs, f, branchOf, send, list, base };
+  const own = (keys: string[], threadId: string) =>
+    fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, thread_id: threadId }) });
+  return { dirs, f, send, list, own, base };
 }
 
 const answerOf = (authored: unknown[], requested: unknown[] = [], merged: unknown[] = []) => ({ data: { viewer: { login: "dana" }, requested: { nodes: requested }, authored: { nodes: authored }, merged: { nodes: merged } } });
@@ -390,39 +418,39 @@ describe("links (findings D, E and two clones)", () => {
     expect(((await fresh.json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#7"]).toMatchObject({ via: "url", thread_id: own });
   });
 
-  test("a branch links only the person's PR from the repository itself, never a fork's or one from a resting branch", async () => {
+  test("a fork's PR, or one from main, is never tied to whatever thread is open: only its URL or the person's choice ties it", async () => {
     const w = await projects(
       answerOf([
         ghPull(8, { headRefName: "main", headRepository: { nameWithOwner: "dana/billing-svc" } }),
         ghPull(9, { headRefName: "feat-9", headRepository: { nameWithOwner: "dana/billing-svc" } }),
         ghPull(10, { headRefName: "main" }),
-        ghPull(11, { headRefName: "feat-11" }),
       ]),
     );
-    const thread = await w.send("billing-svc", "Working on the docs.", "docs");
-    // The folder is on main for #8 and #10; #9's branch is checked out too, but it is a fork's.
-    w.branchOf[w.dirs["billing-svc"]!] = "main";
-    let links = (await w.list()).links;
-    expect(links["github.com/northwind/billing-svc#8"]).toBeUndefined();
-    expect(links["github.com/northwind/billing-svc#10"]).toBeUndefined();
-    w.branchOf[w.dirs["billing-svc"]!] = "feat-9";
-    await new Promise((done) => setTimeout(done, 5));
-    links = ((await (await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).json()) as InboxPullsAnswer).links;
-    expect(links["github.com/northwind/billing-svc#9"]).toBeUndefined();
-    expect(thread).toBeTruthy();
+    const docs = await w.send("billing-svc", "Working on the docs on main, and feat-9.", "docs");
+    const links = (await w.list()).links;
+    expect(Object.keys(links)).toEqual([]);
+    // Handed over by the person, the fork's PR is that thread's.
+    expect((await w.own(["github.com/northwind/billing-svc#9"], docs)).status).toBe(200);
+    expect((await w.list()).links["github.com/northwind/billing-svc#9"]).toMatchObject({ via: "owner", thread_id: docs });
   });
 
-  test("two clones of one origin: a thread in the second clone links by URL and by branch", async () => {
-    const w = await projects(answerOf([ghPull(12, { headRefName: "feat-12" }), ghPull(13, { headRefName: "feat-13" })]));
+  test("Hand to an agent takes only a thread in a project of the PR's repository: a second clone's yes, another repository's no", async () => {
+    const w = await projects(answerOf([ghPull(14, { headRefName: "feat-14" })]));
+    const web = await w.send("web-app", "Ready.", "web");
+    const clone = await w.send("billing-svc-2", "Ready.", "clone");
+    await w.list();
+    expect((await w.own(["github.com/northwind/billing-svc#14"], web)).status).toBe(422);
+    expect((await w.own(["github.com/northwind/billing-svc#14"], clone)).status).toBe(200);
+    expect((await w.list()).links["github.com/northwind/billing-svc#14"]).toMatchObject({ via: "owner", thread_id: clone });
+  });
+
+  test("two clones of one origin: a thread in the second clone links by URL", async () => {
+    const w = await projects(answerOf([ghPull(12, { headRefName: "feat-12" })]));
     const byUrl = await w.send("billing-svc-2", "Up for review: https://github.com/northwind/billing-svc/pull/12", "clone-url");
-    const byBranch = await w.send("billing-svc-2", "Working on the retry table.", "clone-branch");
-    // Only the newest thread per folder is asked its branch: the folder is the second clone's.
-    w.branchOf[w.dirs["billing-svc-2"]!] = "feat-13";
     await w.send("billing-svc", "Unrelated.", "first-clone");
     const answer = await w.list();
     expect(answer.links["github.com/northwind/billing-svc#12"]).toMatchObject({ via: "url", thread_id: byUrl });
-    expect(answer.links["github.com/northwind/billing-svc#13"]?.via).toBe("branch");
-    expect([byUrl, byBranch]).toContain(answer.links["github.com/northwind/billing-svc#13"]!.thread_id);
+    expect(answer.projects["github.com/northwind/billing-svc"]).toHaveLength(2);
   });
 });
 
@@ -550,7 +578,7 @@ describe("who may read it", () => {
         else serve.set(httpsPort, args.at(-1)!);
         return ok(`https://${MAGIC}:${httpsPort}/\n`);
       };
-      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, refRunner: f.run, readProjectRepo: async () => null, pullBranch: async () => null });
+      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, refRunner: f.run, readProjectRepo: async () => null });
       servers.push(server);
       const listener = server.tailscale.listenerPort();
       expect(listener).not.toBeNull();
@@ -559,6 +587,13 @@ describe("who may read it", () => {
       const guest = await through(GUEST);
       expect(guest.status).toBe(403);
       expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      // Nor may a guest hand a PR to an agent.
+      const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
+        body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
+      });
+      expect(handGuest.status).toBe(403);
       expect(f.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
     } finally {

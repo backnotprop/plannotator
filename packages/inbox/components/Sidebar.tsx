@@ -38,7 +38,7 @@ export interface SidebarProps {
    */
   onBoard?: () => void;
   /**
-   * Pull requests (approval "inbox-code-review-direction", item 4): the row under Board, shown only with
+   * Pull requests (approval "inbox-code-review-direction", item 4): a row of its own (after Board when the Board is on; it needs none), shown only with
    * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
    */
   onPulls?: () => void;

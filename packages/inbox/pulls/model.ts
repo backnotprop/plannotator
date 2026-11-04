@@ -23,8 +23,8 @@ export { inboxPullLabel };
 
 /** The answer as the page shows it: the rows by whose move it is, only the chosen project's when one is. */
 export function pullGroups(answer: InboxPullsAnswer, project: string | null): InboxPullGroups {
-  const projectOf = (pull: InboxPull) => answer.projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? null;
-  const pulls = project ? answer.pulls.filter((p) => projectOf(p) === project) : answer.pulls;
+  const projectsOf = (pull: InboxPull) => answer.projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? [];
+  const pulls = project ? answer.pulls.filter((p) => projectsOf(p).includes(project)) : answer.pulls;
   const stacks = inboxPullStacks(pulls);
   return inboxPullGroups(inboxPullItems(stacks, (pull) => !!answer.links[pull.key]));
 }
@@ -63,11 +63,66 @@ export function linkAgentName(link: InboxPullLink | null): string | null {
   return link.agent.name?.trim() || agentName(link.agent.host);
 }
 
-/** The stack's name: its Board card's title, else its thread's subject, else its lowest open layer's title. */
+/**
+ * The stack's name: the thread's subject when the agent opened it there (`url`: the agent named its own work),
+ * else its lowest open layer's title. A thread the person handed it to is named by the hand-off, not the work.
+ */
 export function stackTitle(stack: InboxPullStack, link: InboxPullLink | null): string {
   const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
   if (open.length === 1) return open[0]!.title;
-  return link?.card?.title || link?.thread_subject || (inboxPullLandsNext(stack) ?? stack.layers[stack.layers.length - 1]!).title;
+  return (link?.via === 'url' && link.thread_subject) || (inboxPullLandsNext(stack) ?? stack.layers[stack.layers.length - 1]!).title;
+}
+
+/** The Inbox projects a stack's repository is (two clones of one origin are two). */
+export function stackProjects(answer: Pick<InboxPullsAnswer, 'projects'>, stack: Pick<InboxPullStack, 'host' | 'repo'>): readonly string[] {
+  return answer.projects[`${stack.host}/${stack.repo}`.toLowerCase()] ?? [];
+}
+
+/** The PRs a hand-off gives the agent: the stack's open layers (a merged one is done). */
+export function handoffKeys(stack: InboxPullStack): string[] {
+  return stack.layers.filter((l) => l.state === 'open' || l.state === 'draft').map((l) => l.key);
+}
+
+const firstName = (pull: Pick<InboxPull, 'author'>) => pull.author ?? 'a teammate';
+
+/**
+ * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent): what it is, where,
+ * and what the agent may do with it. Only the person's own open layers are the agent's to change; a teammate's
+ * is for discussion: never pushed to, commented on or approved. DRAFT agent text (REPORT): the words reach the
+ * agent as the person's New message.
+ */
+export function pullHandoffMessage(stack: InboxPullStack): string {
+  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
+  const layers = open.length > 0 ? open : [stack.layers[stack.layers.length - 1]!];
+  const mine = layers.some((l) => l.mine);
+  const where = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
+  const cut = (title: string) => {
+    const one = title.replace(/\s+/g, ' ').trim();
+    return one.length > 100 ? `${one.slice(0, 99)}…` : one;
+  };
+  if (!mine) {
+    const pull = layers[0]!;
+    const who = firstName(pull);
+    const head =
+      layers.length === 1
+        ? `Help me review ${pullNoun(pull)}: ${cut(pull.title)}\n\nIt is ${who}'s, in ${where}: ${pull.url}`
+        : `Help me review ${who}'s stack, ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${cut(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
+    return `${head}\n\nRead the change, then reply here with what it does, what looks risky, and what I might ask ${who}. This thread is for our discussion only: don't push to the branch, comment on the ${stack.platform === 'gitlab' ? 'merge request' : 'pull request'}, or approve it.`;
+  }
+  const pull = layers[0]!;
+  const head =
+    layers.length === 1
+      ? `Own ${pullNoun(pull)}: ${cut(pull.title)}\n\nIt is mine, in ${where}: ${pull.url} (branch ${pull.head}, into ${pull.base}).`
+      : `Own the stack ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${cut(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
+  const teammates = layers.filter((l) => !l.mine);
+  const theirs = teammates.length > 0 ? ` ${teammates.map(inboxPullLabel).join(', ')} ${teammates.length === 1 ? 'is' : 'are'} a teammate's: read ${teammates.length === 1 ? 'it' : 'them'}, never change ${teammates.length === 1 ? 'it' : 'them'}.` : '';
+  return `${head}\n\nRead the change, then reply here with what it does and anything to fix before it lands. I review it in the Plannotator Inbox: my verdicts and replies come to this thread, and you act on them in ${layers.length === 1 ? `that ${stack.platform === 'gitlab' ? 'merge request' : 'pull request'}'s branch` : 'the branch of the layer they name'}.${theirs} Don't merge anything.`;
+}
+
+/** The stack's open layers, bottom (lands first) up, one numbered line each. */
+function layerLines(layers: readonly InboxPull[], stack: InboxPullStack, where: string): string {
+  const lines = layers.map((l, i) => `${i + 1}. ${inboxPullLabel(l)} ${l.title.replace(/\s+/g, ' ').trim()}: ${l.url} (branch ${l.head}${l.mine ? '' : `, ${firstName(l)}'s`})`);
+  return `A stack in ${where}, landing from the bottom up into ${stack.open_base}:\n${lines.join('\n')}`;
 }
 
 /** The repository's own name (`billing-svc` for `northwind/billing-svc`). */
@@ -89,7 +144,8 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
     case 'requested':
       return pull.author ? `${pull.author} asked for your review` : 'Your review was asked for';
     case 'agent_ready':
-      return `${linkAgentName(link) ?? 'Your agent'} opened it · your review`;
+      // `owner`: the person handed it over (the agent did not open it); `url`: the agent's own thread names it.
+      return `${linkAgentName(link) ?? 'Your agent'} ${link?.via === 'owner' ? 'has it' : 'opened it'} · your review`;
     case 'running':
       return 'Checks running';
     case 'changes':
@@ -116,12 +172,14 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
 /** A stack row's third line: "3 open, 1 merged · start at #412" (a stack of one says why it waits, after its number). */
 export function rowLine(item: InboxPullItem, link: InboxPullLink | null): string {
   const open = item.stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
-  if (item.stack.layers.length === 1) return `${inboxPullLabel(item.focus)} · ${reasonWords(item, link).replace(/^./, (c) => c.toLowerCase())}`;
+  // Mid-line the reason starts lower case, but never an agent's name ("Claude Code has it").
+  const reason = () => (item.reason === 'agent_ready' ? reasonWords(item, link) : reasonWords(item, link).replace(/^./, (c) => c.toLowerCase()));
+  if (item.stack.layers.length === 1) return `${inboxPullLabel(item.focus)} · ${reason()}`;
   const merged = item.stack.layers.filter((l) => l.state === 'merged').length;
   const counts = `${open.length} open${merged > 0 ? `, ${merged} merged` : ''}`;
   const start = startLayer(item.stack);
   if (item.move === 'on_you' && start) return `${counts} · start at ${inboxPullLabel(start)}`;
-  return `${counts} · ${reasonWords(item, link).replace(/^./, (c) => c.toLowerCase())}`;
+  return `${counts} · ${reason()}`;
 }
 
 /** Where "Review layer by layer" starts: the next layer to land that is not a draft, else the next to land. */

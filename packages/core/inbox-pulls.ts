@@ -57,10 +57,21 @@ export interface InboxPull {
   merged_at: string | null;
 }
 
-/** How a PR was tied to an agent's thread. */
-export type InboxPullLinkVia = "card" | "url" | "branch";
+/**
+ * How a PR was tied to an agent's thread: `owner`, the person handed it to an agent (or launched one for it) and
+ * the Inbox keeps that choice; `url`, the PR's link in an agent's own message in a project of the PR's repository
+ * (the agent opened it). Nothing else ties a PR to a thread: no branch guess, and the Board is never needed.
+ */
+export type InboxPullLinkVia = "owner" | "url";
 
-/** The agent's thread (and Board card) a PR is tied to, read on this computer only. */
+/** A Board card that links a PR: a quiet extra, only while the Board is on. */
+export interface InboxPullCard {
+  id: string;
+  title: string;
+  column: string;
+}
+
+/** The agent's thread a PR is tied to, read on this computer only. */
 export interface InboxPullLink {
   via: InboxPullLinkVia;
   thread_id: string;
@@ -72,8 +83,6 @@ export interface InboxPullLink {
   last: { message_id: string; preview: string; at: string } | null;
   /** The thread's latest Guided Review, when the agent sent one. */
   guide: { message_id: string; title: string; steps: number } | null;
-  /** The Board card that links the PR (or links the thread), when there is one. */
-  card: { id: string; title: string; column: string } | null;
 }
 
 /** One host the Inbox asked, and as whom. */
@@ -93,8 +102,10 @@ export interface InboxPullsAnswer {
   pulls: InboxPull[];
   /** By pull key: the agent's thread, when one is tied to it. */
   links: Record<string, InboxPullLink>;
-  /** `host/repo` (lowercased) → the Inbox project it belongs to. */
-  projects: Record<string, string>;
+  /** `host/repo` (lowercased) → the Inbox projects on it (two clones of one origin are two projects). */
+  projects: Record<string, string[]>;
+  /** By pull key: the Board card that links it. Empty while the Board is off (no Board UI then). */
+  cards: Record<string, InboxPullCard>;
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
