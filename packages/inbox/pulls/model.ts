@@ -500,7 +500,9 @@ export function pullsEmptyWords(
   const failed = notices.filter((n) => n.key.startsWith('unavailable:') || n.key.startsWith('rate_limited:'));
   if (failed.length > 0) {
     const others = notices.filter((n) => !failed.includes(n) && !n.key.startsWith('capped:'));
-    return { kind: 'unread', head: failed[0]!.head, lines: [...failed, ...others].map((n) => n.line) };
+    // The heading already says the first one: its line goes on from there ("Its pull requests aren't shown.").
+    const rest = (n: PullsNotice) => (n.line.startsWith(`${n.head}; `) ? n.line.slice(n.head.length + 2).replace(/^./, (c) => c.toUpperCase()) : n.line);
+    return { kind: 'unread', head: failed[0]!.head, lines: [rest(failed[0]!), ...failed.slice(1).map((n) => n.line), ...others.map((n) => n.line)] };
   }
   const unsigned = notices.filter((n) => n.key.startsWith('unsigned:'));
   if (unsigned.length > 0 && model.hosts.length === 0) {
