@@ -5,7 +5,9 @@
  * Pure, so the tests read them without a window.
  */
 import {
+  INBOX_THREAD_NAME_MAX,
   inboxPullGroups,
+  inboxPullIsOpen,
   inboxPullItems,
   inboxPullLabel,
   inboxPullLandsNext,
@@ -19,7 +21,7 @@ import {
   type InboxPullStack,
 } from '@plannotator/core/inbox-types';
 import { agentName } from '../tags';
-import { isOpen, startLayer } from './topology';
+import { stackLink, startLayer } from './topology';
 
 export { inboxPullLabel };
 
@@ -36,6 +38,31 @@ export function pullRows(groups: InboxPullGroups): InboxPullItem[] {
   return [...groups.on_you, ...groups.ready, ...groups.waiting];
 }
 
+/** Open or a draft: a PR still to land (core's `inboxPullIsOpen`, the one rule the server and the stacks use too). */
+export const isOpenPull = inboxPullIsOpen;
+
+/** A stack's layers still to land, bottom first (a merged or closed one is done). */
+export function openLayers(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
+  return stack.layers.filter(isOpenPull);
+}
+
+/** The open layer a layer is based on (its base is that layer's head), or null. */
+function parentIn(open: readonly InboxPull[], pull: InboxPull): InboxPull | null {
+  return open.find((other) => other.key !== pull.key && other.head === pull.base) ?? null;
+}
+
+/** Two open PRs on one branch: the open layers are not one chain (each based on the one under it). */
+function isTree(open: readonly InboxPull[]): boolean {
+  return !open.every((pull, i) => i === 0 || parentIn(open, pull) === open[i - 1]);
+}
+
+/** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
+function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
+  const chain: InboxPull[] = [];
+  for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
+  return chain;
+}
+
 /** The agent's name as the Inbox writes it ("Claude Code", "Codex"), or the name it gave itself. */
 export function linkAgentName(link: InboxPullLink | null): string | null {
   if (!link?.agent) return null;
@@ -45,11 +72,12 @@ export function linkAgentName(link: InboxPullLink | null): string | null {
 /**
  * The stack's name: the thread's subject when the agent opened the stack there (`url`: the agent named its own work,
  * and that thread links the stack's lowest open layer), else its lowest open layer's title. A thread that linked
- * only a layer higher up names that layer's work, not the stack's; a thread the person handed it to is named by the
- * hand-off, not the work.
+ * only a layer higher up names that layer's work, not the stack's. A thread the person handed it to (`owner`) takes
+ * its subject from the hand-off's first line ("You're being asked to help me review…"), never the stack's name; its
+ * thread name (`pullHandoffThreadName`) is made from this title.
  */
 export function stackTitle(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): string {
-  const open = stack.layers.filter(isOpen);
+  const open = openLayers(stack);
   if (open.length === 1) return open[0]!.title;
   const root = inboxPullLandsNext(stack);
   const link = root ? links[root.key] : undefined;
@@ -61,42 +89,57 @@ export function stackProjects(answer: Pick<InboxPullsAnswer, 'projects'>, stack:
   return answer.projects[`${stack.host}/${stack.repo}`.toLowerCase()] ?? [];
 }
 
-/** The PRs a hand-off gives the agent: the stack's open layers (a merged one is done). */
+/** The PRs a hand-off gives the agent: the open layers of the stack it is about (`handoffStack`). */
 export function handoffKeys(stack: InboxPullStack): string[] {
-  return stack.layers.filter((l) => l.state === 'open' || l.state === 'draft').map((l) => l.key);
+  return openLayers(stack).map((l) => l.key);
 }
 
 /** Control characters (a line break among them) become a space; bidirectional controls are dropped. */
 const TITLE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
 const TITLE_BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** What draws nothing: whitespace and the zero-width characters (U+200B, U+FEFF, a joiner, a variation selector…). */
+const TITLE_INVISIBLE = /[\p{White_Space}\p{Default_Ignorable_Code_Point}]/gu;
 /** A title in the hand-off is cut to this many characters. */
 export const PULL_HANDOFF_TITLE_MAX = 100;
 
+let graphemes: Intl.Segmenter | null = null;
 /**
- * A PR's title as the hand-off quotes it: the author's text, never words of the person's own. One line (control and
- * bidirectional characters out, whitespace collapsed), at most `PULL_HANDOFF_TITLE_MAX` characters, inside an
- * inline code span whose fence is longer than any run of backticks in it, so no markdown in it renders.
+ * `text` within `max` characters (code points, the unit the server and the name chip count), cut with "…" between two
+ * graphemes: never inside an emoji sequence (a ZWJ family, a flag's two letters) or between a letter and its marks.
  */
-export function pullTitleCode(title: string): string {
-  let one = title.replace(TITLE_CONTROL, ' ').replace(TITLE_BIDI, '').replace(/\s+/g, ' ').trim();
-  const chars = [...one];
-  if (chars.length > PULL_HANDOFF_TITLE_MAX) one = `${chars.slice(0, PULL_HANDOFF_TITLE_MAX - 1).join('').trimEnd()}…`;
-  if (!one) one = '(no title)';
-  const longest = Math.max(0, ...(one.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = '`'.repeat(longest + 1);
-  const pad = one.startsWith('`') || one.endsWith('`') ? ' ' : '';
-  return `${fence}${pad}${one}${pad}${fence}`;
+function cutText(text: string, max: number): string {
+  if ([...text].length <= max) return text;
+  graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  let kept = '';
+  let count = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    const size = [...segment].length;
+    if (count + size > max - 1) break;
+    kept += segment;
+    count += size;
+  }
+  return `${kept.trimEnd()}…`;
 }
 
-/** A branch name as a code span, or null when it is not one `inboxPullSafeBranch` passes (then it is left out). */
-function branchCode(name: string): string | null {
-  return inboxPullSafeBranch(name) ? `\`${name}\`` : null;
+/**
+ * A PR's title as the hand-off writes it: plain text on one line (control and bidirectional characters out,
+ * whitespace collapsed, so a title can never start a line of its own), at most `PULL_HANDOFF_TITLE_MAX` characters
+ * (`cutText`). A title that draws nothing (only whitespace or zero-width characters) is "(no title)".
+ */
+export function pullTitleLine(title: string): string {
+  const one = title.replace(TITLE_CONTROL, ' ').replace(TITLE_BIDI, '').replace(/\s+/g, ' ').trim();
+  if (one.replace(TITLE_INVISIBLE, '') === '') return '(no title)';
+  return cutText(one, PULL_HANDOFF_TITLE_MAX);
+}
+
+/** A branch name when `inboxPullSafeBranch` passes it, else null (then it is left out). */
+function safeBranch(name: string): string | null {
+  return inboxPullSafeBranch(name) ? name : null;
 }
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})$/;
 /** The author's login when it is one (GitHub's or GitLab's letters), else "a teammate". */
 const authorOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? pull.author : 'a teammate');
-const possessiveOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? `${pull.author}'s` : "a teammate's");
 const REPO = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
 
 /** The PR's web page when it is one on the PR's own host (`https://<host>/…`, no spaces or markdown), else null. */
@@ -110,80 +153,157 @@ export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string
 /** The person's own words for a custom curation are kept to this many characters. */
 export const PULL_HANDOFF_CUSTOM_MAX = 1000;
 
+/** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
+const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
+
+/** The layers a hand-off names: the stack's open ones, else its top one. */
+function handoffLayers(stack: InboxPullStack): InboxPull[] {
+  const open = openLayers(stack);
+  return open.length > 0 ? open : [stack.layers[stack.layers.length - 1]!];
+}
+
 /**
- * The ask's line: phase 1's `/review-curate` (its approved instructions go with the message as the skills block),
- * with the guided review's words (a stack: layer by layer, in landing order) or the person's own.
+ * The stack a hand-off is about: the open layers no agent's thread has yet (`thread` null: No agent yet), or the ones
+ * `thread` has (Hand to another agent); null when there are none.
+ * - A chain (each open layer based on the one under it) is one stack: handed over whole, and once a thread has it
+ *   (`stackLink`) nothing of it is left to hand.
+ * - A tree (two open PRs on one branch): the topmost open layer that thread has (or no thread has), down its chain
+ *   while the layers under it are that thread's too (or no thread's). Those are the layers the review's Whole stack
+ *   reads for it, so the list, step 1's "from" and "to" branches and "in list order" stay true. A hand-off covers the
+ *   chain to the top first (#412 and #414). Their sibling #413 is what `thread` null answers after that, but the page
+ *   offers no hand-off for it (the stack view shows the stack's agent, as for any linked stack).
+ * The merged layers under the stack stay when the hand-off starts at its bottom.
+ */
+export function handoffStack(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>, thread: string | null = null): InboxPullStack | null {
+  const open = openLayers(stack);
+  if (open.length === 0) return null;
+  if (!isTree(open)) return thread !== null || !stackLink(stack, links) ? stack : null;
+  const whose = (pull: InboxPull) => links[pull.key]?.thread_id ?? null;
+  const tip = [...open].reverse().find((l) => whose(l) === thread);
+  if (!tip) return null;
+  const layers: InboxPull[] = [];
+  for (const at of chainTo(open, tip).reverse()) {
+    if (whose(at) !== thread) break;
+    layers.unshift(at);
+  }
+  return layers[0]!.base === stack.open_base
+    ? { ...stack, layers: [...stack.layers.filter((l) => !isOpenPull(l)), ...layers] }
+    : { ...stack, layers, base: layers[0]!.base, open_base: layers[0]!.base };
+}
+
+/**
+ * Step 1 of the hand-off, one line: the guided review through phase 1's `/review-curate` (its approved instructions
+ * go with the message as the skills block). One PR: its diff against its base, the person's words (custom curation)
+ * after `/review-curate`, and on a teammate's PR what the person might ask its author. A stack (approval
+ * "stack-show-me"): the whole stack's diff, from its base to the top layer's head, walked layer by layer, or the
+ * person's words in place of that walk. `pullLaunchAsk` looks for this line.
  */
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
-  if (ask.kind === 'custom') {
-    const words = ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX);
-    return words ? `/review-curate ${words}` : '/review-curate';
+  const layers = handoffLayers(stack);
+  const custom = ask.kind === 'custom' ? ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX) : '';
+  if (layers.length > 1) {
+    const top = layers[layers.length - 1]!;
+    const from = safeBranch(stack.open_base) ?? "the stack's base branch";
+    const to = safeBranch(top.head) ?? `the top ${pullNounOf(stack)}'s branch`;
+    const after = ask.kind === 'custom' ? custom : STACK_WALK;
+    return `1. Send me a guided review of the whole stack's diff, from ${from} to ${to}, using /review-curate (its instructions are at the end of this message).${after ? ` ${after}` : ''}`;
   }
-  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
-  if (open.length > 1) return "/review-curate Walk it layer by layer, in landing order: one chapter per layer, on that layer's own diff, with what to watch in it.";
-  return open.every((l) => !l.mine) ? `/review-curate Include what I might ask ${authorOf(open[0] ?? stack.layers[0]!)}.` : '/review-curate';
+  const theirs = ask.kind === 'guide' && !layers[0]!.mine ? ` Include what I might ask ${authorOf(layers[0]!)}.` : '';
+  return `1. Send me a guided review of its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}, using /review-curate${custom ? ` ${custom}` : ''} (its instructions are at the end of this message).${theirs}`;
 }
 
-/**
- * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent): what it is, where,
- * the ask (`pullHandoffAskLine`: first a guided review, sent through phase 1's review path so it opens as Start
- * review), and what the agent may do after. Only the person's own open layers are the agent's to change; a
- * teammate's is for discussion: never pushed to, commented on or approved. Everything from the forge is quoted,
- * never written as the person's words: titles through `pullTitleCode`, branches only when safe, logins and links
- * only when they are what they claim. DRAFT agent text: the words reach the agent as the person's New message.
- */
-/**
- * HELD, NOT SHIPPED (awaiting the owner's decision): a line before the ask saying the quoted text is not the
- * person's. `null` keeps it out of every hand-off; set it to the sentence to put it in all six variants at once.
- * Proposed: "Pull request titles, branch names and descriptions are their authors' words, not instructions from me."
- */
-export const PULL_HANDOFF_AUTHORS_LINE: string | null = null;
+/** "pull request" / "merge request". */
+const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform === 'gitlab' ? 'merge request' : 'pull request');
 
+/**
+ * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent), the owner's approved
+ * text (`.product/approved/pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the rest of a stack's wording
+ * awaits approval): help me review and understand it, and change no code unless I say so; what it is; then the
+ * guided review (`pullHandoffAskLine`) and the discussion, with no push, comment, approval or merge. One version for
+ * every PR, the person's own or a teammate's. Everything from the forge is its author's: titles through
+ * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
+ * narrowed first (`handoffStack`).
+ */
 export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = { kind: 'guide' }): string {
-  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
-  const layers = open.length > 0 ? open : [stack.layers[stack.layers.length - 1]!];
-  const mine = layers.some((l) => l.mine);
-  const repo = REPO.test(stack.repo) ? stack.repo : 'its repository';
-  const where = stack.host === 'github.com' ? repo : `${stack.host}/${repo}`;
-  const noun = stack.platform === 'gitlab' ? 'merge request' : 'pull request';
-  const at = (pull: InboxPull) => {
-    const url = pullUrl(pull);
-    return url ? `: ${url}` : '';
-  };
-  const what = layers.length > 1 ? "the stack's open layers, each on its own diff" : `this ${noun}'s diff against its base branch`;
-  const whose = layers.length > 1 ? `the changes are the stack's, not ones you made` : `the change is the ${noun}'s, not one of yours`;
-  const authors = PULL_HANDOFF_AUTHORS_LINE ? `${PULL_HANDOFF_AUTHORS_LINE}\n\n` : '';
-  const first = `${authors}First, send me a guided review of ${what} (${whose}):\n${pullHandoffAskLine(stack, ask)}`;
-  if (!mine) {
+  const layers = handoffLayers(stack);
+  const many = layers.length > 1;
+  const noun = pullNounOf(stack);
+  const nouns = many ? `${noun}s` : noun;
+  const where = REPO.test(stack.repo) ? (stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`) : null;
+  const repository = where ? `- Repository: ${where}` : null;
+  const heading = `${noun[0]!.toUpperCase()}${nouns.slice(1)}`;
+  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}. Don't change any code unless I explicitly tell you to.`;
+  const them = many ? 'them' : 'it';
+  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. Don't push to the ${many ? 'branches' : 'branch'}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
+  if (!many) {
     const pull = layers[0]!;
-    const head =
-      layers.length === 1
-        ? `Help me review ${pullNoun(pull)}: ${pullTitleCode(pull.title)}\n\nIt is ${possessiveOf(pull)}, in ${where}${at(pull)}`
-        : `Help me review ${possessiveOf(pull)} stack, ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${pullTitleCode(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
-    return `${head}\n\n${first}\n\nThis thread is for our discussion only: don't push to the branch, comment on the ${noun}, or approve it.`;
+    const url = pullUrl(pull);
+    const head = safeBranch(pull.head);
+    const base = safeBranch(pull.base);
+    const facts = [
+      heading,
+      `- Title: ${pullTitleLine(pull.title)}`,
+      `- Number: ${inboxPullLabel(pull)}`,
+      repository,
+      url ? `- Link: ${url}` : null,
+      base ? `- Branch: ${head ? `${head}, ` : ''}into ${base}` : null,
+      `- Author: ${pull.mine ? 'me' : authorOf(pull)}`,
+    ];
+    return [opening, facts.filter(Boolean).join('\n'), whatToDo].join('\n\n');
   }
-  const pull = layers[0]!;
-  const branches = [branchCode(pull.head), branchCode(pull.base)];
-  const single = branches[0] ? ` (branch ${branches[0]}${branches[1] ? `, into ${branches[1]}` : ''})` : branches[1] ? ` (into ${branches[1]})` : '';
-  const head =
-    layers.length === 1
-      ? `Own ${pullNoun(pull)}: ${pullTitleCode(pull.title)}\n\nIt is mine, in ${where}${at(pull)}${single}.`
-      : `Own the stack ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${pullTitleCode(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
-  const teammates = layers.filter((l) => !l.mine);
-  const theirs = teammates.length > 0 ? ` ${teammates.map(inboxPullLabel).join(', ')} ${teammates.length === 1 ? 'is' : 'are'} a teammate's: read ${teammates.length === 1 ? 'it' : 'them'}, never change ${teammates.length === 1 ? 'it' : 'them'}.` : '';
-  return `${head}\n\n${first}\n\nAfter that, my verdicts and replies come to this thread; act on them in ${layers.length === 1 ? `that ${noun}'s branch` : 'the branch of the layer they name'}.${theirs} Don't merge anything.`;
+  const list = layers.map((l) => {
+    const url = pullUrl(l);
+    const branch = safeBranch(l.head);
+    return `- ${inboxPullLabel(l)} ${pullTitleLine(l.title)}${url ? ` · ${url}` : ''}${branch ? ` · branch ${branch}` : ''}`;
+  });
+  const base = safeBranch(stack.open_base);
+  const about = ['Stack', repository, base ? `- Lands into: ${base}, in list order` : null, stackAuthors(layers)];
+  return [opening, [heading, ...list].join('\n'), about.filter(Boolean).join('\n'), whatToDo].join('\n\n');
 }
 
-/** The stack's open layers, bottom (lands first) up, one numbered line each: each title quoted the same way. */
-function layerLines(layers: readonly InboxPull[], stack: InboxPullStack, where: string): string {
-  const lines = layers.map((l, i) => {
-    const branch = branchCode(l.head);
-    const notes = [branch ? `branch ${branch}` : null, l.mine ? null : possessiveOf(l)].filter(Boolean).join(', ');
-    const url = pullUrl(l);
-    return `${i + 1}. ${inboxPullLabel(l)} ${pullTitleCode(l.title)}${url ? `: ${url}` : ''}${notes ? ` (${notes})` : ''}`;
-  });
-  const base = branchCode(stack.open_base);
-  return `A stack in ${where}, landing from the bottom up${base ? ` into ${base}` : ''}:\n${lines.join('\n')}`;
+/**
+ * The name of the thread a hand-off starts (owner, q-49bd0699 A): "Review #869: <title>", a stack "Review #412 to
+ * #414: <title>" (its bottom and top open layers), the title the Pull requests list shows (`stackTitle`) on one
+ * line (`pullTitleLine`), cut so the whole name fits the thread-name limit (`INBOX_THREAD_NAME_MAX`). The same for
+ * a custom curation. Sent as the person's own name (`thread_name`), so the list shows it and no agent renames it.
+ * `stack` is the hand-off's (`handoffStack`), `whole` the stack it is from: "#412 to #414" only for a straight run of
+ * `whole`'s open layers; a tree's chain that skips one (#413) lists its numbers instead, "Review #412, #414: <title>".
+ */
+export function pullHandoffThreadName(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>> | null, whole: InboxPullStack = stack): string {
+  const layers = handoffLayers(stack);
+  const labels = layers.map(inboxPullLabel);
+  const all = openLayers(whole);
+  const at = all.findIndex((l) => l.key === layers[0]!.key);
+  const straight = at >= 0 && layers.every((l, i) => all[at + i]?.key === l.key);
+  const numbers = labels.length === 1 ? labels[0]! : straight ? `${labels[0]} to ${labels[labels.length - 1]}` : numberList(labels);
+  const head = `Review ${numbers}: `;
+  return `${head}${cutText(pullTitleLine(stackTitle(stack, links ?? {})), INBOX_THREAD_NAME_MAX - [...head].length)}`;
+}
+
+/** A tree hand-off's numbers in its thread's name stay within this many characters. */
+const NAME_NUMBERS_MAX = 60;
+
+/** "#412, #414", cut with ", …" to `NAME_NUMBERS_MAX` characters (the first number always shows). */
+function numberList(labels: readonly string[]): string {
+  const all = labels.join(', ');
+  if (all.length <= NAME_NUMBERS_MAX) return all;
+  let kept = labels[0]!;
+  for (const label of labels.slice(1)) {
+    if (`${kept}, ${label}, …`.length > NAME_NUMBERS_MAX) break;
+    kept = `${kept}, ${label}`;
+  }
+  return `${kept}, …`;
+}
+
+/** "- Author: me" when one person wrote every layer, else "- Authors: me (#412, #413), tomas (#414)". */
+function stackAuthors(layers: readonly InboxPull[]): string {
+  const by = new Map<string, string[]>();
+  for (const l of layers) {
+    const who = l.mine ? 'me' : authorOf(l);
+    by.set(who, [...(by.get(who) ?? []), inboxPullLabel(l)]);
+  }
+  if (by.size === 1) return `- Author: ${[...by.keys()][0]}`;
+  return `- Authors: ${[...by].map(([who, labels]) => `${who} (${labels.join(', ')})`).join(', ')}`;
 }
 
 const possessive = (name: string) => (name.endsWith('s') ? `${name}'` : `${name}'s`);
@@ -240,7 +360,7 @@ export function rowMeta(item: InboxPullItem, link: InboxPullLink | null): RowMet
   // Mid-line the reason starts lower case, but never an agent's name ("Your agent opened it").
   const why = item.reason === 'agent_ready' ? (agent ? 'your review' : reasonWords(item, link)) : reasonWords(item, link).replace(/^./, (c) => c.toLowerCase());
   if (item.stack.layers.length === 1) return { lead: inboxPullLabel(item.focus), agent, rest: why };
-  const open = item.stack.layers.filter(isOpen);
+  const open = openLayers(item.stack);
   const merged = item.stack.layers.filter((l) => l.state === 'merged').length;
   const counts = `${open.length} open${merged > 0 ? `, ${merged} merged` : ''}`;
   const start = startLayer(item.stack);
@@ -309,8 +429,8 @@ function pullSubject(target: PullReviewTarget): string {
 
 /**
  * What a hand-off sent from compose (+ New agent) asked for: a guided review when the words still hold the guided
- * line (`ask_line`) as a line of its own, else a custom curation. A line, not a substring: a custom curation's
- * `/review-curate <words>` contains the own-PR guided line `/review-curate`.
+ * step 1 (`ask_line`, `pullHandoffAskLine`) as a line of its own, else a custom curation. A line, not a substring: a
+ * guided step 1 edited in compose, or one with the person's words after `/review-curate`, is a custom curation.
  */
 export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' {
   const wanted = askLine.trim();

@@ -6,6 +6,7 @@
  */
 import {
   inboxPullAncestors,
+  inboxPullIsOpen,
   inboxPullLabel,
   inboxPullLandsNext,
   inboxPullParent,
@@ -16,7 +17,8 @@ import {
 
 type Links = Readonly<Record<string, InboxPullLink>>;
 
-export const isOpen = (pull: Pick<InboxPull, 'state'>) => pull.state === 'open' || pull.state === 'draft';
+/** Open or a draft: core's `inboxPullIsOpen`, the one rule the server, the stacks and the hand-off use too. */
+export const isOpen = inboxPullIsOpen;
 
 /** The open layer a layer sits on, through merged layers between; null on none. */
 function openUnder(stack: InboxPullStack, key: string): InboxPull | null {
@@ -100,12 +102,18 @@ export function stackLink(stack: InboxPullStack, links: Links): InboxPullLink | 
  * sits on (down its own line of the stack, never a sibling's); else, when only one thread links the stack, that one.
  * With several agents on one stack, each gets verdicts only for its own layers and the ones above them. Among the
  * person's own open layers only; null for a teammate's PR, which never takes a verdict here (the person reviews it
- * on the forge).
+ * on the forge). In a fork, a thread that has an open layer on another branch was handed that branch's chain: a
+ * thread handed #412 and #414 was never told about their sibling #413, so #413 has no agent until it is linked itself.
  */
 export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Links): InboxPullLink | null {
   if (!layer.mine) return null;
   if (links[layer.key]) return links[layer.key]!;
-  const owned = (l: InboxPull) => l.mine && isOpen(l) && !!links[l.key];
+  // On this layer's own line: a layer it sits on, or one that sits on it.
+  const onLine = (l: InboxPull) =>
+    inboxPullAncestors(stack, layer.key).some((a) => a.key === l.key) || inboxPullAncestors(stack, l.key).some((a) => a.key === layer.key);
+  const offBranch = (thread: string) =>
+    isOpen(layer) && stack.layers.some((l) => l.key !== layer.key && isOpen(l) && links[l.key]?.thread_id === thread && !onLine(l));
+  const owned = (l: InboxPull) => l.mine && isOpen(l) && !!links[l.key] && !offBranch(links[l.key]!.thread_id);
   const below = inboxPullAncestors(stack, layer.key).find(owned);
   if (below) return links[below.key]!;
   const linked = stack.layers.filter(owned);

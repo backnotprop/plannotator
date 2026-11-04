@@ -22,6 +22,7 @@ import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
+import { hashDraftScope } from "../../utils/draftScopeHash";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -493,6 +494,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
+      draftKey: string;
     } | null>(null);
 
     // Live proxied-app mode: the iframe navigates a real origin, so the
@@ -1265,7 +1267,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             onClick={() => {
               const anchorEl = globalCommentButtonRef.current;
               if (!anchorEl) return;
-              setGlobalCommentPopover({ anchorEl, contextText: "" });
+              // One kept draft per live-app URL (src), else per document: a
+              // hash of its text, taken only when the composer opens, so two
+              // documents never share a draft.
+              const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
+              setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -1482,6 +1488,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
+              // The words typed survive a close (Escape, X) and come back on reopen.
+              draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}

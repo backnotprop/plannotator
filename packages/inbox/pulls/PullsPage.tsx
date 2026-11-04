@@ -54,6 +54,9 @@ import {
   pullGroups,
   pullHandoffAskLine,
   pullHandoffMessage,
+  pullHandoffThreadName,
+  handoffStack,
+  openLayers,
   pullNounWord,
   pullRows,
   type PullHandoffAsk,
@@ -63,7 +66,7 @@ import {
 } from './model';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
-import { chainMarks, isOpen, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
+import { chainMarks, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -83,7 +86,8 @@ export interface PullsPageProps {
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** Launch an agent: compose's New thread, with the hand-off's words and the PRs it is for. */
-  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement) => void;
+  /** `threadName`: the new thread's name (`pullHandoffThreadName`), compose's chip as it opens. */
+  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement, threadName: string) => void;
   /** Review sent the hand-off to `session`, the picked agent: the list reads the new thread. */
   onHanded: (session: string) => void;
 }
@@ -451,8 +455,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // Other agents on the stack: each gets verdicts for its own layers only, and the ladder says whose those are.
   const others = otherLayerAgents(stack, model.links);
   const start = startLayer(stack);
-  const openLayers = stack.layers.filter(isOpen);
-  const top = openLayers[openLayers.length - 1] ?? stack.layers[stack.layers.length - 1]!;
+  const open = openLayers(stack);
+  // What a hand-off is about (`handoffStack`): with no agent yet, the whole stack (a tree: the chain to its top); Hand
+  // again, the layers the agent has. A tree's sibling left out of that chain shows nothing of its own here.
+  const handed = (link ? handoffStack(stack, model.links, link.thread_id) : null) ?? handoffStack(stack, model.links) ?? stack;
+  const top = open[open.length - 1] ?? stack.layers[stack.layers.length - 1]!;
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -460,7 +467,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     if (phone) heading.current?.focus({ preventScroll: true });
   }, [stack.id, phone]);
   const forge = forgeName(stack);
-  const many = openLayers.length > 1;
+  const many = open.length > 1;
   // "Hand to another agent": the two lines open again, under the agent that has it.
   const [rehand, setRehand] = useState(false);
   // After a hand-off, focus moves to the status line that says who has it (the hand-off's controls are gone).
@@ -480,6 +487,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
       Open the diff
     </button>
   ) : null;
+  const threadName = pullHandoffThreadName(handed, model.links, stack);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -532,7 +540,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               Lands next: <span className="ib-pr-num">{inboxPullLabel(next)}</span>
             </span>
           )}
-          {!link && openLayers.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
+          {!link && open.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
           {/* Each chip says what it opens ("Thread", "Board"), with its own mark: a thread and its card often share a title. */}
           {link && (
             <Tip content="Open the agent's thread">
@@ -573,7 +581,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               ) : (
                 <span className="ib-mut">· no answer yet</span>
               )}
-              {openLayers.length > 0 && !rehand && (
+              {open.length > 0 && !rehand && (
                 <>
                   <span className="ib-mut" aria-hidden="true">
                     ·
@@ -597,15 +605,16 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             )}
           </div>
         )}
-        {openLayers.length > 0 && (!link || rehand) && (
+        {open.length > 0 && (!link || rehand) && (
           <HandLine
             key={link ? `again:${link.thread_id}` : 'first'}
-            stack={stack}
+            stack={handed}
             projects={stackProjects(model, stack)}
             lead={link ? 'Hand again for' : 'Ask for'}
             owners={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
             launch={!link}
-            onLaunch={(body, opener) => props.onLaunch(handoffKeys(stack), stackProjects(model, stack), body, pullHandoffAskLine(stack, { kind: 'guide' }), opener)}
+            threadName={threadName}
+            onLaunch={(body, opener) => props.onLaunch(handoffKeys(handed), stackProjects(model, stack), body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName)}
             onHanded={(session) => {
               focusSaid.current = true;
               setRehand(false);
@@ -616,7 +625,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             diff={openDiff}
           />
         )}
-        {openLayers.length > 0 && link && !rehand && (
+        {open.length > 0 && link && !rehand && (
           <div className="ib-pr-actions">
             {reviewGuide && (
               // The agent's guided review arrived: it is the review (phase 1's Start review), a stack's chapters its layers.
@@ -643,7 +652,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         </div>
       </div>
       {link?.last && !ended && <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} />}
-      {link && ended && openLayers.length > 0 && !rehand && (
+      {link && ended && open.length > 0 && !rehand && (
         <div className="ib-pr-replyfoot" data-pulls-ended-foot="">
           <div className="ib-pr-replyrow">
             <button type="button" className="ib-pr-replybtn" onClick={() => setRehand(true)} data-pulls-rehand-foot="">
@@ -690,6 +699,7 @@ function HandLine({
   lead,
   owners,
   launch,
+  threadName,
   onLaunch,
   onHanded,
   onCancel,
@@ -699,6 +709,8 @@ function HandLine({
   stack: InboxPullStack;
   projects: readonly string[];
   lead: string;
+  /** The new thread's name (`pullHandoffThreadName`). */
+  threadName: string;
   /** The sessions that have the PR now (Hand again for): not offered. */
   owners: readonly string[];
   launch: boolean;
@@ -713,7 +725,7 @@ function HandLine({
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // One idempotency key per send to one agent: a retry to the same agent reuses it, a new pick gets a new one.
-  const keyRef = useRef<{ session: string; key: string } | null>(null);
+  const keyRef = useRef<{ session: string; key: string; unnamed?: boolean } | null>(null);
   const projectKey = projects.join('\u0000');
   // Read again when an agent turns out to have ended, and when the window comes back (agents end while it is away).
   const [readCount, setReadCount] = useState(0);
@@ -765,7 +777,15 @@ function HandLine({
       await inboxApi.pullOwnerCheck(keys, session.project_id);
       // The ask's instructions are phase 1's /review-curate, carried as the skills block a Send adds for it.
       const body = withSkillsBlock(pullHandoffMessage(stack, ask), reviewCurateBlock());
-      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: idempotency.key });
+      const to = { host: session.host, session: session.session };
+      const named = (name: string | undefined) => inboxApi.startThread({ to, body, idempotency_key: idempotency.key, ...(name ? { thread_name: name } : {}) });
+      const sent = await named(idempotency.unnamed ? undefined : threadName).catch((cause: unknown) => {
+        // Another open thread of the project has that name (the PR handed again): the thread goes without one, and a
+        // retry with this key does too (the same Send).
+        if (!(cause instanceof InboxApiError) || cause.code !== 'thread_name_taken') throw cause;
+        idempotency.unnamed = true;
+        return named(undefined);
+      });
       try {
         await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
       } catch (cause) {
