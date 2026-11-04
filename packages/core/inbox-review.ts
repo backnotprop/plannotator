@@ -380,7 +380,7 @@ export const INBOX_REVIEW_DRAW_HELP = [
   "drawings  Prints the review's drawings (the Overview's and each Show me): round,",
   '          and the lines each part opens.',
   '',
-  'The drawing (the same object as the guide\'s overview "diagram"):',
+  'The drawing:',
   '  { "kind": "html",',
   '    "title": "After the third failure",',
   '    "source": "<div data-step=\\"1\\" data-mark=\\"fails\\" data-code=\\"src/jobs/retry-worker.ts#L11\\">…</div>",',
@@ -402,8 +402,8 @@ export const INBOX_REVIEW_DRAW_HELP = [
   '  "acc-fill", "dash", "t-acc", "t-grey".',
   '- Nothing from outside: no scripts, event handlers, <style> (use css), external',
   '  images, fonts or url(), iframes, forms or popovers.',
-  '- width and height make a fixed canvas the review scales to fit. Add "tall", the',
-  '  same parts stacked about 400 px wide, for a phone.',
+  '- width and height make a fixed canvas the review scales to fit. Add "tall":',
+  '  every part again, stacked about 400 px wide, for a phone.',
 ].join('\n');
 
 /** `plannotator review draw`'s result (AGENT-TEXT §3). */
