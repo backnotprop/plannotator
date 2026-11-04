@@ -109,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolvePlanReview, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -3291,6 +3291,15 @@ if (args[0] === "sessions") {
     console.log(
       JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: modApproval } })
     );
+    process.exit(0);
+  }
+
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  if (
+    event.hook_event_name === "PermissionRequest" &&
+    event.tool_name === "ExitPlanMode" &&
+    !resolvePlanReview(loadConfig(), process.env)
+  ) {
     process.exit(0);
   }
 
