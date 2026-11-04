@@ -452,6 +452,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
         break;
       case "item/started":
         if (params.item?.type === "fileChange") permissions?.fileChange(params.item.id, params.item.changes);
+        // An MCP tool call: its approval (an elicitation) names only the server and arguments.
+        if (params.item?.type === "mcpToolCall") permissions?.mcpCall(params.threadId, params.turnId, params.item);
         break;
       case "serverRequest/resolved":
         permissions?.resolved(params.requestId);

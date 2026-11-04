@@ -33,7 +33,8 @@
  * the questions as written; a spaced dash inside a choice's label gets a word
  * joiner so the block keeps the label whole); never: a secret question (the Inbox would keep
  * the answer), a number or a multi-select field, a form with no field (an
- * approval: `_meta.codex_approval_kind`, or a message-only form), the URL and
+ * approval: `_meta.codex_approval_kind`, or a message-only form; an MCP tool
+ * call's approval is the permission card's), the URL and
  * OpenAI form modes. Those wait on Terminal (`codex resume`), as an approval
  * the card cannot show does.
  *
@@ -59,6 +60,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_CODEX_NAME, type InboxMessage, type InboxQuestion } from "@plannotator/core/inbox-types";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import type { LaunchPermissionContext } from "./inbox-launch-host";
+import { isCodexToolApproval } from "./inbox-launch-codex-permission";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 import type { CodexThreadStatus } from "./inbox-launch-codex";
 
@@ -428,6 +430,8 @@ export function createCodexQuestions(
     /** A server request: true when it is one of these (the card is asked, or left to Terminal). */
     asked(id: number | string, method: string, params: any): boolean {
       if (method !== CODEX_USER_INPUT && method !== CODEX_ELICITATION) return false;
+      // An MCP tool call's approval is the permission card's (inbox-launch-codex-permission.ts).
+      if (isCodexToolApproval(method, params)) return false;
       if (!params || typeof params.threadId !== "string") return true;
       const root = rootOfThread(params.threadId);
       // Not a launched thread of this Inbox: another client of the daemon answers it.

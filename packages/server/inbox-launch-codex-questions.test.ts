@@ -329,6 +329,35 @@ describe("the transport", () => {
     expect(t.answers).toEqual([[1, { answers: { rounding: { answers: ["Half up"] } } }]]);
   });
 
+  test("only Codex's own question is kept from Mark read: a normal agent's question (plannotator_inbox) in the same thread is set aside and archived exactly as before", () => {
+    const t = transport();
+    const q = t.make();
+    q.asked(1, CODEX_USER_INPUT, choice);
+    const card = t.cards()[0]!;
+    const normal = t.store.sendMessage({
+      project_id: t.root.project_id,
+      author: { kind: "agent", host: "claude-code", session: "ses_normal" },
+      body: ":::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::",
+      reply_to: t.root.id,
+    }).message;
+    const normalQ = () => t.store.questionsOf(normal.id)[0]!;
+    // Mark read: the normal question is closed as a skip and set aside; Codex's stays open.
+    t.store.markRead(t.root.thread_id, true);
+    expect(normalQ().state).toBe("closed");
+    expect(normalQ().set_aside_at).toBeTruthy();
+    expect(t.store.questionsOf(card.id)[0]!.state).toBe("open");
+    // Its Undo reopens the normal question, as before.
+    t.store.markRead(t.root.thread_id, false);
+    expect(normalQ().state).toBe("open");
+    // Archive closes both, and Unarchive reopens both: the store's archive is unchanged.
+    t.store.resolveThread(t.root.thread_id, true, "person");
+    expect([normalQ().state, t.store.questionsOf(card.id)[0]!.state]).toEqual(["closed", "closed"]);
+    t.store.resolveThread(t.root.thread_id, false, "person");
+    expect([normalQ().state, t.store.questionsOf(card.id)[0]!.state]).toEqual(["open", "open"]);
+    q.sweep();
+    expect(t.answers).toEqual([]);
+  });
+
   test("the session goes away: settled in Codex while its turn runs is answered in Terminal; a turn that ended is no longer waiting; an answer that never went is said so, never left looking delivered", () => {
     const t = transport();
     const q = t.make();

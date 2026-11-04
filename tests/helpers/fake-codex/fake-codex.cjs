@@ -234,6 +234,21 @@ function daemon() {
     if (spec.kind === "userInput") {
       return ask(thread, "item/tool/requestUserInput", { threadId: thread.id, turnId: turn.id, itemId, questions: spec.questions, isBlocking: spec.isBlocking !== false, autoResolutionMs: null }, "waitingOnUserInput");
     }
+    // An MCP tool call that needs approval, as Codex core asks it: the item starts (in progress), then a
+    // message-only form elicitation marked `codex_approval_kind: "mcp_tool_call"` with the call's arguments.
+    if (spec.kind === "mcpToolCall") {
+      const server = spec.serverName || "docs";
+      if (spec.started !== false) notify(thread, "item/started", { threadId: thread.id, turnId: turn.id, item: { type: "mcpToolCall", id: itemId, server, tool: spec.tool, arguments: spec.arguments ?? null, status: "inProgress" } });
+      return ask(thread, "mcpServer/elicitation/request", {
+        threadId: thread.id,
+        turnId: turn.id,
+        serverName: server,
+        mode: "form",
+        _meta: { codex_approval_kind: "mcp_tool_call", ...(spec.arguments !== undefined ? { tool_params: spec.arguments } : {}), ...(spec.meta || {}) },
+        message: `Allow the ${server} MCP server to run tool "${spec.tool}"?`,
+        requestedSchema: { type: "object", properties: {} },
+      });
+    }
     // An MCP server's form: no item; the request (mode, message, requestedSchema, _meta) flattened in.
     if (spec.kind === "elicitation") return ask(thread, "mcpServer/elicitation/request", { threadId: thread.id, turnId: turn.id, serverName: spec.serverName || "docs", ...spec.request });
     return ask(thread, "item/commandExecution/requestApproval", { ...base, cwd: thread.cwd, command: spec.command, reason: spec.reason || null });

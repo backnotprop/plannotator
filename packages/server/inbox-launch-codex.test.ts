@@ -14,14 +14,28 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_NO_LONGER_WAITING, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
+import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_NO_LONGER_WAITING, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices, inboxPermissionQuestion } from "@plannotator/core/inbox-permission";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { installFakeCodex, type FakeCodex, type FakeCodexConfig } from "../../tests/helpers/fake-codex";
 import { createInboxLaunch } from "./inbox-launch";
 import { codexHostState, codexTrustOverride, codexTrustRoot, codexTurnErrorNote, codexWritesTrust, parseDaemonStart } from "./inbox-launch-codex";
-import { CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSION_TERMS, CODEX_PERMISSIONS_APPROVAL, codexApprovalKey, codexDecision, codexDiffEdits, codexPermissionEvent, createCodexPermissions } from "./inbox-launch-codex-permission";
+import {
+  CODEX_COMMAND_APPROVAL,
+  CODEX_ELICITATION_APPROVAL,
+  CODEX_FILE_APPROVAL,
+  CODEX_PERMISSION_TERMS,
+  CODEX_PERMISSIONS_APPROVAL,
+  codexApprovalKey,
+  codexDecision,
+  codexDiffEdits,
+  codexMcpCallOf,
+  codexPermissionEvent,
+  codexToolApprovalEvent,
+  createCodexPermissions,
+  isCodexToolApproval,
+} from "./inbox-launch-codex-permission";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -161,6 +175,46 @@ describe("the pure parts", () => {
     const asked = { permissions: { network: { enabled: true }, fileSystem: null } };
     expect(codexDecision(CODEX_PERMISSIONS_APPROVAL, asked, "once")).toEqual({ permissions: { network: { enabled: true } }, scope: "turn" });
     expect(codexDecision(CODEX_PERMISSIONS_APPROVAL, asked, "deny")).toEqual({ permissions: {}, scope: "turn" });
+  });
+
+  test("an MCP tool call's approval is the permission card's, matched to exactly one call; every other approval riding elicitation stays in Terminal", () => {
+    const approval = (meta: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+      threadId: THREAD,
+      turnId: "t1",
+      serverName: "docs",
+      mode: "form",
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_params: { query: "refunds", limit: 5 }, ...meta },
+      message: 'Allow the docs MCP server to run tool "search"?',
+      requestedSchema: { type: "object", properties: {} },
+      ...extra,
+    });
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}))).toBe(true);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({ codex_approval_kind: "tool_suggestion" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({ codex_approval_kind: "browser_auth" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}, { requestedSchema: { type: "object", properties: { why: { type: "string" } } } }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}, { mode: "url" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, { ...approval({}), _meta: null })).toBe(false);
+
+    const call = { id: "c1", threadId: THREAD, turnId: "t1", server: "docs", tool: "search", arguments: { limit: 5, query: "refunds" } };
+    expect(codexMcpCallOf(approval({}), [call])).toEqual(call);
+    // Not the same arguments, another server, or another thread: no call, so no card.
+    expect(codexMcpCallOf(approval({}), [{ ...call, arguments: { query: "refunds" } }])).toBeNull();
+    expect(codexMcpCallOf(approval({}), [{ ...call, server: "files" }])).toBeNull();
+    expect(codexMcpCallOf(approval({}), [{ ...call, threadId: "other" }])).toBeNull();
+    // Two tools that would both match: the card never guesses which call it allows.
+    expect(codexMcpCallOf(approval({}), [call, { ...call, id: "c2", tool: "delete" }])).toBeNull();
+
+    const event = codexToolApprovalEvent(approval({}), call)!;
+    expect(event).toMatchObject({ tool_name: "mcp__docs__search", tool_input: { query: "refunds", limit: 5 }, permission_suggestions: [] });
+    // The permission card's own words: no session choice (Codex's "remember" is not offered).
+    expect(inboxPermissionChoices(event, CODEX_PERMISSION_TERMS)).toEqual([INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL]);
+    expect(inboxPermissionQuestion(event, { agent: "Codex", folder: "/p", ...CODEX_PERMISSION_TERMS }).prompt).toContain("`search` from docs");
+    expect(codexToolApprovalEvent(approval({}), null)).toBeNull();
+    expect(codexToolApprovalEvent(approval({}), { ...call, arguments: ["a"] })).toBeNull();
+
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "once")).toEqual({ action: "accept", content: null, _meta: null });
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "deny")).toEqual({ action: "decline", content: null, _meta: null });
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "terminal")).toBeNull();
   });
 });
 
@@ -530,6 +584,62 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     }
     expect(w.codex.approvals()[1]).toMatchObject({ result: { decision: "decline" }, how: "answered" });
     await until(() => w.codex.turns().some((t) => t.steer?.includes("Not the build folder.")));
+  });
+
+  test("an MCP tool call's approval is the permission card; Allow once goes back as accept, Deny as decline; a call the card cannot match, or another approval kind, waits on Terminal", async () => {
+    const w = world({ config: { prompts: [{ kind: "mcpToolCall", tool: "search", arguments: { query: "refunds" } }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    const first = cardsOf(w.store, root, threadId)[0]!;
+    // The permission card's identity (`perm:<thread>`), never a question card's (`perm:ask:`).
+    expect(first.author).toMatchObject({ kind: "agent", host: "codex", name: "Codex", session: `perm:${threadId}` });
+    const question = w.store.questionsOf(first.id)[0]!;
+    expect(question.prompt).toContain("`search` from docs");
+    expect(question.choices.map((c) => c.label)).toEqual([INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL]);
+    answerCard(w.store, first.id, INBOX_PERMISSION_ALLOW_ONCE);
+    for (let i = 0; i < 50 && w.codex.approvals().length === 0; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()[0]).toMatchObject({ threadId, method: CODEX_ELICITATION_APPROVAL, result: { action: "accept", content: null, _meta: null }, how: "answered" });
+    await until(() => w.codex.turns().some((t) => t.ended === "completed"));
+
+    // Deny: decline (Codex rejects the call and the turn goes on).
+    w.codex.configure({ prompts: [{ kind: "mcpToolCall", tool: "delete", arguments: { path: "/docs" } }] });
+    expect(await deliverWhenIdle(w, threadId, wake(root.id, "Clean up."))).toBe("delivered");
+    await until(() => cardsOf(w.store, root, threadId).length === 2);
+    answerCard(w.store, cardsOf(w.store, root, threadId)[1]!.id, INBOX_PERMISSION_DENY);
+    for (let i = 0; i < 50 && w.codex.approvals().length < 2; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()[1]).toMatchObject({ method: CODEX_ELICITATION_APPROVAL, result: { action: "decline", content: null, _meta: null }, how: "answered" });
+    await until(() => w.codex.turns().filter((t) => t.ended === "completed").length === 2);
+
+  });
+
+  test("an MCP tool call the card cannot match (no `item/started` for it) or another approval kind riding elicitation gets no card: Codex waits on Terminal", async () => {
+    for (const prompt of [
+      { kind: "mcpToolCall" as const, tool: "search", arguments: { query: "x" }, started: false },
+      { kind: "elicitation" as const, request: { mode: "form", message: "Install the docs plugin?", requestedSchema: { type: "object", properties: {} }, _meta: { codex_approval_kind: "tool_suggestion" } } },
+    ]) {
+      const w = world({ config: { prompts: [prompt] } });
+      const root = await w.send("Fix it.", "send-1");
+      const threadId = root.launch!.session_ref!;
+      await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+      w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+      let state: string | undefined;
+      for (let i = 0; i < 100 && state !== "waiting_terminal"; i++) {
+        w.launch.sweep(true);
+        state = (await w.launch.runOf(root.id))?.state;
+        if (state !== "waiting_terminal") await Bun.sleep(40);
+      }
+      expect(state).toBe("waiting_terminal");
+      expect(messagesOf(w.store, root.thread_id).filter((m) => m.author.kind === "agent")).toEqual([]);
+      expect(w.codex.approvals()).toEqual([]);
+    }
   });
 
   test("a request the person answers in Terminal (codex resume) is withdrawn as answered there", async () => {
