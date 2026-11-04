@@ -1,7 +1,7 @@
 /**
  * `plannotator shape …`: an agent's side of Shape (SPEC.md §4, "CLI").
- * Unreleased (HIDDEN_SUBCOMMANDS): its help text is a DRAFT until the owner
- * approves it word for word.
+ * Unreleased (HIDDEN_SUBCOMMANDS). Its help text is built in
+ * packages/core/shape-skill.ts.
  *
  *   update   store a version of a board (the first one creates the shape)
  *   read     the latest version, and the notes waiting for the agent
@@ -30,7 +30,7 @@ import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
-/** DRAFT. What `plannotator shape` (help included; not `on` or `off`) says while Shape is off. */
+/** What `plannotator shape` (help included; not `on` or `off`) says while Shape is off. */
 export const SHAPE_OFF_TEXT = "shape_off: Shape is off. To turn it on, run `plannotator shape on` (the same switch as the Plannotator Inbox's Settings → Capabilities → Shape).";
 
 /**
@@ -95,7 +95,7 @@ const ALLOWED: Record<Op, readonly string[]> = {
 
 export function parseShapeCommand(argv: readonly string[]): { ok: true; command: ParsedShapeCommand } | { ok: false; error: string } {
   const op = argv[0] as Op | undefined;
-  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done, list, open, on or off." };
+  if (!op || !OPS.includes(op)) return { ok: false, error: `Unknown shape command: ${op ?? ""}` };
   const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false, re: null, text: null };
   const positional: string[] = [];
   for (let i = 1; i < argv.length; i++) {

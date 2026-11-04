@@ -17,6 +17,5 @@ export function shapeSwitchOn(): boolean {
 
 /** Turn Shape on or off; false when config.json could not be saved (nothing changed). */
 export function setShapeSwitch(on: boolean): boolean {
-  saveConfig({ inboxShape: on });
-  return shapeSwitchOn() === on;
+  return saveConfig({ inboxShape: on }) && shapeSwitchOn() === on;
 }

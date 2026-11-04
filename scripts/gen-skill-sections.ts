@@ -26,6 +26,10 @@ export const PLANNOTATOR_SKILL_MD = join(import.meta.dir, "..", "apps", "skills"
 const DESCRIPTION_ANCHOR = "Guided Reviews, ";
 /** Where the section goes: right before this heading. */
 const SECTION_ANCHOR = "## Other subcommands\n";
+/** The section's heading. An old copy is found by it, whatever its text, and replaced. */
+export const SHAPE_SECTION_HEADING = "## plannotator shape";
+/** An old copy of the phrase, whatever its words: "Shape boards (…), " right after the anchor. */
+const OLD_PHRASE = /(?<=Guided Reviews, )Shape boards \([^)]*\), /;
 
 export interface SkillSectionOptions {
   /** `shape` is released (not in HIDDEN_SUBCOMMANDS). */
@@ -53,10 +57,12 @@ export function renderSkillSections(doc: string, options: SkillSectionOptions): 
   if (!descriptionLine?.includes(DESCRIPTION_ANCHOR)) throw new Error(`SKILL.md's description has no "${DESCRIPTION_ANCHOR.trim()}" to put the Shape phrase after`);
   if (!doc.includes(`\n${SECTION_ANCHOR}`)) throw new Error(`SKILL.md has no "${SECTION_ANCHOR.trim()}" heading to put the Shape section before`);
 
-  // Take both out first, so a run after a source change (or a release) replaces them.
-  let out = doc.replace(`${DESCRIPTION_ANCHOR}${SHAPE_SKILL_DESCRIPTION_PHRASE} `, DESCRIPTION_ANCHOR);
-  const heading = SHAPE_SKILL_SECTION.split("\n", 1)[0]!;
-  const old = skillSectionOf(out, heading);
+  if (!SHAPE_SKILL_SECTION.startsWith(`${SHAPE_SECTION_HEADING}\n`)) throw new Error(`SHAPE_SKILL_SECTION must start with "${SHAPE_SECTION_HEADING}"`);
+  if (!OLD_PHRASE.test(`${DESCRIPTION_ANCHOR}${SHAPE_SKILL_DESCRIPTION_PHRASE} `)) throw new Error("SHAPE_SKILL_DESCRIPTION_PHRASE no longer matches the pattern that removes an old copy");
+
+  // Take both out first, by heading and by shape, not by text: a run after a source change (or a release) replaces them.
+  let out = doc.replace(OLD_PHRASE, "");
+  const old = skillSectionOf(out, SHAPE_SECTION_HEADING);
   if (old) out = out.slice(0, old.start) + out.slice(old.end);
 
   if (!options.shapeReleased) return out;

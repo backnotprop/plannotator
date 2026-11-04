@@ -315,6 +315,24 @@ describe("the Shape switch, through the entrypoint", () => {
     }
   }, 60_000);
 
+  // A config.json that is not valid JSON is never written over, so the switch did not move: say so and exit 1,
+  // never "Shape is off." (which off would otherwise read back from the unreadable file).
+  test("on and off with a config.json that cannot be saved: an error, exit 1, the file untouched", async () => {
+    const c = await cli();
+    try {
+      const path = join(c.dataDir, "config.json");
+      writeFileSync(path, "{ not json");
+      for (const which of ["on", "off"]) {
+        const r = await c.run(which);
+        expect({ which, code: r.code, stdout: r.stdout }).toEqual({ which, code: 1, stdout: "" });
+        expect(r.stderr).toContain("config_not_saved: ");
+        expect(readFileSync(path, "utf8")).toBe("{ not json");
+      }
+    } finally {
+      c.done();
+    }
+  }, 60_000);
+
   test("on and off set the very switch the Inbox's Settings reads (and the other way round)", async () => {
     const { SHAPE_OFF_TEXT } = await import("./shape-command");
     const { startInboxServer } = await import("@plannotator/server/inbox");

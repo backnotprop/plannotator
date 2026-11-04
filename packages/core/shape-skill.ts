@@ -13,9 +13,9 @@
  *     (`SHAPE_SKILL_SECTION`, `SHAPE_SKILL_DESCRIPTION_PHRASE`), written there by
  *     `bun run gen:skills` (scripts/gen-skill-sections.ts) once `shape` is released.
  *
- * The section and the description phrase are the owner's approved words
- * (.product/approved/shape-skill/approval.md): never edit them here alone.
- * The guide and the help intro are DRAFT until the owner approves them word for word.
+ * The section, the description phrase, the guide and the help are the owner's
+ * approved words (.product/approved/shape-skill/approval.md): never edit them
+ * here alone.
  *
  * Browser-safe, no dependencies: the server lists it and the window pastes it.
  */
@@ -95,12 +95,9 @@ export const SHAPE_GUIDE = `## The stance
 
 /**
  * The start of `plannotator shape --help`: the welcome, how to open the page
- * (or leave the open one be), and the commands. DRAFT: needs the owner's
- * approval word for word.
+ * (or leave the open one be), and the commands.
  */
 export const SHAPE_HELP_INTRO = [
-  "DRAFT: this text is not approved yet.",
-  "",
   "Welcome to Shape. The person wants to see the work the way you see it, so they can say",
   "\"yes, that's it\" or point at the part that is wrong. Draw it as a board: a JSON file you",
   "store with `plannotator shape update`. The board opens in their browser. You keep it current:",
