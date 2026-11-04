@@ -363,6 +363,8 @@ const rawArgs = process.argv.slice(2);
       await runShapeOpen(args.slice(2), {
         dataDir: getPlannotatorDataDir(),
         openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        // Bare: the page already open, if there is one; `shape open` always opens a tab.
+        reuseOpenPage: args.length === 1,
       }),
     );
   }

@@ -129,7 +129,7 @@ export const SHAPE_HELP_INTRO = [
   "A shape is a board you draw for the person: a Picture, How it works, Requirements",
   "and Code, with numbered references. Each update stores a new version of the whole board.",
   "",
-  "(none)   Opens the Shape page in the person's browser, every board, and prints its address.",
+  "(none)   Opens Shape's page in the person's browser, or the one already open, and prints its address.",
   "update   Stores the board in <board.json>. Without --id it makes a new shape and",
   "         prints its id. With --id, --base is the version you drew from; if the shape",
   "         changed since, the update is refused and the latest version is printed.",

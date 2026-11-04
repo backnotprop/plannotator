@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { isShapeId } from "@plannotator/shared/shape/format";
 import { createShapeStore, shapesDirOf } from "@plannotator/shared/shape/store";
-import { runningShapeServer, startShapeServer, type ShapeServerEntry } from "@plannotator/server/shape";
+import { runningShapeServer, shapeServerOpenPages, startShapeServer, type ShapeServerEntry } from "@plannotator/server/shape";
 
 const START_TIMEOUT_MS = 10_000;
 const START_LOCK = "server.start.lock";
@@ -33,6 +33,12 @@ export interface ShapeOpenDeps {
   stderr?: (text: string) => void;
   /** How long to wait for a started server (tests shorten it). */
   startTimeoutMs?: number;
+  /**
+   * Bare `plannotator shape`: when a Shape page is already open on the running server, print the address and open
+   * no second tab (the open page shows each new version by itself). `shape open` always opens one: an agent runs it
+   * on purpose. When the count cannot be read (an older server, no answer in time), a page is opened.
+   */
+  reuseOpenPage?: boolean;
 }
 
 /** `shape open` arguments: one board id at most, and `--json`. */
@@ -135,6 +141,11 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
     return 1;
   }
   const url = shapePageUrl(entry.url, parsed.id);
+  if (deps.reuseOpenPage && ((await shapeServerOpenPages(entry)) ?? 0) > 0) {
+    if (parsed.json) out(JSON.stringify({ url, opened: false }));
+    else out(url);
+    return 0;
+  }
   const opened = await deps.openUrl(url);
   if (parsed.json) out(JSON.stringify({ url, opened: opened === "opened" }));
   else out(url);

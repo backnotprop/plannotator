@@ -16,6 +16,8 @@ export interface ShapeServerInfoWire {
   version: string;
   serverSession: string;
   on: boolean;
+  /** Pages open on the server (an older server leaves it out). */
+  pages?: number;
 }
 
 /** A refused request: the status and the server's words. */

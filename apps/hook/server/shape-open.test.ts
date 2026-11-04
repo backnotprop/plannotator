@@ -7,14 +7,17 @@
  *  - a second `open` starts a second server instead of reusing the running one;
  *  - a stale `server.json` (its process gone) is taken as running;
  *  - an unknown board id opens a page that shows nothing;
- *  - the address it prints and opens is not the board's (`#shape=<id>`).
+ *  - the address it prints and opens is not the board's (`#shape=<id>`);
+ *  - bare `plannotator shape` opens a second tab while a Shape page is already
+ *    open, or opens none when it cannot tell (an older server).
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createShapeStore } from "@plannotator/shared/shape/store";
-import { isProcessAlive, readShapeServerEntry, shapeServerPath, startShapeServer, type ShapeServer } from "@plannotator/server/shape";
+import { isProcessAlive, readShapeServerEntry, SHAPE_SERVER_INFO_PATH, shapeServerOpenPages, shapeServerPath, startShapeServer, type ShapeServer } from "@plannotator/server/shape";
+import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
 import { parseShapeOpen, runShapeOpen, shapePageUrl } from "./shape-open";
 
 const roots: string[] = [];
@@ -105,6 +108,104 @@ describe("runShapeOpen", () => {
     expect(code).toBe(0);
     expect(spawned).toBe(1);
     expect(readShapeServerEntry(w.dataDir)!.pid).toBe(process.pid);
+  });
+});
+
+describe("bare `plannotator shape`: the page already open, if there is one", () => {
+  /** A running Shapes server in this process, and a spy for openUrl that opens nothing. */
+  async function running() {
+    const w = world();
+    const server = await startShapeServer({ dataDir: w.dataDir, shape: true, port: 0 });
+    servers.push(server);
+    const entry = readShapeServerEntry(w.dataDir)!;
+    const opened: string[] = [];
+    const out: string[] = [];
+    const deps = {
+      dataDir: w.dataDir,
+      openUrl: async (url: string) => {
+        opened.push(url);
+        return "opened" as const;
+      },
+      spawnServer: () => {
+        throw new Error("the running server must be reused");
+      },
+      stdout: (t: string) => out.push(t),
+      stderr: () => {},
+    };
+    return { w, entry, opened, out, deps };
+  }
+
+  /** A page holding the event stream open, as the Shape page does; close() drops it and waits until the server saw it. */
+  async function connectPage(entry: { url: string; port: number }) {
+    const controller = new AbortController();
+    const response = await fetch(`${entry.url}${SHAPE_EVENTS_PATH}`, { signal: controller.signal });
+    expect(response.status).toBe(200);
+    return {
+      close: async () => {
+        controller.abort();
+        for (let i = 0; i < 50 && (await shapeServerOpenPages(entry)) !== 0; i++) await Bun.sleep(20);
+        expect(await shapeServerOpenPages(entry)).toBe(0);
+      },
+    };
+  }
+
+  test("a page is open: it prints the address and opens no tab; `shape open` still opens one", async () => {
+    const r = await running();
+    const page = await connectPage(r.entry);
+    try {
+      expect(await shapeServerOpenPages(r.entry)).toBe(1);
+      expect(await runShapeOpen([], { ...r.deps, reuseOpenPage: true })).toBe(0);
+      expect(r.out).toEqual([`${r.entry.url}/`]);
+      expect(r.opened).toEqual([]);
+      expect(await runShapeOpen([], r.deps)).toBe(0);
+      expect(r.opened).toEqual([`${r.entry.url}/`]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("no page is open: it opens one", async () => {
+    const r = await running();
+    // One that came and went counts for nothing.
+    await (await connectPage(r.entry)).close();
+    expect(await runShapeOpen([], { ...r.deps, reuseOpenPage: true })).toBe(0);
+    expect(r.opened).toEqual([`${r.entry.url}/`]);
+    expect(r.out).toEqual(r.opened);
+  });
+
+  test("an older server that does not report its pages: it opens one", async () => {
+    const w = world();
+    // A Shapes server from before the field: it answers who it is, but not how many pages it has.
+    const old = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) =>
+        new URL(req.url).pathname === SHAPE_SERVER_INFO_PATH ? Response.json({ shape_server: 1, version: "old", serverSession: "s", on: true }) : new Response("", { status: 404 }),
+    });
+    try {
+      mkdirSync(join(w.dataDir, "shapes"), { recursive: true });
+      const url = `http://127.0.0.1:${old.port}`;
+      writeFileSync(shapeServerPath(w.dataDir), JSON.stringify({ v: 1, pid: process.pid, port: old.port, url, version: "old", started: "" }));
+      expect(await shapeServerOpenPages({ port: old.port! })).toBeNull();
+      const opened: string[] = [];
+      const code = await runShapeOpen([], {
+        dataDir: w.dataDir,
+        openUrl: async (u) => {
+          opened.push(u);
+          return "opened";
+        },
+        spawnServer: () => {
+          throw new Error("the running server must be reused");
+        },
+        stdout: () => {},
+        stderr: () => {},
+        reuseOpenPage: true,
+      });
+      expect(code).toBe(0);
+      expect(opened).toEqual([`${url}/`]);
+    } finally {
+      old.stop(true);
+    }
   });
 });
 
