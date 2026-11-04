@@ -22,7 +22,7 @@
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullLandsNext, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import type { InboxComposeSession } from '@plannotator/core/inbox-types';
@@ -41,19 +41,30 @@ import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
+  answeredClis,
+  chainMarks,
   checksWords,
   findStack,
   forgeName,
   handoffKeys,
   inboxPullLabel,
+  initials,
+  ladderHeading,
+  landsNextLayer,
   PULL_HANDOFF_CUSTOM_MAX,
   layerBaseWords,
   layerPill,
   linkAgentName,
+  otherLayerAgents,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffMessage,
+  pullNounWord,
+  pullRows,
+  pullsEmptyWords,
+  pullsNotices,
   type PullHandoffAsk,
+  repoLabels,
   repoName,
   rowLine,
   stackLink,
@@ -158,22 +169,54 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
+  const notices = pullsNotices(model);
   if (total === 0) {
-    const signedIn = model.hosts.length > 0;
+    const empty = pullsEmptyWords(model, notices);
     return (
-      <div className="ib-pr-empty" data-pulls-empty="">
-        <p className="ib-pr-empty-h">{signedIn ? 'Nothing open in your projects' : 'No signed-in GitHub or GitLab here'}</p>
-        <p>
-          {signedIn
-            ? 'Pull requests you opened, and the ones you are asked to review, show here.'
-            : 'Pull requests show here when this computer’s gh or glab is signed in to the host of a project’s origin.'}
-        </p>
+      <div className="ib-pr-empty" data-pulls-empty={empty.kind}>
+        <p className="ib-pr-empty-h">{empty.head}</p>
+        {empty.lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
       </div>
     );
   }
-  const row = (item: InboxPullItem) => <PullRow key={item.stack.id} item={item} link={stackLink(item.stack, model.links)} selected={item.stack.id === selected} phone={phone} now={now} onOpen={() => onOpen(item.stack.id)} />;
+  const labels = repoLabels(pullRows(groups).map((item) => item.stack));
+  const row = (item: InboxPullItem) => (
+    <PullRow
+      key={item.stack.id}
+      item={item}
+      link={stackLink(item.stack, model.links)}
+      links={model.links}
+      repoLabel={labels.get(inboxPullRepoKey(item.stack.host, item.stack.repo)) ?? repoName(item.stack.repo)}
+      selected={item.stack.id === selected}
+      phone={phone}
+      now={now}
+      onOpen={() => onOpen(item.stack.id)}
+    />
+  );
   return (
     <>
+      {notices.length > 0 && (
+        <div className="ib-pr-notices" role="status" data-pulls-notices="">
+          {notices.map((n) => (
+            <p key={n.key} className="ib-pr-notice" data-pulls-notice={n.key}>
+              <Icon name="info" size={14} />
+              <span>
+                {n.line}
+                {n.link && (
+                  <>
+                    {' · '}
+                    <a href={n.link.href} target="_blank" rel="noreferrer noopener" data-pulls-notice-link="">
+                      {n.link.label}
+                    </a>
+                  </>
+                )}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
       {groups.on_you.length > 0 && (
         <div className="ib-group" role="group" aria-label="On you" data-pulls-group="on_you">
           <div className="ib-band">
@@ -209,11 +252,21 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
   );
 }
 
-/** Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), else nothing. */
+/**
+ * Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), an empty tile
+ * for a teammate's PR whose account is gone (the column stays even), else nothing (the person's own).
+ */
 function RowLead({ item, link }: { item: InboxPullItem; link: InboxPullLink | null }) {
   if (link?.agent) return <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} />;
   const author = item.focus.author;
-  if (!author || item.focus.mine) return null;
+  if (item.focus.mine) return null;
+  if (!author) {
+    return (
+      <Tip content="A deleted account">
+        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="" />
+      </Tip>
+    );
+  }
   return (
     <Tip content={author}>
       <span className="ib-pr-av" role="img" aria-label={author}>
@@ -223,30 +276,48 @@ function RowLead({ item, link }: { item: InboxPullItem; link: InboxPullLink | nu
   );
 }
 
-function initials(login: string): string {
-  // Two words give two letters ("mara-lee" → "ML"); one gives one ("priya" → "P"), never a pair that reads as "PR".
-  const parts = login.split(/[-_. ]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
-}
-
-/** The chain of PR marks, bottom (lands first) to top. */
+/** The chain of PR marks, bottom (lands first) to top: past five layers, the first two, "+N" and the last two. */
 function Chain({ stack }: { stack: InboxPullStack }) {
   return (
     <span className="ib-pr-chain" aria-hidden="true" data-pulls-chain={stack.layers.length}>
-      {stack.layers.map((layer, i) => (
-        <span key={layer.key} className="ib-pr-link">
+      {chainMarks(stack.layers).map((mark, i) => (
+        <span key={'more' in mark ? 'more' : mark.key} className="ib-pr-link">
           {i > 0 && <span className="ib-pr-dash" />}
-          <span className="ib-bc-mark" data-card-mark={markState(layer)} data-card-mark-kind="pr">
-            <RefMarkIcon kind="pr" state={markState(layer)} size={13} />
-          </span>
+          {'more' in mark ? (
+            <span className="ib-pr-more" data-pulls-chain-more={mark.more}>
+              +{mark.more}
+            </span>
+          ) : (
+            <span className="ib-bc-mark" data-card-mark={markState(mark)} data-card-mark-kind="pr">
+              <RefMarkIcon kind="pr" state={markState(mark)} size={13} />
+            </span>
+          )}
         </span>
       ))}
     </span>
   );
 }
 
-function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPullItem; link: InboxPullLink | null; selected: boolean; phone: boolean; now: number; onOpen: () => void }) {
-  const title = stackTitle(item.stack, link);
+function PullRow({
+  item,
+  link,
+  links,
+  repoLabel,
+  selected,
+  phone,
+  now,
+  onOpen,
+}: {
+  item: InboxPullItem;
+  link: InboxPullLink | null;
+  links: InboxPullsAnswer['links'];
+  repoLabel: string;
+  selected: boolean;
+  phone: boolean;
+  now: number;
+  onOpen: () => void;
+}) {
+  const title = stackTitle(item.stack, links);
   const line = rowLine(item, link);
   const layers = item.stack.layers.length;
   return (
@@ -262,8 +333,8 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
       <div className="ib-l1">
         <span className="ib-from ib-lead">
           <RowLead item={item} link={link} />
-          <span className="ib-p" dir="auto">
-            {repoName(item.stack.repo)}
+          <span className="ib-p" dir="auto" data-pulls-repo="">
+            {repoLabel}
           </span>
         </span>
         <span className="ib-t">
@@ -285,7 +356,11 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
           </span>
         )}
         <span className="ib-pv" dir="auto">
-          {layers > 1 && <span className="ib-sr">A stack of {layers} pull requests: </span>}
+          {layers > 1 && (
+            <span className="ib-sr">
+              A stack of {layers} {pullNounWord(item.stack.platform)}s:{' '}
+            </span>
+          )}
           {line}
         </span>
       </div>
@@ -295,10 +370,18 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
 
 function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnswer | null; loading: boolean; error: string | null; onRefresh: () => void }) {
   const now = useRelativeClock(true);
-  const clis = [...new Set((model?.hosts ?? []).map((h) => h.cli))];
-  const from = clis.length === 0 ? 'gh and glab' : clis.join(' and ');
-  const limited = model?.hosts.some((h) => h.error === 'rate_limited');
-  const when = model?.fetched_at ? relativeWords(model.fetched_at, now).replace('just now', 'just now') : null;
+  // Only the CLIs that answered: a host that failed is said in the list, by name.
+  const answered = model ? answeredClis(model) : [];
+  const when = model?.fetched_at ? relativeWords(model.fetched_at, now) : null;
+  const words = error
+    ? error
+    : !model
+      ? 'From gh and glab on this computer'
+      : answered.length > 0
+        ? `From ${answered.join(' and ')} on this computer${when ? ` · ${when}` : ''}`
+        : model.hosts.length > 0
+          ? 'Nothing read this time'
+          : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
       <Tip content="Read again">
@@ -306,8 +389,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           <Icon name="refresh" size={14} />
         </button>
       </Tip>
-      <span className="ib-pr-foot-t" aria-live="polite">
-        {error ? error : limited ? `${from} asked to slow down; showing the last read` : `From ${from} on this computer${when ? ` · ${when}` : ''}`}
+      <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
+        {words}
       </span>
     </div>
   );
@@ -324,7 +407,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const reviewGuide = link?.guide?.review ? link.guide : null;
   const asked = link?.via === 'owner' && link.ask && !reviewGuide ? (link.ask === 'custom' ? 'custom curation on the way' : 'guided review on the way') : null;
   const now = useRelativeClock(true);
-  const next = inboxPullLandsNext(stack);
+  // "Lands next" only where the base is one it lands on (a merged layer in the middle, or an unread base, gets none).
+  const next = landsNextLayer(stack);
+  // An agent whose session ended stays named, marked ended; Reply gives way to handing it to another agent.
+  const ended = link?.agent?.ended === true;
+  // Other agents on the stack: each gets verdicts for its own layers only, and the ladder says whose those are.
+  const others = otherLayerAgents(stack, model.links);
   const start = startLayer(stack);
   const openLayers = stack.layers.filter(isOpen);
   const top = openLayers[openLayers.length - 1] ?? stack.layers[stack.layers.length - 1]!;
@@ -385,17 +473,35 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
       </div>
       <div className="ib-pr-body">
         <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
-          {stackTitle(stack, link)}
+          {stackTitle(stack, model.links)}
         </h2>
         <div className="ib-pr-meta">
           <span dir="auto">{stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`}</span>
           {agent && link?.agent && (
-            <span className="ib-pr-agent">
+            <span className="ib-pr-agent" data-pulls-agent-ended={ended ? '' : undefined}>
               <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />
               {agent}
+              {ended && <span className="ib-mut">ended</span>}
             </span>
           )}
-          <span>{plural(stack.layers.length, stack.platform === 'gitlab' ? 'merge request' : 'pull request')}</span>
+          {others.map((other) => (
+            <Tip key={other.link.thread_id} content={`Open ${linkAgentName(other.link) ?? 'the agent'}'s thread: ${other.link.thread_subject ?? 'Untitled'}`}>
+              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenThread(other.link.thread_id)} data-pulls-layer-agents={other.link.thread_id}>
+                <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: other.link.agent?.host ?? null }} tip={false} />
+                <span>
+                  {linkAgentName(other.link) ?? 'Agent'}
+                  {other.link.agent?.ended ? ' (ended)' : ''}
+                </span>
+                <span className="ib-pr-chip-k">{other.layers.map(inboxPullLabel).join(', ')}</span>
+              </button>
+            </Tip>
+          ))}
+          <span>{plural(stack.layers.length, pullNounWord(stack.platform))}</span>
+          {phone && next && (
+            <span data-pulls-lands-next-head="">
+              Lands next: <span className="ib-pr-num">{inboxPullLabel(next)}</span>
+            </span>
+          )}
           {!link && openLayers.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
           {/* Each chip says what it opens ("Thread", "Board"), with its own mark: a thread and its card often share a title. */}
           {link && (
@@ -423,6 +529,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             <div className="ib-pr-status-h">
               {link.agent && <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />}
               <b>{agent ?? 'Agent'}</b>
+              {ended && (
+                <span className="ib-mut" data-pulls-ended="">
+                  · ended
+                </span>
+              )}
               {asked ? (
                 <span className="ib-mut" data-pulls-ask={link.ask}>
                   · {asked}
@@ -488,11 +599,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         )}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
-            <b>{many ? 'Landing order' : 'Pull request'}</b>
+            <b>{ladderHeading(stack)}</b>
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
-              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key && many} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
+              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
             ))}
             <li className="ib-pr-base" aria-label={`Base branch ${stack.base}`}>
               <span className="ib-pr-dot" aria-hidden="true" />
@@ -501,7 +612,17 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           </ol>
         </div>
       </div>
-      {link?.last && <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} />}
+      {link?.last && !ended && <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} />}
+      {link && ended && openLayers.length > 0 && !rehand && (
+        <div className="ib-pr-replyfoot" data-pulls-ended-foot="">
+          <div className="ib-pr-replyrow">
+            <button type="button" className="ib-pr-replybtn" onClick={() => setRehand(true)} data-pulls-rehand-foot="">
+              <Icon name="forward" size={15} />
+              <b>Hand to another agent</b> <span className="ib-mut">{agent ?? 'The agent'} ended</span>
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -685,10 +806,18 @@ function HandLine({
           {sessions.length > 0 && (
             <div className="ib-pr-agents" role="radiogroup" aria-label="Agent">
               {sessions.map((session) => (
-                <label className="ib-pr-agbtn" key={session.session} data-pulls-hand-session={session.session} data-on={picked?.session === session.session ? '' : undefined} data-disabled={sending !== null ? '' : undefined}>
+                <label
+                  className="ib-pr-agbtn"
+                  key={session.session}
+                  title={agentWords(session)}
+                  data-pulls-hand-session={session.session}
+                  data-on={picked?.session === session.session ? '' : undefined}
+                  data-disabled={sending !== null ? '' : undefined}
+                >
                   <input type="radio" name={agentName} checked={picked?.session === session.session} disabled={sending !== null} onChange={() => setPickedSession(session.session)} />
                   <HostMark host={session.host} />
-                  {agentWords(session)}
+                  {/* A long session label is cut on a narrow screen, never past it; the whole label is the pill's title. */}
+                  <span className="ib-pr-agbtn-t">{agentWords(session)}</span>
                   {session.busy && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
                 </label>
               ))}
@@ -799,7 +928,7 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
                   {checks}
                 </span>
               )}
-              {base && <span>{base}</span>}
+              {base && <span className="ib-pr-basew">{base}</span>}
             </>
           )}
         </span>

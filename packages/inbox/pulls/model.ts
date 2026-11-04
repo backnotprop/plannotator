@@ -9,6 +9,7 @@ import {
   inboxPullItems,
   inboxPullLabel,
   inboxPullLandsNext,
+  inboxPullLongLived,
   inboxPullSafeBranch,
   inboxPullStacks,
   type InboxPull,
@@ -35,27 +36,49 @@ export function pullRows(groups: InboxPullGroups): InboxPullItem[] {
   return [...groups.on_you, ...groups.ready, ...groups.waiting];
 }
 
-/** The agent's thread behind a stack: the topmost open layer's link, else any layer's. */
+const isOpen = (pull: Pick<InboxPull, 'state'>) => pull.state === 'open' || pull.state === 'draft';
+
+/**
+ * The agent's thread behind a stack: the lowest open layer's link (the agent that opened the stack from its
+ * bottom), else any layer's. An agent that linked one layer higher up is that layer's agent, not the stack's.
+ */
 export function stackLink(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
-  for (let i = stack.layers.length - 1; i >= 0; i--) {
-    const layer = stack.layers[i]!;
-    if ((layer.state === 'open' || layer.state === 'draft') && links[layer.key]) return links[layer.key]!;
-  }
+  for (const layer of stack.layers) if (isOpen(layer) && links[layer.key]) return links[layer.key]!;
   return stack.layers.map((l) => links[l.key]).find((l): l is InboxPullLink => !!l) ?? null;
 }
 
 /**
- * Where a verdict on one layer goes: that layer's own agent thread, else the stack's (among the person's own
- * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge).
+ * Where a verdict on one layer goes: that layer's own agent thread; else the thread of the nearest linked layer under
+ * it (the agent that opened the stack from there); else, when only one thread links the stack, that one. With
+ * several agents on one stack, each gets verdicts only for its own layers: never a layer below the one it linked.
+ * Among the person's own open layers only; null for a teammate's PR, which never takes a verdict here (the person
+ * reviews it on the forge).
  */
 export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
   if (!layer.mine) return null;
   if (links[layer.key]) return links[layer.key]!;
-  for (let i = stack.layers.length - 1; i >= 0; i--) {
-    const other = stack.layers[i]!;
-    if (other.mine && (other.state === 'open' || other.state === 'draft') && links[other.key]) return links[other.key]!;
+  const linked = stack.layers.filter((l) => l.mine && isOpen(l) && links[l.key]);
+  const at = stack.layers.findIndex((l) => l.key === layer.key);
+  // The nearest linked layer under this one: an agent that linked a layer higher up owns the layers above it.
+  const below = linked.filter((l) => stack.layers.indexOf(l) < at).at(-1);
+  if (below) return links[below.key]!;
+  const threads = new Set(linked.map((l) => links[l.key]!.thread_id));
+  return threads.size === 1 ? links[linked[0]!.key]! : null;
+}
+
+/** The agents with a layer of the stack other than the stack's own (`stackLink`): one entry per thread. */
+export function otherLayerAgents(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): { link: InboxPullLink; layers: InboxPull[] }[] {
+  const main = stackLink(stack, links);
+  const out = new Map<string, { link: InboxPullLink; layers: InboxPull[] }>();
+  for (const layer of stack.layers) {
+    if (!isOpen(layer)) continue;
+    const link = layerVerdictLink(layer, stack, links);
+    if (!link || link.thread_id === main?.thread_id) continue;
+    const entry = out.get(link.thread_id) ?? { link, layers: [] };
+    entry.layers.push(layer);
+    out.set(link.thread_id, entry);
   }
-  return null;
+  return [...out.values()];
 }
 
 /** The agent's name as the Inbox writes it ("Claude Code", "Codex"), or the name it gave itself. */
@@ -65,13 +88,17 @@ export function linkAgentName(link: InboxPullLink | null): string | null {
 }
 
 /**
- * The stack's name: the thread's subject when the agent opened it there (`url`: the agent named its own work),
- * else its lowest open layer's title. A thread the person handed it to is named by the hand-off, not the work.
+ * The stack's name: the thread's subject when the agent opened the stack there (`url`: the agent named its own work,
+ * and that thread links the stack's lowest open layer), else its lowest open layer's title. A thread that linked
+ * only a layer higher up names that layer's work, not the stack's; a thread the person handed it to is named by the
+ * hand-off, not the work.
  */
-export function stackTitle(stack: InboxPullStack, link: InboxPullLink | null): string {
-  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
+export function stackTitle(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): string {
+  const open = stack.layers.filter(isOpen);
   if (open.length === 1) return open[0]!.title;
-  return (link?.via === 'url' && link.thread_subject) || (inboxPullLandsNext(stack) ?? stack.layers[stack.layers.length - 1]!).title;
+  const root = inboxPullLandsNext(stack);
+  const link = root ? links[root.key] : undefined;
+  return (link?.via === 'url' && link.thread_subject) || (root ?? stack.layers[stack.layers.length - 1]!).title;
 }
 
 /** The Inbox projects a stack's repository is (two clones of one origin are two). */
@@ -231,6 +258,8 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
       return 'Changes requested';
     case 'failing':
       return 'Checks failed';
+    case 'conflicts':
+      return 'Has conflicts';
     case 'approved':
       return `${pull.approved_by ?? 'Approved'}${pull.approved_by ? ' approved' : ''}${pull.checks === 'success' ? ' · checks passed' : ''}`;
     case 'approved_running':
@@ -273,6 +302,7 @@ export function layerPill(pull: InboxPull): { text: string; tone: 'you' | 'ok' |
   if (pull.state === 'draft') return { text: 'Draft', tone: 'quiet' };
   if (pull.requested && !pull.mine) return { text: 'Your review', tone: 'you' };
   if (pull.review === 'changes_requested') return { text: 'Changes requested', tone: 'bad' };
+  if (pull.conflicts === true) return { text: 'Conflicts', tone: 'bad' };
   if (pull.review === 'approved') return { text: 'Approved', tone: 'ok' };
   if (pull.mine) return { text: 'Your review', tone: 'you' };
   return { text: 'No reviews yet', tone: 'quiet' };
@@ -283,19 +313,264 @@ export function checksWords(pull: Pick<InboxPull, 'checks'>): string | null {
   return pull.checks === 'success' ? 'Checks passed' : pull.checks === 'failure' ? 'Checks failed' : pull.checks === 'pending' ? 'Checks running' : null;
 }
 
-/** "After #412" (on another layer), "Based on main" (the next to land), or null. */
-export function layerBaseWords(pull: InboxPull, stack: InboxPullStack): string | null {
-  const under = stack.layers.find((l) => l.head === pull.base && l.key !== pull.key);
-  if (under && under.state !== 'merged') return `After ${inboxPullLabel(under)}`;
-  if (under) return `On ${inboxPullLabel(under)}, merged`;
-  return inboxPullLandsNext(stack)?.key === pull.key && stack.layers.length > 1 ? `Based on ${pull.base}` : null;
+/** The open layer a layer sits on, through merged layers between (a layer merged into an open one's branch); null on none. */
+function openUnder(pull: InboxPull, stack: InboxPullStack): InboxPull | null {
+  let base = pull.base;
+  for (let i = 0; i < stack.layers.length; i++) {
+    const under = stack.layers.find((l) => l.head === base && l.key !== pull.key);
+    if (!under || under.state === 'closed') return null;
+    if (isOpen(under)) return under;
+    base = under.base;
+  }
+  return null;
 }
 
-/** The layer after this one in landing order, among the open ones; null at the top. */
+/** Whether a branch is one a layer lands on: long-lived, or the head of a merged layer that itself landed on one. */
+function landsOnBase(branch: string, stack: InboxPullStack): boolean {
+  let base = branch;
+  for (let i = 0; i <= stack.layers.length; i++) {
+    if (inboxPullLongLived(base)) return true;
+    const merged = stack.layers.find((l) => l.state === 'merged' && l.head === base);
+    if (!merged) return false;
+    base = merged.base;
+  }
+  return false;
+}
+
+/**
+ * The layer marked "Lands next": the lowest open one, only in a stack of several open layers and only when its base
+ * is a branch it lands on (long-lived, or a merged layer's that landed). A base the Inbox knows nothing of (a closed
+ * PR's branch, never read) gets no mark: the layer under it may not have landed.
+ */
+export function landsNextLayer(stack: InboxPullStack): InboxPull | null {
+  const next = inboxPullLandsNext(stack);
+  if (!next || stack.layers.filter(isOpen).length < 2) return null;
+  return landsOnBase(next.base, stack) ? next : null;
+}
+
+/**
+ * "After #412" (on another layer), "Also on #9101" (a second layer on the same one: the stack forks there), "Based
+ * on main" (the next to land), "Based on `dr/route53` (no open PR)" (a branch no PR the Inbox read has as its head),
+ * or null.
+ */
+export function layerBaseWords(pull: InboxPull, stack: InboxPullStack): string | null {
+  const under = stack.layers.find((l) => l.head === pull.base && l.key !== pull.key);
+  if (under && under.state !== 'merged') {
+    // Siblings by number: the first is "After", every other one "Also on" (a fork, not a chain).
+    const first = stack.layers.find((l) => isOpen(l) && l.base === pull.base && l.key !== under.key);
+    return first && first.key !== pull.key ? `Also on ${inboxPullLabel(under)}` : `After ${inboxPullLabel(under)}`;
+  }
+  if (under) return `On ${inboxPullLabel(under)}, merged`;
+  if (!isOpen(pull) || inboxPullLandsNext(stack)?.key !== pull.key) return null;
+  if (!inboxPullLongLived(pull.base)) return `Based on ${pull.base} (no open ${pullNounWord(pull.platform)})`;
+  return stack.layers.length > 1 ? `Based on ${pull.base}` : null;
+}
+
+/** The layer after this one in landing order: the first open layer that sits on it (a fork's sibling is not next); null at the top. */
 export function nextLayer(stack: InboxPullStack, key: string): InboxPull | null {
-  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
-  const at = open.findIndex((l) => l.key === key);
-  return at >= 0 ? (open[at + 1] ?? null) : null;
+  return stack.layers.find((l) => isOpen(l) && l.key !== key && openUnder(l, stack)?.key === key) ?? null;
+}
+
+/** "pull request" / "merge request". */
+export function pullNounWord(platform: InboxPull['platform']): 'pull request' | 'merge request' {
+  return platform === 'gitlab' ? 'merge request' : 'pull request';
+}
+
+/** The stack view's ladder heading: "Landing order" for more than one layer, else "Pull request" / "Merge request". */
+export function ladderHeading(stack: InboxPullStack): string {
+  if (stack.layers.length > 1) return 'Landing order';
+  return stack.platform === 'gitlab' ? 'Merge request' : 'Pull request';
+}
+
+/**
+ * A teammate's initials for the row's tile: two words give two letters ("mara-lee" → "ML"), one gives one
+ * ("priya" → "P"); never a pair that reads as "pull request" or "merge request" on this page ("PR", "MR"): the
+ * first letter alone then.
+ */
+export function initials(login: string): string {
+  const parts = login.split(/[-_. ]+/).filter(Boolean);
+  const two = ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+  return two === 'PR' || two === 'MR' ? two[0]! : two;
+}
+
+/** A row's chain of marks: every layer up to five; past that the first two, "+N", and the last two. */
+export function chainMarks(layers: readonly InboxPull[]): (InboxPull | { more: number })[] {
+  if (layers.length <= 5) return [...layers];
+  return [layers[0]!, layers[1]!, { more: layers.length - 4 }, layers[layers.length - 2]!, layers[layers.length - 1]!];
+}
+
+/**
+ * Each repository's label in the list, by `inboxPullRepoKey`: its own name ("ledger"), with as much of its path as
+ * tells it apart from another listed repository of the same name ("platform/ledger", "finance/ledger"), and its host
+ * when the paths are the same on two hosts.
+ */
+export function repoLabels(repos: readonly Pick<InboxPullStack, 'host' | 'repo'>[]): Map<string, string> {
+  const unique = new Map<string, { host: string; repo: string }>();
+  for (const r of repos) unique.set(`${r.host}/${r.repo}`.toLowerCase(), { host: r.host, repo: r.repo });
+  const all = [...unique.entries()];
+  const tail = (repo: string, n: number) => repo.split('/').slice(-n).join('/');
+  const out = new Map<string, string>();
+  for (const [key, { host, repo }] of all) {
+    const depth = repo.split('/').length;
+    let n = 1;
+    const clash = (k: number) => all.some(([other, o]) => other !== key && tail(o.repo, k).toLowerCase() === tail(repo, k).toLowerCase());
+    while (n < depth && clash(n)) n++;
+    out.set(key, clash(n) ? `${host}/${repo}` : tail(repo, n));
+  }
+  return out;
+}
+
+/** A host as the list names it: "GitHub" and "GitLab" for github.com and gitlab.com, else the host itself. */
+export function hostName(host: string): string {
+  return host === 'github.com' ? 'GitHub' : host === 'gitlab.com' ? 'GitLab' : host;
+}
+
+const joinAnd = (names: readonly string[]) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+
+/** What a forge's own list of the person's PRs is: the search the capped answer comes from. */
+function forgeListUrl(host: string, cli: 'gh' | 'glab'): string {
+  return cli === 'glab' ? `https://${host}/dashboard/merge_requests` : `https://${host}/pulls`;
+}
+
+/** One line the list says about what it could not read, or read only in part. */
+export interface PullsNotice {
+  key: string;
+  /** Short, for the empty state's heading. */
+  head: string;
+  /** The line in the list. */
+  line: string;
+  /** "Open on GitHub": the forge's own list, when only part of it is shown. */
+  link?: { href: string; label: string };
+}
+
+/**
+ * Why the list may be missing pull requests, one notice per cause: a host that didn't answer or asked to slow down
+ * (its last read shown when there is one, else its PRs are not), a host whose searches found more than one read takes
+ * ("Showing 100 of 133"), and a project's host no CLI here is signed in to (the CLI not installed, or not signed in
+ * there). Never "Nothing open" while one of these holds.
+ */
+export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'unsigned'>): PullsNotice[] {
+  const out: PullsNotice[] = [];
+  for (const error of ['unavailable', 'rate_limited'] as const) {
+    for (const shown of [false, true]) {
+      const hosts = model.hosts.filter((h) => h.error === error && !!h.last_read === shown);
+      if (hosts.length === 0) continue;
+      const names = joinAnd([...new Set(hosts.map((h) => hostName(h.host)))]);
+      const many = hosts.length > 1;
+      const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
+      const tail = shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`;
+      out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+    }
+  }
+  for (const h of model.hosts) {
+    if (!h.capped || h.capped.total <= h.capped.shown) continue;
+    const forge = h.cli === 'glab' ? 'GitLab' : 'GitHub';
+    out.push({
+      key: `capped:${h.host}`,
+      head: `Showing ${h.capped.shown} of ${h.capped.total}`,
+      line: `Showing ${h.capped.shown} of ${h.capped.total} from ${h.host}`,
+      link: { href: forgeListUrl(h.host, h.cli), label: `Open on ${forge}` },
+    });
+  }
+  const unsigned = model.unsigned ?? [];
+  const byCli = new Map<'gh' | 'glab', string[]>();
+  for (const host of unsigned) {
+    const cli = /gitlab/i.test(host) ? 'glab' : 'gh';
+    byCli.set(cli, [...(byCli.get(cli) ?? []), host]);
+  }
+  for (const [cli, hosts] of byCli) {
+    const missing = model.clis?.[cli] === 'missing';
+    const head = missing ? `${cli} isn't installed` : `${cli} isn't signed in to ${joinAnd(hosts)}`;
+    const line = missing ? `${cli} isn't installed here, so pull requests on ${joinAnd(hosts)} aren't shown.` : `${head}, so ${hosts.length > 1 ? 'their' : 'its'} pull requests aren't shown.`;
+    out.push({ key: `unsigned:${cli}`, head, line });
+  }
+  return out;
+}
+
+const SIGN_IN_LINE = 'Pull requests show here when this computer’s gh or glab is signed in to the host of a project’s origin.';
+
+/**
+ * What the empty list says, by cause: a host that failed ("GitHub didn't answer", never "Nothing open"), a CLI not
+ * installed, signed out, no project on GitHub or GitLab, or truly nothing open.
+ */
+export function pullsEmptyWords(
+  model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'unsigned' | 'projects'>,
+  notices: readonly PullsNotice[] = pullsNotices(model),
+): { kind: 'unread' | 'missing' | 'signed-out' | 'no-repos' | 'nothing'; head: string; lines: string[] } {
+  const failed = notices.filter((n) => n.key.startsWith('unavailable:') || n.key.startsWith('rate_limited:'));
+  if (failed.length > 0) {
+    const others = notices.filter((n) => !failed.includes(n) && !n.key.startsWith('capped:'));
+    return { kind: 'unread', head: failed[0]!.head, lines: [...failed, ...others].map((n) => n.line) };
+  }
+  const unsigned = notices.filter((n) => n.key.startsWith('unsigned:'));
+  if (unsigned.length > 0 && model.hosts.length === 0) {
+    const missing = (model.unsigned ?? []).length > 0 && unsigned.every((n) => n.head.endsWith("isn't installed"));
+    if (missing) {
+      const clis = unsigned.map((n) => n.key.slice('unsigned:'.length));
+      return { kind: 'missing', head: `${joinAnd(clis)} ${clis.length > 1 ? "aren't" : "isn't"} installed`, lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
+    }
+    return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
+  }
+  if (model.hosts.length === 0) {
+    // An older Inbox says nothing of its CLIs: the words it always had.
+    if (model.clis && Object.keys(model.projects).length === 0) {
+      return { kind: 'no-repos', head: 'No project here is on GitHub or GitLab', lines: ['Pull requests show here for projects whose origin is on GitHub or GitLab.'] };
+    }
+    return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [SIGN_IN_LINE] };
+  }
+  return { kind: 'nothing', head: 'Nothing open in your projects', lines: ['Pull requests you opened, and the ones you are asked to review, show here.', ...unsigned.map((n) => n.line)] };
+}
+
+/** One row of the review's file rail: a folder heading (only when the rail groups), or a file. */
+export type RailRow = { kind: 'folder'; key: string; text: string; full: string } | { kind: 'file'; path: string; dir: string; name: string };
+
+/**
+ * The review rail's rows. As a flat list (the folder before each name, cut at its start when long) while that reads
+ * each file apart; when two files share their name and last folder (`…/vpc-peering/main.tf` in five regions), the
+ * rail groups the files under folder headings instead: the folders past what every file shares, a long one cut in
+ * the middle (`eu-west-1/…/vpc-peering/`), each file by its name.
+ */
+export function railRows(paths: readonly string[]): RailRow[] {
+  const file = (path: string): RailRow => {
+    const slash = path.lastIndexOf('/');
+    return { kind: 'file', path, dir: slash >= 0 ? path.slice(0, slash + 1) : '', name: path.slice(slash + 1) };
+  };
+  const tails = new Set<string>();
+  let alike = false;
+  for (const path of paths) {
+    const tail = path.split('/').slice(-2).join('/');
+    if (tails.has(tail)) alike = true;
+    tails.add(tail);
+  }
+  if (!alike) return paths.map(file);
+  const dirOf = (path: string) => path.split('/').slice(0, -1);
+  const groups = new Map<string, string[]>();
+  for (const path of paths) {
+    const key = dirOf(path).join('/');
+    groups.set(key, [...(groups.get(key) ?? []), path]);
+  }
+  // The folders every (non-root) group shares are left out of the headings: one group alone keeps its last two.
+  const dirs = [...groups.keys()].filter(Boolean).map((key) => key.split('/'));
+  let shared = 0;
+  while (dirs.length > 1 && dirs.every((d) => d.length > shared + 1 && d[shared] === dirs[0]![shared])) shared++;
+  const own = (key: string) => key.split('/').filter(Boolean).slice(dirs.length > 1 ? shared : -2);
+  const cut = (parts: string[]) => (parts.length > 2 ? `${parts[0]}/…/${parts[parts.length - 1]}/` : `${parts.join('/')}/`);
+  const cuts = [...groups.keys()].filter(Boolean).map((key) => cut(own(key)));
+  // Two headings the middle cut would make alike keep their whole own path (the line cuts it at its start).
+  const alikeCut = new Set(cuts).size < cuts.length;
+  const rows: RailRow[] = [];
+  for (const [key, members] of groups) {
+    const full = key ? `${key}/` : '/';
+    const text = !key ? full : alikeCut ? `${own(key).join('/')}/` : cut(own(key));
+    rows.push({ kind: 'folder', key, text, full });
+    for (const path of members) rows.push({ ...(file(path) as Extract<RailRow, { kind: 'file' }>), dir: '' });
+  }
+  return rows;
+}
+
+/** The CLIs whose hosts answered this read, for the foot ("From gh on this computer"). */
+export function answeredClis(model: Pick<InboxPullsAnswer, 'hosts'>): string[] {
+  return [...new Set(model.hosts.filter((h) => !h.error).map((h) => h.cli))];
 }
 
 /** The stack (and its row) holding a PR or a stack id. */

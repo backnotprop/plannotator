@@ -1008,6 +1008,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const root = store.message(id);
       return root && root.thread_id === id ? store.canonicalProjectId(root.project_id) : null;
     },
+    // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
+    sessionLive: (session) => live.isSessionLive(session),
   };
   // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
   // A project's origin is read once before its first list (the cache is read-behind), so the first open after a

@@ -19,12 +19,15 @@ export interface PullsState {
 
 /**
  * The Pull requests list (approval "inbox-code-review-direction", item 4):
- * read only while `enabled` (the page is open and Code review is on). Off,
- * nothing is asked and a read in flight is dropped. The last answer is kept
- * for the sidebar's count and the next visit; nothing refreshes it while the
- * page is closed.
+ * read while `enabled` (the page is open and Code review is on): on open, on
+ * focus after `PULLS_FOCUS_MS`, every `PULLS_TICK_MS` while visible. While the
+ * page is closed but `counted` (Code review is on), the sidebar's "On you"
+ * count is kept current: the list is read once when the window starts and
+ * again on focus after `PULLS_FOCUS_MS` (the server answers from its cache
+ * while that is fresh). Neither: nothing is asked and a read in flight is
+ * dropped.
  */
-export function usePulls(enabled: boolean): PullsState {
+export function usePulls(enabled: boolean, counted = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,7 +36,7 @@ export function usePulls(enabled: boolean): PullsState {
 
   const read = useCallback(
     (refresh: boolean) => {
-      if (!enabled) return;
+      if (!enabled && !counted) return;
       inFlight.current?.abort();
       const controller = new AbortController();
       inFlight.current = controller;
@@ -57,10 +60,19 @@ export function usePulls(enabled: boolean): PullsState {
           }
         });
     },
-    [enabled],
+    [enabled, counted],
   );
 
   useEffect(() => {
+    if (!enabled && counted) {
+      // The page is closed: the count only. Read when the window starts (or Code review is turned on), then on focus.
+      if (lastAt.current === 0 || Date.now() - lastAt.current >= PULLS_FOCUS_MS) read(false);
+      const onFocus = () => {
+        if (Date.now() - lastAt.current >= PULLS_FOCUS_MS) read(false);
+      };
+      window.addEventListener('focus', onFocus);
+      return () => window.removeEventListener('focus', onFocus);
+    }
     if (!enabled) {
       inFlight.current?.abort();
       inFlight.current = null;
@@ -81,7 +93,7 @@ export function usePulls(enabled: boolean): PullsState {
       inFlight.current?.abort();
       inFlight.current = null;
     };
-  }, [enabled, read]);
+  }, [enabled, counted, read]);
 
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);

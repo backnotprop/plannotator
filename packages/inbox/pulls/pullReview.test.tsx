@@ -9,7 +9,11 @@
  *  - a teammate's PR (no agent thread here) offering a verdict that has
  *    nowhere to go;
  *  - the list not grouped by whose move it is, a stack drawn as several rows,
- *    or the waiting ones not folded.
+ *    or the waiting ones not folded;
+ *  - the worst case (break-ui on #2590): a failed read saying "Nothing open",
+ *    a capped read with no count, a refused diff offering a verdict, an empty
+ *    diff read forever, a long title lost from the header, an ended agent
+ *    offered Reply.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -119,10 +123,13 @@ let diffHead: string | null = 'a'.repeat(40);
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 let sessionReads = 0;
+/** What the diff door answers instead of a one-file patch (a refused branch, an empty diff); null: the patch. */
+let diffOverride: ((key: string, scope: string) => Response) | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
+  diffOverride = null;
   asked = [];
   posted = [];
   sessionsAnswer = {
@@ -160,6 +167,7 @@ beforeEach(() => {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
       asked.push({ key, scope });
+      if (diffOverride) return diffOverride(key, scope);
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
       return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
     }
@@ -961,4 +969,71 @@ test('a hostile title is one line, cut, inside a code span; an unsafe branch and
   expect(text).not.toContain('evil.example');
   expect(text).not.toContain('mallory');
   expect(text).toContain("It is a teammate's, in northwind/billing-svc");
+});
+
+// --- the worst-case stress test (break-ui on #2590) ---
+
+test.skipIf(!hasDom)('a host that didn\'t answer: the list says so, never "Nothing open"; with a last read its PRs stay and a notice says why', async () => {
+  const failed: InboxPullsAnswer = { ...model, pulls: [], links: {}, hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable' }], clis: { gh: 'signed_in' }, unsigned: [] };
+  mount(<Page answer={failed} stackId="" />);
+  await settle();
+  expect(el('[data-pulls-empty]').getAttribute('data-pulls-empty')).toBe('unread');
+  expect(document.body.textContent).not.toContain('Nothing open');
+  act(() => root?.unmount());
+  host?.remove();
+
+  const kept: InboxPullsAnswer = { ...model, hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', error: 'rate_limited', last_read: '2026-11-03T09:00:00.000Z' }] };
+  mount(<Page answer={kept} stackId="" />);
+  await settle();
+  expect(document.querySelector('[data-pulls-empty]')).toBeNull();
+  expect(document.querySelector('[data-pulls-notice="rate_limited:true"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)("more PRs than one read takes: the list says how many it shows, with the forge's own list", async () => {
+  const capped: InboxPullsAnswer = { ...model, hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 100, total: 133 } }] };
+  mount(<Page answer={capped} stackId="" />);
+  await settle();
+  expect(el('[data-pulls-notice="capped:github.com"]').textContent).toContain('100 of 133');
+  expect(el<HTMLAnchorElement>('[data-pulls-notice-link]').href).toBe('https://github.com/pulls');
+});
+
+/** The model with #412 pushed again at `at` (the window's diff cache, by a PR's last update, reads it afresh). */
+const pushed412 = (at: string): InboxPullsAnswer => ({ ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, updated_at: at } : p)) });
+
+test.skipIf(!hasDom)('a diff the Inbox refuses (a branch it cannot compare): the forge link, and no verdict on a diff never read', async () => {
+  diffOverride = () => Response.json({ error: 'The diff could not be read.', code: 'pull_diff_failed' }, { status: 502 });
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed412('2026-11-04T01:00:00.000Z')} />);
+  await settle();
+  expect(document.querySelector('[data-pull-diff-error]')).not.toBeNull();
+  expect(el<HTMLAnchorElement>('[data-pull-diff-error-forge]').href).toBe(stack[0]!.url);
+  expect(document.querySelector('[data-review-decision]')).toBeNull();
+  expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading the diff…" forever', async () => {
+  diffOverride = (key, scope) => Response.json({ serverSession: 's', key, scope, base: 'x', head: 'y', patch: '', head_sha: 'a'.repeat(40) });
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={pushed412('2026-11-04T02:00:00.000Z')} />);
+  await settle();
+  expect(el('[data-pull-diff-empty]').textContent).toContain('changes no files');
+  expect(document.body.textContent).not.toContain('Reading the diff');
+});
+
+test.skipIf(!hasDom)('a long title is cut in the review header but kept whole in its hover', async () => {
+  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
+  const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
+  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);
+  await settle();
+  expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
+});
+
+test.skipIf(!hasDom)('an ended agent stays named, marked ended; Reply gives way to "Hand to another agent"', async () => {
+  const ended: InboxPullsAnswer = { ...model, links: { [stack[2]!.key]: { ...link, agent: { ...link.agent!, ended: true } } } };
+  mount(<Page answer={ended} stackId={STACK_ID} />);
+  await settle();
+  expect(document.querySelector('[data-pulls-agent-ended]')).not.toBeNull();
+  expect(document.querySelector('[data-pulls-reply]')).toBeNull();
+  await act(async () => el('[data-pulls-rehand-foot]').click());
+  await settle();
+  expect(document.querySelector('[data-pulls-ended-foot]')).toBeNull();
+  expect(el('[data-pulls-handoff]').getAttribute('data-pulls-handoff')).toBe('again');
 });

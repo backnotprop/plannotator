@@ -113,6 +113,38 @@ describe("inboxPullStacks", () => {
     expect(inboxPullStacks([b, a]).map((s) => keys(s.layers))).toEqual([[7, 8]]);
   });
 
+  test("a merged layer in the middle (merged into an open PR's branch): the stack runs from that open PR up, the merged one between", () => {
+    const fx = pr({ number: 48150, head: "fx-cache", base: "main" });
+    const ttl = pr({ number: 48151, head: "fx-cache-ttl", base: "fx-cache", state: "merged" });
+    const metrics = pr({ number: 48152, head: "fx-cache-metrics", base: "fx-cache-ttl" });
+    const alerts = pr({ number: 48153, head: "fx-cache-alerts", base: "fx-cache-metrics" });
+    const stacks = inboxPullStacks([alerts, metrics, ttl, fx]);
+    expect(stacks.map((s) => keys(s.layers))).toEqual([[48150, 48151, 48152, 48153]]);
+    // What lands next is the open PR at the bottom, not the layer above the merged one.
+    expect(inboxPullLandsNext(stacks[0]!)?.number).toBe(48150);
+    expect(stacks[0]!.base).toBe("main");
+    expect(stacks[0]!.open_base).toBe("main");
+  });
+
+  test("two open PRs from one branch (a backport): the layer based on that branch sits on the one into main, whatever the order", () => {
+    const main = pr({ number: 320, head: "fix-rounding", base: "main" });
+    const backport = pr({ number: 321, head: "fix-rounding", base: "release/2026.10" });
+    const tests = pr({ number: 322, head: "fix-rounding-tests", base: "fix-rounding" });
+    for (const order of [
+      [backport, main, tests],
+      [tests, main, backport],
+      [main, backport, tests],
+    ]) {
+      const stacks = inboxPullStacks(order);
+      expect(stacks.map((s) => keys(s.layers)).sort()).toEqual([[320, 322], [321]]);
+    }
+    // Into a feature branch and into main: main's PR takes the layers above it.
+    const feature = pr({ number: 30, head: "shared", base: "feature/epic" });
+    const intoMain = pr({ number: 31, head: "shared", base: "main" });
+    const above = pr({ number: 32, head: "above", base: "shared" });
+    expect(inboxPullStacks([feature, intoMain, above]).find((s) => s.layers.some((l) => l.number === 32))!.layers.map((l) => l.number)).toEqual([31, 32]);
+  });
+
   test("two layers on one branch stay in one stack, by depth then number", () => {
     const low = pr({ number: 10, head: "base-work", base: "main" });
     const b = pr({ number: 12, head: "b", base: "base-work" });
@@ -133,6 +165,11 @@ describe("whose move", () => {
     expect(inboxPullMove(pr({ number: 8, head: "h", checks: "failure" }), false)).toEqual({ move: "on_you", reason: "failing" });
     expect(inboxPullMove(pr({ number: 9, head: "i", reviewers: ["jun"] }), false)).toEqual({ move: "waiting", reason: "review" });
     expect(inboxPullMove(pr({ number: 10, head: "j", mine: false, author: "mara" }), false)).toEqual({ move: "waiting", reason: "others" });
+  });
+
+  test("an approved PR that conflicts with its base is not ready to land: it is on the person", () => {
+    expect(inboxPullMove(pr({ number: 82, head: "kms", review: "approved", approved_by: "jo", conflicts: true }), false)).toEqual({ move: "on_you", reason: "conflicts" });
+    expect(inboxPullMove(pr({ number: 83, head: "kms2", review: "approved", approved_by: "jo", conflicts: false }), false)).toEqual({ move: "ready", reason: "approved" });
   });
 
   test("the groups: On you holds teammates' requests and the agents' PRs; a stack goes by the layer on the person", () => {

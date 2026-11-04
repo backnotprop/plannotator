@@ -26,7 +26,19 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, GITHUB_SEARCH_MAX_CHARS, githubPullSearches, INBOX_PULL_DIFF_MAX_BYTES, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls, safeBranch } from "./inbox-pulls";
+import {
+  compareBranch,
+  createInboxPulls,
+  GITHUB_SEARCH_MAX_CHARS,
+  githubPullSearches,
+  INBOX_PULL_DIFF_MAX_BYTES,
+  INBOX_PULLS_FRESH_MS,
+  linkInboxPulls,
+  parseGithubPulls,
+  parseGitlabPulls,
+  previewOf,
+  safeBranch,
+} from "./inbox-pulls";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
 import type { PRRuntime } from "@plannotator/shared/pr-provider";
@@ -442,7 +454,7 @@ describe("the reader", () => {
   test("no repository, no call at all", async () => {
     const f = forge();
     const pulls = createInboxPulls({ run: f.run });
-    expect(await pulls.list([])).toEqual({ fetched_at: null, hosts: [], pulls: [] });
+    expect(await pulls.list([])).toEqual({ fetched_at: null, hosts: [], pulls: [], clis: {}, unsigned: [] });
     expect(f.calls).toEqual([]);
   });
 });
@@ -665,6 +677,125 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
   test("branch names a compare would misread are refused", () => {
     for (const bad of ["-x", "/x", "a..b", "a:b", "a~1", "a^", "a b", "a@{1}", ""]) expect(safeBranch(bad)).toBe(false);
     for (const good of ["retry/schedule", "feat-2", "release_1.2"]) expect(safeBranch(good)).toBe(true);
+  });
+});
+
+// --- the worst-case stress test (break-ui on #2590): what the list must say when it can't read everything ---
+
+describe("the worst case (break-ui on #2590)", () => {
+  const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+
+  test("a host that times out on the first read: marked unavailable with no last read (its PRs aren't shown); after one answer, a failure says when that answer was read", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    // gh stopped at the list's time limit: nothing it said names a cause.
+    f.fail = "context deadline exceeded";
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    const first = await pulls.list(repos);
+    expect(first.pulls).toEqual([]);
+    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable" }]);
+    now += 31_000;
+    f.fail = null;
+    expect((await pulls.list(repos)).pulls).toHaveLength(3);
+    const readAt = new Date(now).toISOString();
+    now += INBOX_PULLS_FRESH_MS;
+    f.fail = "GraphQL: API rate limit already exceeded for user ID 48213.";
+    const limited = await pulls.list(repos);
+    expect(limited.pulls).toHaveLength(3);
+    expect(limited.hosts[0]).toMatchObject({ error: "rate_limited", last_read: readAt });
+  });
+
+  test("gh not installed is told apart from gh signed out; the host it would have asked is listed as unsigned", async () => {
+    const missing: RefRunner = async (cli) => ({ stdout: "", stderr: `${cli}: not found`, exitCode: 127 });
+    const none = await createInboxPulls({ run: missing }).list(repos);
+    expect(none.clis).toEqual({ gh: "missing", glab: "missing" });
+    expect(none.unsigned).toEqual(["github.com"]);
+    const signedOut: RefRunner = async (cli) => ({ stdout: "", stderr: cli === "gh" ? "You are not logged into any GitHub hosts. To log in, run: gh auth login" : "No GitLab instance is authenticated", exitCode: 1 });
+    const out = await createInboxPulls({ run: signedOut }).list(repos);
+    expect(out.clis).toEqual({ gh: "signed_out", glab: "signed_out" });
+    expect(out.unsigned).toEqual(["github.com"]);
+    expect(out.hosts).toEqual([]);
+  });
+
+  test("more open PRs than the searches answer: the host says how many were read, of how many", async () => {
+    const many = (from: number, n: number) => Array.from({ length: n }, (_, i) => ghPull(from + i, { headRefName: `b${from + i}` }));
+    const answer = { data: { viewer: { login: "dana" }, requested: { issueCount: 61, nodes: many(2000, 50) }, authored: { issueCount: 72, nodes: many(1000, 50) }, merged: { nodes: [] } } };
+    const listed = await createInboxPulls({ run: forge(answer).run }).list(repos);
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 100, total: 133 });
+    // Nothing left out: no count said.
+    expect(parseGithubPulls(JSON.stringify(GH_ANSWER), "github.com")!.capped).toBeUndefined();
+    const gitlab = parseGitlabPulls(
+      JSON.stringify({ data: { currentUser: { username: "dana", requested: { count: 3, nodes: [GL_MR(1)] }, authored: { count: 1, nodes: [GL_MR(2, { author: { username: "dana" } })] }, merged: { nodes: [] } } } }),
+      "gitlab.com",
+    )!;
+    expect(gitlab.capped).toEqual({ shown: 2, total: 4 });
+  });
+
+  test("a conflicting PR says so (GitHub `mergeable`, GitLab `conflicts`); an unknown one says nothing", () => {
+    const gh = parseGithubPulls(JSON.stringify(answerOf([ghPull(1, { mergeable: "CONFLICTING" }), ghPull(2, { mergeable: "UNKNOWN" }), ghPull(3, { mergeable: "MERGEABLE" })])), "github.com")!;
+    const by = Object.fromEntries(gh.pulls.map((p) => [p.number, p]));
+    expect(by[1]!.conflicts).toBe(true);
+    expect(by[2]!.conflicts).toBeUndefined();
+    expect(by[3]!.conflicts).toBe(false);
+    const gl = parseGitlabPulls(JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(4, { conflicts: true })] }, merged: { nodes: [] } } } }), "gitlab.com")!;
+    expect(gl.pulls[0]!.conflicts).toBe(true);
+  });
+
+  test("a non-ASCII branch (a valid git branch) is compared, percent-encoded; one git refuses is still refused and runs nothing", async () => {
+    const answer = answerOf([
+      ghPull(330, { headRefName: "übersetzung/fehlermeldungen" }),
+      ghPull(331, { headRefName: "fehlermeldungen-im-dashboard", baseRefName: "übersetzung/fehlermeldungen" }),
+      ghPull(340, { headRefName: "bad..name" }),
+      ghPull(341, { headRefName: "on-bad", baseRefName: "bad..name" }),
+    ]);
+    const f = forge(answer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list(repos);
+    const diff = await pulls.diff("github.com/northwind/billing-svc#331", "stack");
+    expect(diff.patch).toBe("diff of repos/northwind/billing-svc/compare/main...fehlermeldungen-im-dashboard\n");
+    await pulls.diff("github.com/northwind/billing-svc#330", "stack");
+    expect(f.calls.at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
+    const before = f.calls.length;
+    await expect(pulls.diff("github.com/northwind/billing-svc#340", "stack")).rejects.toMatchObject({ code: "pull_diff_failed" });
+    expect(f.calls.length).toBe(before);
+    for (const bad of ["-x", "a..b", "a:b", "a~1", "a b", "a@{1}", "x.lock", "a//b", "‮evil", ""]) expect(compareBranch(bad)).toBe(false);
+    for (const good of ["übersetzung/fehlermeldungen", "日本語/ブランチ", "feat#12", "release/2026.10"]) expect(compareBranch(good)).toBe(true);
+  });
+
+  test("the last words keep code as written: no underscore or backtick turned into a space", () => {
+    expect(previewOf("Layer 3 fails `settle_batch()` on EUR→JPY. Rebased from `main`.")).toBe("Layer 3 fails settle_batch() on EUR→JPY. Rebased from main.");
+    expect(previewOf("## Status\n\n> **Done:** the _retry_ layer, see [the PR](https://x.test/1)\n- one\n- two")).toBe("Status Done: the retry layer, see the PR one two");
+    expect(previewOf("snake_case_name and 2*3*4")).toBe("snake_case_name and 2*3*4");
+  });
+
+  test("an agent that sent with a wake and polls no more is marked ended; a live one and an MCP-only one are not", () => {
+    const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1), ghPull(2), ghPull(3)])), "github.com")!.pulls;
+    const message = (id: string, thread: string, n: number, session: string, wakes: boolean) => ({
+      id,
+      thread_id: thread,
+      project_id: "prj_1",
+      created_at: "2026-11-03T10:00:00.000Z",
+      author: { kind: "agent", host: "opencode", session, name: "OpenCode" },
+      body: `Up: https://github.com/northwind/billing-svc/pull/${n}`,
+      ...(wakes ? { wakes: true } : {}),
+    });
+    const messages = new Map([
+      ["m1", message("m1", "t1", 1, "ses_gone", true)],
+      ["m2", message("m2", "t2", 2, "ses_live", true)],
+      ["m3", message("m3", "t3", 3, "ses_mcp", false)],
+    ]);
+    const store = {
+      threadsOf: () => [...messages.values()].map((m) => ({ thread_id: m.thread_id, last_at: m.created_at })),
+      threadMessageIds: (thread: string) => [...messages.values()].filter((m) => m.thread_id === thread).map((m) => m.id),
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+      sessionLive: (session: string) => session === "ses_live",
+    };
+    const links = linkInboxPulls(pull, store, new Map([["github.com/northwind/billing-svc", ["prj_1"]]]));
+    expect(links["github.com/northwind/billing-svc#1"]!.agent).toMatchObject({ session: "ses_gone", ended: true });
+    expect(links["github.com/northwind/billing-svc#2"]!.agent!.ended).toBeUndefined();
+    expect(links["github.com/northwind/billing-svc#3"]!.agent!.ended).toBeUndefined();
   });
 });
 
