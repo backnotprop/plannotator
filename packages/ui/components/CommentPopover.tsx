@@ -96,6 +96,12 @@ interface CommentPopoverProps {
   onAskAI?: CommentAskAIHandler;
   askAIContext?: CommentAskAIContext;
   askAIDisabled?: boolean;
+  /** Opt-in: the primary action's label (Shape: "Change it"). Absent → "Add" / "Save", as always. */
+  submitLabel?: string;
+  /** Opt-in: the Ask AI action's label (Shape: "Ask"). Absent → "Ask AI", as always. */
+  askAILabel?: string;
+  /** Opt-in: the textarea's placeholder (Shape: "Add a general comment..."). Absent → as always. */
+  placeholder?: string;
   /** Opt-in: `/` and `$` skill-reference autocomplete (document UI surfaces). Off by default. */
   skillReferences?: boolean;
   /**
@@ -219,6 +225,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   onAskAI,
   askAIContext,
   askAIDisabled = false,
+  submitLabel,
+  askAILabel,
+  placeholder,
   skillReferences = false,
   mentionSource,
   targetChips,
@@ -750,7 +759,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               onChange={(e) => { setText(e.target.value); readComposerCaret(); }}
               onKeyDown={handleKeyDown}
               onSelectCaret={readComposerCaret}
-              placeholder={isGlobal ? 'Add a global comment...' : 'Add a comment...'}
+              placeholder={placeholder ?? (isGlobal ? 'Add a global comment...' : 'Add a comment...')}
               sizeClassName="min-h-32 max-h-full"
               skillReferences={skillReferences}
               tokens={skillAc.referenceTokens}
@@ -776,7 +785,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 disabled={!canSubmit}
                 className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {isGlobal ? 'Add' : 'Save'}
+                {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
               </button>
               {quickLookGoodButton}
               {onAskAI && (
@@ -787,7 +796,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
                 >
                   <SparklesIcon className="w-3 h-3" />
-                  Ask AI
+                  {askAILabel ?? 'Ask AI'}
                 </button>
               )}
             </div>
@@ -906,7 +915,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           onChange={(e) => { setText(e.target.value); readComposerCaret(); }}
           onKeyDown={handleKeyDown}
           onSelectCaret={readComposerCaret}
-          placeholder={isGlobal ? 'Add a global comment...' : 'Add a comment...'}
+          placeholder={placeholder ?? (isGlobal ? 'Add a global comment...' : 'Add a comment...')}
           sizeClassName="max-h-64 min-h-[4.5rem]"
           skillReferences={skillReferences}
           tokens={skillAc.referenceTokens}
@@ -932,7 +941,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             disabled={!canSubmit}
             className="px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
           >
-            {isGlobal ? 'Add' : 'Save'}
+            {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
           </button>
           {quickLookGoodButton}
           {onAskAI && (
@@ -943,7 +952,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}
             >
               <SparklesIcon className="w-3 h-3" />
-              Ask AI
+              {askAILabel ?? 'Ask AI'}
             </button>
           )}
         </div>

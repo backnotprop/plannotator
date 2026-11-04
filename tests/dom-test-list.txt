@@ -497,3 +497,4 @@ packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
 packages/inbox/boardReveal.test.tsx
+packages/ui/components/shape/ShapeDrawn.test.tsx

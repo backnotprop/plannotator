@@ -1,0 +1,23 @@
+/* The Shape harness page. Paths reach into packages/ui's own install: the
+   harness lives outside every workspace so nothing ships it. */
+@import "../../../packages/ui/node_modules/@fontsource-variable/inter/index.css";
+@import "../../../packages/ui/node_modules/@fontsource-variable/geist-mono/index.css";
+@import "../../../packages/ui/node_modules/tailwindcss/index.css";
+@plugin "../../../packages/review-editor/node_modules/tailwindcss-animate";
+
+@source "../../../packages/ui/components/**/*.tsx";
+@source "../../../packages/ui/hooks/**/*.ts";
+@source "../../../packages/guide-viewer/**/*.tsx";
+@source "../../../packages/review-editor/components/TokenHoverCard.tsx";
+@source "./**/*.tsx";
+
+@import "../../../packages/ui/theme.css";
+@import "../../../packages/ui/components/shape/shape.css";
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+.harness-thread { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; line-height: 1.5; }
+.harness-thread [data-shape-message] { padding: 6px 8px; margin: -6px -8px; }
+.harness-thread .who { font-weight: 600; font-size: 13px; }
+.harness-thread .at { color: var(--muted-foreground); font-weight: 400; font-size: 12px; margin-left: 6px; }
+.harness-thread p { margin: 2px 0 0; }

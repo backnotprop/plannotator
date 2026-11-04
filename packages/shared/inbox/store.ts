@@ -14,7 +14,6 @@
  * MCP tools share them. See schema.ts for the layout.
  */
 
-import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -109,7 +108,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { sanitizeTag } from "@plannotator/core/project";
+import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
   INBOX_ANNOTATION_CURRENT,
@@ -509,12 +508,8 @@ function handoffActive(message: InboxMessage): boolean {
 /** The most ids one send may supersede. */
 export const INBOX_SUPERSEDES_MAX = 100;
 
-/** `<name>-<6 hex of the root>`, so two repositories with one name stay apart. */
-export function inboxProjectKey(name: string, root: string, hashLength = 6): string {
-  const base = sanitizeTag(name) ?? "project";
-  const hash = createHash("sha256").update(root).digest("hex").slice(0, Math.min(hashLength, 64));
-  return `${base}-${hash}`;
-}
+// `<name>-<6 hex of the root>`: in project-key.ts, so the Shape store files under the same keys without loading this store.
+export { inboxProjectKey };
 
 /**
  * The highest seq in an older store's decisions.jsonl (Decisions were removed

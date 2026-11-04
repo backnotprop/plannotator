@@ -248,7 +248,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
  * runs.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -277,6 +277,40 @@ export const CARD_COMMAND_USAGE = [
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
+].join("\n");
+
+/**
+ * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
+ * Unreleased (HIDDEN_SUBCOMMANDS). DRAFT: every word below needs the owner's
+ * approval before Shape ships (approval "shape-living-board", "Still needs
+ * its own approval").
+ */
+export const SHAPE_COMMAND_USAGE = [
+  "DRAFT: this text is not approved yet.",
+  "",
+  "Usage:",
+  "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
+  "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
+  "  plannotator shape drawing [<shp_id>]",
+  "  plannotator shape done [<shp_id>]",
+  "  plannotator shape list [--all] [--json]",
+  "",
+  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
+  "and Code, with numbered references. Each update stores a new version of the whole board.",
+  "",
+  "update   Stores the board in <board.json>. Without --id it makes a new shape and",
+  "         prints its id. With --id, --base is the version you drew from; if the shape",
+  "         changed since, the update is refused and the latest version is printed.",
+  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
+  "         board redraws only what changed.",
+  "read     Prints the latest version (or --version <n>). --notes also prints the notes",
+  "         that wait for you (Change it and Ask) and marks them as received.",
+  "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
+  "done     Finishes the shape. Do this only when the person says so.",
+  "list     Lists the active shapes, newest change first (--all: finished ones too).",
+  "",
+  "Without <shp_id>, read, drawing and done use your session's newest active shape,",
+  "else this project's.",
 ].join("\n");
 
 /**
@@ -652,6 +686,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  shape: SHAPE_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",

@@ -235,11 +235,13 @@ import {
   parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
+  hasHelpFlag,
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runShapeCommand } from "./shape-command";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -330,6 +332,21 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
+// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
+// strict-annotate parse, which takes `--file`-style flags for itself.
+{
+  const args = rawArgs;
+  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
+    process.exit(
+      await runShapeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
       }),
     );
   }
