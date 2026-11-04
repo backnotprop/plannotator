@@ -267,7 +267,14 @@ describe("Show me while Code review is on", () => {
     const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
     expect((await w.showMe(review.thread_id, "turn-0001", target, review.guide.title)).status).toBe(200);
     const path = w.drawingsPath(review.message_id);
-    for (const source of ["<div data-code=src/zzz.ts#L1>x</div>", '<div class="a"data-code="src/zzz.ts#L1">x</div>', '<div/data-code="src/zzz.ts#L1">x</div>']) {
+    for (const source of [
+      "<div data-code=src/zzz.ts#L1>x</div>",
+      '<div class="a"data-code="src/zzz.ts#L1">x</div>',
+      '<div/data-code="src/zzz.ts#L1">x</div>',
+      // A stray quote in an unquoted value: the browser still reads the code.
+      "<div data-code=src/zzz.ts#L1 title=it's>x</div>",
+      '<div title=a"b data-code=src/zzz.ts#L1>x</div>',
+    ]) {
       const refused = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source } });
       expect(refused.status).toBe(422);
       expect((await json(refused)).problems).toContain('data-code="src/zzz.ts#L1": src/zzz.ts is not a file in this review');

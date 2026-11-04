@@ -47,14 +47,18 @@ const HELP = new Set(["--help", "-h", "help"]);
  * alone, `review draw`, `review drawings ./dir`) is `plannotator review
  * <DIRECTORY | PR_URL>`, as it always was. Off (Code review off), never:
  * the review parse takes it, as in the release before Show me.
+ * `codeReviewOn` is asked last, only for these two words: any other command
+ * never reads config.json here (a broken one warns only where it always did).
  */
-export function isReviewDrawCommand(argv: readonly string[], codeReviewOn: boolean): boolean {
-  if (!codeReviewOn || argv[0] !== "review") return false;
+export function isReviewDrawCommand(argv: readonly string[], codeReviewOn: () => boolean): boolean {
+  if (argv[0] !== "review" || (argv[1] !== "draw" && argv[1] !== "drawings")) return false;
   const first = argv[2];
   if (first === undefined) return false;
-  if (argv[1] === "draw") return first === "--help" || first === "-h" || /^--(?:file|review|turn)(?:=|$)/.test(first);
-  if (argv[1] === "drawings") return first === "--help" || first === "-h" || isInboxId("msg", first);
-  return false;
+  const shaped =
+    argv[1] === "draw"
+      ? first === "--help" || first === "-h" || /^--(?:file|review|turn)(?:=|$)/.test(first)
+      : first === "--help" || first === "-h" || isInboxId("msg", first);
+  return shaped && codeReviewOn();
 }
 
 /** Parse the arguments after `review`: `draw --file F --review M --turn T`, or `drawings M`. */

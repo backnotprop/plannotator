@@ -16,7 +16,7 @@
  */
 import { afterAll, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -91,9 +91,52 @@ test("Code review off: `review draw` and `review drawings` are the review parse'
     ["review", "drawings", "--help"],
     ["review", "drawings"],
   ]) {
-    expect(isReviewDrawCommand(argv, false)).toBe(false);
+    expect(isReviewDrawCommand(argv, () => false)).toBe(false);
   }
+  // The switch (config.json) is read only for `review draw|drawings`: every other command reads nothing new.
+  let reads = 0;
+  for (const argv of [["--version"], ["--help"], ["review", "--help"], ["review"], ["annotate", "x.md"], ["sessions"]]) {
+    isReviewDrawCommand(argv, () => (reads++, true));
+  }
+  expect(reads).toBe(0);
 });
+
+test("Code review off with a broken config.json: --version, --help and review --help print what 0.28.49 printed", async () => {
+  const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+  const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+  const dataDir = join(root, "data-broken");
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, "config.json"), "{ not json");
+  const stubbed = stubHookDistHtml();
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_BROWSER: NO_BROWSER,
+    NO_BROWSER: "1",
+    NO_ANON_PING: "1",
+    PLANNOTATOR_UPDATE_CHECK: "0",
+    PLANNOTATOR_INBOX_CONNECT: "0",
+    PLANNOTATOR_TEST_SANDBOX: "1",
+  };
+  const cli = async (...argv: string[]) => {
+    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    return { stdout, stderr, code };
+  };
+  try {
+    // What 0.28.49 printed: --version reads no config; --help reads it once (the Board's help line), and
+    // `review --help` once (its Tailscale default). Show me adds no read, so no second warning.
+    const warnings = (stderr: string) => stderr.split("\n").filter((line) => line.includes("failed to read config.json")).length;
+    const version = await cli("--version");
+    expect([version.code, warnings(version.stderr)]).toEqual([0, 0]);
+    const help = await cli("--help");
+    expect([help.code, help.stdout, warnings(help.stderr)]).toEqual([0, `${formatTopLevelHelp()}\n`, 1]);
+    const reviewHelp = await cli("review", "--help");
+    expect([reviewHelp.code, reviewHelp.stdout, warnings(reviewHelp.stderr)]).toEqual([0, `${formatSubcommandHelp("review")}\n`, 1]);
+  } finally {
+    removeStubbedHtml(stubbed);
+  }
+}, 60_000);
 
 test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
   const dataDir = join(root, "data-routes");
@@ -117,11 +160,13 @@ test("Code review off: the drawings routes are the unknown route, and a version-
   expect(checkInboxGuide({ snapshot: JSON.stringify(snapshot) }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });
 });
 
-test("an html overview diagram in a version-2 snapshot: Shape's check while Code review is on, untouched while off", () => {
-  const outside = '<div data-mark="a" data-code="src/not-in-the-patch.ts#L1">a</div>';
-  const snapshot = { ...FIXTURE_V2_HTML, guide: { ...FIXTURE_V2_HTML.guide, overview: { text: "x", diagram: { kind: "html" as const, source: outside } } } };
-  expect(checkInboxGuide({ snapshot }, root, { codeReview: false }).ok).toBe(true);
-  const on = checkInboxGuide({ snapshot }, root, { codeReview: true });
-  expect(on.ok).toBe(false);
-  if (!on.ok) expect(on.error).toContain('data-code="src/not-in-the-patch.ts#L1": src/not-in-the-patch.ts is not a file in this review');
+test("a version-2 snapshot taken while Code review is off is taken while on, html overview diagram and all", () => {
+  // The repo's own v2 html fixture (a `code:` link) and a guide-builder picture with <style>: the guide format's, not Shape's.
+  const styled = { ...FIXTURE_V2_HTML, guide: { ...FIXTURE_V2_HTML.guide, overview: { text: "x", diagram: { kind: "html" as const, source: '<style>.a{color:red}</style><a class="a" href="chapter:1">One</a>' } } } };
+  for (const snapshot of [FIXTURE_V2_HTML, styled]) {
+    const off = checkInboxGuide({ snapshot }, root, { codeReview: false });
+    const on = checkInboxGuide({ snapshot }, root, { codeReview: true });
+    expect(off.ok).toBe(true);
+    expect(on).toEqual(off);
+  }
 });

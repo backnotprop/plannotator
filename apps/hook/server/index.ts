@@ -344,7 +344,7 @@ const rawArgs = process.argv.slice(2);
 // included) the review parse takes them, exactly as before Show me.
 {
   const args = rawArgs;
-  if (isReviewDrawCommand(args, loadConfig().inboxCodeReview === true)) {
+  if (isReviewDrawCommand(args, () => loadConfig().inboxCodeReview === true)) {
     const drawDataDir = getPlannotatorDataDir();
     process.exit(
       await runReviewDrawCommand(args.slice(1), {

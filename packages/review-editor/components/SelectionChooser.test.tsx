@@ -80,6 +80,11 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     const ref = mount({ onShowMe: (s) => shown.push(s), onAsk: () => {} });
     act(() => ref.current!.handleLineSelectionEnd({ start: 14, end: 14, side: 'deletions' }));
     expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
+    // A drag from a new-side line onto a deleted one: one end is old, so no Show me either.
+    act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 14, side: 'additions', endSide: 'deletions' }));
+    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
+    act(() => ref.current!.handleLineSelectionEnd({ start: 15, end: 17, side: 'additions', endSide: 'additions' }));
+    expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask', 'Show me']);
     expect(shown).toEqual([]);
   });
 

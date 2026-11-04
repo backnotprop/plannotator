@@ -5,7 +5,9 @@
  * redrawn Overview changed.
  */
 import { parseShapeCodeTarget, shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
-import { inboxReviewLines } from '@plannotator/core/inbox-review';
+import { checkInboxDrawing, inboxReviewLines } from '@plannotator/core/inbox-review';
+import { guideDiagramIsDrawn } from '@plannotator/core/guide-format';
+import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 
 /** A path's last part: "retry-worker.ts". */
 export function baseName(path: string): string {
@@ -19,6 +21,65 @@ export function showMeAbout(
 ): boolean {
   if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
   return asked.file === place.file && !!asked.lines && asked.lines[0] <= place.lines[1] && place.lines[0] <= asked.lines[1];
+}
+
+/**
+ * The Overview's diagram as the review pane draws it, a Shape picture: a drawn
+ * one (snapshot version 3, checked by the Inbox when it came), or a version-2
+ * html one only when it keeps Shape's rules and opens only the review's files.
+ * Null for anything else, which keeps the guide viewer's own rendering (an
+ * html picture's note), as before Show me.
+ */
+export function overviewPicture(diagram: GuideOverviewDiagram | undefined, files: readonly string[]): GuideOverviewDiagram | null {
+  if (diagram?.kind !== 'html') return null;
+  if (guideDiagramIsDrawn(diagram)) return diagram;
+  return checkInboxDrawing(diagram, files, { withTitle: false }).ok ? diagram : null;
+}
+
+type Place = { file: string | null; lines: readonly [number, number] | null };
+
+/**
+ * Whether a Show me of this round asked on `asked` is the one the person means
+ * by `place`, so it opens again rather than asking anew: the whole review both;
+ * or the same file with the selection inside the asked lines, or sharing at
+ * least half of the lines the two cover together. Lines 1–200 are not a
+ * picture of 16–18; 15–18 is.
+ */
+export function showMeSamePlace(asked: Place, place: Place): boolean {
+  if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
+  if (asked.file !== place.file || !asked.lines) return false;
+  const [a0, a1] = asked.lines;
+  const [p0, p1] = place.lines;
+  if (p0 >= a0 && p1 <= a1) return true;
+  const shared = Math.min(a1, p1) - Math.max(a0, p0) + 1;
+  const together = Math.max(a1, p1) - Math.min(a0, p0) + 1;
+  return shared > 0 && shared * 2 >= together;
+}
+
+/** A Show me turn as the window reads it (packages/inbox/api.ts `InboxAskTurnWire`). */
+interface ShowMeTurn {
+  id: string;
+  kind?: 'show_me';
+  show_me?: { review: string; file: string | null; lines: [number, number] | null };
+  drawing?: string;
+  answer?: string;
+  stopped?: boolean;
+  failure?: string;
+}
+
+/**
+ * This review's Show me for `place` that the agent is drawing now: no picture
+ * and no answer yet, and actually running (the Inbox's running turn, or this
+ * window's live stream). A turn the Inbox kept but nobody answers (no
+ * connection when asked, or the session gone before a word) is not waiting:
+ * Show me on its lines asks anew.
+ */
+export function waitingShowMe<T extends ShowMeTurn>(turns: readonly T[], reviewId: string, place: Place, running: string | null, live: string | null): T | undefined {
+  return turns
+    .filter((turn) => turn.kind === 'show_me' && turn.show_me?.review === reviewId && showMeSamePlace(turn.show_me, place))
+    .filter((turn) => !turn.drawing && turn.answer === undefined && !turn.stopped && turn.failure === undefined)
+    .filter((turn) => turn.id === running || turn.id === live)
+    .at(-1);
 }
 
 /** "retry-worker.ts lines 16–18", or "the whole review" for the Overview's. */

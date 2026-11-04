@@ -15,7 +15,7 @@ import { generateId } from '@plannotator/ui/utils/generateId';
 import { inboxApi, type InboxAskTurnWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { errorText } from '../toastError';
-import { showMeAbout } from './showMeModel';
+import { showMeAbout, showMeSamePlace, waitingShowMe } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -162,25 +162,23 @@ export function useShowMe({
   const boxDone = !!boxTurn && (boxTurn.answer !== undefined || boxTurn.stopped === true || boxTurn.failure !== undefined);
 
   /**
-   * Show me on these lines (or the whole review). What was asked about them
-   * before opens again, never a second request: this review's picture (from
-   * this window or another one), else the Show me still being drawn (its
-   * box, waiting), else an earlier round's picture as asked (round 2: it
-   * stays, with Show me again). Other lines open the box.
+   * Show me on these lines (or the whole review). What was asked about the
+   * same place opens again, never a second request: this review's picture
+   * (from this window or another one; the same place by `showMeSamePlace`),
+   * else the Show me the agent is drawing now (its box, waiting), else an
+   * earlier round's picture on overlapping lines, as asked (round 2: it stays,
+   * with Show me again). Other lines open the box.
    */
   const open = (place: ShowMePlace) => {
     setProblem(null);
-    const drawn = drawings.filter((drawing) => showMeAbout(drawing, place)).at(-1);
+    const drawn = drawings.filter((drawing) => showMeSamePlace(drawing, place)).at(-1);
     if (drawn) {
       opened.current.add(drawn.id);
       setBox(null);
       setView({ drawing: drawn.id, as: 'sheet', part: null, from: place });
       return;
     }
-    const waiting = turns
-      .filter((turn) => turn.kind === 'show_me' && turn.show_me?.review === reviewId && showMeAbout(turn.show_me, place))
-      .filter((turn) => !turn.drawing && turn.answer === undefined && !turn.stopped && turn.failure === undefined)
-      .at(-1);
+    const waiting = waitingShowMe(turns, reviewId, place, running, streaming ? (live.current?.turn ?? null) : null);
     if (waiting?.show_me) {
       setView(null);
       setBox({

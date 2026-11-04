@@ -42,7 +42,7 @@ import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
-import { anchorDrawing, anchorLines, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
+import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
 import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
@@ -261,7 +261,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   };
 
   // The Overview's picture, and in a later round which of its parts the agent redrew.
-  const overviewHtml = snapshot?.guide.overview?.diagram?.kind === 'html' ? snapshot.guide.overview.diagram : null;
+  // The Overview's picture, drawn as a Shape picture (overviewPicture); any other diagram keeps the guide viewer's own.
+  const overviewHtml = useMemo(
+    () => overviewPicture(snapshot?.guide.overview?.diagram, files.map((file) => file.path)),
+    [snapshot, files],
+  );
   const earlierReview = earlierReviews.at(-1) ?? null;
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
   useEffect(() => {
@@ -292,12 +296,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     : `drawn by ${author} with the guide`;
   const renderOverviewDiagram = useCallback(
     (diagram: GuideOverviewDiagram): ReactNode | null =>
-      diagram.kind === 'html' ? (
+      diagram.kind === 'html' && diagram === overviewHtml ? (
         <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={overviewMeta} {...(overviewChanged ? { changed: overviewChanged } : {})} onCode={(target) => void openCode(target)} />
       ) : null,
     // openCode reads the latest render's state through its closure; the figure is redrawn when these change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overviewMeta, overviewChanged, files, chapters, mode],
+    [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
   const renderOverviewFigure = useCallback(
     (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <OverviewShowMe onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),

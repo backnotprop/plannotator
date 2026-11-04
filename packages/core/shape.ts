@@ -496,16 +496,65 @@ export function shapeHtmlProblems(html: string): string[] {
   return out;
 }
 
+const isHtmlSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
+
 /**
- * Every `data-code` value in drawn HTML, as a browser reads the attribute:
- * by the tag and attribute tokenizer above (quoted or not, after `/` or
- * straight after another attribute), named references decoded. In order.
+ * Every `data-code` value in drawn HTML, as a browser reads the attribute: a
+ * small scan by the HTML tokenizer's own rules for start tags (a value quoted
+ * or not, a stray quote inside an unquoted one kept, an attribute after `/`
+ * or straight after another's closing quote; comments, end tags and `<!…>`
+ * skipped), named references decoded. In order. It never misses a tag the
+ * browser reads; it may read one the browser takes as text, which only makes
+ * a check stricter.
  */
 export function shapeHtmlDataCodes(html: string): string[] {
   const out: string[] = [];
-  for (const t of html.matchAll(TAG_RE)) {
-    for (const a of (t[2] ?? '').matchAll(ATTR_RE)) {
-      if (a[1]!.toLowerCase() === 'data-code') out.push(decodeEntities(a[2] ?? a[3] ?? a[4] ?? ''));
+  const n = html.length;
+  let i = 0;
+  while (i < n) {
+    const lt = html.indexOf('<', i);
+    if (lt < 0) break;
+    i = lt + 1;
+    if (html.startsWith('!--', i)) {
+      const end = html.indexOf('-->', i + 3);
+      i = end < 0 ? n : end + 3;
+      continue;
+    }
+    if (html[i] === '!' || html[i] === '?' || html[i] === '/') {
+      const end = html.indexOf('>', i);
+      i = end < 0 ? n : end + 1;
+      continue;
+    }
+    if (!/[A-Za-z]/.test(html[i] ?? '')) continue;
+    while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
+    for (;;) {
+      while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
+      if (i >= n) break;
+      if (html[i] === '>') {
+        i++;
+        break;
+      }
+      const start = i;
+      i++; // A name may start with `=`.
+      while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i++;
+      const name = html.slice(start, i).toLowerCase();
+      while (i < n && isHtmlSpace(html[i])) i++;
+      let value = '';
+      if (html[i] === '=') {
+        i++;
+        while (i < n && isHtmlSpace(html[i])) i++;
+        const quote = html[i];
+        if (quote === '"' || quote === "'") {
+          const end = html.indexOf(quote, i + 1);
+          value = html.slice(i + 1, end < 0 ? n : end);
+          i = end < 0 ? n : end + 1;
+        } else {
+          const from = i;
+          while (i < n && !isHtmlSpace(html[i]) && html[i] !== '>') i++;
+          value = html.slice(from, i);
+        }
+      }
+      if (name === 'data-code') out.push(decodeEntities(value));
     }
   }
   return out;

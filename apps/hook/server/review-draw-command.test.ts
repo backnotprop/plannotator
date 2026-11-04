@@ -33,11 +33,11 @@ const REVIEW = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F";
 describe("parse", () => {
   test("only `review draw` and `review drawings` of their own shape are ours; `review <DIRECTORY>` stays a review", () => {
     for (const argv of [["review", "draw", "--help"], ["review", "draw", "--file", "a.json"], ["review", "draw", "--turn=t"], ["review", "drawings", REVIEW], ["review", "drawings", "-h"]]) {
-      expect(isReviewDrawCommand(argv, true)).toBe(true);
+      expect(isReviewDrawCommand(argv, () => true)).toBe(true);
     }
     // A folder named draw or drawings, a PR URL, a plain review: the review parse's, as before Show me.
     for (const argv of [["review"], ["review", "origin/main"], ["review", "draw"], ["review", "drawings"], ["review", "drawings", "./drawings"], ["review", "draw", "src"], ["review", "drawings", "https://example.com/o/r/pull/1"]]) {
-      expect(isReviewDrawCommand(argv, true)).toBe(false);
+      expect(isReviewDrawCommand(argv, () => true)).toBe(false);
     }
   });
 

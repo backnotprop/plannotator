@@ -108,8 +108,9 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot, parseOptions) : parseGuideSnapshot(input.snapshot, parseOptions);
     if (!parsed.ok) return { ok: false, error: `Invalid guide snapshot (${parsed.error.path}): ${parsed.error.message}` };
     const snapshot = parsed.value;
-    // On, every html overview diagram (version 2 or 3) is the picture the review pane draws: Shape's rules, the patch's files.
-    const drawnProblem = options.codeReview ? overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch) : null;
+    // A drawn picture (version 3, read only while Code review is on): Shape's rules and the patch's files. A version-2
+    // document is taken as it always was; the review pane draws its html picture only if it keeps Shape's rules.
+    const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
     if (drawnProblem) return { ok: false, error: drawnProblem };
     // The strict placement checks, on the snapshot's own guide and patch. The
     // snapshot format lets a file reference omit its summary (a shipped
@@ -143,9 +144,9 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
   return withAuthoredOverview(built.snapshot, overview);
 }
 
-/** What is wrong with an overview's html diagram (the review pane draws it), by Shape's rules and the patch's files, or null. */
+/** What is wrong with an overview's drawn (version-3) diagram, by Shape's rules and the patch's files, or null. */
 function overviewDiagramProblem(diagram: GuideOverviewDiagram | undefined, rawPatch: string): string | null {
-  if (!diagram || diagram.kind !== "html") return null;
+  if (!diagram || diagram.kind !== "html" || !guideDiagramIsDrawn(diagram)) return null;
   const files = parseDiffToFiles(rawPatch).map((file) => file.path);
   const checked = checkInboxDrawing(diagram, files, { withTitle: false });
   return checked.ok ? null : `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}`;
