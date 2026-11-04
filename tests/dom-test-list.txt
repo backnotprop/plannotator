@@ -512,6 +512,7 @@ packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
+packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
 packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
 packages/ui/components/ImageLightbox.regionDraft.test.tsx
