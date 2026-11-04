@@ -257,6 +257,21 @@ describe("diffHunkLines", () => {
     expect(diffHunkLines(["@@ -1 +1 @@", "-a", "+b", "+c", ""].join("\n"))).toBeNull();
   });
 
+  it("refuses an @@ row it cannot read, rather than reading no hunks", () => {
+    expect(diffHunkLines(sql.replace("@@ -1,4 +1,4 @@", "@@ -1,4 +1,4@@"))).toBeNull();
+    expect(diffHunkLines(sql.replace("@@ -1,4 +1,4 @@", "@@ -a,4 +1,4 @@"))).toBeNull();
+  });
+
+  it("refuses a combined diff", () => {
+    // `git diff` of a merge conflict writes `@@@` hunks with two prefix columns.
+    const combined = ["diff --cc x", "--- a/x", "+++ b/x", "@@@ -1,1 -1,1 +1,2 @@@", "- old", " +new", "++more", ""].join("\n");
+    expect(diffHunkLines(combined)).toBeNull();
+  });
+
+  it("refuses content rows before the first hunk", () => {
+    expect(diffHunkLines(["--- a/x", "+++ b/x", "+stray", "@@ -1 +1 @@", "-a", "+b", ""].join("\n"))).toBeNull();
+  });
+
   it("refuses hunks out of order", () => {
     expect(diffHunkLines(["@@ -5 +5 @@", "-e", "+E", "@@ -1 +1 @@", "-a", "+A", ""].join("\n"))).toBeNull();
   });

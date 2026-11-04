@@ -136,9 +136,11 @@ const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 /**
  * The hunks of one file's patch (a `DiffFile.patch`), in order, with every
  * line numbered. The file header before the first hunk is skipped, and so is
- * `\ No newline at end of file`. Returns null when a hunk's lines do not add
- * up to its header, or hunks overlap: a truncated or hand-edited patch is
- * never read as a shorter valid one.
+ * `\ No newline at end of file`. Returns null for anything else it cannot
+ * account for: a hunk whose lines do not add up to its header, hunks that
+ * overlap, an `@@` row it cannot read (combined `@@@` diffs included), or a
+ * line of content outside a hunk. A truncated or hand-edited patch is never
+ * read as a shorter valid one.
  */
 export function diffHunkLines(patch: string): DiffHunk[] | null {
   const rows = patch.split("\n");
@@ -146,8 +148,7 @@ export function diffHunkLines(patch: string): DiffHunk[] | null {
   for (let i = 0; i < rows.length; ) {
     const header = HUNK_HEADER.exec(rows[i]);
     if (!header) {
-      // Past the first hunk, only another hunk or the patch's end may follow.
-      if (hunks.length > 0 && rows[i] !== "") return null;
+      if (!isFileHeaderRow(rows[i], hunks.length > 0)) return null;
       i += 1;
       continue;
     }
@@ -158,6 +159,17 @@ export function diffHunkLines(patch: string): DiffHunk[] | null {
     i = read.next;
   }
   return hunks;
+}
+
+/**
+ * True for a row that may stand outside a hunk. Before the first hunk that is
+ * the file header (`---`/`+++` included, but no other content row and no
+ * `@@` row); after it, only the blank row that ends the patch.
+ */
+function isFileHeaderRow(row: string, pastFirstHunk: boolean): boolean {
+  if (pastFirstHunk) return row === "";
+  if (row.startsWith("--- ") || row.startsWith("+++ ")) return true;
+  return !/^(?:@@|[ +-])/.test(row);
 }
 
 /** First line number a hunk side covers: an empty side's header names the line before it. */

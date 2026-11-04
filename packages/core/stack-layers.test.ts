@@ -46,13 +46,37 @@ describe("two layers, one line changed by both", () => {
     " line 4",
     " line 5",
   );
+  const whole = patch(
+    "diff --git a/app.ts b/app.ts",
+    "index c4352f8..ff28d11 100644",
+    "--- a/app.ts",
+    "+++ b/app.ts",
+    "@@ -1,5 +1,6 @@",
+    "+line 0 by L2",
+    " line 1",
+    "-line 2",
+    "+line 2 by L2",
+    " line 3",
+    " line 4",
+    " line 5",
+    "@@ -12,7 +13,7 @@ line 11",
+    " line 12",
+    " line 13",
+    " line 14",
+    "-line 15",
+    "+line 15 by L1",
+    " line 16",
+    " line 17",
+    " line 18",
+  );
   const layers: StackLayer[] = [
     { id: "pr-1", patch: l1 },
     { id: "pr-2", patch: l2 },
   ];
-  const map = mapStackLines(layers);
+  const map = mapStackLines(layers, { reviewPatch: whole });
 
   it("gives a lower layer's line, moved down by the layer above", () => {
+    expect(map.status).toBe("ok");
     // "line 15 by L1" is line 16 at the top: L2 added a line above it.
     expect(at(map, "app.ts", 16)).toEqual({ kind: "layer", id: "pr-1" });
     expect(at(map, "app.ts", 15)).toEqual({ kind: "unknown" });
@@ -65,16 +89,45 @@ describe("two layers, one line changed by both", () => {
   it("keeps both layers on a line the higher one rewrote, the writer of its text last", () => {
     expect(at(map, "app.ts", 3)).toEqual({ kind: "several", ids: ["pr-1", "pr-2"] });
   });
-
-  it("is plain data that survives JSON", () => {
-    const sent: StackLineMap = JSON.parse(JSON.stringify(map));
-    expect(at(sent, "app.ts", 16)).toEqual({ kind: "layer", id: "pr-1" });
-    expect(at(sent, "app.ts", 3)).toEqual({ kind: "several", ids: ["pr-1", "pr-2"] });
-  });
 });
 
 describe("three layers", () => {
   // Top file: 1 "b by L2", 11-12 "a1/a2 by L1", 27 "line 25 by L2", 33 "c by L3".
+  const whole = patch(
+    "diff --git a/app.ts b/app.ts",
+    "index ac9837c..39cc5ef 100644",
+    "--- a/app.ts",
+    "+++ b/app.ts",
+    "@@ -1,13 +1,15 @@",
+    "+b by L2",
+    " line 1",
+    " line 2",
+    " line 3",
+    " line 4",
+    "-line 5",
+    " line 6",
+    " line 7",
+    " line 8",
+    " line 9",
+    " line 10",
+    "+a1 by L1",
+    "+a2 by L1",
+    " line 11",
+    " line 12",
+    " line 13",
+    "@@ -22,9 +24,10 @@ line 21",
+    " line 22",
+    " line 23",
+    " line 24",
+    "-line 25",
+    "+line 25 by L2",
+    " line 26",
+    " line 27",
+    " line 28",
+    " line 29",
+    " line 30",
+    "+c by L3",
+  );
   const map = mapStackLines([
     {
       id: "L1",
@@ -139,7 +192,7 @@ describe("three layers", () => {
         "+c by L3",
       ),
     },
-  ]);
+  ], { reviewPatch: whole });
 
   it("carries each layer's lines through every layer above it", () => {
     expect(at(map, "app.ts", 1)).toEqual({ kind: "layer", id: "L2" });
@@ -235,17 +288,11 @@ describe("renames", () => {
   ];
 
   it("follows a file through a rename with hunks and one with none", () => {
-    const map = mapStackLines(layers);
+    const map = mapStackLines(layers, { reviewPatch: whole });
     expect(at(map, "final.ts", 3)).toEqual({ kind: "layer", id: "L1" });
     expect(at(map, "final.ts", 9)).toEqual({ kind: "layer", id: "L2" });
     expect(at(map, "old.ts", 3)).toEqual({ kind: "unknown" });
     expect(at(map, "mid.ts", 9)).toEqual({ kind: "unknown" });
-  });
-
-  it("passes the check against the whole-stack diff under the final name", () => {
-    const map = mapStackLines(layers, { reviewPatch: whole });
-    expect(at(map, "final.ts", 3)).toEqual({ kind: "layer", id: "L1" });
-    expect(at(map, "final.ts", 9)).toEqual({ kind: "layer", id: "L2" });
   });
 });
 
@@ -345,15 +392,9 @@ describe("reverts", () => {
     { id: "L2", patch: l2 },
   ];
 
-  it("leaves nothing of a line a higher layer deleted", () => {
-    const map = mapStackLines(layers);
-    expect(at(map, "f.ts", 1, 9)).toEqual({ kind: "unknown" });
-    expect(at(map, "f.ts", 18)).toEqual({ kind: "layer", id: "L1" });
-  });
-
-  it("gives unknown, with the check, for lines put back to base", () => {
+  it("gives unknown for lines a higher layer deleted or put back to base", () => {
     const map = mapStackLines(layers, { reviewPatch: whole });
-    expect(at(map, "f.ts", 10)).toEqual({ kind: "unknown" });
+    expect(at(map, "f.ts", 1, 17)).toEqual({ kind: "unknown" });
     expect(at(map, "r.ts", 1, 5)).toEqual({ kind: "unknown" });
     expect(at(map, "f.ts", 18)).toEqual({ kind: "layer", id: "L1" });
   });
@@ -407,11 +448,7 @@ describe("a file deleted by one layer and added back by the next", () => {
     { id: "L2", patch: l2 },
   ];
 
-  it("gives the whole file to the layer that added it back", () => {
-    expect(at(mapStackLines(layers), "gone.ts", 1, 6)).toEqual({ kind: "layer", id: "L2" });
-  });
-
-  it("with the check, keeps only the lines the review shows as changed", () => {
+  it("labels only the lines the review shows as changed", () => {
     const map = mapStackLines(layers, { reviewPatch: whole });
     expect(at(map, "gone.ts", 4)).toEqual({ kind: "layer", id: "L2" });
     expect(at(map, "gone.ts", 1, 3)).toEqual({ kind: "unknown" });
@@ -497,9 +534,455 @@ describe("check", () => {
     expect(at(map, "b.ts", 2)).toEqual({ kind: "layer", id: "L1" });
   });
 
+  it("takes every run from a file whose reviewed content is not the top layer's, even when its lines line up", () => {
+    // A review of L1's head: a.ts's `+` line matches L1's, but L2 changed a.ts since.
+    const map = mapStackLines(layers, { reviewPatch: l1 });
+    expect(at(map, "a.ts", 2)).toEqual({ kind: "unknown" });
+    expect(at(map, "b.ts", 2)).toEqual({ kind: "layer", id: "L1" });
+  });
+
   it("still labels correctly when the review is only the top layer's diff", () => {
     const map = mapStackLines(layers, { reviewPatch: l2 });
     expect(at(map, "a.ts", 6)).toEqual({ kind: "layer", id: "L2" });
+  });
+});
+
+describe("layers that do not chain into one stack", () => {
+  const unavailable = (layers: StackLayer[], reviewPatch: string) => {
+    const map = mapStackLines(layers, { reviewPatch });
+    expect(map.status).toBe("unavailable");
+    expect(map.runs).toEqual({});
+  };
+
+  it("gives nothing when a lower layer gained a commit the layer above is not rebased on", () => {
+    // L1 = base...L1 (new head), L2 = L1...L2 (three-dot, so from L1's old head).
+    const l1 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..4b5ce0b 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,3 +1,4 @@",
+      "+// header by L1",
+      " line 1",
+      " line 2",
+      " line 3",
+      "@@ -5,7 +6,7 @@ line 4",
+      " line 5",
+      " line 6",
+      " line 7",
+      "-line 8",
+      "+line 8 by L1",
+      " line 9",
+      " line 10",
+      " line 11",
+      "diff --git a/b.ts b/b.ts",
+      "index f985857..0759b20 100644",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1,6 +1,6 @@",
+      " line 1",
+      " line 2",
+      "-line 3",
+      "+line 3 by L1",
+      " line 4",
+      " line 5",
+      " line 6",
+    );
+    const l2 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..06f2de4 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -6,7 +6,7 @@ line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      "-line 9",
+      "+line 9 by L2",
+      " line 10",
+      " line 11",
+      " line 12",
+    );
+    const review = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..06f2de4 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -6,7 +6,7 @@ line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      "-line 9",
+      "+line 9 by L2",
+      " line 10",
+      " line 11",
+      " line 12",
+      "diff --git a/b.ts b/b.ts",
+      "index f985857..0759b20 100644",
+      "--- a/b.ts",
+      "+++ b/b.ts",
+      "@@ -1,6 +1,6 @@",
+      " line 1",
+      " line 2",
+      "-line 3",
+      "+line 3 by L1",
+      " line 4",
+      " line 5",
+      " line 6",
+    );
+    unavailable(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+      ],
+      review,
+    );
+    // Without the blob ids, the text of the line L2 deletes still gives it away.
+    const noIndex = (p: string) => p.replace(/^index .*\n/gm, "");
+    unavailable(
+      [
+        { id: "L1", patch: noIndex(l1) },
+        { id: "L2", patch: noIndex(l2) },
+      ],
+      noIndex(review),
+    );
+  });
+
+  it("gives nothing when the lower layer was force-pushed and the layer above was not rebased", () => {
+    const l1 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..01bed1d 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,12 +1,13 @@",
+      "+// header by L1",
+      " line 1",
+      " line 2",
+      " line 3",
+      "-line 4",
+      "+line 4 by L1",
+      " line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      "-line 9",
+      "+line 9 by L1",
+      " line 10",
+      " line 11",
+      " line 12",
+    );
+    // Three-dot from the force-pushed L1: the merge base is the stack base.
+    const l2 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..bb39f27 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,12 +1,12 @@",
+      " line 1",
+      " line 2",
+      " line 3",
+      "-line 4",
+      "+line 4 by L1",
+      " line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      " line 9",
+      "-line 10",
+      "+line 10 by L2",
+      " line 11",
+      " line 12",
+    );
+    unavailable(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+      ],
+      l2,
+    );
+  });
+
+  it("gives nothing when a layer is based on a layer lower than the one below it", () => {
+    // L3 is based on L1, so L2's "}" is not in the reviewed tree, while
+    // L1's identical "}" is: the texts alone cannot tell them apart.
+    const l1 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..7ce8701 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -6,6 +6,7 @@ line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      "+}",
+      " line 9",
+      " line 10",
+      " line 11",
+    );
+    const l2 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 7ce8701..6d7b4fd 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -7,6 +7,7 @@ line 6",
+      " line 7",
+      " line 8",
+      " }",
+      "+}",
+      " line 9",
+      " line 10",
+      " line 11",
+    );
+    const l3 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 7ce8701..fec6b52 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,4 +1,4 @@",
+      "-line 1",
+      "+line 1 by L3",
+      " line 2",
+      " line 3",
+      " line 4",
+    );
+    const review = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index 624b469..fec6b52 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,4 +1,4 @@",
+      "-line 1",
+      "+line 1 by L3",
+      " line 2",
+      " line 3",
+      " line 4",
+      "@@ -6,6 +6,7 @@ line 5",
+      " line 6",
+      " line 7",
+      " line 8",
+      "+}",
+      " line 9",
+      " line 10",
+      " line 11",
+    );
+    unavailable(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+        { id: "L3", patch: l3 },
+      ],
+      review,
+    );
+  });
+
+  it("gives nothing for a layer that is two commits' diffs joined, naming a file twice", () => {
+    const c1 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index c8b13a5..c957be0 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,5 +1,5 @@",
+      " line 1",
+      "-line 2",
+      "+line 2 by L1",
+      " line 3",
+      " line 4",
+      " line 5",
+    );
+    const c2 = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index c957be0..739aa0a 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -3,6 +3,6 @@ line 2 by L1",
+      " line 3",
+      " line 4",
+      " line 5",
+      "-line 6",
+      "+line 6 by L1",
+      " line 7",
+      " line 8",
+    );
+    const review = patch(
+      "diff --git a/a.ts b/a.ts",
+      "index c8b13a5..739aa0a 100644",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1,8 +1,8 @@",
+      " line 1",
+      "-line 2",
+      "+line 2 by L1",
+      " line 3",
+      " line 4",
+      " line 5",
+      "-line 6",
+      "+line 6 by L1",
+      " line 7",
+      " line 8",
+    );
+    unavailable([{ id: "L1", patch: c1 + c2 }], review);
+  });
+});
+
+describe("a file that turns binary and back", () => {
+  // t.dat: L1 edits line 2, L2 makes it binary, L3 writes L1's text back.
+  const l1 = patch(
+    "diff --git a/a.ts b/a.ts",
+    "index f985857..44c0f44 100644",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,5 +1,5 @@",
+    " line 1",
+    "-line 2",
+    "+line 2 by L1",
+    " line 3",
+    " line 4",
+    " line 5",
+    "diff --git a/t.dat b/t.dat",
+    "index f985857..44c0f44 100644",
+    "--- a/t.dat",
+    "+++ b/t.dat",
+    "@@ -1,5 +1,5 @@",
+    " line 1",
+    "-line 2",
+    "+line 2 by L1",
+    " line 3",
+    " line 4",
+    " line 5",
+  );
+  const l2 = patch("diff --git a/t.dat b/t.dat", "index 44c0f44..084bd32 100644", "Binary files a/t.dat and b/t.dat differ");
+  const l3 = patch("diff --git a/t.dat b/t.dat", "index 084bd32..44c0f44 100644", "Binary files a/t.dat and b/t.dat differ");
+  const review = patch(
+    "diff --git a/a.ts b/a.ts",
+    "index f985857..44c0f44 100644",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -1,5 +1,5 @@",
+    " line 1",
+    "-line 2",
+    "+line 2 by L1",
+    " line 3",
+    " line 4",
+    " line 5",
+    "diff --git a/t.dat b/t.dat",
+    "index f985857..44c0f44 100644",
+    "--- a/t.dat",
+    "+++ b/t.dat",
+    "@@ -1,5 +1,5 @@",
+    " line 1",
+    "-line 2",
+    "+line 2 by L1",
+    " line 3",
+    " line 4",
+    " line 5",
+  );
+
+  it("forgets the file's lines at the binary step, and keeps the other files'", () => {
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+        { id: "L3", patch: l3 },
+      ],
+      { reviewPatch: review },
+    );
+    expect(map.status).toBe("ok");
+    expect(at(map, "t.dat", 2)).toEqual({ kind: "unknown" });
+    expect(at(map, "a.ts", 2)).toEqual({ kind: "layer", id: "L1" });
+  });
+});
+
+describe("a layer that renames two files", () => {
+  // b.ts and c.ts start identical. L2's diff pairs b.ts→b2.ts and c.ts→c2.ts;
+  // the whole-stack diff of the same commits pairs c.ts→b2.ts and b.ts→c2.ts.
+  const l1 = patch(
+    "diff --git a/b.ts b/b.ts",
+    "index c8b13a5..f7ca596 100644",
+    "--- a/b.ts",
+    "+++ b/b.ts",
+    "@@ -1,6 +1,6 @@",
+    " line 1",
+    " line 2",
+    "-line 3",
+    "+line 3 by L1",
+    " line 4",
+    " line 5",
+    " line 6",
+  );
+  const l2 = patch(
+    "diff --git a/b.ts b/b2.ts",
+    "similarity index 80%",
+    "rename from b.ts",
+    "rename to b2.ts",
+    "index f7ca596..ab6feeb 100644",
+    "--- a/b.ts",
+    "+++ b/b2.ts",
+    "@@ -4,5 +4,5 @@ line 3 by L1",
+    " line 4",
+    " line 5",
+    " line 6",
+    "-line 7",
+    "+line 7 by L2",
+    " line 8",
+    "diff --git a/c.ts b/c2.ts",
+    "similarity index 79%",
+    "rename from c.ts",
+    "rename to c2.ts",
+    "index c8b13a5..ff8c03a 100644",
+    "--- a/c.ts",
+    "+++ b/c2.ts",
+    "@@ -5,4 +5,4 @@ line 4",
+    " line 5",
+    " line 6",
+    " line 7",
+    "-line 8",
+    "+line 8 by L2",
+  );
+  const review = patch(
+    "diff --git a/c.ts b/b2.ts",
+    "similarity index 61%",
+    "rename from c.ts",
+    "rename to b2.ts",
+    "index c8b13a5..ab6feeb 100644",
+    "--- a/c.ts",
+    "+++ b/b2.ts",
+    "@@ -1,8 +1,8 @@",
+    " line 1",
+    " line 2",
+    "-line 3",
+    "+line 3 by L1",
+    " line 4",
+    " line 5",
+    " line 6",
+    "-line 7",
+    "+line 7 by L2",
+    " line 8",
+    "diff --git a/b.ts b/c2.ts",
+    "similarity index 79%",
+    "rename from b.ts",
+    "rename to c2.ts",
+    "index c8b13a5..ff8c03a 100644",
+    "--- a/b.ts",
+    "+++ b/c2.ts",
+    "@@ -5,4 +5,4 @@ line 4",
+    " line 5",
+    " line 6",
+    " line 7",
+    "-line 8",
+    "+line 8 by L2",
+  );
+
+  it("forgets both files' lines, since git pairs the paths either way", () => {
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: l1 },
+        { id: "L2", patch: l2 },
+      ],
+      { reviewPatch: review },
+    );
+    expect(map.status).toBe("ok");
+    expect(at(map, "b2.ts", 1, 8)).toEqual({ kind: "unknown" });
+    expect(at(map, "c2.ts", 1, 8)).toEqual({ kind: "unknown" });
   });
 });
 
@@ -518,36 +1001,44 @@ describe("malformed patches", () => {
     " line 5",
   );
   const truncated = good.split("\n").slice(0, -3).join("\n");
-  const cases: [string, StackLayer[], { reviewPatch: string } | undefined][] = [
-    ["a layer cut off mid-hunk", [{ id: "L1", patch: truncated }], undefined],
-    ["a layer that is not a diff", [{ id: "L1", patch: "<html>rate limited</html>" }], undefined],
-    ["a review cut off mid-hunk", [{ id: "L1", patch: good }], { reviewPatch: truncated }],
-    ["a review that is not a diff", [{ id: "L1", patch: good }], { reviewPatch: "not a diff" }],
+  const badHeader = good.replace("@@ -1,5 +1,5 @@", "@@ -1,5 +1,5@@");
+  const cases: [string, string, string][] = [
+    ["a layer cut off mid-hunk", truncated, good],
+    ["a layer whose first hunk header cannot be read", badHeader, good],
+    ["a layer that is not a diff", "<html>rate limited</html>", good],
+    ["a review cut off mid-hunk", good, truncated],
+    ["a review that is not a diff", good, "not a diff"],
   ];
 
-  for (const [name, layers, check] of cases) {
-    it(`gives unknown for ${name}, without throwing`, () => {
-      const map = mapStackLines(layers, check);
-      expect(at(map, "a.ts", 1, 5)).toEqual({ kind: "unknown" });
-      expect(map.ids).toEqual(["L1"]);
+  for (const [name, layer, reviewPatch] of cases) {
+    it(`gives nothing for ${name}, without throwing`, () => {
+      const map = mapStackLines([{ id: "L1", patch: layer }], { reviewPatch });
+      expect(map).toEqual({ status: "unavailable", ids: ["L1"], runs: {} });
     });
   }
 
+  it("tells an empty stack, with nothing to label, from an unreadable one", () => {
+    expect(mapStackLines([{ id: "L1", patch: "" }], { reviewPatch: "" }).status).toBe("ok");
+  });
+
   it("treats an empty layer as one that changed nothing", () => {
-    const map = mapStackLines([
-      { id: "L1", patch: good },
-      { id: "L2", patch: "" },
-    ]);
+    const map = mapStackLines(
+      [
+        { id: "L1", patch: good },
+        { id: "L2", patch: "" },
+      ],
+      { reviewPatch: good },
+    );
     expect(at(map, "a.ts", 2)).toEqual({ kind: "layer", id: "L1" });
   });
 
   it("gives unknown for runs naming a layer the map has no id for", () => {
-    const map: StackLineMap = { ids: ["L1"], runs: { "a.ts": [[1, 3, [4]]] } };
+    const map: StackLineMap = { status: "ok", ids: ["L1"], runs: { "a.ts": [[1, 3, [4]]] } };
     expect(at(map, "a.ts", 2)).toEqual({ kind: "unknown" });
   });
 
   it("does not read object built-ins as paths", () => {
-    const map = mapStackLines([{ id: "L1", patch: good }]);
+    const map = mapStackLines([{ id: "L1", patch: good }], { reviewPatch: good });
     expect(at(map, "constructor", 1)).toEqual({ kind: "unknown" });
     expect(at(map, "__proto__", 1)).toEqual({ kind: "unknown" });
   });

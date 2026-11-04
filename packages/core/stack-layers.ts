@@ -4,6 +4,9 @@
  * lines are the lines a whole-stack review shows. A layer id is opaque: this
  * module knows nothing about pull requests or forges.
  *
+ * Its one promise: it may say less, never something false. Diffs that do not
+ * chain, or that it cannot read, give no labels at all.
+ *
  * Browser-safe and dependency-free. The map it builds is plain data, so a
  * server can build it and send it as JSON.
  */
@@ -32,8 +35,13 @@ export type LineOrigin = { kind: "layer"; id: string } | { kind: "several"; ids:
  */
 export type StackLineRuns = Record<string, [start: number, end: number, layers: number[]][]>;
 
-/** Layer ids bottom to top, and the lines each one wrote. */
+/**
+ * Layer ids bottom to top, and the lines each one wrote. `unavailable` means
+ * a diff could not be read or the diffs do not chain into one stack, so
+ * nothing is labelled; `ok` with no runs means there was nothing to label.
+ */
 export interface StackLineMap {
+  status: "ok" | "unavailable";
   ids: readonly string[];
   runs: StackLineRuns;
 }
@@ -47,39 +55,47 @@ interface Claim {
 /** Path → line number → its claim, as the files stand at one layer's head. */
 type Claims = Map<string, Map<number, Claim>>;
 
-/** How one diff changes one file: its path before and after (null when added or deleted), and its hunks. */
+/** Path → the blob id the file has at one layer's head, as the diffs' `index` lines name it. */
+type Blobs = Map<string, string>;
+
+/** How one diff changes one file. */
 interface FileStep {
+  /** Path before and after; null when the file is added or deleted. */
   from: string | null;
   to: string | null;
+  /** Blob ids from the `index` line; null when there is none (a pure rename or mode change). */
+  oldBlob: string | null;
+  newBlob: string | null;
+  /** Its lines cannot be followed: a binary diff, or a pairing git may make another way (see `unsurePairing`). */
+  untraceable: boolean;
   hunks: DiffHunk[];
 }
 
 /**
- * Maps each line at the top of the stack to the layers that wrote it. A line
- * a higher layer rewrote keeps the lower layer too, ahead of it, and the
- * higher layer's text is the one shown. Renames are followed; lines no layer
- * wrote get no run.
+ * Maps each line the review shows as added to the layers that wrote it. A
+ * line a higher layer rewrote keeps the lower layer too, ahead of it; the
+ * higher layer's text is the one shown. Renames are followed.
  *
- * With `check`, the result is tied to the review's own diff: only its `+`
- * lines keep their runs, and a file loses them all unless every `+` line was
- * written by a layer with the same text. A patch that cannot be read gives an
- * empty map, never a partial one.
+ * `reviewPatch` is the whole-stack diff the person reads. Only its `+` lines
+ * get runs, and a file loses them all unless every `+` line was written by a
+ * layer with the same text, in a file whose content matches the top layer's.
  */
-export function mapStackLines(layers: readonly StackLayer[], check?: { reviewPatch: string }): StackLineMap {
+export function mapStackLines(layers: readonly StackLayer[], check: { reviewPatch: string }): StackLineMap {
   const ids = layers.map((layer) => layer.id);
-  const unknown: StackLineMap = { ids, runs: {} };
+  const unavailable: StackLineMap = { status: "unavailable", ids, runs: {} };
   let claims: Claims = new Map();
+  let blobs: Blobs = new Map();
   for (const [index, layer] of layers.entries()) {
     const steps = fileSteps(layer.patch);
-    if (!steps) return unknown;
-    claims = applyLayer(claims, steps, index);
+    if (!steps || !chainHolds(blobs, steps)) return unavailable;
+    const next = applyLayer(claims, steps, index);
+    if (!next) return unavailable;
+    claims = next;
+    blobs = nextBlobs(blobs, steps);
   }
-  if (check) {
-    const reviewed = keepReviewedLines(claims, check.reviewPatch);
-    if (!reviewed) return unknown;
-    claims = reviewed;
-  }
-  return { ids, runs: toRuns(claims) };
+  const review = fileSteps(check.reviewPatch);
+  if (!review) return unavailable;
+  return { status: "ok", ids, runs: toRuns(keepReviewedLines(claims, blobs, review)) };
 }
 
 /** Every layer that wrote lines in a span: one, several (bottom to top), or none known. */
@@ -98,31 +114,108 @@ export function lineOrigin(map: StackLineMap, span: LineSpan): LineOrigin {
   return { kind: "several", ids };
 }
 
-/** A diff's per-file steps, or null when it cannot be read. */
+// ── Reading a diff ──────────────────────────────────────────────────────────
+
+const INDEX_LINE = /^index ([0-9a-f]{7,})\.\.([0-9a-f]{7,})/m;
+const BINARY_LINE = /^(?:Binary files |GIT binary patch$)/m;
+
+/** A diff's per-file steps, or null when it cannot be read or changes a path twice. */
 function fileSteps(patch: string): FileStep[] | null {
   const files = parseDiffToFiles(patch);
   if (files.length === 0 && patch.trim() !== "") return null;
   const steps: FileStep[] = [];
+  const froms = new Set<string>();
+  const tos = new Set<string>();
   for (const file of files) {
     const hunks = diffHunkLines(file.patch);
     if (!hunks) return null;
-    steps.push({
+    const blobs = INDEX_LINE.exec(file.patch);
+    const step: FileStep = {
       from: file.status === "added" ? null : (file.oldPath ?? file.path),
       to: file.status === "deleted" ? null : file.path,
+      oldBlob: blobs?.[1] ?? null,
+      newBlob: blobs?.[2] ?? null,
+      untraceable: hunks.length === 0 && BINARY_LINE.test(file.patch),
       hunks,
-    });
+    };
+    if (!addOnce(froms, step.from) || !addOnce(tos, step.to)) return null;
+    steps.push(step);
   }
-  return steps;
+  return steps.map((step) => (unsurePairing(step, steps) ? { ...step, untraceable: true } : step));
 }
 
-/** The claims after one layer: earlier lines carried through its hunks, then its own `+` lines. */
-function applyLayer(before: Claims, steps: readonly FileStep[], layer: number): Claims {
+/**
+ * True when git could pair a new path with a different old one than this diff
+ * did. Rename detection is a heuristic: a whole diff pairs paths as a set, but
+ * `git blame` looks for each file's source alone, and the two can disagree
+ * once a layer offers a choice. A rename is unsure when the layer removes
+ * another path it could come from; an added file is unsure when a rename in
+ * the layer took a source it could have come from.
+ */
+function unsurePairing(step: FileStep, steps: readonly FileStep[]): boolean {
+  const moved = (s: FileStep) => s.from !== null && s.to !== null && s.from !== s.to;
+  const removedPaths = steps.filter((s) => s.from !== null && s.from !== s.to).length;
+  if (moved(step)) return removedPaths > 1;
+  return step.from === null && steps.some(moved);
+}
+
+/** Adds a path to a set; false when it was already there. */
+function addOnce(paths: Set<string>, path: string | null): boolean {
+  if (path === null) return true;
+  if (paths.has(path)) return false;
+  paths.add(path);
+  return true;
+}
+
+// ── The blob chain: each layer must start where the one below ended ─────────
+
+/** Abbreviated ids of one blob: the shorter is a prefix of the longer. */
+function sameBlob(a: string, b: string): boolean {
+  return a.length <= b.length ? b.startsWith(a) : a.startsWith(b);
+}
+
+/** True when every file a layer changes starts from the blob the layers below left it at. */
+function chainHolds(blobs: Blobs, steps: readonly FileStep[]): boolean {
+  return steps.every((step) => {
+    const known = blobs.get((step.from ?? step.to)!);
+    return known === undefined || step.oldBlob === null || sameBlob(known, step.oldBlob);
+  });
+}
+
+const NO_BLOB = "0000000";
+
+/** The blobs after one layer: a path it moved or deleted is gone, a path it wrote has its new blob. */
+function nextBlobs(blobs: Blobs, steps: readonly FileStep[]): Blobs {
+  const after = new Map(blobs);
+  for (const step of steps) if (step.from !== null && step.from !== step.to) after.set(step.from, NO_BLOB);
+  for (const step of steps) {
+    if (step.to === null) continue;
+    const blob = step.newBlob ?? (step.from === null ? undefined : blobs.get(step.from));
+    if (blob === undefined) after.delete(step.to);
+    else after.set(step.to, blob);
+  }
+  return after;
+}
+
+// ── Following lines up the stack ────────────────────────────────────────────
+
+/**
+ * The claims after one layer: earlier lines carried through its hunks, then
+ * its own `+` lines. Null when a line the layer deletes or keeps does not have
+ * the text a lower layer wrote there: the layer is not based on the one below.
+ */
+function applyLayer(before: Claims, steps: readonly FileStep[], layer: number): Claims | null {
   const after = new Map(before);
   for (const step of steps) if (step.from !== null) after.delete(step.from);
   for (const step of steps) {
     if (step.to === null) continue;
-    const old = step.from === null ? undefined : before.get(step.from);
+    if (step.untraceable) {
+      after.set(step.to, new Map());
+      continue;
+    }
+    const old = (step.from === null ? undefined : before.get(step.from)) ?? new Map<number, Claim>();
     const lines = carryClaims(old, step.hunks);
+    if (!lines) return null;
     for (const { line, replaced } of replacements(old, step.hunks)) {
       lines.set(line.newLine, { layers: [...replaced, layer], text: line.text });
     }
@@ -132,59 +225,62 @@ function applyLayer(before: Claims, steps: readonly FileStep[], layer: number): 
 }
 
 /**
+ * A file's claims renumbered through a layer's hunks, in one pass over each:
+ * kept lines move to their new number, deleted lines are gone. Null when a
+ * kept or deleted line's text differs from its claim's.
+ */
+function carryClaims(claims: ReadonlyMap<number, Claim>, hunks: readonly DiffHunk[]): Map<number, Claim> | null {
+  const carried = new Map<number, Claim>();
+  for (const hunk of hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind === "add") continue;
+      const claim = claims.get(line.oldLine);
+      if (!claim) continue;
+      if (claim.text !== line.text) return null;
+      if (line.kind === "context") carried.set(line.newLine, claim);
+    }
+  }
+  let next = 0;
+  let shift = 0;
+  for (const line of [...claims.keys()].sort((a, b) => a - b)) {
+    while (next < hunks.length && hunks[next].oldEnd <= line) {
+      shift = hunks[next].newEnd - hunks[next].oldEnd;
+      next += 1;
+    }
+    const inHunk = next < hunks.length && line >= hunks[next].oldStart;
+    if (!inHunk) carried.set(line + shift, claims.get(line)!);
+  }
+  return carried;
+}
+
+type AddedLine = Extract<DiffHunkLine, { kind: "add" }>;
+
+/**
  * Each `+` line, with the layers that wrote the `-` lines it replaced: those
  * in the same change, between the nearest context lines.
  */
-function replacements(claims: ReadonlyMap<number, Claim> | undefined, hunks: readonly DiffHunk[]) {
+function replacements(claims: ReadonlyMap<number, Claim>, hunks: readonly DiffHunk[]): { line: AddedLine; replaced: number[] }[] {
   const out: { line: AddedLine; replaced: number[] }[] = [];
   for (const hunk of hunks) {
     const replaced = new Set<number>();
     for (const line of hunk.lines) {
       if (line.kind === "context") replaced.clear();
-      else if (line.kind === "del") for (const layer of claims?.get(line.oldLine)?.layers ?? []) replaced.add(layer);
+      else if (line.kind === "del") for (const layer of claims.get(line.oldLine)?.layers ?? []) replaced.add(layer);
       else out.push({ line, replaced: [...replaced].sort((a, b) => a - b) });
     }
   }
   return out;
 }
 
-/** A file's claims renumbered through a layer's hunks; lines it deleted are gone. */
-function carryClaims(claims: ReadonlyMap<number, Claim> | undefined, hunks: readonly DiffHunk[]): Map<number, Claim> {
-  const carried = new Map<number, Claim>();
-  for (const [line, claim] of claims ?? []) {
-    const moved = newLineOf(line, hunks);
-    if (moved !== null) carried.set(moved, claim);
-  }
-  return carried;
-}
+// ── Tying the map to the review ─────────────────────────────────────────────
 
-/** Where an old line lands on the new side, or null when the hunks delete it. */
-function newLineOf(oldLine: number, hunks: readonly DiffHunk[]): number | null {
-  let shift = 0;
-  for (const hunk of hunks) {
-    if (oldLine < hunk.oldStart) break;
-    if (oldLine < hunk.oldEnd) {
-      const kept = hunk.lines.find((line) => line.kind === "context" && line.oldLine === oldLine);
-      return kept?.kind === "context" ? kept.newLine : null;
-    }
-    shift = hunk.newEnd - hunk.oldEnd;
-  }
-  return oldLine + shift;
-}
-
-type AddedLine = Extract<DiffHunkLine, { kind: "add" }>;
-
-function addedLines(hunks: readonly DiffHunk[]): AddedLine[] {
-  return hunks.flatMap((hunk) => hunk.lines.filter((line): line is AddedLine => line.kind === "add"));
-}
-
-/** The claims on the review's `+` lines, file by file; null when the review cannot be read. */
-function keepReviewedLines(claims: Claims, reviewPatch: string): Claims | null {
-  const steps = fileSteps(reviewPatch);
-  if (!steps) return null;
+/** The claims on the review's `+` lines, for each file that passes the check. */
+function keepReviewedLines(claims: Claims, blobs: Blobs, review: readonly FileStep[]): Claims {
   const kept: Claims = new Map();
-  for (const step of steps) {
+  for (const step of review) {
     if (step.to === null) continue;
+    const top = blobs.get(step.to);
+    if (top !== undefined && step.newBlob !== null && !sameBlob(top, step.newBlob)) continue;
     const lines = reviewedClaims(claims.get(step.to), step.hunks);
     if (lines) kept.set(step.to, lines);
   }
@@ -194,15 +290,18 @@ function keepReviewedLines(claims: Claims, reviewPatch: string): Claims | null {
 /** A file's claims on its reviewed `+` lines, or null when one of them was not written by a layer with that text. */
 function reviewedClaims(claims: ReadonlyMap<number, Claim> | undefined, hunks: readonly DiffHunk[]): Map<number, Claim> | null {
   const kept = new Map<number, Claim>();
-  for (const line of addedLines(hunks)) {
-    const claim = claims?.get(line.newLine);
-    if (claim?.text !== line.text) return null;
-    kept.set(line.newLine, claim);
+  for (const hunk of hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind !== "add") continue;
+      const claim = claims?.get(line.newLine);
+      if (claim?.text !== line.text) return null;
+      kept.set(line.newLine, claim);
+    }
   }
   return kept;
 }
 
-/** Claims as runs of consecutive lines from one layer, per path, as plain data. */
+/** Claims as runs of consecutive lines with the same layers, per path, as plain data. */
 function toRuns(claims: Claims): StackLineRuns {
   const entries: [string, StackLineRuns[string]][] = [];
   for (const [path, lines] of claims) {
