@@ -40,6 +40,7 @@ if (hasDom) {
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
+const { PostEnding } = (hasDom ? await import('./PostEnding') : {}) as typeof import('./PostEnding');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
@@ -330,6 +331,35 @@ test.skipIf(!hasDom)('a patch whose head the forge did not pin down posts nothin
   await settle();
   expect(document.querySelector('[data-review-posts]')).toBeNull();
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(theirs.url);
+});
+
+test.skipIf(!hasDom)('a comment edited after it was posted counts as new: the follow-up sends the correction', async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const comment = { id: 'c-edit', type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text: 'Cap the backof.', createdAt: 1 } as never;
+  let edit: (text: string) => void = () => {};
+  function Ending() {
+    const [text, setText] = useState('Cap the backof.');
+    edit = setText;
+    const comments = [{ ...(comment as object), text }] as never[];
+    return <PostEnding pull={theirs} agent={null} comments={comments} anchor="diff" busy={false} picked="forge" onPick={() => {}} onPosted={() => {}} />;
+  }
+  mount(<Ending />);
+  await settle();
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  expect(el('[data-review-posted-done]').textContent).toContain('Review posted on GitHub');
+  // The same comment, corrected: not done any more, and only the correction goes.
+  act(() => edit('Cap the backoff at 24 hours.'));
+  await settle();
+  expect(document.querySelector('[data-review-posted-done]')).toBeNull();
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  const sent = posted.filter((p) => p.path.endsWith('/pulls/review')).map((p) => (p.body.fileComments as { body: string }[]).map((c) => c.body));
+  expect(sent).toEqual([['Cap the backof.'], ['Cap the backoff at 24 hours.']]);
 });
 
 test.skipIf(!hasDom)('a new push after a post offers the decision again', async () => {

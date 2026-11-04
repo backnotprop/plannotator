@@ -28,6 +28,14 @@ const PlatformPost = lazy(() => import('#platform-post'));
 
 export type ReviewDestination = 'forge' | 'agent';
 
+/**
+ * A posted comment as it went: its id with what it says and where. A comment edited after it was posted keeps its
+ * id but not this, so the correction counts as new and the follow-up offers it.
+ */
+export function postedSignature(c: CodeAnnotation): string {
+  return JSON.stringify([c.id, c.text ?? '', c.suggestedCode ?? '', c.filePath, c.lineStart, c.lineEnd, c.side, c.scope ?? 'line']);
+}
+
 const DEST_KEY = 'plannotator-inbox-review-dest';
 
 function readDestination(): ReviewDestination {
@@ -102,7 +110,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
   const sameKey = !!done && !!target && done.key === target.key;
   const sameHead = sameKey && done!.head === target!.head_sha;
-  const comments = useMemo(() => (sameKey ? all.filter((c) => !done!.ids.has(c.id)) : all), [sameKey, all, done]);
+  const comments = useMemo(() => (sameKey ? all.filter((c) => !done!.ids.has(postedSignature(c))) : all), [sameKey, all, done]);
   const isDone = sameHead && comments.length === 0;
   const name = useId();
 
@@ -218,7 +226,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               setOpen(null);
               // A follow-up comment after an approval still reads as the approval.
               const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map((c) => c.id)]) });
+              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map(postedSignature)]) });
               onPosted({ ...result, action, label: rules.label });
             }}
           />
