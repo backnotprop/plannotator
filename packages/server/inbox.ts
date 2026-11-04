@@ -1339,11 +1339,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (lists.length > 0) steps[id] = lists;
       }
     }
-    // `initiative_threads` (additive, approval "board-hashtags"): per live initiative, every thread a message
-    // tags it in (`#Shape`), latest first, from the store's in-memory tag index. The preview shows at most
-    // INITIATIVE_THREAD_ROWS of the ones no card of it links, so only those few get a list row here: a tag
-    // used in a thousand threads costs a thousand ids, never a thousand row reads.
-    const initiativeThreads = store.initiativeThreads();
+    // `initiative_threads` (additive, approval "board-hashtags"): per live initiative, the latest-tagged threads
+    // (`#Shape`) no card of it links, at most INITIATIVE_THREAD_ROWS, with their list rows in `threads`, and
+    // `total`, how many such threads there are, for the preview's "+N more". From the store's in-memory tag
+    // index, read from its newest end: a tag used in thousands of threads costs the same as one in a few.
     const linkedTo = new Map<string, Set<string>>();
     for (const card of cards) {
       if (!card.initiative || card.column === "dropped") continue;
@@ -1351,16 +1350,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const id of card.threads) linked.add(id);
       linkedTo.set(card.initiative, linked);
     }
-    for (const [initiative, ids] of Object.entries(initiativeThreads)) {
-      const linked = linkedTo.get(initiative);
-      let rows = 0;
-      for (const id of ids) {
-        if (rows >= INITIATIVE_THREAD_ROWS) break;
-        if (linked?.has(id)) continue;
-        rows++;
-        if (!(id in threads)) threads[id] = store.listRow(id);
-      }
-    }
+    const initiativeThreads = store.initiativeThreads({ limit: INITIATIVE_THREAD_ROWS, linked: (id) => linkedTo.get(id) });
+    for (const read of Object.values(initiativeThreads)) for (const id of read.threads) if (!(id in threads)) threads[id] = store.listRow(id);
     // `initiatives` (additive, approval "board-initiatives"): every one, deleted ones too (an opened card's
     // history names them); the window offers only the live ones.
     return {

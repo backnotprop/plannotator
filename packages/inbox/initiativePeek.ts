@@ -6,8 +6,8 @@
  * Board's order (In review, In progress, Todo, Backlog, Done last), capped,
  * the rest "+N more"; one count per column that has cards, in the same order.
  * Threads: the other threads a message tags it in (the cards read's
- * `initiative_threads`, latest first), minus the ones a card of it links and
- * the thread the tag sits in; capped, the rest "+N more".
+ * `initiative_threads`: the latest few no card of it links, and how many in
+ * all), minus the thread the tag sits in; capped, the rest "+N more".
  */
 import {
   INBOX_CARD_COLUMN_LABELS,
@@ -65,12 +65,20 @@ function threadOf(row: InboxListRow): PeekThread {
   };
 }
 
+/** The cards read's tagged threads for one initiative (`initiative_threads`). */
+export interface TaggedThreads {
+  /** The latest-tagged threads no card of it links, newest first: the few the preview may list. */
+  threads: readonly string[];
+  /** How many threads tag it that no card of it links, in all. */
+  total: number;
+}
+
 export function initiativePeekModel(
   initiativeId: string,
   cards: readonly InboxCardWire[],
   rows: ReadonlyMap<string, InboxListRow>,
   projectNames: ReadonlyMap<string, string> = new Map(),
-  tagged: readonly string[] = [],
+  tagged: TaggedThreads = { threads: [], total: 0 },
   exclude: string | null = null,
 ): InitiativePeekModel {
   const mine = cards.filter((card) => card.initiative === initiativeId && RANK.has(card.column));
@@ -81,8 +89,11 @@ export function initiativePeekModel(
   const linked = new Set(mine.flatMap((card) => card.threads));
   const times = [...mine.map((card) => card.heard_at), ...[...linked].flatMap((id) => rows.get(id)?.last_at ?? [])].sort();
   const projects = [...new Set(mine.map((card) => projectNames.get(card.project_id)).filter((name): name is string => !!name))];
-  // The count is of ids (the server sends every one); only the shown few need a row.
-  const others = tagged.filter((id) => id !== exclude && !linked.has(id));
+  // Linked since the read (a card picked it up): out of the list and the count too.
+  const others = tagged.threads.filter((id) => id !== exclude && !linked.has(id));
+  const linkedSince = tagged.threads.filter((id) => id !== exclude && linked.has(id)).length;
+  // The thread being read tags it (its tag opened this), so `total` counts it unless a card links it.
+  const here = exclude !== null && (tagged.threads.includes(exclude) || !linked.has(exclude)) ? 1 : 0;
   const mentions = others
     .map((id) => rows.get(id))
     .filter((row): row is InboxListRow => !!row)
@@ -96,6 +107,6 @@ export function initiativePeekModel(
     items: items.slice(0, PEEK_ITEMS),
     moreItems: Math.max(0, items.length - PEEK_ITEMS),
     mentions,
-    moreMentions: Math.max(0, others.length - mentions.length),
+    moreMentions: Math.max(0, tagged.total - here - linkedSince - mentions.length),
   };
 }

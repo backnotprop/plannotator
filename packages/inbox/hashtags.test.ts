@@ -50,3 +50,36 @@ test('the picker opens on # at a word start and filters by key, names that start
   expect(filterInitiatives([REVIEW, SHAPE, ini('ini_ed', 'Editor')], 'e').map((i) => i.name)).toEqual(['Editor', 'Code review', 'Shape']);
   expect(filterInitiatives([REVIEW, SHAPE], 'zzz')).toEqual([]);
 });
+
+test('review fix 1: a tag after "(" or "[" links; only real link text or a link destination is left alone', () => {
+  const shape = initiativeHref(SHAPE.id);
+  expect(linkHashtags('Ship it (part of #Shape)', ALL)).toBe(`Ship it (part of [#Shape](${shape}))`);
+  expect(linkHashtags('Ship it (#Shape)', ALL)).toBe(`Ship it ([#Shape](${shape}))`);
+  expect(linkHashtags('[#Shape](https://example.com)', ALL)).toBe('[#Shape](https://example.com)');
+  expect(linkHashtags('[part of #Shape](https://example.com)', ALL)).toBe('[part of #Shape](https://example.com)');
+  expect(linkHashtags('[see](#Shape)', ALL)).toBe('[see](#Shape)');
+  // What links is what moves a card: the store reads the same tags.
+  expect(inboxTaggedInitiative('Ship it (part of #Shape)', ALL)?.id).toBe(SHAPE.id);
+  expect(inboxTaggedInitiative('[see](#Shape)', ALL)).toBeNull();
+});
+
+test('review fix 2: double-backtick code and a longer fence around a ``` fence hold no tag', () => {
+  expect(inboxHashtags('Use ``#Shape`` here, and ``a ` #Shape`` too')).toEqual([]);
+  const fenced = '````md\n```\n#Shape\n```\n````\nthen #Shape';
+  expect(inboxHashtags(fenced).map((t) => t.start)).toEqual([fenced.lastIndexOf('#Shape')]);
+  expect(linkHashtags('````md\n```\n#Shape\n```\n````', ALL)).toBe('````md\n```\n#Shape\n```\n````');
+  // An unclosed run of backticks is plain text: the tag after it counts.
+  expect(inboxHashtags('a `` b #Shape').map((t) => t.tag)).toEqual(['Shape']);
+});
+
+test('URLs hold no tag; a tag starts at a line start, after whitespace or opening punctuation', () => {
+  expect(inboxHashtags('https://x.dev/?q=#Shape a-#Shape www.x.dev/#Shape <https://x.dev#Shape> x=#Shape')).toEqual([]);
+  expect(inboxHashtags('**#Shape** "#Shape" (#Shape) [#Shape]\n#Shape').length).toBe(5);
+  expect(findHashtagTrigger('a-#sh', 5)).toBeNull();
+  expect(findHashtagTrigger('(#sh', 4)).toEqual({ start: 1, query: 'sh' });
+});
+
+test('the picker offers only names that make a tag', () => {
+  const odd = [ini('ini_n', '123'), ini('ini_p', '!!!'), SHAPE];
+  expect(filterInitiatives(odd, '').map((i) => i.name)).toEqual(['Shape']);
+});

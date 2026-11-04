@@ -1524,9 +1524,12 @@ function Inbox() {
   const cardsSeq = useRef(0);
   /** Whether the Board is on (`boardEnabled` below), for the reads that run outside a render. */
   const boardOnRef = useRef(false);
+  /** When the last cards read started: an opened `#` preview reads them only when that is older than 5 s. */
+  const cardsReadAt = useRef(0);
   const refreshCards = useCallback(async (): Promise<CardsModel | null> => {
     if (!boardOnRef.current) return null;
     const mine = ++cardsSeq.current;
+    cardsReadAt.current = Date.now();
     try {
       const next = await inboxApi.cards();
       // An older read never replaces a newer one that landed first.
@@ -1629,6 +1632,18 @@ function Inbox() {
    * cards have loaded; before that the id filters as it stands.
    */
   // `#` in a composer names these (approval "board-hashtags"): the Board's live initiatives, with their cards counted.
+  // The live initiatives, the same array while their ids and names stay: every message's tag links
+  // (`linkHashtags`) follow it, so a list or cards read that changes neither redraws no message.
+  const initiativesKey = liveInitiatives(cards?.initiatives)
+    .map((i) => `${i.id}\u0000${i.name}`)
+    .join('\u0001');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
+  const tagInitiatives = useMemo(() => liveInitiatives(cards?.initiatives), [initiativesKey]);
+  // An opened preview reads the cards again (a tag written since in a thread no card links), at most once in 5 s.
+  const refreshForPeek = useCallback(() => {
+    if (Date.now() - cardsReadAt.current < 5_000) return;
+    void refreshCards();
+  }, [refreshCards]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
@@ -1639,9 +1654,8 @@ function Inbox() {
     for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rows.has(id)) rows.set(id, row);
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
-    const refresh = () => void refreshCards();
-    return { initiatives: liveInitiatives(cards?.initiatives), counts, cards: live, rows, projects, mentions, refresh };
-  }, [cards, latest, refreshCards]);
+    return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
+  }, [cards, latest, tagInitiatives, refreshForPeek]);
   const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {

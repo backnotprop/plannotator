@@ -16,6 +16,7 @@
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
+import { codeFenceCloseIndex } from "./markdown-structure";
 
 export interface InboxInitiative {
   /** `ini_` + ULID. */
@@ -74,15 +75,19 @@ export function inboxCardInitiativeOf(card: { initiative?: string | null }, live
 // ─────────────── Hashtags (approval "board-hashtags") ───────────────
 // `#Shape` in what the person writes names an initiative. A tag is `#`, then
 // a letter or digit, then letters, digits, `_` or `-`; never all digits
-// (`#123` is an issue), never after a letter, digit, `/`, `&` or `#` (a URL's
-// fragment, `owner/repo#1`, `##`). Code (fenced or `inline`) holds no tag.
+// (`#123` is an issue). It starts a line or follows whitespace or opening
+// punctuation (`inboxHashtagMayFollow`), so `owner/repo#1`, `a-#x`, `?q=#x`
+// and `##` are not tags. Code (fenced, any fence length, or inline with any
+// equal backtick runs), a link's destination (`](…)`, `<…>`) and a URL hold
+// no tag. The store (what moves a card) and the window (what links) read the
+// same tags.
 
 /** Threads an initiative's preview lists (the window's `initiativePeek`); the rest read "+N more". */
 export const INBOX_INITIATIVE_PEEK_THREADS = 3;
 
-/** A hashtag's key: letters and digits only, lowercased, so `#CodeReview`, `#code-review` and "Code review" are one. */
+/** A hashtag's key: letters and digits only, lowercased (not locale-dependent, the same in the server and every browser), so `#CodeReview`, `#code-review` and "Code review" are one. */
 export function inboxInitiativeTagKey(name: string): string {
-  return name.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+  return name.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 /** How a pick is written: `#Shape`, `#CodeReview` (the words joined, each after the first capitalised). */
@@ -92,13 +97,77 @@ export function inboxInitiativeTag(name: string): string {
     .split(/\s+/)
     .map((word) => word.replace(/[^\p{L}\p{N}_-]/gu, ""))
     .filter(Boolean);
-  return `#${words.map((word, i) => (i === 0 ? word : word.charAt(0).toLocaleUpperCase() + word.slice(1))).join("")}`;
+  return `#${words.map((word, i) => (i === 0 ? word : word.charAt(0).toUpperCase() + word.slice(1))).join("")}`;
 }
 
-/** Code blocked out (same length, spaces), so a `#name` in code is never a tag. */
+/** Whether a name can be written as a tag that names it back (not "123" or "!!!"): the picker offers only these. */
+export function inboxInitiativeTaggable(name: string): boolean {
+  const tag = inboxInitiativeTag(name);
+  const read = inboxHashtags(tag);
+  return read.length === 1 && read[0]!.start === 0 && read[0]!.end === tag.length && read[0]!.key === inboxInitiativeTagKey(name);
+}
+
+/** What may come right before a tag's `#` (an empty string: the text's start). */
+export function inboxHashtagMayFollow(before: string): boolean {
+  return before === "" || /[\s([{"'\u201C\u2018\u00AB*_~>]/u.test(before);
+}
+
+/** `match` blanked (same length, spaces; newlines kept), so offsets in the rest of the text stay put. */
+const blank = (match: string) => match.replace(/[^\n]/g, " ");
+
+/** Inline code blanked: a run of N backticks up to the next run of exactly N (CommonMark); an unmatched run is text. */
+function withoutInlineCode(text: string): string {
+  let out = "";
+  let at = 0;
+  const runs = /`+/g;
+  for (let open = runs.exec(text); open; open = runs.exec(text)) {
+    const length = open[0].length;
+    let close: RegExpExecArray | null = null;
+    const next = /`+/g;
+    next.lastIndex = open.index + length;
+    for (let run = next.exec(text); run; run = next.exec(text)) {
+      if (run[0].length === length) {
+        close = run;
+        break;
+      }
+    }
+    if (!close) continue;
+    const end = close.index + length;
+    out += text.slice(at, open.index) + blank(text.slice(open.index, end));
+    at = end;
+    runs.lastIndex = end;
+  }
+  return out + text.slice(at);
+}
+
+/**
+ * What holds no tag, blanked: fenced code (closed as the Viewer closes it,
+ * `codeFenceCloseIndex`), inline code, link destinations and URLs.
+ */
 function withoutCode(text: string): string {
-  const blank = (match: string) => match.replace(/[^\n]/g, " ");
-  return text.replace(/```[\s\S]*?(```|$)/g, blank).replace(/`[^`\n]*`/g, blank);
+  const lines = text.split("\n");
+  const parts: string[] = [];
+  let prose: string[] = [];
+  const flush = () => {
+    if (prose.length > 0) parts.push(withoutInlineCode(prose.join("\n")));
+    prose = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*```/.test(lines[i]!)) {
+      prose.push(lines[i]!);
+      continue;
+    }
+    flush();
+    const close = Math.min(codeFenceCloseIndex(lines, i), lines.length - 1);
+    parts.push(lines.slice(i, close + 1).map(blank).join("\n"));
+    i = close;
+  }
+  flush();
+  return parts
+    .join("\n")
+    .replace(/\]\([^)\n]*\)/g, (m) => "](" + blank(m.slice(2)))
+    .replace(/<[a-z][a-z0-9+.-]*:[^>\s]*>/gi, blank)
+    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]*/gi, blank);
 }
 
 export interface InboxHashtag {
@@ -114,12 +183,13 @@ export interface InboxHashtag {
 /** Every hashtag in `text`, in order. */
 export function inboxHashtags(text: string): InboxHashtag[] {
   const out: InboxHashtag[] = [];
-  const re = /(^|[^\p{L}\p{N}_&/#])#([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
+  const re = /#([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
   const plain = withoutCode(text);
   for (let match = re.exec(plain); match; match = re.exec(plain)) {
-    const tag = match[2]!.replace(/[-_]+$/, "");
+    const start = match.index;
+    if (!inboxHashtagMayFollow(plain.slice(Math.max(0, start - 1), start))) continue;
+    const tag = match[1]!.replace(/[-_]+$/, "");
     if (/^\d+$/.test(tag)) continue;
-    const start = match.index + match[1]!.length;
     out.push({ start, end: start + 1 + tag.length, tag, key: inboxInitiativeTagKey(tag) });
   }
   return out;

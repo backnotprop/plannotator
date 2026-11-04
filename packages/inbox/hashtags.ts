@@ -15,8 +15,19 @@
  */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
-import { inboxHashtags, inboxInitiativeOfTag, inboxInitiativeTag, inboxInitiativeTagKey, type InboxCardWire, type InboxInitiative, type InboxListRow } from '@plannotator/core/inbox-types';
+import {
+  inboxHashtagMayFollow,
+  inboxHashtags,
+  inboxInitiativeOfTag,
+  inboxInitiativeTag,
+  inboxInitiativeTaggable,
+  inboxInitiativeTagKey,
+  type InboxCardWire,
+  type InboxInitiative,
+  type InboxListRow,
+} from '@plannotator/core/inbox-types';
 import type { SkillCatalogEntry, SkillReferenceToken } from '@plannotator/ui/utils/skillReferences';
+import type { TaggedThreads } from './initiativePeek';
 
 export interface InitiativeTags {
   /** The live initiatives, in the order they were made. */
@@ -29,8 +40,8 @@ export interface InitiativeTags {
   rows: ReadonlyMap<string, InboxListRow>;
   /** Project names by id: the preview's "Initiative · plannotator, workspaces". */
   projects: ReadonlyMap<string, string>;
-  /** The threads a message tags each initiative in, latest first (the cards payload's `initiative_threads`). */
-  mentions: ReadonlyMap<string, readonly string[]>;
+  /** Per initiative, the latest threads a message tags it in and how many in all (the cards payload's `initiative_threads`). */
+  mentions: ReadonlyMap<string, TaggedThreads>;
   /** Read the cards again (an opened preview does, so the threads tagged since are in it). */
   refresh?: () => void;
 }
@@ -61,18 +72,22 @@ export function findHashtagTrigger(text: string, caret: number): Trigger | null 
   while (i > 0 && /[\p{L}\p{N}_-]/u.test(text[i - 1]!)) i--;
   if (i === 0 || text[i - 1] !== '#') return null;
   const start = i - 1;
-  const before = start > 0 ? text[start - 1]! : '';
-  if (before && /[\p{L}\p{N}_&/#`]/u.test(before)) return null;
+  // The store's own rule for where a tag starts, so what the list writes is a tag.
+  if (!inboxHashtagMayFollow(start > 0 ? text[start - 1]! : '')) return null;
   const query = text.slice(i, caret);
   if (query.length > 40) return null;
   return { start, query };
 }
 
-/** The initiatives a query keeps: those whose key starts with it first, then those that hold it. */
+/**
+ * The initiatives a query keeps: those whose key starts with it first, then those that hold it. A name that
+ * makes no tag ("123", "!!!") is never offered: its pick would name nothing.
+ */
 export function filterInitiatives(initiatives: readonly InboxInitiative[], query: string): InboxInitiative[] {
   const key = inboxInitiativeTagKey(query);
-  if (!key) return [...initiatives];
-  const keyed = initiatives.map((i) => ({ i, k: inboxInitiativeTagKey(i.name) }));
+  const taggable = initiatives.filter((i) => inboxInitiativeTaggable(i.name));
+  if (!key) return taggable;
+  const keyed = taggable.map((i) => ({ i, k: inboxInitiativeTagKey(i.name) }));
   return [...keyed.filter((x) => x.k.startsWith(key)), ...keyed.filter((x) => !x.k.startsWith(key) && x.k.includes(key))].map((x) => x.i);
 }
 
@@ -274,14 +289,15 @@ export function initiativeHref(id: string): string {
  */
 export function linkHashtags(text: string, initiatives: readonly InboxInitiative[]): string {
   if (initiatives.length === 0 || !text.includes('#')) return text;
+  // A markdown link's own text (`[part of #Shape](…)`): a link inside a link is none. Its destination holds no
+  // tag at all (core blanks it).
+  const linkTexts = [...text.matchAll(/\[([^\[\]\n]*)\]\(/g)].map((m) => [m.index!, m.index! + m[0].length] as const);
   let out = '';
   let last = 0;
   for (const tag of inboxHashtags(text)) {
     const initiative = inboxInitiativeOfTag(tag.key, initiatives);
     if (!initiative) continue;
-    // Already inside a markdown link's text or URL: leave it.
-    const before = text.slice(Math.max(0, tag.start - 1), tag.start);
-    if (before === '[' || before === '(') continue;
+    if (linkTexts.some(([from, to]) => tag.start > from && tag.end < to)) continue;
     out += text.slice(last, tag.start) + `[#${tag.tag}](${initiativeHref(initiative.id)})`;
     last = tag.end;
   }

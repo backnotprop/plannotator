@@ -10,7 +10,7 @@
  * `openHashtag`). On a touch screen the first tap opens the preview, a second
  * tap on the tag (or its "Open on Board") goes. No keyboard shortcut.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { createPortal } from 'react-dom';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS } from '@plannotator/ui/components/RefHoverCard';
@@ -40,6 +40,18 @@ function initiativeOf(a: HTMLAnchorElement): string | null {
 /** The previews for the tags inside `rootRef`, and the tag click's question: did a tap open it instead (then stop)? */
 export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>): { node: React.ReactNode; tapOpens: (a: Element) => boolean } {
   const [open, setOpen] = useState<Open | null>(null);
+  const peekId = `ib-tagpeek-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
+  // The tag says whether its preview is open and which it is (the markdown renderer draws the link, so this is set here).
+  useEffect(() => {
+    if (!open) return;
+    const anchor = open.anchor;
+    anchor.setAttribute('aria-expanded', 'true');
+    anchor.setAttribute('aria-controls', peekId);
+    return () => {
+      anchor.setAttribute('aria-expanded', 'false');
+      anchor.removeAttribute('aria-controls');
+    };
+  }, [open, peekId]);
   const current = useRef<Open | null>(null);
   current.current = open;
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -220,7 +232,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
   if (!initiative) return { node: null, tapOpens };
   // The thread the tag sits in is not listed under Threads: the person is already in it.
   const here = new URLSearchParams(window.location.hash.slice(1)).get('thread');
-  const model = initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id) ?? [], here);
+  const model = initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id), here);
   const container = open.anchor.closest<HTMLElement>('dialog[open], .pn-inbox') ?? document.body;
   const board = initiativeHref(initiative.id);
   const go = () => close();
@@ -229,6 +241,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
       ref={cardRef}
       // RefHoverCard's own surface (packages/ui): one family with the issue and PR cards.
       className="ib-tagpeek fixed z-[120] flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
+      id={peekId}
       role="dialog"
       aria-label={`Initiative ${initiative.name}`}
       data-tag-peek={initiative.id}
@@ -309,7 +322,11 @@ function PeekView({ name, board, model, onGo }: { name: string; board: string; m
             {model.byColumn.map((c) => (
               <li key={c.col} className={BADGE}>
                 {c.column}
-                <span className="ib-tagpeek-n">{c.count}</span>
+                {/* A no-break space, so the badge reads "In review 2" and not "In review2". */}
+                <span className="ib-tagpeek-n">
+                  {'\u00A0'}
+                  {c.count}
+                </span>
               </li>
             ))}
           </ul>

@@ -7843,5 +7843,5 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-tagpeek .ib-tagpeek-agent .ib-mk { opacity: 0.7; }
 .ib-tagpeek-row:hover .ib-tagpeek-agent .ib-mk, .ib-tagpeek-row:focus-visible .ib-tagpeek-agent .ib-mk { opacity: 0.9; }
 /* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
-.pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 5px; font-size: 12px; font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
-.ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; }
+.pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: 12px; font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
+.ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }

@@ -57,16 +57,22 @@ test('cards past the cap read "+N more"; all done is one Done badge; none is emp
   expect([empty.cards, empty.items, empty.byColumn, empty.mentions, empty.updated]).toEqual([0, [], [], [], null]);
 });
 
-test('threads: the tagged ones latest first, minus those a card of it links and the one being read; the rest "+N more", counted from ids', () => {
+test('threads: the cards read\'s few latest (no card of it links them), minus the one being read; "+N more" from its total', () => {
   const cards = [card('todo', 'todo', { threads: ['t-linked'] }), card('gone', 'dropped', { threads: ['t-cancelled-card'] })];
-  const ids = ['t-linked', 't-here', 't-cancelled-card', 't-1', 't-2', 't-3', 't-4'];
-  // The cards read sends a row only for the few the preview lists: t-4 has an id and no row.
-  const rows = new Map(['t-linked', 't-here', 't-cancelled-card', 't-1', 't-2', 't-3'].map((id) => [id, row(id)] as const));
-  const model = initiativePeekModel('ini_a', cards, rows, new Map(), ids, 't-here');
+  const rows = new Map(['t-here', 't-cancelled-card', 't-1', 't-2'].map((id) => [id, row(id)] as const));
+  // The server sends the 4 latest unlinked and how many there are in all (9, the one being read among them).
+  const sent = { threads: ['t-here', 't-cancelled-card', 't-1', 't-2'], total: 9 };
+  const model = initiativePeekModel('ini_a', cards, rows, new Map(), sent, 't-here');
   // A cancelled card's thread is not "linked": the card is not on the Board.
   expect(model.mentions.map((t) => t.id)).toEqual(['t-cancelled-card', 't-1', 't-2'].slice(0, PEEK_THREADS));
   expect(model.mentions[0]!.title).toBe('About t-cancelled-card');
-  expect(model.moreMentions).toBe(2);
+  expect(model.moreMentions).toBe(9 - 1 - 3);
+  // Read from another thread (the Board's card panel has none): the one being read is not taken off.
+  expect(initiativePeekModel('ini_a', cards, rows, new Map(), sent, null).moreMentions).toBe(9 - 3);
+  // A card linking a sent thread since the read: it leaves Threads and the count.
+  const since = [...cards, card('new', 'todo', { threads: ['t-1'] })];
+  const after = initiativePeekModel('ini_a', since, rows, new Map(), sent, 't-here');
+  expect([after.mentions.map((t) => t.id), after.moreMentions]).toEqual([['t-cancelled-card', 't-2'], 9 - 1 - 1 - 2]);
   // An older Inbox sends no `initiative_threads`: no threads.
   expect(initiativePeekModel('ini_a', cards, rows).mentions).toEqual([]);
 });

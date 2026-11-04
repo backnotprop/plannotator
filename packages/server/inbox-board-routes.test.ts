@@ -381,7 +381,7 @@ describe("the Board's initiatives over the routes (approval \"board-initiatives\
 });
 
 describe("# tags in the cards read (approval \"board-hashtags\")", () => {
-  test("`initiative_threads`: every tagged thread latest first, with rows only for the few the preview lists that no card of it links", async () => {
+  test("`initiative_threads`: the few latest tagged threads no card of it links, with their rows, and the total", async () => {
     const { server, base, project } = await world();
     const store = server.store;
     const shape = store.createInitiative({ name: "Shape", by: { kind: "person" } });
@@ -391,11 +391,12 @@ describe("# tags in the cards read (approval \"board-hashtags\")", () => {
     store.setCardInitiative(card.id, shape.id, { kind: "person" });
     const tagged = Array.from({ length: 7 }, (_, i) => store.sendMessage({ project_id: project.id, author: agent, body: `Note ${i} for #shape`, thread: `t${i}` }).message.thread_id);
     store.sendMessage({ project_id: project.id, author: agent, body: "Only `#Shape` in code", thread: "code" });
-    type Read = { initiative_threads?: Record<string, string[]>; threads: Record<string, unknown> };
+    type Read = { initiative_threads?: Record<string, { threads: string[]; total: number }>; threads: Record<string, unknown> };
     const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as Read;
-    expect(model.initiative_threads).toEqual({ [shape.id]: [...[...tagged].reverse(), linked.thread_id] });
-    // Rows: the linked card's own thread, and the 4 latest unlinked tagged threads (3 shown + the one being read).
+    // Bounded: the 4 latest unlinked tagged threads (3 shown + the one being read), and how many in all.
     const latest = [...tagged].reverse();
+    expect(model.initiative_threads).toEqual({ [shape.id]: { threads: latest.slice(0, 4), total: 7 } });
+    // Rows: the linked card's own thread, and those 4.
     expect(Object.keys(model.threads).sort()).toEqual([linked.thread_id, ...latest.slice(0, 4)].sort());
   });
 });
