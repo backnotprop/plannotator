@@ -12,7 +12,7 @@
  */
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
 import { resolveCodeNavHover, validateCodeNavRequest, type CodeNavRequest } from "../generated/code-nav.ts";
 import { createShapeStore, type ShapeStore } from "../generated/shape/store.ts";
@@ -76,7 +76,7 @@ export function createPiShapeRoutes(options: { dataDir: string; heartbeatMs?: nu
 			if (url.pathname !== "/api/shapes" && !url.pathname.startsWith("/api/shapes/")) return false;
 			const origin = typeof req.headers.origin === "string" ? req.headers.origin : null;
 			if (!isSameOriginOrNoOrigin(origin, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
-				sendJson(res, 403, { error: "Cross-origin requests are not accepted.", code: "cross_origin" });
+				sendJson(res, 403, crossOriginRefusalBody());
 				return true;
 			}
 			if (url.pathname === SHAPE_EVENTS_PATH) {
