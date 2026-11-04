@@ -10,8 +10,8 @@
  *    Board (under Inbox when Board is off) with the changed count; the grid
  *    lists every board and Find narrows it;
  *  - the thread header's Pebble (a dot while it changed) opens the board over
- *    the thread and the board's own Pebble closes it, the board's Thread tab shows the
- *    thread's messages, and Esc closes it;
+ *    the thread, the board's Thread tab shows the thread's messages, and its
+ *    × ("Close Shape"), Esc or Back closes it;
  *  - a drawing's `#…` link never changes the window's hash, and an https link
  *    opens a new tab (never this one);
  *  - a change waits for the agent until `shape read --notes` takes it, then
@@ -140,13 +140,17 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   expect(read.stdout).toContain('Make it Thursday');
   await expect(layer.locator('.shp-pill.waits')).toHaveCount(0);
 
-  // The board lies over the thread, its header's Pebble where the thread's was: that one closes it; Esc does too.
+  // The board lies over the thread: its × closes it, and so do Esc and Back.
   await layer.getByRole('button', { name: 'Close Shape' }).click();
   await expect(layer).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.snooze}$`));
   await pebble.click();
   await expect(layer).toBeVisible();
   await page.keyboard.press('Escape');
+  await expect(layer).toHaveCount(0);
+  await pebble.click();
+  await expect(layer).toBeVisible();
+  await page.goBack();
   await expect(layer).toHaveCount(0);
 
   // The grid: every board, Find narrows it, a card opens its board over its thread.
