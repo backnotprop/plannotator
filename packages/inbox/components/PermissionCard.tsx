@@ -361,7 +361,7 @@ export function PermissionCard({
   terminal: PermissionTerminal | null;
   /** The session already switched to Full permissions from an earlier prompt: no confirm again. */
   fullUsed: boolean;
-  /** A tailnet guest's page (`tailnetGuest`): no Stop in the header, as the server answers it `owner_only`. */
+  /** A tailnet guest's page (`tailnetGuest`): no Stop in the header and no answers, as the server refuses both. */
   guest?: boolean;
   onChanged: () => void | Promise<void>;
 }) {
@@ -507,7 +507,7 @@ export function PermissionCard({
         </p>
         <RequestBody read={read} kind={kind} phone={phone} />
       </div>
-      <footer className="pc-foot">
+      <footer className="pc-foot" hidden={guest}>
         {mode === 'reason' ? (
           <Reason who={agentNameOf(message.author, true)} busy={busy} onDeny={(text) => void answer(null, text)} onCancel={() => setMode('answers')} />
         ) : mode === 'confirmFull' ? (
