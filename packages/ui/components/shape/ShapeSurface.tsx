@@ -111,6 +111,9 @@ interface Target {
  */
 export const SHAPE_CHANGE_NOT_SENT = "Your change wasn't saved. Press Change it to try again.";
 
+/** An Ask the host did not take: the question stays in the Ask panel with this line (the Inbox Ask's words, AskChat). */
+export const SHAPE_ASK_NOT_SENT = 'That question did not go through. Try again.';
+
 const key = (view: string, id: string) => `${view}/${id}`;
 
 function marksFor(all: MarkState, view: ShapeViewId): MarkState {
@@ -169,7 +172,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const [panel, setPanel] = useState<ShapePanelTab | null>(initialPanel ?? null);
   const [lastTab, setLastTab] = useState<ShapePanelTab>('ask');
   const [answerReady, setAnswerReady] = useState(false);
-  const [streams, setStreams] = useState<Record<string, { prompt: string; scope: AIChatEntry['question']['scope']; text: string; at: number; done?: boolean }>>({});
+  const [streams, setStreams] = useState<Record<string, { prompt: string; scope: AIChatEntry['question']['scope']; text: string; at: number; done?: boolean; failed?: boolean }>>({});
   const [msgFlash, setMsgFlash] = useState<string | null>(null);
   const panelRef = useRef(panel);
   panelRef.current = panel;
@@ -408,15 +411,22 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     openPanel('ask');
     const temp = `pending-${Date.now()}`;
     setStreams((s) => ({ ...s, [temp]: { prompt: input.text, scope, text: '', at: Date.now() } }));
+    let failed = false;
     try {
       const result = await host.ask(id, { ...input, kind: 'ask', v: v.n }, (text) => setStreams((s) => (s[temp] ? { ...s, [temp]: { ...s[temp]!, text } } : s)));
       upsertNote(result.question);
       if (result.answer) upsertNote(result.answer);
+    } catch {
+      // Not taken: the question stays in the panel, and says so.
+      failed = true;
+      setStreams((s) => (s[temp] ? { ...s, [temp]: { ...s[temp]!, text: '', failed: true } } : s));
     } finally {
-      setStreams((s) => {
-        const { [temp]: _gone, ...rest } = s;
-        return rest;
-      });
+      if (!failed) {
+        setStreams((s) => {
+          const { [temp]: _gone, ...rest } = s;
+          return rest;
+        });
+      }
       if (panelRef.current !== 'ask') setAnswerReady(true);
     }
   }, [host, id, finished, openPanel, upsertNote]);
@@ -594,12 +604,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     for (const [tid, s] of Object.entries(streams)) {
       out.push({
         question: { id: tid, prompt: s.prompt, createdAt: s.at, scope: s.scope },
-        response: { questionId: tid, text: s.text, isStreaming: true, createdAt: s.at },
+        response: { questionId: tid, text: s.text, isStreaming: !s.failed, createdAt: s.at, ...(s.failed ? { error: SHAPE_ASK_NOT_SENT } : {}) },
       });
     }
     return out;
   }, [notes, streams, session.state, agent]);
-  const streaming = Object.keys(streams).length > 0;
+  const streaming = Object.values(streams).some((s) => !s.failed);
 
   const provider = useMemo<AIProviderOption[]>(() => [{
     id: 'shape-session',

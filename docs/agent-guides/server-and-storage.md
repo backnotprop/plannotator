@@ -376,7 +376,7 @@ Shape's page for people without the Inbox (`plannotator shape open`; see "Shape"
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/` | GET | The page (`apps/hook/dist/shape.html`, the Inbox window's CSP and `X-Frame-Options: DENY`) |
+| `/` | GET / HEAD | The page: `shape.html.gz`, embedded, sent as is with `Content-Encoding: gzip` when `Accept-Encoding` takes gzip, otherwise unzipped once (`Vary: Accept-Encoding` either way); the Inbox window's CSP and `X-Frame-Options: DENY` |
 | `/api/shape-server` | GET | `{ shape_server: 1, version, serverSession, on }`: the CLI's reuse check and the page's `serverSession`. Another site: `403` |
 | `/api/shapes`, `/api/shapes/*` | GET / POST | The Inbox's Shape routes above, the same handler (`createBunShapeRoutes`). Off (config `inboxShape` not true, read per request): `404` as if absent. Another site: `403`, reads included. A POST carrying another server's `serverSession`: `409 session_mismatch`, nothing saved |
 
