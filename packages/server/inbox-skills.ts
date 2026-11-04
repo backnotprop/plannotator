@@ -22,6 +22,7 @@
  * (contract 7.46, 7.47). Agents never use these: MCP has no skills field.
  */
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { listReferenceSkills } from "./review-skill-loader";
 import { handleReferenceSkillContent, handleReferenceSkills } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
@@ -44,8 +45,8 @@ function noStore(res: Response): Response {
  * A skill of the person's own with the same name wins: the built-in is left
  * out. Off, the catalog is exactly the discovered skills.
  */
-export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills): Response {
-  if (!codeReview) return handleReferenceSkills();
+export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false): Response {
+  if (!codeReview && !shape) return handleReferenceSkills();
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -53,7 +54,9 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
     skills = [];
   }
   const own = new Set(skills.map((skill) => skill.name));
-  const builtins = INBOX_REVIEW_SKILLS.filter((skill) => !own.has(skill.name)).map((skill) => ({
+  // Shape's `/shape` (approval "shape-living-board") while Shape is on, beside the review skills while Code review is.
+  const offered = [...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : [])];
+  const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT,
     description: skill.description,
@@ -63,9 +66,9 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
 }
 
 /** The answer for a skills path, or null for any other path. `codeReview`: the person's Code review switch. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean } = {}): Response | null {
+export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; shape?: boolean } = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true) : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.shape === true) : handleReferenceSkillContent(req));
 }

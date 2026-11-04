@@ -129,7 +129,7 @@ const CONFIG = {
   // HTML inside an SVG's foreignObject (a label in a box) is kept.
   HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ADD_ATTR: ['pathLength', 'target'],
-  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select'],
+  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select', 'area', 'map'],
   // Nothing may open in the top layer: it sits over the whole app, past the frame's containment and clip.
   FORBID_ATTR: [...SHAPE_DROPPED_ATTRS, ...SHAPE_TOP_LAYER_ATTRS],
 };
@@ -226,7 +226,7 @@ const noop = () => {};
 const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
 
 export function ShapeDrawn(props: ShapeDrawnProps) {
-  const { drawn, phase = 'drawn', skip = false, pinpoint = false, marks = NO_MARKS, refs = [], refHover = null, refFlash = null } = props;
+  const { drawn, phase = 'drawn', skip = false, pinpoint = false, marks = NO_MARKS, refHover = null, refFlash = null } = props;
   const systemReduce = useReducedMotion();
   const reduce = props.reduce ?? systemReduce;
   const frameRef = useRef<HTMLDivElement>(null);
@@ -372,6 +372,25 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       if (b) {
         e.stopPropagation();
         openBubble(b);
+        return;
+      }
+      // A drawing's link never moves the page it sits on: `#…` scrolls inside the drawing (never the host's
+      // hash, which is the Inbox's route), an http(s) link opens in a new tab, and anything else does nothing.
+      // Any element with an href is held (an `<area>` the store and sanitizer refuse would still be caught); only a
+      // link (`<a>`, `<area>`) is followed, the way below. Another element's href (`<use href="#icon">`) moves nothing.
+      const withHref = path.filter((t): t is Element => t instanceof Element && (t.hasAttribute('href') || t.hasAttribute('xlink:href')));
+      if (withHref.length) e.preventDefault();
+      const link = withHref.find((t) => t.localName === 'a' || t.localName === 'area');
+      if (link) {
+        const href = (link.getAttribute('href') ?? link.getAttribute('xlink:href') ?? '').trim();
+        if (href.startsWith('#')) {
+          const id = decodeURIComponent(href.slice(1));
+          const to = id ? (root as ShadowRoot).getElementById?.(id) : null;
+          to?.scrollIntoView({ block: 'nearest', behavior: handlers.current.reduce ? 'auto' : 'smooth' });
+        } else {
+          const url = shapeLinkUrl(href);
+          if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        }
         return;
       }
       const h = handlers.current;

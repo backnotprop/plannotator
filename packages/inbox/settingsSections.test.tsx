@@ -418,7 +418,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  expect(rows).toEqual(['Board', 'Checklist', 'Code review']);
+  expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -458,6 +458,34 @@ test.skipIf(!hasDom)('Capabilities: the Code review switch, off by default, save
     await until(() => switchNamed(el, 'Code review')!.getAttribute('aria-checked') === 'false', 'the switch off');
   } finally {
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ code_review: { on: false } }));
+  }
+});
+
+// Shape (approval "shape-inbox-placement"): off by default, last in the card, saving config.json `inboxShape`;
+// the sidebar's Shape row never shows while it is off (it needs 3 or more boards even when on).
+test.skipIf(!hasDom)('Capabilities: the Shape switch, off by default, saves inboxShape to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxShape?: boolean }).inboxShape;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
+  expect(el.querySelector('[data-settings-shape]')?.contains(switchNamed(el, 'Shape'))).toBe(true);
+  expect(switchNamed(el, 'Shape')!.getAttribute('aria-checked')).toBe('false');
+  expect(config()).toBeUndefined();
+  try {
+    act(() => switchNamed(el, 'Shape')!.click());
+    await until(() => config() === true, 'config.json inboxShape true');
+    await until(() => switchNamed(el, 'Shape')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    expect(el.querySelector('[data-shape-nav]')).toBeNull();
+    act(() => switchNamed(el, 'Shape')!.click());
+    await until(() => config() === false, 'config.json inboxShape false');
+    await until(() => switchNamed(el, 'Shape')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ shape: { on: false } }));
   }
 });
 

@@ -245,3 +245,21 @@ button.shp-hb:hover { background: var(--muted); }
   .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
   .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
 }
+
+/* ── the grid: Shape's landing (approved "shape-landing-grid") ── */
+.shp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 18px 16px; padding: 4px 20px 80px; align-content: start; }
+.shp-gcard { min-width: 0; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent); cursor: pointer; overflow: hidden; transition: box-shadow .15s; color: var(--foreground); }
+.shp-gcard:hover { box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent), 0 6px 18px -10px color-mix(in oklab, var(--foreground) 30%, transparent); }
+.shp-gcard:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
+.shp-thumb { position: relative; overflow: hidden; pointer-events: none; }
+.shp-thumb-in { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.shp-gprev { aspect-ratio: 16 / 10; background: color-mix(in oklab, var(--background) 92%, var(--muted)); border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+.shp-gprev .shp-drawn { --shp-paper: transparent; }
+.shp-glab { padding: 9px 12px 11px; }
+.shp-gt { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 14px; font-weight: 500; }
+.shp-gt span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex: none; }
+.shp-gm { margin-top: 2px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-grid-empty { padding: 48px 20px; color: var(--muted-foreground); font-size: 14px; text-align: center; }
+@container (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }
+@media (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }

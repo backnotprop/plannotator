@@ -28,12 +28,13 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { inboxProjectKey } from "../inbox/project-key";
 import {
   checkShapeBoard,
@@ -136,6 +137,12 @@ export interface ShapeStore {
   markDelivered(id: string, noteIds: readonly string[]): ShapeNote[];
   /** A file under the shape's files/ folder, path-guarded; null when absent or outside. */
   filePath(id: string, name: string): string | null;
+  /**
+   * Someone holds the store's lock (or this shape's). A server awaits this
+   * clearing before it writes, so the store's blocking wait never stalls its
+   * event loop behind an agent's CLI.
+   */
+  locked(id?: string | null): boolean;
 }
 
 // The lock is a file holding its owner's token. A lock older than
@@ -659,8 +666,21 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     const rel = name.replace(/^files\//, "");
     if (!rel || rel.includes("/") || rel.includes("\\") || rel.startsWith(".")) return null;
     const path = join(folder, "files", rel);
-    return existsSync(path) ? path : null;
+    // A link planted in files/ never leads out: the real file must sit in the real files/ folder, and be a file.
+    try {
+      const real = realpathSync(path);
+      if (dirname(real) !== realpathSync(join(folder, "files")) || !statSync(real).isFile()) return null;
+      return real;
+    } catch {
+      return null;
+    }
   }
 
-  return { dir, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
+  function locked(id?: string | null): boolean {
+    if (existsSync(join(dir, ".lock"))) return true;
+    const folder = id ? shapeDir(id) : null;
+    return !!folder && existsSync(join(folder, ".lock"));
+  }
+
+  return { dir, locked, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
 }

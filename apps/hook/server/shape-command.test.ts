@@ -136,6 +136,25 @@ describe("shape read", () => {
   });
 });
 
+describe("shape answer", () => {
+  test("the agent answers the person's Ask; the board's chat has it under the question, from that session", async () => {
+    const w = world({ PI_SESSION_ID: "sess-mine" });
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "whistles once"))).out);
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    const person = createShapeStore({ dataDir });
+    person.addNote(id, { kind: "ask", v: 1, text: "Why once?" });
+    const [ask] = JSON.parse((await w.run("read", id, "--notes")).out).notes;
+    expect(ask.kind).toBe("ask");
+
+    expect((await w.run("answer", id, "--re", ask.id, "--text", "So it never nags.")).code).toBe(0);
+    const answer = person.notes(id).find((n) => n.kind === "answer");
+    expect(answer).toMatchObject({ re: ask.id, text: "So it never nags.", from: { host: "pi", id: "sess-mine" } });
+    // An answer needs the Ask's id and words.
+    expect((await w.run("answer", id, "--text", "x")).code).toBe(2);
+  });
+});
+
 describe("shape done and drawing", () => {
   test("a finished shape refuses drawing and new versions", async () => {
     const w = world();
@@ -159,4 +178,61 @@ describe("parseShapeCommand", () => {
     expect(parseShapeCommand(["update", "--file", "b.json", "--through", "../../x"])).toMatchObject({ ok: false, error: "--through takes an Inbox message id (msg_…)." });
     expect(parseShapeCommand(["update", "--file", "b.json", "--through", "msg_01JC0000000000000000000000"])).toMatchObject({ ok: true });
   });
+});
+
+describe("the Shape switch, through the entrypoint", () => {
+  // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
+  // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
+  // says it is off and exits 1, and nothing is written. On, the same calls work.
+  test("off: one line and exit 1, help included, nothing stored; on: help and update work", async () => {
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+    const { existsSync, readdirSync } = await import("node:fs");
+    const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+    const { SHAPE_OFF_TEXT } = await import("./shape-command");
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-gate-")));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    const project = join(root, "kettle");
+    mkdirSync(join(dataDir), { recursive: true });
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(root, "board.json"), JSON.stringify({ title: "Kettle", claim: "Built.", views: { picture: { html: "<p>One whistle</p>" } } }));
+    const stubbed = stubHookDistHtml();
+    const entry = join(import.meta.dir, "index.ts");
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER: "1",
+      NO_ANON_PING: "1",
+      PLANNOTATOR_UPDATE_CHECK: "0",
+      PLANNOTATOR_INBOX_CONNECT: "0",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+    };
+    const run = async (...argv: string[]) => {
+      const proc = Bun.spawn(["bun", "run", entry, "shape", ...argv], { cwd: project, env, stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { stdout, stderr, code };
+    };
+    try {
+      for (const config of [null, { inboxShape: false }]) {
+        if (config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
+        for (const argv of [["--help"], ["update", "--file", join(root, "board.json"), "--project", project], ["list"]]) {
+          const r = await run(...argv);
+          expect(r.code).toBe(1);
+          expect(r.stdout).toBe("");
+          expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
+        }
+        expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+      }
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
+      const help = await run("--help");
+      expect(help.code, help.stderr).toBe(0);
+      expect(`${help.stdout}${help.stderr}`).toContain("shape update");
+      const made = await run("update", "--file", join(root, "board.json"), "--project", project);
+      expect(made.code, made.stderr).toBe(0);
+      expect(JSON.parse(made.stdout).v).toBe(1);
+    } finally {
+      removeStubbedHtml(stubbed);
+    }
+  }, 60_000);
 });

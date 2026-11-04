@@ -196,13 +196,18 @@ describe('review entry assets', () => {
           ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx'];
+    // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`.
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
     // The surface's reader (one section per screen) and its diagram engine wait the same way.
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
+    expect(read('packages/inbox/shape/ShapeParts.tsx')).toContain("lazy(() => import('#shape-board'))");
+    // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
+    const board = /^import\s+(?!type\b)[^;]*from\s+['"]@plannotator\/ui\/components\/shape(?:\/ShapeSurface)?['"]/m;
+    expect(walk('packages/inbox').filter((path) => path !== 'packages/inbox/shape/ShapeBoard.tsx' && board.test(read(path)))).toEqual([]);
   });
 
   // Inbox search's palette (the approved "inbox-search" design: "the palette

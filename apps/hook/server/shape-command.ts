@@ -6,6 +6,7 @@
  *   update   store a version of a board (the first one creates the shape)
  *   read     the latest version, and the notes waiting for the agent
  *   drawing  say "I'm drawing": the board shows it until the next version (10 min at most)
+ *   answer   answer the person's Ask (the board shows it under the question)
  *   done     finish a shape
  *   list     the shapes, newest change first
  *
@@ -28,8 +29,11 @@ import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
-type Op = "update" | "read" | "drawing" | "done" | "list";
-const OPS: readonly Op[] = ["update", "read", "drawing", "done", "list"];
+/** DRAFT. What `plannotator shape` (help included) says while Shape is off. */
+export const SHAPE_OFF_TEXT = "shape_off: Shape is off. The person turns it on in the Plannotator Inbox: Settings → Capabilities → Shape.";
+
+type Op = "update" | "read" | "drawing" | "answer" | "done" | "list";
+const OPS: readonly Op[] = ["update", "read", "drawing", "answer", "done", "list"];
 
 export interface ParsedShapeCommand {
   op: Op;
@@ -43,21 +47,25 @@ export interface ParsedShapeCommand {
   notes: boolean;
   all: boolean;
   json: boolean;
+  /** answer: the Ask it answers (`shn_…`), and the words. */
+  re: string | null;
+  text: string | null;
 }
 
-const VALUE_FLAGS = new Set(["--file", "--id", "--base", "--thread", "--through", "--project", "--version"]);
+const VALUE_FLAGS = new Set(["--file", "--id", "--base", "--thread", "--through", "--project", "--version", "--re", "--text"]);
 const ALLOWED: Record<Op, readonly string[]> = {
   update: ["--file", "--id", "--base", "--thread", "--through", "--project", "--json"],
   read: ["--version", "--notes", "--project", "--json"],
   drawing: ["--project", "--json"],
+  answer: ["--re", "--text", "--project", "--json"],
   done: ["--project", "--json"],
   list: ["--all", "--json"],
 };
 
 export function parseShapeCommand(argv: readonly string[]): { ok: true; command: ParsedShapeCommand } | { ok: false; error: string } {
   const op = argv[0] as Op | undefined;
-  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, done or list." };
-  const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false };
+  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done or list." };
+  const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false, re: null, text: null };
   const positional: string[] = [];
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -80,6 +88,8 @@ export function parseShapeCommand(argv: readonly string[]): { ok: true; command:
       else if (arg === "--thread") out.thread = value;
       else if (arg === "--through") out.through = value;
       else if (arg === "--project") out.project = value;
+      else if (arg === "--re") out.re = value;
+      else if (arg === "--text") out.text = value;
     } else if (arg === "--notes") out.notes = true;
     else if (arg === "--all") out.all = true;
     else if (arg === "--json") out.json = true;
@@ -92,6 +102,9 @@ export function parseShapeCommand(argv: readonly string[]): { ok: true; command:
   } else {
     if (positional.length > 1) return { ok: false, error: `shape ${op} takes one shape id at most.` };
     out.id = positional[0] ?? null;
+  }
+  if (op === "answer" && (!out.re || !out.text?.trim())) {
+    return { ok: false, error: "shape answer needs --re <shn_…> (the Ask, from `shape read --notes`) and --text '<your answer>'." };
   }
   for (const [flag, value] of [["--thread", out.thread], ["--through", out.through]] as const) {
     if (value !== null && !/^msg_[0-9A-HJKMNP-TV-Z]{26}$/.test(value)) return { ok: false, error: `${flag} takes an Inbox message id (msg_…).` };
@@ -261,6 +274,15 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     const next = store.drawing(id);
     if (c.json) await say(JSON.stringify({ id, drawing: next?.drawing ?? null }));
     else await say(`${id}: drawing until the next version (at most 10 minutes).`);
+    return 0;
+  }
+
+  if (c.op === "answer") {
+    if (!session) return refuse("no_session", "shape answer runs inside an agent session (the board shows who answered).");
+    const result = store.answer(id, { re: c.re, text: c.text!.trim(), from: session });
+    if (!result.ok) return refuse(result.code, result.code === "invalid" ? result.errors.join("; ") : result.message);
+    if (c.json) await say(JSON.stringify({ id, note: result.note }));
+    else await say(`${id}: answered. The board shows it under the question.`);
     return 0;
   }
 

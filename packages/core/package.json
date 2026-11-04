@@ -54,6 +54,7 @@
     "./inbox-format": "./inbox-format.ts",
     "./inbox-snooze": "./inbox-snooze.ts",
     "./shape": "./shape.ts",
+    "./shape-skill": "./shape-skill.ts",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
     "./diagram-anchor": "./diagram-anchor.ts",
