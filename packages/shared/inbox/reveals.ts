@@ -35,11 +35,12 @@ export interface RevealEntry {
 export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
-  // The owner: "ok board can be 3 days, snooze 2". The claim turns the Board on (inboxBoard unset -> true).
+  // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the
+  // dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
   // The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and the
-  // Board's 5 threads; the Board need not be on. The claim turns the Checklist on (inboxSteps unset -> true, never
-  // false), then `ChecklistIntro` opens. Until the claim no word of it reaches an agent.
+  // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
+  // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
 ];
 

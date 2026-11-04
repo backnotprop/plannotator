@@ -2191,7 +2191,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 label: 'Selected text',
                 text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
                 sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
-                ...selectionSourceLines(blocks, hookCommentPopover.blockIds ?? []),
+                ...selectionSourceLines(
+                  blocks,
+                  hookCommentPopover.blockIds ?? [],
+                  hookCommentPopover.selectedText,
+                  hookCommentPopover.startOffset,
+                ),
               }}
             />
           )}

@@ -581,6 +581,32 @@ export function computeInlineDiff(
 }
 
 /**
+ * Longest pair of chunks a code document's modified block word-diffs inline.
+ * Past it the diff view stacks old over new, so a rewritten block of a large
+ * config file never runs one big word diff on the main thread.
+ */
+export const CODE_INLINE_DIFF_LIMIT = 8 * 1024;
+
+/**
+ * Word-level tokens for a modified block of a config or data file
+ * (`renderAs: "code"`), or null when the pair is too long to diff inline.
+ *
+ * `computeInlineDiff` gates on the markdown parse (a `#` comment line is a
+ * heading there, and its tokens drop the `#`), so a code document diffs the
+ * raw text instead: every character of both sides survives in the tokens.
+ */
+export function computeCodeInlineDiff(oldText: string, newText: string): InlineDiffToken[] | null {
+  if (oldText.length + newText.length > CODE_INLINE_DIFF_LIMIT) return null;
+  // A chunk ends with its line's newline; diffing without it keeps a token from
+  // straddling the end of the block.
+  const strip = (text: string) => text.replace(/\n$/, "");
+  return diffWordsWithSpace(strip(oldText), strip(newText)).map((c) => ({
+    type: c.added ? "added" : c.removed ? "removed" : "unchanged",
+    value: c.value,
+  }));
+}
+
+/**
  * Compute the diff between two plan versions.
  *
  * Groups consecutive remove+add changes into "modified" blocks for
