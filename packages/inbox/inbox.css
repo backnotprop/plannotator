@@ -433,11 +433,15 @@ button.ib-mut { border-radius: 6px; }
 /* Floating (the peek, a phone's sheet), the sidebar keeps room on its right; docked, the panes' gutter is that room. */
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
 /* Workspaces' TaterSpriteSidebar: 24 frames of 77x88 at 2x shown 44 px high
-   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion. */
-.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; transform: scaleX(-1); animation: ib-tater-sidebar 3.5s steps(24) infinite; }
-@keyframes ib-tater-sidebar { to { background-position: -924px 0; } }
+   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion.
+   The strip slides inside a one-frame window by `transform`, so the compositor runs the loop:
+   no style or paint work on the page each frame (a `background-position` loop restyled 60 times a second).
+   The strip takes no margin: `.ib-brand span` below gives spans a -4 px one. */
+.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; overflow: hidden; transform: scaleX(-1); }
+.ib-brand .ib-tater-strip { display: block; margin-left: 0; width: 924px; height: 44px; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; animation: ib-tater-sidebar 3.5s steps(24) infinite; }
+@keyframes ib-tater-sidebar { to { transform: translateX(-924px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ib-brand .ib-tater { animation: none; }
+  .ib-brand .ib-tater-strip { animation: none; }
 }
 .ib-brand b { font-weight: 650; font-size: var(--ib-fs-15, 15px); letter-spacing: -0.005em; }
 .ib-brand span { color: var(--muted-foreground); font-weight: 500; font-size: var(--ib-fs-15, 15px); margin-left: -4px; }
@@ -2352,6 +2356,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-opt .ib-mk { margin-top: 2px; }
 .ib-opt .ib-t { display: block; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
 .ib-opt .ib-d { display: block; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A named session's option (Send to another session, issue #2450): the label on one line, cut with "…". */
+.ib-opt .ib-opt-txt { flex: 1; min-width: 0; }
+.ib-opt .ib-t[data-session-label] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-opt[data-ended] { cursor: default; opacity: 0.55; }
 .ib-opt[data-ended]:hover { background: none; }
 /* A linked machine that is away (asleep, or needing an update): its rows greyed as an ended session's option is, and one
@@ -2739,6 +2746,20 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-fline .ib-mk.ib-big { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); }
 .ib-fline .ib-mk.ib-big > svg, .ib-fline .ib-mk.ib-big > img { width: var(--ib-mark-24-g); height: var(--ib-mark-24-g); }
 .ib-fl-nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A named session's author (issue #2450): "Claude Code · Fix login redirect", the label quieter (the secondary colour,
+   the meta size, never bold, an unread head included). The agent's name never shrinks; the label gives way with "…"
+   (its own colour), and the whole of it is on hover. Flex, so the "…" is the label's; `pre` keeps the dot's spaces. */
+.pn-inbox .ib-fl-nm[data-session-label] { display: flex; align-items: baseline; min-width: 0; }
+.ib-fl-nm[data-session-label] > .ib-fl-agent { flex: none; }
+.ib-fl-nm[data-session-label] > .ib-fl-lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; }
+.ib-fl-lbl > .ib-fl-lsep { white-space: pre; }
+/* Under an open head's fold button the name takes the pointer (its hover shows the whole label; a click folds, Thread.tsx). */
+.ib-fline > .ib-fl-hit ~ .ib-fl-nm[data-session-label] { pointer-events: auto; cursor: pointer; }
+/* A thread a named session wrote in: the name column takes a label's room, on every head alike so they line up
+   (34% of the thread's width, about 191 px in a 561 px thread, at most 288 px). The narrow thread below has no such column. */
+@container ib-thread (min-width: 561px) {
+  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px min(34cqi, 288px) minmax(0, 1fr) auto minmax(66px, auto); }
+}
 .ib-fl-sn { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-fl-sn b { font-weight: 600; color: var(--foreground); }
 .ib-fl-arr { opacity: 0.7; }

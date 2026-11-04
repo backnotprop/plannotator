@@ -1,5 +1,6 @@
 import type { InboxParticipant } from '@plannotator/core/inbox-types';
 import { HostMark } from '../icons';
+import { labelOf, shortLabel, useSessionLabels, type SessionLabels } from '../sessionLabels';
 import { agentName } from '../tags';
 import { RowTip } from './RowTip';
 
@@ -19,11 +20,16 @@ import { RowTip } from './RowTip';
 /** A wide row draws up to three hosts' tiles; past that two. */
 export const ROW_AGENT_MARKS = 3;
 
+/** The longest session label the row's words carry, in characters; a longer one is cut in the middle. */
+export const ROW_LABEL_MAX = 32;
+
 /** One host in the row: its tile, and how many of its sessions are in the thread. */
 export interface RowAgentGroup {
   host: string | null;
   name: string;
   sessions: number;
+  /** The labels of its sessions that have one (issue #2450), first to join first; absent or empty: none named. */
+  labels?: string[];
 }
 
 /**
@@ -32,14 +38,22 @@ export interface RowAgentGroup {
  * a thread the person started). Hosts are told apart by their names, so two spellings of one host
  * (`claude`, `claude-code`) are one tile.
  */
-export function rowAgentGroups(participants: readonly InboxParticipant[] | undefined, agent: { kind: string; host?: string | null }): RowAgentGroup[] {
-  const sessions = participants && participants.length > 0 ? participants : [{ host: agent.kind === 'agent' ? (agent.host ?? null) : null }];
+export function rowAgentGroups(
+  participants: readonly InboxParticipant[] | undefined,
+  agent: { kind: string; host?: string | null; session?: string | null },
+  labels: SessionLabels = {},
+): RowAgentGroup[] {
+  const sessions: readonly { host: string | null; session?: string | null }[] =
+    participants && participants.length > 0 ? participants : [{ host: agent.kind === 'agent' ? (agent.host ?? null) : null, session: agent.kind === 'agent' ? (agent.session ?? null) : null }];
   const groups: RowAgentGroup[] = [];
   for (const session of sessions) {
     const name = agentName(session.host);
+    const label = labelOf(labels, session.session);
     const group = groups.find((g) => g.name === name);
-    if (group) group.sessions++;
-    else groups.push({ host: session.host, name, sessions: 1 });
+    if (group) {
+      group.sessions++;
+      if (label) group.labels = [...(group.labels ?? []), label];
+    } else groups.push({ host: session.host, name, sessions: 1, ...(label ? { labels: [label] } : {}) });
   }
   return groups;
 }
@@ -53,9 +67,20 @@ export function shownAgentGroups(groups: readonly RowAgentGroup[]): { shown: rea
   return { shown, more: groups.reduce((n, g) => n + g.sessions, 0) - shown.length };
 }
 
-/** Every agent in words: "Claude Code, OpenCode and Codex", "2 Claude Code sessions". */
+/**
+ * Every agent in words: "Claude Code, OpenCode and Codex", "2 Claude Code sessions". A named session says its
+ * label (issue #2450): "Fix login redirect (Claude Code)", "3 Claude Code sessions (Fix login redirect, Docs pass,
+ * 1 unnamed)"; each label cut in the middle past ROW_LABEL_MAX. No label: the words as they were.
+ */
 export function rowAgentWords(groups: readonly RowAgentGroup[]): string {
-  const words = groups.map((g) => (g.sessions < 2 ? g.name : g.host ? `${g.sessions} ${g.name} sessions` : `${g.sessions} agent sessions`));
+  const words = groups.map((g) => {
+    const named = (g.labels ?? []).map((label) => shortLabel(label, ROW_LABEL_MAX));
+    const plain = g.sessions < 2 ? g.name : g.host ? `${g.sessions} ${g.name} sessions` : `${g.sessions} agent sessions`;
+    if (named.length === 0) return plain;
+    if (g.sessions < 2) return `${named[0]} (${g.name})`;
+    const unnamed = g.sessions - named.length;
+    return `${plain} (${[...named, ...(unnamed > 0 ? [`${unnamed} unnamed`] : [])].join(', ')})`;
+  });
   return words.length < 2 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`;
 }
 
@@ -63,8 +88,8 @@ export function rowAgentWords(groups: readonly RowAgentGroup[]): string {
  * A wide row's tiles and "+N", one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgents({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null }; tip?: boolean }) {
-  const groups = rowAgentGroups(participants, agent);
+export function RowAgents({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean }) {
+  const groups = rowAgentGroups(participants, agent, useSessionLabels());
   const { shown, more } = shownAgentGroups(groups);
   const words = rowAgentWords(groups);
   const marks = (
@@ -104,8 +129,8 @@ export function rowAgentTiles(groups: readonly RowAgentGroup[]): { shown: readon
  * two tiles, then a "+N" tile; one image named by every agent. `tip`: the words in a tooltip too (not on a phone,
  * where a hover is a first tap).
  */
-export function RowAgentTiles({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null }; tip?: boolean }) {
-  const groups = rowAgentGroups(participants, agent);
+export function RowAgentTiles({ participants, agent, tip = true }: { participants: readonly InboxParticipant[] | undefined; agent: { kind: string; host?: string | null; session?: string | null }; tip?: boolean }) {
+  const groups = rowAgentGroups(participants, agent, useSessionLabels());
   const words = rowAgentWords(groups);
   const { shown, more } = rowAgentTiles(groups);
   const tiles = (
