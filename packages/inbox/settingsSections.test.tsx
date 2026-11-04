@@ -418,7 +418,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  expect(rows).toEqual(['Board', 'Checklist']);
+  expect(rows).toEqual(['Board', 'Checklist', 'Code review']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -432,6 +432,32 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
     await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
   } finally {
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
+// Code review in the Inbox (approval "inbox-code-review-direction"): off by default, after the Checklist, saving config.json `inboxCodeReview`.
+test.skipIf(!hasDom)('Capabilities: the Code review switch, off by default, saves inboxCodeReview to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxCodeReview?: boolean }).inboxCodeReview;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Code review') !== null, 'the Code review switch');
+  expect(el.querySelector('[data-settings-code-review]')?.contains(switchNamed(el, 'Code review'))).toBe(true);
+  expect(switchNamed(el, 'Code review')!.getAttribute('aria-checked')).toBe('false');
+  expect(config()).toBeUndefined();
+  try {
+    act(() => switchNamed(el, 'Code review')!.click());
+    await until(() => config() === true, 'config.json inboxCodeReview true');
+    await until(() => switchNamed(el, 'Code review')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Code review')!.click());
+    await until(() => config() === false, 'config.json inboxCodeReview false');
+    await until(() => switchNamed(el, 'Code review')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ code_review: { on: false } }));
   }
 });
 

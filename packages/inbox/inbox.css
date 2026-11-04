@@ -7342,3 +7342,67 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   :root[data-ib-keyboard-pin="tight"] .ib-draft-above { padding-top: 2px; margin-bottom: 8px; }
   :root[data-ib-keyboard-pin="tight"] .ib-draft-above .ib-draft-discard::after { inset: -9px -8px; }
 }
+
+/* Code review in the Inbox (approval "inbox-code-review-direction", concept A take B). The review card on an agent's
+   message (ReviewCard.tsx): one raised surface in the thread's own tones, no border colour and no tint; the chapter
+   list in the text's own type. Drawn only while the person has Settings → Capabilities → Code review on. */
+.ib-rvcard { margin-top: 14px; padding: 14px 16px 16px; border-radius: 12px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); max-width: 720px; }
+.ib-rvc-top { display: flex; align-items: center; gap: 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-rvc-kind { display: inline-flex; align-items: center; gap: 6px; }
+.ib-rvc-state { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-weight: 550; color: var(--foreground); white-space: nowrap; }
+.ib-rvc-state[data-verdict="approved"] { color: var(--success); }
+.ib-rvc-title { margin-top: 8px; font-size: var(--ib-fs-15, 15px); font-weight: 600; overflow-wrap: anywhere; }
+.ib-rvc-meta { margin-top: 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-rvc-chapters { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+.ib-rvc-chapters li { display: flex; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
+.ib-rvc-n { width: 14px; flex: none; text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-rvc-ct { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.ib-rvc-foot { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.ib-rvc-note { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+
+/* The full-window review (ReviewPane.tsx): the guide viewer's frame with a rail on the left (Walkthrough | All files,
+   then the chapters or the files) and the verdict in the header (ui's DecisionControl). The comments panel folds into
+   the header's Comments button below REVIEW_FOLD_PANEL_BELOW, as the guide pane's does below its own width. */
+.ib-review .ib-rsplit { display: grid; grid-template-columns: 264px minmax(0, 1fr) 300px; min-height: 0; }
+.ib-review.ib-fold .ib-rsplit { grid-template-columns: 264px minmax(0, 1fr); position: relative; }
+.ib-review.ib-fold .ib-gpanel { display: none; }
+.ib-review.ib-fold .ib-gbody { isolation: isolate; z-index: 0; }
+.ib-review.ib-fold.ib-panel-open .ib-gpanel { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: min(300px, 100%); z-index: 6; box-shadow: -16px 0 48px rgba(0, 0, 0, 0.18); }
+.ib-review .ib-vhead .ib-fn { flex: none; }
+.ib-review .ib-vhead .ib-from { min-width: 0; }
+.ib-rv-decide { display: inline-flex; flex: none; }
+.ib-rrail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 14px 12px; border-right: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-rv-modes { display: flex; }
+.ib-rv-modes .ib-seg-o { flex: 1; justify-content: center; }
+.ib-rv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.pn-inbox .ib-rv-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: 7px; text-align: left; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
+.pn-inbox .ib-rv-row:hover { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-rv-row[data-on] { background: var(--muted); font-weight: 550; }
+.pn-inbox .ib-rv-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-rv-mark { width: 20px; height: 20px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1.5px solid color-mix(in oklch, var(--muted-foreground) 45%, transparent); font-variant-numeric: tabular-nums; }
+.ib-rv-mark[data-done] { border-color: transparent; background: var(--success); color: var(--background); }
+.ib-rv-overview { border-color: transparent; }
+.ib-rv-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ib-rv-file .ib-rv-t { overflow: hidden; }
+.ib-rv-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); direction: rtl; text-align: left; }
+.ib-rv-dir { color: var(--muted-foreground); }
+.ib-rv-route { margin: 0 0 12px; }
+.ib-rv-route .ib-sessnote { margin: 0; }
+.ib-rv-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-rv-progress { margin-top: auto; padding: 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-rv-phonebar { display: none; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A phone: one column. The rail's switch sits at the top of the review; the chapters are the guide's own cards. */
+  .ib-review .ib-rsplit, .ib-review.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+  .ib-review .ib-rrail { display: none; }
+  .ib-rv-phonebar { display: grid; gap: 8px; padding: 10px 12px 0; }
+  .pn-inbox .ib-rv-jump { height: 44px; width: 100%; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-16-in, 16px); }
+  .ib-review .ib-vhead .ib-from { display: none; }
+  .ib-review .ib-vhead .ib-fn { flex: 1; }
+  .ib-rvcard { padding: 12px 14px 14px; }
+  .pn-inbox .ib-rvc-foot .ib-btn { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .ib-rvcard { border: 1px solid CanvasText; }
+  .ib-rv-mark[data-done] { background: Highlight; color: HighlightText; }
+}

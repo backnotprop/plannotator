@@ -10,7 +10,7 @@ import {
   type SkillReferenceToken,
   type SkillTriggerContext,
 } from '../utils/skillReferences';
-import { fetchSkillCatalog, getCachedSkillCatalog } from '../utils/skillCatalog';
+import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '../utils/skillCatalog';
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
@@ -69,18 +69,29 @@ export function useSkillReferenceAutocomplete(options: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
   bareEscapeDismisses?: boolean;
+  /**
+   * Which catalog entries this composer offers and paints (a host's per-place
+   * rule, e.g. the Inbox's `/review-recheck` only in a reviewed thread).
+   * Absent: every entry, as before. Keep its identity stable across renders.
+   */
+  catalogFilter?: (entry: SkillCatalogEntry) => boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
-  const [catalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
+  const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
     enabled ? getCachedSkillCatalog() : [],
   );
+  const catalog = useMemo(() => (catalogFilter ? fullCatalog.filter(catalogFilter) : fullCatalog), [fullCatalog, catalogFilter]);
   const [caret, setCaret] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Escape dismisses the menu for the trigger it was open on; the same trigger
   // does not reopen until the user leaves it (new trigger start clears this).
   const [dismissedStart, setDismissedStart] = useState<number | null>(null);
+
+  // A reload (the host's catalog changed at its source) reads it again here too.
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => (enabled ? onSkillCatalogReload(() => setReloads((n) => n + 1)) : undefined), [enabled]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -91,7 +102,7 @@ export function useSkillReferenceAutocomplete(options: {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, reloads]);
 
   const trigger: SkillTriggerContext | null = useMemo(() => {
     if (!enabled || catalog.length === 0 || caret === null) return null;
