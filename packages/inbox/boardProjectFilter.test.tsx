@@ -395,6 +395,40 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'delete' } });
 });
 
+test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a failed fetch says the one line, a taken name the server's words", async () => {
+  scriptFetch();
+  const scripted = globalThis.fetch;
+  let answer: 'offline' | 'taken' | 'broken' = 'offline';
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1:1');
+    if (url.pathname === '/api/inbox/initiatives' && init?.method === 'POST') {
+      if (answer === 'offline') throw new TypeError('Failed to fetch');
+      if (answer === 'taken') {
+        return new Response(JSON.stringify({ code: 'initiative_exists', error: 'There is already an initiative named Shape.' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ code: 'error', error: 'Internal error: disk full' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    return scripted(input, init);
+  }) as typeof fetch;
+  draw();
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-new]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  const tryAdd = async (name: string) => {
+    await type(dialog.querySelector<HTMLInputElement>('[data-initiative-new-name]')!, name);
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-add]')!.click());
+    await settle();
+    return dialog.querySelector('[data-initiative-error]')?.textContent ?? null;
+  };
+  expect(await tryAdd('Release')).toBe('That did not save. Try again.');
+  answer = 'broken';
+  expect(await tryAdd('Release')).toBe('That did not save. Try again.');
+  answer = 'taken';
+  expect(await tryAdd('shape')).toBe('There is already an initiative named Shape.');
+});
+
 test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {
   scriptFetch();
   const drawn = draw({ view: 'done', project: API });

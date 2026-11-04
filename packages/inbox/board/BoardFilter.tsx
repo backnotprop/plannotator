@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { INBOX_INITIATIVE_NAME_MAX, INBOX_NO_INITIATIVE, type InboxInitiative } from '@plannotator/core/inbox-types';
-import { inboxApi, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { Modal } from '../components/Updates';
@@ -271,6 +271,9 @@ export function CardInitiativeItems({ initiatives, value, onPick }: { initiative
  * with Delete, which asks once ("Its 4 cards go to No initiative"); a field to
  * add one. Every change is its own write; the Board reads the cards again.
  */
+/** The refusals whose server text the dialog shows as is (409s): a name taken, the limit reached. */
+const INITIATIVE_REFUSALS: ReadonlySet<string> = new Set(['initiative_exists', 'initiative_limit']);
+
 export function InitiativesDialog({
   initiatives,
   cardCounts,
@@ -330,7 +333,8 @@ export function InitiativesDialog({
     try {
       return await work();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'That did not save. Try again.');
+      // Only a name taken or the limit reached say why (the server's words); anything else, a network failure too, the one line.
+      setError(cause instanceof InboxApiError && INITIATIVE_REFUSALS.has(cause.code) ? cause.message : 'That did not save. Try again.');
       return null;
     } finally {
       setBusy(false);
