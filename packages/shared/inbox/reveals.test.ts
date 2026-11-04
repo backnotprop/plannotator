@@ -2,7 +2,9 @@
  * The reveals' queue (approval "inbox-feature-reveal", 2026-11-03), by a clock the test moves. What regresses: the
  * order (Snooze, then the Board); the 48 h spacing moving or letting two through; a stuck Snooze holding the Board
  * back for ever, or patience skipping an entry with nothing behind it; the Board's tenure (3 days, the owner's
- * change) or its 5 threads moving; a dev build, a feature the person decided, or the steps placeholder being revealed.
+ * change) or its 5 threads moving; a dev build or a feature the person decided being revealed; the Checklist (approval
+ * "inbox-checklist-reveal", 2026-11-04) leaving its place after Snooze and the Board, its 5 days or 5 threads moving, or
+ * it needing the Board on.
  */
 import { describe, expect, test } from "bun:test";
 import { INBOX_REVEALS, REVEAL_PATIENCE_MS, REVEAL_SPACING_MS, revealLastShown, revealMayClaim, revealNext, type RevealState } from "./reveals";
@@ -31,9 +33,20 @@ describe("the order", () => {
     expect(revealMayClaim("board", state({ open: { board: true } }), NOW)).toBe(true);
   });
 
-  test("the steps placeholder is never next, whatever its state", () => {
-    expect(revealNext(state({ firstUseAt: ago(30 * DAY), open: { steps: true } }), NOW)).toBeNull();
-    expect(revealMayClaim("steps", state({ firstUseAt: ago(30 * DAY), open: { steps: true } }), NOW)).toBe(false);
+  test("the Checklist comes after Snooze and the Board: last in line while either is still open", () => {
+    const day6 = { firstUseAt: ago(6 * DAY) };
+    expect(revealNext(state({ ...day6, open: { snooze: true, board: true, steps: true } }), NOW)).toBe("snooze");
+    expect(revealNext(state({ ...day6, open: { snooze: false, board: true, steps: true } }), NOW)).toBe("board");
+    expect(revealNext(state({ ...day6, open: { snooze: false, board: false, steps: true } }), NOW)).toBe("steps");
+    // A tab that armed the Checklist while the Board is next is refused.
+    expect(revealMayClaim("steps", state({ ...day6, open: { board: true, steps: true } }), NOW)).toBe(false);
+    expect(revealMayClaim("steps", state({ ...day6, open: { steps: true } }), NOW)).toBe(true);
+  });
+
+  test("the Checklist keeps the 48 h spacing after the Board", () => {
+    const after = (ms: number) => revealNext(state({ firstUseAt: ago(6 * DAY), lastShownAt: ago(ms), open: { steps: true } }), NOW);
+    expect(after(48 * HOUR - 1)).toBeNull();
+    expect(after(48 * HOUR)).toBe("steps");
   });
 
   test("a dev build, or no first use known, decides nothing", () => {
@@ -58,6 +71,30 @@ describe("the Board's who", () => {
   test("Snooze keeps its own 2 days and needs no threads", () => {
     expect(revealNext(state({ firstUseAt: ago(2 * DAY), threads: 0, open: { snooze: true } }), NOW)).toBe("snooze");
     expect(revealNext(state({ firstUseAt: ago(2 * DAY - 1), threads: 0, open: { snooze: true } }), NOW)).toBeNull();
+  });
+});
+
+describe("the Checklist's who", () => {
+  const steps = (over: Partial<RevealState>) => revealNext(state({ firstUseAt: ago(5 * DAY), open: { steps: true }, ...over }), NOW);
+
+  test("tenure: exactly 5 days of first use, not a millisecond before", () => {
+    expect(INBOX_REVEALS.find((entry) => entry.id === "steps")).toMatchObject({ tenureMs: 5 * DAY, minThreads: 5, enabled: true });
+    expect(steps({ firstUseAt: ago(5 * DAY) })).toBe("steps");
+    expect(steps({ firstUseAt: ago(5 * DAY - 1) })).toBeNull();
+  });
+
+  test("threads: 5 or more", () => {
+    expect(steps({ threads: 5 })).toBe("steps");
+    expect(steps({ threads: 4 })).toBeNull();
+  });
+
+  test("the Board need not be on: a Board switched off (no longer open) leaves the Checklist next", () => {
+    expect(steps({ open: { board: false, steps: true } })).toBe("steps");
+  });
+
+  test("a Checklist the person decided (not open), or a dev build, is never next", () => {
+    expect(steps({ open: { steps: false } })).toBeNull();
+    expect(steps({ release: false })).toBeNull();
   });
 });
 

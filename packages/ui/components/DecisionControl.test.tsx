@@ -404,4 +404,52 @@ describe('DecisionControl', () => {
     expect(handlers['discard-and-finish']).not.toHaveBeenCalled();
   });
 
+  // Guards a note lost to a failed send (Inbox code review): a host holding
+  // the notes gets each keystroke, a fresh mount shows what it holds, and the
+  // control never clears a note on submit; the host does, once it went.
+  test.skipIf(!hasDom)('host-held notes survive a submit and a remount until the host clears them', async () => {
+    let held: Record<string, string> = { 'note-with-feedback': 'kept from before' };
+    const handlers = makeHandlers();
+    function Host() {
+      const [drafts, setDrafts] = React.useState(held);
+      return (
+        <DecisionControl
+          spec={buildDecisionSpec(REVIEW_FEEDBACK)}
+          handlers={handlers}
+          busy={false}
+          isLoading={false}
+          drafts={drafts}
+          onDraftsChange={(next) => {
+            held = next;
+            setDrafts(next);
+          }}
+        />
+      );
+    }
+    const mountHost = async () => {
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      root = createRoot(host);
+      await act(async () => root!.render(<Host />));
+    };
+    await mountHost();
+    await openMenu();
+    await clickItem('Send with a note…');
+    expect(noteInput().value).toBe('kept from before');
+    await typeNote('needs a test');
+    expect(held).toEqual({ 'note-with-feedback': 'needs a test' });
+    await pressKey(noteInput(), { key: 'Enter', metaKey: true });
+    expect(handlers['note-with-feedback']).toHaveBeenCalledWith('needs a test');
+    expect(held).toEqual({ 'note-with-feedback': 'needs a test' });
+
+    await act(async () => root!.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    await mountHost();
+    await openMenu();
+    await clickItem('Send with a note…');
+    expect(noteInput().value).toBe('needs a test');
+  });
+
 });

@@ -4,6 +4,7 @@
  * and the feedback text a Send carries after the picks.
  */
 
+import { INBOX_GUIDE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -378,7 +379,7 @@ export function recordQuote(record: InboxAnnotationRecord): string {
   return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
 
-export const GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
+export const GUIDE_FEEDBACK_TITLE = INBOX_GUIDE_FEEDBACK_TITLE;
 
 /** Quoted code in a fence no line of it can close (the review app's `fenced`). */
 function fenced(code: string): string {
@@ -432,7 +433,8 @@ export function guideFeedback(records: readonly InboxAnnotationRecord[]): string
   for (const record of records) {
     const comment = guideCommentOf(record);
     if (!comment || !record.guide) continue;
-    const entry = byMessage.get(record.message_id) ?? { title: record.guide.title, comments: [] };
+    // The agent's title, as one line of at most 120 characters: it can never add lines to the person's reply.
+    const entry = byMessage.get(record.message_id) ?? { title: inboxReviewTitleLine(record.guide.title), comments: [] };
     entry.comments.push(comment);
     byMessage.set(record.message_id, entry);
   }

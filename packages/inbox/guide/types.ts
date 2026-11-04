@@ -24,6 +24,16 @@ export interface GuideReaderProps {
   onReviewedChange: (reviewed: boolean[]) => void;
   /** Line comments on the diffs; absent, the diffs are read-only (a resolved thread). */
   comments?: GuideReaderComments;
+  /**
+   * A review (code review in the Inbox): `walkthrough` draws the agent's
+   * chapters, as without it; `files` draws every changed file in the patch's
+   * order under one heading, with the same comments. Absent: `walkthrough`.
+   */
+  mode?: 'walkthrough' | 'files';
+  /** Bring this file's diff into view (the review's rail). A new token moves again to the same file. */
+  reveal?: { path: string; token: number } | null;
+  /** The review's Viewed ticks on each file's header. Absent: no Viewed control, as before. */
+  viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

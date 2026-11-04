@@ -122,3 +122,14 @@ export async function handleCodeNavHover(
 }
 
 export { extractChangedFiles };
+
+/** The hover answer for a parsed body, as status and JSON (Shape's code routes, packages/shared/shape/routes.ts). */
+export async function codeNavHoverAnswer(body: unknown, cwd: string): Promise<{ status: number; body: unknown }> {
+  const error = validateCodeNavRequest(body);
+  if (error) return { status: 400, body: { error } };
+  try {
+    return { status: 200, body: await resolveCodeNavHover(bunCodeNavRuntime, body as CodeNavRequest, cwd, []) };
+  } catch (err) {
+    return { status: 500, body: { error: err instanceof Error ? err.message : "Code navigation failed" } };
+  }
+}

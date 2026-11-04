@@ -993,7 +993,28 @@ export function createInboxLiveSessions(options: {
   /** When `session` last went idle, live or not; null when never seen idle (Tidy's "Nothing to change"). */
   const lastIdleOf = (session: string): number | null => sessions.get(session)?.lastIdleSince ?? null;
 
+  /** When `session` was last heard at all: a poll, a state event or an MCP tool call; null when never (thread steps' presence). */
+  const lastHeardOf = (session: string): number | null => {
+    const polled = sessions.get(session)?.lastSeen ?? null;
+    const called = mcpSeen.get(session)?.lastSeen ?? null;
+    return polled === null ? called : called === null ? polled : Math.max(polled, called);
+  };
+
+  /**
+   * Evidence that `session` ended (thread steps' presence): it polled in this run and no longer does, or the
+   * Inbox wakes it itself and knows its thread is gone. A session never seen polling is never ended here,
+   * whatever host it names: it may read the thread at any time (inbox-compose.md, "Replying when the asking
+   * session has ended").
+   */
+  const endedOf = (session: string): boolean => {
+    if (options.wakeOnlyStatus?.(session) === "dead") return true;
+    const entry = sessions.get(session);
+    return !!entry && entry.wakeOnly === undefined && !isLive(entry);
+  };
+
   return {
+    lastHeardOf,
+    endedOf,
     pollStarted,
     stateChanged,
     seenWakeOnly,
