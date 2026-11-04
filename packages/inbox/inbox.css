@@ -7621,6 +7621,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-review .ib-vhead .ib-prr-fn { flex: 0 1 auto; min-width: 0; }
 .ib-prreview .ib-vhead .ib-from { flex: 0 100 auto; }
 .pn-inbox .ib-prreview .ib-vhead .ib-back, .ib-prreview .ib-vhead .ib-vsep, .ib-prreview .ib-vhead .ib-vcomments, .ib-prreview .ib-vhead [data-pull-review-forge] { flex: none; white-space: nowrap; }
+/* A narrow window short of the phone layout: the destination's names drop, as on a phone (each keeps its mark and
+   its words in the tooltip), so the verdict fits by 760. */
+@media (max-width: 959px) {
+  .ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
+}
 /* What the list could not read, or read only in part: a quiet line over the groups. */
 .ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
 .ib-pr-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; overflow-wrap: anywhere; }
@@ -7665,7 +7670,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* Review and Open the diff, each a full line, as the hand-off lines above them. */
   .ib-pr-handoff .ib-pr-actions > .ib-btn { flex: 1 1 100%; justify-content: center; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
-  .ib-prr-layers { padding-inline: 10px; margin-inline: -10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
+  .ib-prr-layers { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
   .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }

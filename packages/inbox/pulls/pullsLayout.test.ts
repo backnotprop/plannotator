@@ -30,6 +30,10 @@ test('the review header: the title gives way (shrinks, cut with "…"); Back and
   const back = declared('.pn-inbox .ib-prreview .ib-vhead .ib-back');
   expect(back).toMatch(/flex:\s*none/);
   expect(back).toMatch(/white-space:\s*nowrap/);
+  // 760 to 959 wide (short of the phone layout): the destination's names drop so the verdict still fits.
+  const narrow = CODE.match(/@media \(max-width: 959px\) \{([^{}]*\{[^{}]*\})\s*\}/)?.[1] ?? '';
+  expect(narrow).toContain('.ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden]');
+  expect(narrow).toMatch(/display:\s*none/);
 });
 
 test("an agent pill is never wider than its line; its label is cut", () => {
