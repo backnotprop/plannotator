@@ -10,9 +10,11 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  inboxPullAncestors,
   inboxPullGroups,
   inboxPullItems,
   inboxPullLandsNext,
+  inboxPullParent,
   inboxPullMove,
   inboxPullStacks,
   inboxPullUrlsIn,
@@ -126,9 +128,10 @@ describe("inboxPullStacks", () => {
     expect(stacks[0]!.open_base).toBe("main");
   });
 
-  test("two open PRs from one branch (a backport): the layer based on that branch sits on the one into main, whatever the order", () => {
-    const main = pr({ number: 320, head: "fix-rounding", base: "main" });
-    const backport = pr({ number: 321, head: "fix-rounding", base: "release/2026.10" });
+  test("two open PRs from one branch (a backport): the layer based on that branch sits on the one into the trunk, whatever the numbers and order", () => {
+    // The backport has the lower number: the rank is the trunk, not the number.
+    const backport = pr({ number: 320, head: "fix-rounding", base: "release/2026.10" });
+    const main = pr({ number: 321, head: "fix-rounding", base: "main" });
     const tests = pr({ number: 322, head: "fix-rounding-tests", base: "fix-rounding" });
     for (const order of [
       [backport, main, tests],
@@ -136,8 +139,13 @@ describe("inboxPullStacks", () => {
       [main, backport, tests],
     ]) {
       const stacks = inboxPullStacks(order);
-      expect(stacks.map((s) => keys(s.layers)).sort()).toEqual([[320, 322], [321]]);
+      expect(stacks.map((s) => keys(s.layers)).sort()).toEqual([[320], [321, 322]]);
     }
+    // The forge's default branch is the trunk, whatever its name: into `next` beats into `release/…`.
+    const intoRelease = pr({ number: 39, head: "shared-next", base: "release/1", default_branch: "next" });
+    const intoNext = pr({ number: 40, head: "shared-next", base: "next", default_branch: "next" });
+    const onShared = pr({ number: 41, head: "on-shared", base: "shared-next", default_branch: "next" });
+    expect(inboxPullStacks([intoRelease, intoNext, onShared]).find((s) => s.layers.some((l) => l.number === 41))!.layers.map((l) => l.number)).toEqual([40, 41]);
     // Into a feature branch and into main: main's PR takes the layers above it.
     const feature = pr({ number: 30, head: "shared", base: "feature/epic" });
     const intoMain = pr({ number: 31, head: "shared", base: "main" });
@@ -150,6 +158,28 @@ describe("inboxPullStacks", () => {
     const b = pr({ number: 12, head: "b", base: "base-work" });
     const a = pr({ number: 11, head: "a", base: "base-work" });
     expect(inboxPullStacks([b, a, low]).map((s) => keys(s.layers))).toEqual([[10, 11, 12]]);
+  });
+
+  test("each layer's parent is the layer it sits on, never its neighbour in the list (a fork, merged layers under and between)", () => {
+    // A on main; B and C on A (a fork); D on B. In the list D comes after C, but D sits on B.
+    const a = pr({ number: 1, head: "a", base: "main" });
+    const b = pr({ number: 2, head: "b", base: "a" });
+    const c = pr({ number: 3, head: "c", base: "a" });
+    const d = pr({ number: 4, head: "d", base: "b" });
+    const [fork] = inboxPullStacks([d, c, b, a]);
+    expect(keys(fork!.layers)).toEqual([1, 2, 3, 4]);
+    const parentNumber = (pull: InboxPull) => inboxPullParent(fork!, pull.key)?.number ?? null;
+    expect([a, b, c, d].map(parentNumber)).toEqual([null, 1, 1, 2]);
+    expect(keys(inboxPullAncestors(fork!, d.key))).toEqual([2, 1]);
+    expect(keys(inboxPullAncestors(fork!, c.key))).toEqual([1]);
+    // Merged under the root, and merged in the middle: each sits on the one below it.
+    const old = pr({ number: 50, head: "fx-base", base: "main", state: "merged" });
+    const fx = pr({ number: 51, head: "fx-cache", base: "fx-base" });
+    const ttl = pr({ number: 52, head: "fx-cache-ttl", base: "fx-cache", state: "merged" });
+    const metrics = pr({ number: 53, head: "fx-cache-metrics", base: "fx-cache-ttl" });
+    const [chain] = inboxPullStacks([metrics, ttl, fx, old]);
+    expect(keys(chain!.layers)).toEqual([50, 51, 52, 53]);
+    expect(chain!.layers.map((l) => inboxPullParent(chain!, l.key)?.number ?? null)).toEqual([null, 50, 51, 52]);
   });
 });
 

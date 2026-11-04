@@ -60,6 +60,8 @@ export interface InboxPull {
   checks: InboxPullChecks | null;
   /** The forge says it conflicts with its base branch (GitHub `mergeable: CONFLICTING`, GitLab `conflicts`); absent when unknown. */
   conflicts?: boolean;
+  /** Its repository's default branch as the forge answered it (GitHub `defaultBranchRef`, GitLab `rootRef`); absent when unknown. */
+  default_branch?: string;
   updated_at: string;
   merged_at: string | null;
 }
@@ -108,8 +110,12 @@ export interface InboxPullHost {
   error?: "rate_limited" | "unavailable";
   /** With `error`: when the answer still shown for this host was read; absent when there is none (its PRs are not shown). */
   last_read?: string;
-  /** The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): how many were read, of how many. */
-  capped?: { shown: number; total: number };
+  /**
+   * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
+   * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
+   * to the projects' repositories, so how many of the ones left out are the projects' is not known.
+   */
+  capped?: { shown: number; total: number | null };
 }
 
 /** A CLI as the Inbox found it: not installed, installed and signed in to no host, or signed in to at least one. */
@@ -205,8 +211,13 @@ export interface InboxPullStack {
   platform: InboxPullPlatform;
   host: string;
   repo: string;
-  /** Bottom to top. */
+  /** Bottom to top: depth order, siblings by number (a fork's second branch may come after the first's upper layers). */
   layers: InboxPull[];
+  /**
+   * By layer key: the key of the layer it sits on (its base is that layer's head, a merged layer between included),
+   * null for the bottom layer. The one source of the stack's shape: never read it from `layers`' order.
+   */
+  parents: Record<string, string | null>;
   /** The branch the bottom layer merges into (`main`). */
   base: string;
   /**
@@ -218,6 +229,8 @@ export interface InboxPullStack {
 
 /** Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer. */
 const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
+/** A repository's usual trunk names, when the forge did not say its default branch. */
+const TRUNK = /^(main|master)$/;
 
 /** A long-lived branch (`main`, `develop`, `release/…`): what a stack's bottom layer lands on. */
 export function inboxPullLongLived(branch: string): boolean {
@@ -245,9 +258,10 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const open = unique.filter(isOpen);
   const merged = unique.filter((pull) => pull.state === "merged");
   const headOf = new Map<string, InboxPull>();
-  // The PR a branch's layers sit on: into a long-lived branch first (a backport is a second PR from the same
-  // branch, into a release branch), then the lowest number, whatever order the forge listed them in.
-  const rank = (pull: InboxPull) => (LONG_LIVED.test(pull.base) ? 0 : 1);
+  // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
+  // branch, into a release branch): the one into the repository's trunk (its default branch when the forge said,
+  // else main or master), then into another long-lived branch, then the lowest number, whatever the order.
+  const rank = (pull: InboxPull) => (pull.base === pull.default_branch || TRUNK.test(pull.base) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
   for (const pull of open) {
     if (!ownHead(pull)) continue;
     const at = `${repoKey(pull)}\u0000${pull.head}`;
@@ -284,10 +298,23 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   for (const root of roots) {
     // Depth order, siblings by number: a chain reads bottom to top, a merged layer in the middle under the one above it.
     const layers: InboxPull[] = [];
-    let level: { pull: InboxPull; via: InboxPull[] }[] = [{ pull: root, via: [] }];
+    const parents: Record<string, string | null> = {};
+    let level: { pull: InboxPull; via: InboxPull[]; parent: string | null }[] = [{ pull: root, via: [], parent: null }];
     while (level.length > 0) {
-      for (const { pull, via } of level) layers.push(...via.filter((m) => !layers.includes(m)), pull);
-      level = level.flatMap(({ pull }) => [...(children.get(pull.key) ?? [])].sort((a, b) => a.pull.number - b.pull.number));
+      for (const { pull, via, parent } of level) {
+        // The merged layers between sit one on the other, from the open parent up; this layer on the last of them.
+        let under = parent;
+        for (const m of via) {
+          if (!layers.includes(m)) {
+            layers.push(m);
+            parents[m.key] = under;
+          }
+          under = m.key;
+        }
+        layers.push(pull);
+        parents[pull.key] = under;
+      }
+      level = level.flatMap(({ pull }) => [...(children.get(pull.key) ?? [])].sort((a, b) => a.pull.number - b.pull.number).map((c) => ({ ...c, parent: pull.key })));
     }
     const under: InboxPull[] = [];
     let base = root.base;
@@ -306,8 +333,11 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
       under.unshift(below);
       base = below.base;
     }
+    // The merged layers under the root sit one on the other, the root on the last of them.
+    under.forEach((pull, i) => (parents[pull.key] = i > 0 ? under[i - 1]!.key : null));
+    if (under.length > 0) parents[root.key] = under[under.length - 1]!.key;
     const all = [...under, ...layers];
-    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, base: all[0]!.base, open_base: root.base });
+    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, parents, base: all[0]!.base, open_base: root.base });
   }
   const order = new Map(unique.map((pull, i) => [pull.key, i]));
   return stacks.sort((a, b) => Math.min(...a.layers.map((l) => order.get(l.key)!)) - Math.min(...b.layers.map((l) => order.get(l.key)!)));
@@ -328,6 +358,23 @@ function loops(pull: InboxPull, parentOf: (pull: InboxPull) => InboxPull | null)
 /** The lowest layer still open: the next to land. Null when none is. */
 export function inboxPullLandsNext(stack: InboxPullStack): InboxPull | null {
   return stack.layers.find(isOpen) ?? null;
+}
+
+/** The layer a layer sits on (`parents`), or null for the bottom one (or a key not in the stack). */
+export function inboxPullParent(stack: Pick<InboxPullStack, "layers" | "parents">, key: string): InboxPull | null {
+  const parent = stack.parents[key];
+  return parent ? (stack.layers.find((l) => l.key === parent) ?? null) : null;
+}
+
+/** The layers under a layer, nearest first, down to the bottom: its own line of the stack, never a sibling's. */
+export function inboxPullAncestors(stack: Pick<InboxPullStack, "layers" | "parents">, key: string): InboxPull[] {
+  const out: InboxPull[] = [];
+  let at = inboxPullParent(stack, key);
+  while (at && !out.includes(at)) {
+    out.push(at);
+    at = inboxPullParent(stack, at.key);
+  }
+  return out;
 }
 
 export type InboxPullMove = "on_you" | "ready" | "waiting";
