@@ -263,3 +263,147 @@ button.shp-hb:hover { background: var(--muted); }
 .shp-grid-empty { padding: 48px 20px; color: var(--muted-foreground); font-size: 14px; text-align: center; }
 @container (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }
 @media (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }
+
+/* ── Follow an example (approval "trace-it-board", r5) ── The card sits where the board already puts its status, above the
+   dock; the picture makes room for it. App tokens and the dock's own buttons; one accent (the board's mark colour);
+   three text roles: title 14/20 500, body 13/20, meta 12/16 (code: mono 12/20). Spacing on a 4px grid.
+   Motion is transform and opacity only: the skin and the parts FLIP, stacks cross-fade. */
+.shp-ex-card { --ex-ease: cubic-bezier(.22, 1, .36, 1); --ex-edge: color-mix(in oklab, var(--foreground) 11%, transparent);
+  position: absolute; left: 50%; bottom: 76px; translate: -50% 0; z-index: 24; isolation: isolate;
+  width: min(640px, calc(100% - 24px)); box-sizing: border-box;
+  color: var(--foreground); font: 400 13px/20px var(--font-sans); font-feature-settings: "ss01", "ss02", "cv01";
+  animation: shp-ex-card-in .24s var(--ex-ease) both; }
+.shp-ex-card.expanded { width: min(1280px, calc(100% - 32px)); }
+@keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
+.shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); }
+.shp-ex-card.leaving { pointer-events: none; }
+.shp-ex-skin { position: absolute; inset: 0; z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
+  box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }
+.shp-ex-in { padding: 8px 12px 12px 16px; }
+.shp-ex-card p { margin: 0; }
+
+.shp-ex-head { display: flex; align-items: center; gap: 4px; height: 32px; margin-left: -8px; }
+.shp-ex-head .shp-tbtn { height: 28px; padding: 0 10px; }
+.shp-ex-sp { flex: 1; }
+.shp-ex-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; align-items: start; margin-top: 8px; }
+
+/* Stacks: every state in one cell (so the card keeps its size), the one on now cross-fades in. */
+.shp-ex-stack { display: grid; }
+.shp-ex-stack > * { grid-area: 1 / 1; opacity: 0; visibility: hidden; transition: opacity .12s ease-out, visibility 0s linear .12s; }
+.shp-ex-stack > .cur { opacity: 1; visibility: visible; transition: opacity .2s ease-out .04s, visibility 0s; }
+.shp-ex-navs { justify-items: end; }
+
+.shp-ex-text { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; align-items: start; align-content: start; }
+.shp-ex-text.all { grid-template-columns: minmax(0, 1fr); }
+.shp-ex-count { font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shp-ex-does { font-size: 14px; font-weight: 500; line-height: 20px; text-wrap: pretty; }
+.shp-ex-sub { margin-top: 4px !important; color: var(--muted-foreground); text-wrap: pretty; }
+.shp-ex-fn { appearance: none; border: 0; background: none; padding: 0; font: 400 12px/20px var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); cursor: pointer;
+  text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent); text-underline-offset: 3px; transition: color .15s ease, text-decoration-color .15s ease; }
+
+.shp-ex-nav { display: flex; align-items: center; gap: 4px; margin-top: -4px; }
+.shp-ex-icon, .shp-ex-quiet, .shp-ex-step, .shp-ex-more { appearance: none; border: 0; background: transparent; color: var(--muted-foreground); height: 28px; border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px; font: 400 13px/20px var(--font-sans); white-space: nowrap;
+  transition: background-color .15s ease, color .15s ease, transform .12s ease; }
+.shp-ex-icon { width: 28px; }
+.shp-ex-quiet, .shp-ex-more { padding: 0 8px; }
+.shp-ex-step { padding: 0 8px 0 12px; color: var(--foreground); background: color-mix(in oklab, var(--muted) 70%, transparent); }
+.shp-ex-more[aria-expanded="true"] { color: var(--foreground); }
+.shp-ex-icon:disabled { opacity: .35; cursor: default; }
+.shp-ex-icon:active:not(:disabled), .shp-ex-quiet:active, .shp-ex-step:active, .shp-ex-more:active { transform: scale(.97); }
+.shp-ex-card button:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
+.shp-ex-note { margin-top: 12px !important; font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); }
+
+/* Open: what goes in → what happens → what comes out. */
+.shp-ex-ios { display: grid; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--ex-edge); }
+.shp-ex-ios > .shp-ex-io { grid-area: 1 / 1; visibility: hidden; }
+.shp-ex-ios > .shp-ex-io.cur, .shp-ex-ios > .shp-ex-io.leaving { visibility: visible; }
+.shp-ex-io { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1.55fr) 24px minmax(0, .4fr); column-gap: 8px; align-items: start; }
+.shp-ex-col { min-width: 0; }
+.shp-ex-cap { font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); margin: 0 0 8px !important; }
+.shp-ex-flow { margin-top: 28px; justify-self: center; fill: none; stroke: color-mix(in oklab, var(--foreground) 45%, transparent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.shp-ex-card .tk { color: var(--shiki-dark); }
+html.light .shp-ex-card .tk { color: var(--shiki-light); }
+
+/* Values: one mono size, tabular; a literal takes its type's colour from the Code view's theme. */
+.shp-ex-val { display: inline-flex; padding: 2px 6px; border-radius: 6px; font: 400 12px/20px var(--font-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; color: var(--foreground); white-space: pre; }
+.shp-ex-val code { font: inherit; }
+.shp-ex-val.hand { background: color-mix(in oklab, var(--primary) 8%, var(--popover)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 32%, transparent); }
+.shp-ex-ghost { position: absolute; z-index: 3; margin: 0; pointer-events: none; will-change: transform;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 45%, transparent), 0 6px 16px -8px rgb(0 0 0 / .35); }
+
+/* Goes in: name, value, where it came from — one grid, so every row lines up. */
+.shp-ex-ins { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; row-gap: 4px; }
+.shp-ex-ins > li { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.shp-ex-ins .nm { flex: none; width: var(--nw); font-size: 12px; }
+.shp-ex-ins .nm, .shp-ex-outv .nm { font: 400 12px/24px var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); white-space: nowrap; }
+.shp-ex-ins .vl { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.shp-ex-card .pl { font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); }
+.shp-ex-src { margin-left: auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; font: 400 12px/20px var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); white-space: nowrap; }
+.shp-ex-src.handed { font-family: var(--font-sans); color: var(--primary); }
+.shp-ex-src.link, .shp-ex-line { appearance: none; border: 0; background: none; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.shp-ex-src.link .u, .shp-ex-line .u { text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; transition: text-decoration-color .15s ease; }
+.shp-ex-oi { flex: none; opacity: .4; transition: opacity .15s ease, transform .15s ease; }
+
+/* What happens: the function, drawn as a box like the board's own. */
+.shp-ex-box { position: relative; border-radius: 10px; padding: 8px 12px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 15%, transparent); }
+.shp-ex-sig { display: block; font: 400 12px/20px var(--font-mono, ui-monospace, monospace); color: var(--foreground); white-space: pre; overflow-x: auto; scrollbar-width: none; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--ex-edge); }
+.shp-ex-checks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 12px minmax(0, 1fr) max-content; column-gap: 8px; }
+.shp-ex-checks > li { position: relative; display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: baseline; padding: 2px 0; }
+.shp-ex-checks .mk { align-self: start; margin-top: 6px; color: var(--muted-foreground); }
+.shp-ex-checks .cond { font: 400 12px/20px var(--font-mono, ui-monospace, monospace); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 2ch; text-indent: -2ch; }
+.shp-ex-checks .got { justify-self: end; text-align: right; }
+.shp-ex-checks .got .shp-ex-val { padding: 0; }
+.shp-ex-checks .say { font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
+.shp-ex-checks li.fail .mk { color: var(--foreground); }
+.shp-ex-checks li.skip > * { opacity: .45; }
+.shp-ex-checks li.decides::before { content: ""; position: absolute; left: -12px; top: 4px; bottom: 4px; width: 2px; border-radius: 0 2px 2px 0; background: var(--primary); }
+.shp-ex-checks li.decides .mk { color: var(--primary); }
+.shp-ex-checks .dec { grid-column: 2 / -1; font: 400 12px/16px var(--font-sans); color: var(--primary); padding-bottom: 2px; }
+.shp-ex-checks .dec b { font-weight: 500; color: var(--destructive); }
+.shp-ex-line { margin-top: 4px; font: 400 12px/20px var(--font-sans); color: var(--muted-foreground); }
+
+/* Comes out. */
+.shp-ex-col.out { display: flex; flex-direction: column; align-items: flex-start; }
+.shp-ex-outv { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; }
+.shp-ex-type { margin-top: 4px; font: 400 12px/20px var(--font-mono, ui-monospace, monospace); }
+.shp-ex-meta { margin-top: 4px; font: 400 12px/16px var(--font-sans); color: var(--muted-foreground); }
+
+@media (hover: hover) {
+  .shp-ex-icon:hover:not(:disabled), .shp-ex-quiet:hover, .shp-ex-step:hover, .shp-ex-more:hover { background: color-mix(in oklab, var(--muted) 80%, transparent); color: var(--foreground); }
+  .shp-ex-fn:hover { color: var(--foreground); text-decoration-color: currentColor; }
+  .shp-ex-src.link:hover, .shp-ex-line:hover { color: var(--foreground); }
+  .shp-ex-src.link:hover .u, .shp-ex-line:hover .u { text-decoration-color: currentColor; }
+  .shp-ex-src.link:hover .shp-ex-oi, .shp-ex-line:hover .shp-ex-oi { opacity: 1; transform: translate(1px, -1px); }
+}
+
+/* Phone: a bottom sheet with the same two states; the dock steps aside while it is up. */
+.shp-ex-card.phone { position: absolute; left: 0; right: 0; bottom: 0; translate: none; width: 100%; animation-name: shp-ex-sheet-in; }
+.shp-ex-card.phone .shp-ex-skin { border-radius: 18px 18px 0 0; }
+.shp-ex-card.phone .shp-ex-in { max-height: 72vh; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px max(12px, env(safe-area-inset-bottom)) 16px; }
+@keyframes shp-ex-sheet-in { from { transform: translateY(24px); opacity: 0; } }
+.shp-ex-grab { display: flex; justify-content: center; width: 100%; height: 20px; padding: 8px 0 0; border: 0; background: none; cursor: pointer; }
+.shp-ex-grab span { width: 36px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
+.shp-root.follow-sheet .shp-dock { opacity: 0; pointer-events: none; transform: translate(-50%, 16px); transition: opacity .2s ease, transform .2s cubic-bezier(.22, 1, .36, 1); }
+.shp-ex-card.phone .shp-ex-body { grid-template-columns: minmax(0, 1fr); }
+/* The sheet sizes to the step on now (its skin follows); the board scrolls on a phone, so nothing else moves. */
+.shp-ex-card.phone .shp-ex-texts { position: relative; }
+.shp-ex-card.phone .shp-ex-texts > :not(.cur) { position: absolute; inset: 0 0 auto 0; }
+.shp-ex-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 0 -8px; }
+.shp-ex-foot .shp-ex-nav { margin-top: 0; }
+.shp-ex-io.stacked { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+.shp-ex-io.stacked .shp-ex-flow { margin: 0 0 0 4px; justify-self: start; }
+.shp-ex-io.stacked .shp-ex-col.out { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+.shp-ex-io.stacked .shp-ex-col.out .shp-ex-cap { flex-basis: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shp-ex-card, .shp-ex-card.phone { animation: shp-ex-fade .15s linear both; }
+  .shp-ex-stack > * { transition: opacity .15s linear, visibility 0s linear .15s; }
+  .shp-ex-stack > .cur { transition: opacity .15s linear, visibility 0s; }
+  .shp-root.follow-sheet .shp-dock { transition: opacity .15s linear; transform: translate(-50%, 0); }
+  .shp-ex-icon, .shp-ex-quiet, .shp-ex-step, .shp-ex-more { transition: background-color .15s, color .15s; }
+  .shp-ex-icon:active:not(:disabled), .shp-ex-quiet:active, .shp-ex-step:active, .shp-ex-more:active { transform: none; }
+}
+@keyframes shp-ex-fade { from { opacity: 0; } }
+/* A function or file the host cannot open is named only. */
+code.shp-ex-fn, span.shp-ex-line { cursor: default; text-decoration: none; }

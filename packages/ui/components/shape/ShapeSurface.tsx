@@ -44,6 +44,7 @@ import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeRequirements } from './ShapeRequirements';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefsCtx, type RefsState } from './refs';
+import { useShapeFollow } from './ShapeFollow';
 import { ShapeInline } from './inline';
 import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
 
@@ -188,6 +189,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const [file, setFile] = useState<ShapeFileTarget | null>(null);
   const [codeNotes, setCodeNotes] = useState<CodeAnnotation[]>([]);
   const [copied, setCopied] = useState(false);
+  // The How it works drawing, for "Follow an example" (its examples light their path on it).
+  const [howBoard, setHowBoard] = useState<HTMLElement | null>(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
@@ -529,7 +532,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const onShapeClickCapture = (e: React.MouseEvent) => {
     if (!panel) return;
     const t = (e.nativeEvent.composedPath()[0] ?? e.target) as Element;
-    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, .shp-pill, .shp-general')) return;
+    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, .shp-pill, .shp-general, .shp-ex-card')) return;
     e.stopPropagation();
     e.preventDefault();
     setPanel(null);
@@ -624,6 +627,17 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     }
   };
 
+  const follow = useShapeFollow({
+    examples: version?.views.how?.examples,
+    board: howBoard,
+    active: view === 'how',
+    phone,
+    reduce,
+    surface: rootEl,
+    onCode: (at) => void openCodeTarget(at),
+    canOpen: (path) => !!host.readFile && isShapeProjectPath(path),
+  });
+
   const copyPrompt = async () => {
     const text = host.resumePrompt?.(id);
     if (!text) return;
@@ -658,6 +672,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}
+          onBoard={v === 'how' && phase !== 'leaving' ? setHowBoard : undefined}
         />
       );
     }
@@ -692,7 +707,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   return (
     <RefsCtx.Provider value={refsState}>
-      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
+      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}${follow.sheet ? ' follow-sheet' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
@@ -760,6 +775,11 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 </button>
               ))}
             </div>
+            {follow.button && (
+              <div className="shp-tgroup" role="group" aria-label="Examples">
+                {follow.button}
+              </div>
+            )}
             {view !== 'code' && !phone && (
               <div className="shp-tstrip">
                 <AnnotationToolstrip
@@ -799,6 +819,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               )}
             </div>
           </div>
+
+          {follow.card}
 
           {hoverRect && <div className="shp-pin-hover" style={{ left: hoverRect.left - 4, top: hoverRect.top - 3, width: hoverRect.width + 8, height: hoverRect.height + 6 }} />}
 

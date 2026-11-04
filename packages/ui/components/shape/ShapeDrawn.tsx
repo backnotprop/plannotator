@@ -199,6 +199,12 @@ export interface ShapeDrawnProps {
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
+  /**
+   * The drawing's `.board`, each time it is drawn afresh (new content, or the
+   * wide and tall layouts swapping), and null once it is gone. For a layer
+   * that works on the drawing itself ("Follow an example").
+   */
+  onBoard?: (board: HTMLElement | null) => void;
 }
 
 /** How much room the view has, for a fixed canvas. */
@@ -286,7 +292,9 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const resolve = handlers.current.resolveSrc;
     if (resolve) for (const img of board.querySelectorAll<HTMLImageElement>('img[src^="files/"]')) img.src = resolve(img.getAttribute('src')!);
     setContentKey((x) => x + 1);
+    handlers.current.onBoard?.(board);
   }, [html, css, scaled]);
+  useEffect(() => () => handlers.current.onBoard?.(null), []);
 
   // The canvas scale.
   useLayoutEffect(() => {
