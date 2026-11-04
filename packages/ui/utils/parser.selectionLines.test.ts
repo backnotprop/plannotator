@@ -100,6 +100,25 @@ describe('selectionSourceLines', () => {
     expect(selectionSourceLines(codeBlocks, ['block-0'])).toEqual({ lineStart: 1, lineEnd: 6 });
   });
 
+  // The same line twice in a code document: only a measured offset can tell
+  // the copies apart. Without one (or with one that no longer holds the
+  // quote) the label must not guess the first copy; it names the file's span.
+  test('a repeated line in a code document names the copy at the offset, or the span without one', () => {
+    const yaml = 'a:\n  enabled: true\nb:\n  enabled: true\n';
+    const codeBlocks = codeDocumentBlocks(yaml, 'yaml');
+    const second = yaml.lastIndexOf('enabled: true');
+    expect(selectionSourceLines(codeBlocks, ['block-0'], 'enabled: true', second)).toEqual({ lineStart: 4, lineEnd: 4 });
+    expect(selectionSourceLines(codeBlocks, ['block-0'], 'enabled: true')).toEqual({ lineStart: 1, lineEnd: 4 });
+    const label = (startOffset: number) => exportAnnotations(codeBlocks, [{
+      id: 'a1', blockId: 'block-0', startOffset, endOffset: startOffset + 13,
+      type: AnnotationType.COMMENT, text: 'why?', originalText: 'enabled: true', createdA: 0,
+    }]);
+    expect(label(second)).toContain('(line 4) ');
+    expect(label(0)).toContain('(lines 1–4) ');
+    // A quote that appears once still names its line without an offset.
+    expect(selectionSourceLines(codeBlocks, ['block-0'], 'b:')).toEqual({ lineStart: 3, lineEnd: 3 });
+  });
+
   test('unknown and diff-view block ids name no line', () => {
     expect(selectionSourceLines(blocks, [])).toBeNull();
     expect(selectionSourceLines(blocks, ['nope', 'diff-block-3'])).toBeNull();

@@ -1107,9 +1107,12 @@ const hostLocationExportLine = (ann: any): string => {
 
 /** The document lines a quote covers inside a block that sets
  *  `contentStartLine` (a whole-file code document, which is ONE block). The
- *  stored `startOffset` is used while it still holds the quote; otherwise the
- *  quote's first occurrence. `null` when the block has no line base or the
- *  quote is not in it, so the caller falls back to the block's span. */
+ *  `startOffset` measured from the selection is used while it still holds the
+ *  quote; otherwise the quote's only occurrence. `null` when the block has no
+ *  line base, the quote is not in it, or the quote appears more than once
+ *  with no offset to tell the copies apart (naming the first copy would point
+ *  at a line nobody commented on), so the caller falls back to the block's
+ *  span. */
 const quoteLinesInContent = (
   block: Block,
   quote: unknown,
@@ -1117,12 +1120,16 @@ const quoteLinesInContent = (
 ): { first: number; last: number } | null => {
   if (typeof block.contentStartLine !== 'number' || typeof quote !== 'string' || quote === '') return null;
   const content = block.content;
-  const start =
+  let start: number;
+  if (
     typeof startOffset === 'number' && Number.isInteger(startOffset) && startOffset >= 0
-      && content.startsWith(quote, startOffset)
-      ? startOffset
-      : content.indexOf(quote);
-  if (start < 0) return null;
+    && content.startsWith(quote, startOffset)
+  ) {
+    start = startOffset;
+  } else {
+    start = content.indexOf(quote);
+    if (start < 0 || content.indexOf(quote, start + 1) !== -1) return null;
+  }
   const base = block.contentStartLine;
   const lineAt = (offset: number) => {
     let line = base;
@@ -1157,19 +1164,22 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
  *  Blocks without a line (diff blocks, unknown ids) are skipped; `null` when
  *  none is left. In a whole-file code document (one block, see
  *  `contentStartLine`) the `selectedText` names the lines instead, as its
- *  annotation's label does. */
+ *  annotation's label does; `startOffset` is where the selection starts in
+ *  the first block (the popover's measured offset), which tells repeated
+ *  copies of the same text apart. */
 export const selectionSourceLines = (
   blocks: readonly Block[],
   blockIds: readonly string[],
   selectedText?: string,
+  startOffset?: number,
 ): { lineStart: number; lineEnd: number } | null => {
   let lineStart = Infinity;
   let lineEnd = -Infinity;
-  for (const id of blockIds) {
+  for (const [index, id] of blockIds.entries()) {
     if (id.startsWith('diff-block-')) continue;
     const block = blocks.find(b => b.id === id);
     if (!block || typeof block.startLine !== 'number' || block.startLine < 1) continue;
-    const quoted = quoteLinesInContent(block, selectedText);
+    const quoted = quoteLinesInContent(block, selectedText, index === 0 ? startOffset : undefined);
     if (quoted) {
       lineStart = Math.min(lineStart, quoted.first);
       lineEnd = Math.max(lineEnd, quoted.last);

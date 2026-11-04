@@ -159,7 +159,9 @@ describe("annotate approval submission", () => {
       createdA: 1,
     });
     // The SECOND `apiVersion: v1` (line 5): its stored offset names the
-    // line, not the quote's first occurrence (line 2).
+    // line, not the quote's first occurrence (line 2). The highlighter stores
+    // this measured offset for a code document (Viewer.codeDocumentRepeatedLine
+    // drives a real selection to it).
     const linkedAnnotations = [
       comment("yaml-1", "kind: ConfigMap", yaml.indexOf("kind: ConfigMap")),
       comment("yaml-2", "apiVersion: v1", yaml.lastIndexOf("apiVersion: v1")),

@@ -2195,6 +2195,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   blocks,
                   hookCommentPopover.blockIds ?? [],
                   hookCommentPopover.selectedText,
+                  hookCommentPopover.startOffset,
                 ),
               }}
             />
