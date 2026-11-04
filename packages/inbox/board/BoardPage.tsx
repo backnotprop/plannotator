@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
-import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo } from '@plannotator/core/inbox-types';
+import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
@@ -21,7 +21,7 @@ import { useCardMarks } from './useCardMarks';
 import { NewCardDialog, type NewCardInput } from './NewCardDialog';
 import { BoardIntro, useCopyBoardPrompt } from './BoardIntro';
 import { TidyMenu, type TidyController } from '../components/Tidy';
-import { ProjectFilter } from './ProjectFilter';
+import { BoardFilter, BoardFilterTokens, InitiativesDialog, initiativeLabel } from './BoardFilter';
 import { projectNames } from '../search/model';
 import {
   agentState,
@@ -30,7 +30,11 @@ import {
   boardCounts,
   boardLanes,
   boardProjects,
+  cardsInInitiative,
   cardsInProject,
+  initiativeCounts,
+  liveInitiatives,
+  newCardInitiative,
   inDoneLane,
   BOARD_FILTER_ROW_BELOW,
   cardAge,
@@ -107,6 +111,14 @@ export interface BoardPageProps {
   project?: string | null;
   onProject?: (project: string | null) => void;
   /**
+   * The initiative the Board shows (`#board&initiative=ini_…`, or `none` for the cards in none), with the
+   * project filter: one filter, two parts (approval "board-initiatives"). Null: every initiative.
+   */
+  initiative?: string | null;
+  onInitiative?: (initiative: string | null) => void;
+  /** Show all: both parts of the filter cleared in one step (one history entry). Absent: each part's own. */
+  onClearFilter?: () => void;
+  /**
    * The window's one toast, with its Undo (`Z`), or null to take it down. Shown only when a card leaves
    * the lanes from its right-click menu (`cardMenuToast`). Absent: no toast, the live region alone.
    */
@@ -131,14 +143,20 @@ export function BoardPage(props: BoardPageProps) {
   const cardsRef = useRef(allCards);
   cardsRef.current = allCards;
   const project = props.project ?? null;
-  // Filtered to a project: everything below reads only its cards (the opened card is found among all).
-  const cards = cardsInProject(allCards, project);
+  const initiative = props.initiative ?? null;
+  // Filtered to a project and/or an initiative: everything below reads only those cards (the opened card is found among all).
+  const projectCards = cardsInProject(allCards, project);
+  const cards = cardsInInitiative(projectCards, initiative);
   const names = useMemo(() => projectNames(props.projects), [props.projects]);
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
+  const initiatives = useMemo(() => liveInitiatives(model?.initiatives), [model?.initiatives]);
+  const initiativeName = initiativeLabel(initiatives, initiative);
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
   const [creating, setCreating] = useState<null | 'backlog' | 'send'>(null);
+  /** The Initiatives dialog (the filter's New initiative… or Edit initiatives…). */
+  const [managing, setManaging] = useState<null | 'new' | 'edit'>(null);
   const [intro, setIntro] = useState(false);
   const claimed = useRef(false);
   useEffect(() => {
@@ -164,7 +182,24 @@ export function BoardPage(props: BoardPageProps) {
     return () => clearInterval(timer);
   }, []);
   // Cards on the lanes (Backlog, and Done's last week, too): none is the empty Board's line.
-  const liveCount = cards.filter((card) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inDoneLane(card, now)).length;
+  const onLanes = (card: InboxCardWire) => INBOX_CARD_LIVE_COLUMNS.includes(card.column) || inDoneLane(card, now);
+  const liveCount = cards.filter(onLanes).length;
+  // The filter's counts: the cards on the lanes of the picked project, per initiative (and in none).
+  const filterCounts = initiativeCounts(projectCards.filter(onLanes), initiatives);
+  // The Initiatives dialog's: every card in each, any column (what a delete leaves in none).
+  const cardCounts = initiativeCounts(allCards, initiatives);
+  /** Put a card in an initiative (or none): the card menu's Initiative and the opened card's. */
+  const setInitiative = async (card: InboxCardWire, next: string | null) => {
+    setFailed(null);
+    try {
+      const { card: changed } = await inboxApi.setCardInitiative(card.id, next);
+      props.onChanged(changed);
+      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the initiative') : null;
+      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” is in no initiative now.`);
+    } catch {
+      setFailed(`“${card.title}” did not change. Try again.`);
+    }
+  };
   const { model: sessions } = useComposeSessions(true);
   const live = sessions ? sessions.projects.flatMap((g) => g.sessions) : null;
   const open = props.openCard ? (allCards.find((c) => c.id === props.openCard) ?? null) : null;
@@ -285,12 +320,17 @@ export function BoardPage(props: BoardPageProps) {
         key,
         run: async () => {
           const started = await inboxApi.startThread({ to: { host: to.host, session: to.session }, body, idempotency_key: messageKey(key, to.session, body) });
-          return (await inboxApi.createCard({ title: input.title, notes: input.notes, refs: input.refs, thread_id: started.thread_id, idempotency_key: key })).card;
+          return (
+            await inboxApi.createCard({ title: input.title, notes: input.notes, refs: input.refs, thread_id: started.thread_id, idempotency_key: key, initiative: input.initiative })
+          ).card;
         },
       };
     }
     const project = input.mode === 'send' && input.to ? input.to.project.id : input.project;
-    return { key, run: async () => (await inboxApi.createCard({ project, title: input.title, notes: input.notes, refs: input.refs, column, idempotency_key: key })).card };
+    return {
+      key,
+      run: async () => (await inboxApi.createCard({ project, title: input.title, notes: input.notes, refs: input.refs, column, idempotency_key: key, initiative: input.initiative })).card,
+    };
   };
 
   /** The dialog's card, made once and brought to what the dialog says now. */
@@ -338,6 +378,7 @@ export function BoardPage(props: BoardPageProps) {
       card = (await inboxApi.editCard(card.id, { op: 'edit', title: input.title, notes: input.notes })).card;
     }
     for (const ref of input.refs) if (!was || !was.refs.includes(ref)) card = (await inboxApi.editCard(card.id, { op: 'link', ref })).card;
+    if ((card.initiative ?? null) !== input.initiative) card = (await inboxApi.setCardInitiative(card.id, input.initiative)).card;
     // A card the dialog made but has not sent yet stays in Backlog (a send moves it to Todo).
     if (!card.sent && card.column !== 'backlog') card = (await inboxApi.moveCard(card.id, { op: 'move', column: 'backlog' })).card;
     dialogCard.current = card;
@@ -430,35 +471,56 @@ export function BoardPage(props: BoardPageProps) {
     onOpenThread: props.onOpenThread,
   };
 
-  // The project filter: the chip in the header, and the way back to every card when it hides them all.
-  // Shown once the cards span two projects (or one is picked): a Board of one project looks as it always did.
-  const showFilter = model !== null && props.onProject !== undefined && (offered.length > 1 || project !== null);
-  const filter = showFilter ? <ProjectFilter projects={offered} names={names} value={project} phone={phone} onChange={(next) => props.onProject?.(next)} /> : null;
-  const inProject = <b dir="auto">{projectName ?? 'this project'}</b>;
+  // The one filter (approval "board-initiatives"): an icon at the header's right, its picks as tokens left
+  // of it (on their own row on a phone or a narrow page), and the way back to every card when it hides them all.
+  const showFilter = model !== null && props.onProject !== undefined;
+  const filtered = project !== null || initiative !== null;
+  const filterProps = {
+    projects: offered,
+    names,
+    project,
+    onProject: (next: string | null) => props.onProject?.(next),
+    initiatives,
+    counts: filterCounts,
+    initiative,
+    onInitiative: (next: string | null) => props.onInitiative?.(next),
+    onManage: setManaging,
+    phone,
+  };
+  const filter = showFilter ? <BoardFilter {...filterProps} tokens={!phone && !narrowHead} /> : null;
+  const tokenRow = showFilter && (phone || narrowHead) && filtered ? <BoardFilterTokens {...filterProps} /> : null;
+  // What the filter shows, in words: "Shape", "plannotator", "Shape in plannotator".
+  const scope = initiativeName && projectName ? `${initiativeName} in ${projectName}` : (initiativeName ?? projectName ?? 'this project');
+  const inProject = <b dir="auto">{scope}</b>;
   const showAll = (
     <button
       type="button"
       className="ib-btn ib-sm"
       onClick={() => {
-        props.onProject?.(null);
+        if (props.onClearFilter) props.onClearFilter();
+        else {
+          if (project !== null) props.onProject?.(null);
+          if (initiative !== null) props.onInitiative?.(null);
+        }
         requestAnimationFrame(() => document.getElementById(titleId)?.focus());
       }}
       data-board-show-all=""
     >
-      Show all projects
+      {initiative !== null ? 'Show all cards' : 'Show all projects'}
     </button>
   );
   // Say a new filter once it lands (not on the first draw).
-  const saidProject = useRef(project);
+  const saidFilter = useRef(`${project}|${initiative}`);
   useEffect(() => {
-    if (saidProject.current === project) return;
-    saidProject.current = project;
-    setSaid(project ? `Showing the cards in ${projectName ?? 'one project'}.` : 'Showing the cards in every project.');
-  }, [project, projectName]);
+    const key = `${project}|${initiative}`;
+    if (saidFilter.current === key) return;
+    saidFilter.current = key;
+    setSaid(filtered ? `Showing the cards in ${scope}.` : 'Showing every card.');
+  }, [project, initiative, scope, filtered]);
 
   let body: ReactNode;
   if (!model) body = props.error ? <div className="ib-error">{props.error}</div> : <div className="ib-bload" aria-busy="true" />;
-  else if (phone && project && cards.length === 0)
+  else if (phone && filtered && cards.length === 0)
     body = (
       <div className="ib-bempty ib-bempty-in" data-board-empty="project">
         <span>No cards in {inProject}</span>
@@ -470,13 +532,13 @@ export function BoardPage(props: BoardPageProps) {
     body = (
       <CardList
         title="Done"
-        empty={project ? <>Nothing done in {inProject} yet.</> : 'Nothing done yet. A card goes here when its work is merged, live or finished.'}
+        empty={filtered ? <>Nothing done in {inProject} yet.</> : 'Nothing done yet. A card goes here when its work is merged, live or finished.'}
         cards={cards.filter((c) => c.column === 'done')}
         {...common}
       />
     );
   else if (view === 'cancelled')
-    body = <CancelledPage cards={cards} inProject={project ? inProject : null} onRestore={(card) => move(card, { op: 'restore' })} onSeeDrops={props.onSeeDrops} unseen={drops} />;
+    body = <CancelledPage cards={cards} inProject={filtered ? inProject : null} onRestore={(card) => move(card, { op: 'restore' })} onSeeDrops={props.onSeeDrops} unseen={drops} />;
   else body = <Lanes cards={cards} {...common} openColumn={open?.column ?? null} onMove={(card, column) => void move(card, { op: 'move', column })} />;
 
   const titleId = useId();
@@ -499,6 +561,8 @@ export function BoardPage(props: BoardPageProps) {
       onChanged={props.onChanged}
       onOpenThread={(threadId) => props.onOpenThread(open, threadId)}
       onCreateThread={(session, opener) => props.onCreateThread(open, session, opener)}
+      initiatives={model?.initiatives ?? []}
+      onInitiative={(next) => void setInitiative(open, next)}
     />
   ) : null;
 
@@ -525,17 +589,17 @@ export function BoardPage(props: BoardPageProps) {
             <h1 id={titleId} tabIndex={-1}>
               {view === 'done' ? 'Done' : 'Cancelled'}
             </h1>
-            {!narrowHead && filter}
           </>
         ) : (
           <>
             <h1 id={titleId} tabIndex={-1}>
               Board
             </h1>
-            {!phone && !narrowHead && filter}
           </>
         )}
         <span className="ib-bsp" />
+        {/* The one filter (approval "board-initiatives"): its tokens, then its icon, right of the gap. */}
+        {filter}
         {/* The "?" sits left of Done and Cancelled (the intro mock). */}
         {(view === 'lanes' || phone) && (
           <Tip content="About the Board">
@@ -560,7 +624,7 @@ export function BoardPage(props: BoardPageProps) {
           <TidyMenu tidy={props.tidy} phone={phone} className="ib-bhead-more" onRefresh={() => props.onChanged()} />
         )}
       </div>
-      {(phone || narrowHead) && filter && <div className="ib-bfbar">{filter}</div>}
+      {tokenRow && <div className="ib-bfbar">{tokenRow}</div>}
       {model && drops.length > 0 && view !== 'cancelled' && (
         <DroppedNotice drops={drops} onRestore={(card) => move(card, { op: 'restore' })} onSeen={() => props.onSeeDrops(drops.map((card) => card.id))} onOpenCancelled={phone ? null : () => props.onView('cancelled')} />
       )}
@@ -581,16 +645,18 @@ export function BoardPage(props: BoardPageProps) {
           props.onOpenCard(card.id);
         }}
         onOpenThread={props.onOpenThread}
+        initiatives={initiatives}
+        onInitiative={(card, next) => void setInitiative(card, next)}
       >
         {body}
         {panel}
-        {model && view === 'lanes' && !phone && liveCount === 0 && !open && project !== null && (
+        {model && view === 'lanes' && !phone && liveCount === 0 && !open && filtered && (
           <div className="ib-bempty" data-board-empty="project">
             <span>Nothing in flight in {inProject}</span>
             {showAll}
           </div>
         )}
-        {model && view === 'lanes' && !phone && liveCount === 0 && !open && project === null && (
+        {model && view === 'lanes' && !phone && liveCount === 0 && !open && !filtered && (
           <div className="ib-bempty" data-board-empty="">
             No cards yet
             <button type="button" className="ib-btn ib-sm" onClick={() => void promptCopy.copy()} data-board-empty-copy="">
@@ -611,8 +677,20 @@ export function BoardPage(props: BoardPageProps) {
           home={props.home}
           phone={phone}
           initialMode={creating}
+          initiatives={initiatives}
+          defaultInitiative={newCardInitiative(initiative)}
           onClose={() => setCreating(null)}
           onCreate={create}
+        />
+      )}
+      {managing && (
+        <InitiativesDialog
+          initiatives={initiatives}
+          cardCounts={cardCounts}
+          start={managing}
+          phone={phone}
+          onClose={() => setManaging(null)}
+          onChanged={() => props.onChanged()}
         />
       )}
       {intro && <BoardIntro mcpCommand={props.mcpCommand} phone={phone} onClose={() => setIntro(false)} />}
@@ -1219,6 +1297,8 @@ function OpenedCard({
   onChanged,
   onOpenThread,
   onCreateThread,
+  initiatives,
+  onInitiative,
 }: {
   card: InboxCardWire;
   projectName: string;
@@ -1238,6 +1318,9 @@ function OpenedCard({
   onChanged: (card?: InboxCardWire) => void;
   onOpenThread: (threadId: string) => void;
   onCreateThread: (session: string | null, opener: HTMLElement) => void;
+  /** Every initiative, deleted ones too (the history names them); the menu offers the live ones. */
+  initiatives: readonly InboxInitiative[];
+  onInitiative: (initiative: string | null) => void;
 }) {
   const [history, setHistory] = useState<InboxCardHistoryEntry[] | null>(null);
   // The card's own project's repo (not the window's): its text links `#123` there.
@@ -1309,6 +1392,8 @@ function OpenedCard({
     <CardPanel
       card={card}
       history={history}
+      initiatives={initiatives}
+      onInitiative={onInitiative}
       refs={refs}
       projectName={projectName}
       repo={repo}

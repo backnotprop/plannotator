@@ -309,6 +309,13 @@ export interface InboxCard {
    * lines, InboxStore's load).
    */
   done_prs?: string[] | null;
+  /**
+   * The Board initiative the person put the card in (approval
+   * "board-initiatives"): an `ini_` id, or null for none. Absent on a line
+   * written before initiatives (readInboxCard reads it as null). Only the
+   * person sets it; a deleted initiative reads as none on the wire.
+   */
+  initiative?: string | null;
 }
 
 /** An automatic ship: when, and the URLs of the PRs that had all merged. */
@@ -508,11 +515,15 @@ export interface InboxCardSent {
 /** The longest card notes, in characters. */
 export const INBOX_CARD_NOTES_MAX = 4000;
 
-/** A stored card with the fields added since step 1 filled in (`notes`, `sent`, `refs`) and its columns read as v2 (readInboxCardColumns). */
+/**
+ * A stored card with the fields added since step 1 filled in (`notes`, `sent`,
+ * `refs`, `initiative`: a missing one is null) and its columns read as v2
+ * (readInboxCardColumns).
+ */
 export function readInboxCard(card: InboxCard): InboxCard {
   const read = readInboxCardColumns(card);
-  if (read.notes !== undefined && read.sent !== undefined && read.refs !== undefined) return read;
-  return { ...read, notes: read.notes ?? null, sent: read.sent ?? null, refs: inboxCardRefsOf(read) };
+  if (read.notes !== undefined && read.sent !== undefined && read.refs !== undefined && read.initiative !== undefined) return read;
+  return { ...read, notes: read.notes ?? null, sent: read.sent ?? null, refs: inboxCardRefsOf(read), initiative: read.initiative ?? null };
 }
 
 /**
@@ -549,6 +560,8 @@ export type InboxCardHistoryEntry =
   | { at: string; by: InboxAuthor; kind: "linked_ref"; ref: string; ref_kind: string }
   | { at: string; by: InboxAuthor; kind: "renamed"; title: string }
   | { at: string; by: InboxAuthor; kind: "notes" }
+  /** Put in an initiative (its `ini_` id; the window names it), or taken out of one (null). */
+  | { at: string; by: InboxAuthor; kind: "initiative"; initiative: string | null }
   | { at: string; by: InboxAuthor; kind: "sent"; to: InboxAuthor; thread_id: string; /** Sent into a thread the card already linked (Start), not a new one. */ existing_thread: boolean };
 
 /**
@@ -580,6 +593,7 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
     for (const ref of inboxCardRefsOf(card)) if (!known.some((k) => k.url === ref.url)) out.push({ at, by, kind: "linked_ref", ref: ref.ref, ref_kind: ref.kind });
     if (card.title !== before.title) out.push({ at, by, kind: "renamed", title: card.title });
     if ((card.notes ?? null) !== (before.notes ?? null)) out.push({ at, by, kind: "notes" });
+    if ((card.initiative ?? null) !== (before.initiative ?? null)) out.push({ at, by, kind: "initiative", initiative: card.initiative ?? null });
     if (card.column !== before.column) {
       if (card.column === "dropped") out.push({ at, by, kind: "dropped", reason: card.dropped?.reason ?? null });
       else if (card.column === "done" && card.auto_shipped && card.auto_shipped.at !== before.auto_shipped?.at) {

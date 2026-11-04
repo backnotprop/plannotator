@@ -1,20 +1,23 @@
 /**
- * The Board's project filter (option a, the owner's pick 2026-10-28): the
- * Project button in the Board's header, as the window draws it over a
- * scripted fetch. What regresses: a Board of one project growing a control
- * it does not need; another project's card on the lanes, in the counts, on
- * the Done or Cancelled page or in the drops; "in" coming back on the
- * button; the menu offering a project with no card; × or Show all projects
- * not clearing; a card opened from another project closing under the
- * filter; the phone's button squeezed into the header instead of its own
- * row, or its menu not a bottom sheet.
+ * The Board's one filter (approval "board-initiatives", take C; the project
+ * part from the owner's pick 2026-10-28): the filter icon in the Board's
+ * header, its menu holding Initiative and Project, the picks as tokens, as
+ * the window draws it over a scripted fetch. What regresses: a Board of one
+ * project offering a Project choice it does not need; another project's (or
+ * initiative's) card on the lanes, in the counts, on the Done or Cancelled
+ * page or in the drops; the menu offering a project with no card, or wrong
+ * counts per initiative and for No initiative; × or Show all not clearing; a
+ * card opened from another project closing under the filter; New card not
+ * starting in the filtered initiative; the opened card's Initiative not
+ * writing; New initiative… not making one; the phone's tokens squeezed into
+ * the header instead of their own row, or its menu not a bottom sheet.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxCardWire, InboxInitiative } from '@plannotator/core/inbox-types';
 import type { BoardPageProps } from './board/BoardPage';
 
 const hasDom = typeof document !== 'undefined';
@@ -60,14 +63,22 @@ const PROJECTS = [
   { id: API, key: 'api', name: 'api', root: '/Users/ada/src/api', created_at: AT, threads: 1, unread: 0 },
 ] as BoardPageProps['projects'];
 
+const SHAPE = 'ini_01JX0000000000000000000001';
+const MEMORY = 'ini_01JX0000000000000000000002';
+const INITIATIVES: InboxInitiative[] = [
+  { id: SHAPE, name: 'Shape', created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: null },
+  { id: MEMORY, name: 'Memory', created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: null },
+  { id: 'ini_01JX0000000000000000000003', name: 'Gone', created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: AT },
+];
+
 const CARDS: InboxCardWire[] = [
-  card('web_backlog', WEB, { column: 'todo' }),
-  card('web_design', WEB, { column: 'in_progress' }),
+  card('web_backlog', WEB, { column: 'todo', initiative: SHAPE }),
+  card('web_design', WEB, { column: 'in_progress', initiative: SHAPE }),
   card('web_look', WEB, { column: 'in_review', you: 'Pick a dialog' }),
   card('web_done', WEB, { column: 'done' }),
   card('web_ice', WEB, { column: 'dropped', aside_from: 'backlog', dropped: { at: AT, by: { kind: 'person' }, reason: null, seen_at: AT } }),
   card('web_drop', WEB, { column: 'dropped', aside_from: 'in_progress', dropped: { at: AT, by: CLAUDE, reason: 'Superseded', seen_at: null } }),
-  card('api_build', API, { column: 'in_progress' }),
+  card('api_build', API, { column: 'in_progress', initiative: SHAPE }),
   card('api_review', API, { column: 'in_review', you: 'Merge #3' }),
   card('api_done', API, { column: 'done' }),
   card('docs_ship', 'prj_docs', { column: 'done' }),
@@ -83,17 +94,30 @@ afterEach(() => {
   while (restorers.length > 0) restorers.pop()!();
 });
 
+/** What the window asked the server to write: each POST's path and body. */
+const posts: { path: string; body: Record<string, unknown> }[] = [];
+
 function scriptFetch() {
   const original = globalThis.fetch;
+  posts.length = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1:1');
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    if (init?.method === 'POST') posts.push({ path: url.pathname, body: JSON.parse(String(init.body)) as Record<string, unknown> });
     if (url.pathname === '/api/inbox/cards' && init?.method === 'POST') {
-      const body = JSON.parse(String(init.body)) as { project: string; title: string };
-      return json({ card: card('made', body.project, { title: body.title, agent: null }) });
+      const body = JSON.parse(String(init.body)) as { project: string; title: string; initiative?: string | null };
+      return json({ card: card('made', body.project, { title: body.title, agent: null, initiative: body.initiative ?? null }) });
+    }
+    if (url.pathname === '/api/inbox/initiatives' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { name: string };
+      return json({ initiative: { id: 'ini_01JX0000000000000000000009', name: body.name, created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: null } });
     }
     if (url.pathname === '/api/inbox/sessions') return json({ serverSession: 's', home: '/Users/ada', projects: [] });
     const one = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)$/);
+    if (one && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { initiative?: string | null };
+      return json({ card: { ...CARDS.find((c) => c.id === one[1])!, initiative: body.initiative ?? null } });
+    }
     if (one) return json({ card: CARDS.find((c) => c.id === one[1]), history: [] });
     if (/\/refs$/.test(url.pathname)) return json({ refs: [] });
     return json({});
@@ -103,18 +127,19 @@ function scriptFetch() {
   });
 }
 
-/** The Board with its project held the way App holds it (the address): each pick is drawn again. */
+/** The Board with its filter held the way App holds it (the address): each pick is drawn again. */
 function draw(over: Partial<BoardPageProps> = {}, cards: InboxCardWire[] = CARDS) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   root = createRoot(host);
   const picks: (string | null)[] = [];
+  const initiativePicks: (string | null)[] = [];
   let props: BoardPageProps = {
     view: 'lanes',
     mcpCommand: null,
     claimIntro: false,
-    model: { serverSession: 's', cursor: 1, cards, dropped_unseen: 1, seen_seq: 10 },
+    model: { serverSession: 's', cursor: 1, cards, dropped_unseen: 1, seen_seq: 10, initiatives: INITIATIVES },
     error: null,
     visitLook: 10,
     handled: new Set(),
@@ -137,12 +162,19 @@ function draw(over: Partial<BoardPageProps> = {}, cards: InboxCardWire[] = CARDS
       props = { ...props, project: next };
       render();
     },
+    initiative: null,
+    onInitiative: (next) => {
+      initiativePicks.push(next);
+      props = { ...props, initiative: next };
+      render();
+    },
     ...over,
   };
   const render = () => act(() => root!.render(<SidebarProvider><BoardPage {...props} /></SidebarProvider>));
   render();
   return {
     picks,
+    initiativePicks,
     rerender: (next: Partial<BoardPageProps>) => {
       props = { ...props, ...next };
       render();
@@ -168,48 +200,62 @@ async function press(el: HTMLElement) {
   await settle();
 }
 
+async function type(input: HTMLInputElement, text: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
 const laneIds = (column: string) => $$(`.ib-blanes [data-lane="${column}"] .ib-bcard`).map((el) => el.getAttribute('data-card-id'));
 const shownCards = () => $$('.ib-bcard').map((el) => el.getAttribute('data-card-id')).sort();
-/** What the button shows (the screen reader's "Project: " prefix aside). */
-const chipWords = () => {
-  const label = $('[data-board-project-chip] .ib-bpf-l')!.cloneNode(true) as HTMLElement;
-  label.querySelector('.ib-sr')?.remove();
-  return label.textContent;
-};
+/** A token's words: the picked project's or initiative's name, or null when nothing of that kind is picked. */
+const token = (kind: 'project' | 'initiative') => $(`[data-board-filter-token="${kind}"] .ib-bflt-tok-l`)?.textContent ?? null;
+/** The open menu's rows of one kind: their words (the count apart) and whether each is checked. */
+const rows = (attr: 'data-board-project-option' | 'data-board-initiative-option') =>
+  $$(`[data-board-filter-menu] [${attr}]`).map((o) => ({
+    name: o.querySelector('.ib-pmi-l')?.textContent?.trim() ?? '',
+    count: o.querySelector('.ib-bflt-n')?.textContent ?? null,
+    checked: o.getAttribute('aria-checked'),
+  }));
 
-test.if(hasDom)('a Board whose cards are all in one project has no Project button and draws as before', async () => {
+test.if(hasDom)('a Board whose cards are all in one project: the filter offers initiatives only, and the Board draws as before', async () => {
   scriptFetch();
   draw({}, CARDS.filter((c) => c.project_id === WEB));
   await settle();
-  expect($('[data-board-project-filter]')).toBeNull();
+  expect($('.ib-bhead [data-board-filter-button]')).not.toBeNull();
+  expect($('[data-board-filter-token]')).toBeNull();
   expect($('.ib-bfbar')).toBeNull();
   expect(shownCards()).toEqual(['web_backlog', 'web_design', 'web_look']);
+  await press($('[data-board-filter-button]')!);
+  expect(rows('data-board-project-option')).toEqual([]);
+  expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All initiatives', 'Shape', 'Memory', 'No initiative']);
 });
 
 test.if(hasDom)('All projects shows every card; picking a project narrows the lanes, the counts and the links', async () => {
   scriptFetch();
   const drawn = draw();
   await settle();
-  // Unfiltered: today's Board, with the button reading All projects.
-  expect(chipWords()).toBe('All projects');
+  // Unfiltered: today's Board, no token, the icon alone.
+  expect($('[data-board-filter-token]')).toBeNull();
+  expect($('[data-board-filter-button]')!.getAttribute('aria-label')).toBe('Filter');
   expect(shownCards()).toEqual(['api_build', 'api_review', 'web_backlog', 'web_design', 'web_look']);
-  expect($('[data-board-summary]')).toBeNull();
   expect($('[data-board-link="done"]')!.textContent).toBe('All done');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 2');
   expect($('[data-dropped-notice]')!.getAttribute('data-dropped-notice')).toBe('1');
-  // The button is the Board header's, beside the counts.
-  expect($('.ib-bhead [data-board-project-chip]')).not.toBeNull();
 
-  await press($('[data-board-project-chip]')!);
-  const menu = $('[data-board-project-menu]')!;
+  await press($('[data-board-filter-button]')!);
+  const menu = $('[data-board-filter-menu]')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  const options = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
   // Only projects with a card (quiet has none), in the sidebar's order; the docs card's project is not one the Inbox knows.
-  expect(options.map((o) => o.textContent?.trim())).toEqual(['All projects', 'web', 'api']);
-  expect(options.map((o) => o.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
-  await act(async () => options[2]!.click());
+  expect(rows('data-board-project-option')).toEqual([
+    { name: 'All projects', count: null, checked: 'true' },
+    { name: 'web', count: null, checked: 'false' },
+    { name: 'api', count: null, checked: 'false' },
+  ]);
+  await act(async () => $('[data-board-project-option="prj_api"]')!.click());
   await settle();
 
   expect(drawn.picks).toEqual([API]);
@@ -219,24 +265,134 @@ test.if(hasDom)('All projects shows every card; picking a project narrows the la
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 0');
   // web's drop is not api's news.
   expect($('[data-dropped-notice]')).toBeNull();
-  // The project's name alone: no "in" (the owner, 2026-10-28), and a way to clear it.
-  expect(chipWords()).toBe('api');
-  expect($('[data-board-project-filter]')!.hasAttribute('data-set')).toBe(true);
-  // The polite live region names the picked project (its wording is free to change).
+  // The project's name alone as the token, and a way to clear it.
+  expect(token('project')).toBe('api');
+  expect($('[data-board-filter]')!.hasAttribute('data-set')).toBe(true);
   const said = $('[data-board-live]')!.textContent ?? '';
   expect(said).toContain('api');
 
   // × shows every project again.
-  await act(async () => $('[data-board-project-clear]')!.click());
+  await act(async () => $('[data-board-filter-clear="project"]')!.click());
   await settle();
   expect(drawn.picks).toEqual([API, null]);
   expect(shownCards()).toHaveLength(5);
-  expect($('[data-board-project-clear]')).toBeNull();
-  // Clearing is announced too: a new message, no longer naming api.
+  expect($('[data-board-filter-token]')).toBeNull();
   const cleared = $('[data-board-live]')!.textContent ?? '';
   expect(cleared).not.toBe('');
   expect(cleared).not.toBe(said);
   expect(cleared).not.toContain('api');
+});
+
+test.if(hasDom)('an initiative: its count and No initiative\'s in the menu, the lanes narrowed, the token named, the project filter kept', async () => {
+  scriptFetch();
+  const drawn = draw({ project: WEB });
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  // Counted on the lanes of the picked project: web has two Shape cards and one in none (its done card is past the week).
+  expect(rows('data-board-initiative-option')).toEqual([
+    { name: 'All initiatives', count: null, checked: 'true' },
+    { name: 'Shape', count: '2', checked: 'false' },
+    { name: 'Memory', count: '0', checked: 'false' },
+    { name: 'No initiative', count: '1', checked: 'false' },
+  ]);
+  // A deleted one is never offered.
+  expect($('[data-board-initiative-option="ini_01JX0000000000000000000003"]')).toBeNull();
+  await act(async () => $(`[data-board-initiative-option="${SHAPE}"]`)!.click());
+  await settle();
+  expect(drawn.initiativePicks).toEqual([SHAPE]);
+  expect(shownCards()).toEqual(['web_backlog', 'web_design']);
+  expect(token('initiative')).toBe('Shape');
+  expect(token('project')).toBe('web');
+  expect($('[data-board-filter-button]')!.getAttribute('aria-label')).toBe('Filter: Shape, web');
+
+  // No initiative: the cards in none.
+  drawn.rerender({ project: null, initiative: 'none' });
+  await settle();
+  expect(shownCards()).toEqual(['api_review', 'web_look']);
+  expect(token('initiative')).toBe('No initiative');
+
+  // Its × clears only the initiative.
+  drawn.rerender({ project: WEB, initiative: SHAPE });
+  await settle();
+  await act(async () => $('[data-board-filter-clear="initiative"]')!.click());
+  await settle();
+  expect(drawn.initiativePicks).toEqual([SHAPE, null]);
+  expect(token('project')).toBe('web');
+  expect(shownCards()).toEqual(['web_backlog', 'web_design', 'web_look']);
+});
+
+test.if(hasDom)('New card on a Board filtered to an initiative starts in it, and its × takes it out', async () => {
+  scriptFetch();
+  draw({ initiative: SHAPE });
+  await settle();
+  act(() => $('[data-board-new]')!.click());
+  await settle();
+  expect($('[data-new-card-initiative] .ib-bflt-tok-l')!.textContent).toBe('Shape');
+  await type($('[data-new-card-title]') as HTMLInputElement, 'Tokens pass');
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+  expect(posts.find((p) => p.path === '/api/inbox/cards')!.body).toMatchObject({ title: 'Tokens pass', initiative: SHAPE });
+
+  // Made again with the initiative taken out: none.
+  posts.length = 0;
+  act(() => $('[data-board-new]')!.click());
+  await settle();
+  await act(async () => $('[data-new-card-initiative-clear]')!.click());
+  await type($('[data-new-card-title]') as HTMLInputElement, 'Favicon');
+  await act(async () => $$('[data-new-card-add]').at(-1)!.click());
+  await settle();
+  expect(posts.find((p) => p.path === '/api/inbox/cards')!.body).toMatchObject({ title: 'Favicon', initiative: null });
+});
+
+test.if(hasDom)('the opened card sets its initiative, and takes it out', async () => {
+  scriptFetch();
+  const changed: (InboxCardWire | undefined)[] = [];
+  draw({ openCard: 'web_look', onChanged: (card) => changed.push(card) });
+  await settle();
+  const trigger = $('[data-card-panel="web_look"] [data-card-initiative]')!;
+  expect(trigger.getAttribute('data-card-initiative')).toBe('none');
+  expect(trigger.textContent).toContain('No initiative');
+  await press(trigger);
+  expect($$('[data-card-initiative-menu] [data-card-initiative-option]').map((o) => o.textContent?.trim())).toEqual(['Shape', 'Memory', 'No initiative']);
+  await act(async () => $(`[data-card-initiative-menu] [data-card-initiative-option="${MEMORY}"]`)!.click());
+  await settle();
+  expect(posts.at(-1)).toEqual({ path: '/api/inbox/cards/web_look', body: { op: 'initiative', initiative: MEMORY } });
+  expect(changed.at(-1)?.initiative).toBe(MEMORY);
+  expect($('[data-board-live]')!.textContent).toContain('Memory');
+});
+
+test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiatives… renames and deletes, asking first', async () => {
+  scriptFetch();
+  let refreshed = 0;
+  draw({ onChanged: () => (refreshed += 1) });
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-new]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  expect(dialog).not.toBeNull();
+  await type(dialog.querySelector<HTMLInputElement>('[data-initiative-new-name]')!, '  Release ');
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-add]')!.click());
+  await settle();
+  expect(posts.at(-1)).toMatchObject({ path: '/api/inbox/initiatives', body: { name: 'Release' } });
+  expect(refreshed).toBe(1);
+
+  // Rename in place: Enter saves.
+  const name = dialog.querySelector<HTMLInputElement>(`[data-initiative-row="${SHAPE}"] [data-initiative-name]`)!;
+  await type(name, 'Shape v2');
+  await act(async () => name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
+  expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'rename', name: 'Shape v2' } });
+
+  // Delete asks once, naming what happens to its cards (three are in Shape).
+  await act(async () => dialog.querySelector<HTMLElement>(`[data-initiative-row="${SHAPE}"] [data-initiative-delete]`)!.click());
+  const ask = dialog.querySelector<HTMLElement>(`[data-initiative-delete-ask="${SHAPE}"]`)!;
+  expect(ask.textContent).toContain('Its 3 cards go to No initiative.');
+  const before = posts.length;
+  await act(async () => ask.querySelector<HTMLElement>('[data-initiative-delete-yes]')!.click());
+  await settle();
+  expect(posts.length).toBe(before + 1);
+  expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'delete' } });
 });
 
 test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {
@@ -244,7 +400,7 @@ test.if(hasDom)('Done and Cancelled list only the filtered project', async () =>
   const drawn = draw({ view: 'done', project: API });
   await settle();
   expect(shownCards()).toEqual(['api_done']);
-  expect(chipWords()).toBe('api');
+  expect(token('project')).toBe('api');
   drawn.rerender({ view: 'cancelled', project: WEB });
   await settle();
   expect($$('[data-dropped-row]').map((el) => el.getAttribute('data-dropped-row')).sort()).toEqual(['web_drop', 'web_ice']);
@@ -286,31 +442,25 @@ test.if(hasDom)('a card made in another project while filtered: the announcement
   await settle();
   act(() => $('[data-board-new]')!.click());
   await settle();
-  const title = $('[data-new-card-title]') as HTMLInputElement;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(title, 'A roadmap page');
-    title.dispatchEvent(new Event('input', { bubbles: true }));
-  });
+  await type($('[data-new-card-title]') as HTMLInputElement, 'A roadmap page');
   await act(async () => $$('[data-new-card-add]').at(-1)!.click());
   await settle();
   expect($('[data-board-live]')!.textContent).toContain('web');
   expect(drawn.picks).toEqual([]);
-  expect(chipWords()).toBe('api');
+  expect(token('project')).toBe('api');
 });
 
-test.if(hasDom)('a phone: the Project button on its own row under the header, its menu a bottom sheet', async () => {
+test.if(hasDom)('a phone: the filter icon in the header, its picks on their own row under it, its menu a bottom sheet', async () => {
   scriptFetch();
-  draw({ phone: true, project: WEB });
+  draw({ phone: true, project: WEB, initiative: SHAPE });
   await settle();
-  expect($('.ib-bhead [data-board-project-chip]')).toBeNull();
-  expect($('.ib-bfbar [data-board-project-chip]')).not.toBeNull();
-  expect(chipWords()).toBe('web');
-  // The stacked list holds only web's cards (its done one, older than a week, behind All done).
-  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design', 'web_look'].sort());
-  expect($('[data-board-done-all]')!.textContent).toBe('All done (1)');
-  await press($('[data-board-project-chip]')!);
-  expect($('[data-board-project-menu]')).not.toBeNull();
-  expect($('.ib-pm-pos[data-phone] [data-board-project-menu]')).not.toBeNull();
+  expect($('.ib-bhead [data-board-filter-button]')).not.toBeNull();
+  expect($('.ib-bhead [data-board-filter-token]')).toBeNull();
+  expect($$('.ib-bfbar [data-board-filter-token]').map((el) => el.getAttribute('data-board-filter-token'))).toEqual(['initiative', 'project']);
+  // The stacked list holds only web's Shape cards.
+  expect($$('[data-board-view="phone"] .ib-bcard').map((el) => el.getAttribute('data-card-id')).sort()).toEqual(['web_backlog', 'web_design']);
+  await press($('[data-board-filter-button]')!);
+  expect($('.ib-pm-pos[data-phone] [data-board-filter-menu]')).not.toBeNull();
   expect($('.ib-pm-scrim')).not.toBeNull();
 });
 

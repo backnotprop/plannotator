@@ -347,3 +347,35 @@ describe("the Board page's routes", () => {
     expect((await fetch(`${base}/api/inbox/board/intro`)).status).toBe(405);
   });
 });
+
+describe("the Board's initiatives over the routes (approval \"board-initiatives\")", () => {
+  test("made, set on a card (and on a New card), renamed, deleted: the cards read follows each, and a delete leaves its cards in none", async () => {
+    const { base, project, post } = await world();
+    type Read = { cards: { id: string; initiative: string | null }[]; initiatives: { id: string; name: string; deleted_at: string | null }[] };
+    const read = async () => (await (await fetch(`${base}/api/inbox/cards`)).json()) as Read;
+    const made = (await (await post("/api/inbox/initiatives", { name: "Shape" })).json()) as { initiative: { id: string } };
+    const id = made.initiative.id;
+    const clash = await post("/api/inbox/initiatives", { name: "shape" });
+    expect(clash.status).toBe(409);
+    expect(((await clash.json()) as { code: string }).code).toBe("initiative_exists");
+    // A New card on a Board filtered to it starts in it.
+    const fresh = (await (await post("/api/inbox/cards", { project: project.id, title: "Tokens pass", initiative: id })).json()) as { card: { id: string; initiative: string } };
+    expect(fresh.card.initiative).toBe(id);
+    const plain = (await (await post("/api/inbox/cards", { project: project.id, title: "Favicon" })).json()) as { card: { id: string; initiative: string | null } };
+    expect(plain.card.initiative).toBeNull();
+    const set = (await (await post(`/api/inbox/cards/${plain.card.id}`, { op: "initiative", initiative: id })).json()) as { card: { initiative: string } };
+    expect(set.card.initiative).toBe(id);
+    expect((await post(`/api/inbox/cards/${plain.card.id}`, { op: "initiative" })).status).toBe(422);
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "rename", name: "Shape v2" })).status).toBe(200);
+    let model = await read();
+    expect(model.initiatives.map((i) => i.name)).toEqual(["Shape v2"]);
+    expect(model.cards.filter((c) => c.initiative === id).length).toBe(2);
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "delete" })).status).toBe(200);
+    model = await read();
+    expect(model.initiatives[0]!.deleted_at).not.toBeNull();
+    expect(model.cards.map((c) => c.initiative)).toEqual([null, null]);
+    // A stale window's write is refused like every other.
+    expect((await post("/api/inbox/initiatives", { name: "Memory", serverSession: "another" })).status).toBe(409);
+    expect((await fetch(`${base}/api/inbox/initiatives`)).status).toBe(405);
+  });
+});

@@ -26,6 +26,9 @@ import {
   isInboxCardPersonColumn,
   isInboxCardSentWaiting,
   isInboxCardUnread,
+  isInboxInitiativeId,
+  INBOX_NO_INITIATIVE,
+  type InboxInitiative,
   type InboxCardHistoryEntry,
   type InboxAuthor,
   type InboxCardColumn,
@@ -55,6 +58,70 @@ export function boardViewOf(value: string | null): BoardView {
  */
 export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(cards: readonly T[], project: string | null): readonly T[] {
   return project ? cards.filter((card) => card.project_id === project) : cards;
+}
+
+/**
+ * The Board's initiative filter (approval "board-initiatives"): an `ini_` id
+ * (`#board&initiative=ini_…`), `none` for the cards in no initiative
+ * (`&initiative=none`), or null for every card. It narrows what the project
+ * filter left, so the two combine.
+ */
+export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(cards: readonly T[], initiative: string | null): readonly T[] {
+  if (initiative === null) return cards;
+  if (initiative === INBOX_NO_INITIATIVE) return cards.filter((card) => !card.initiative);
+  return cards.filter((card) => card.initiative === initiative);
+}
+
+/** The initiatives the person can pick, in the order they were made (a deleted one is gone from the filter and the menus). */
+export function liveInitiatives(initiatives: readonly InboxInitiative[] | undefined): InboxInitiative[] {
+  return (initiatives ?? []).filter((initiative) => initiative.deleted_at === null);
+}
+
+/**
+ * How many cards each initiative holds, and how many are in none (`none`),
+ * among `cards` (the Board passes the cards on its lanes in the picked
+ * project). A card whose initiative was deleted counts as in none (the
+ * server already reads it so).
+ */
+export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative'>[], live: readonly Pick<InboxInitiative, 'id'>[]): Map<string, number> {
+  const counts = new Map<string, number>([[INBOX_NO_INITIATIVE, 0], ...live.map((i) => [i.id, 0] as [string, number])]);
+  for (const card of cards) {
+    const key = card.initiative && counts.has(card.initiative) ? card.initiative : INBOX_NO_INITIATIVE;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The initiative filter an address names (`&initiative=`): `none`, or an
+ * `ini_` id; anything else is no filter. Once the initiatives have loaded
+ * (`live` not null) an id they do not hold (a deleted one, a stale link) is
+ * no filter either; before that the id filters as it stands, so a filtered
+ * link never flashes every card.
+ */
+export function boardInitiativeOf(value: string | null | undefined, live: readonly Pick<InboxInitiative, 'id'>[] | null): string | null {
+  if (!value) return null;
+  if (value === INBOX_NO_INITIATIVE) return value;
+  if (!isInboxInitiativeId(value)) return null;
+  return live === null || live.some((i) => i.id === value) ? value : null;
+}
+
+/** The Board's filter in an address, after `#board` (`&project=…&initiative=…`), in that order; empty for none. */
+export function boardFilterHash(filter: { project?: string | null; initiative?: string | null }): string {
+  return (
+    (filter.project ? `&project=${encodeURIComponent(filter.project)}` : '') + (filter.initiative ? `&initiative=${encodeURIComponent(filter.initiative)}` : '')
+  );
+}
+
+/** Where a New card starts on a Board filtered to an initiative: that one (never "No initiative", which is no initiative). */
+export function newCardInitiative(filter: string | null): string | null {
+  return filter && filter !== INBOX_NO_INITIATIVE ? filter : null;
+}
+
+/** An initiative's name by id, deleted ones too (an opened card's history names them); null when unknown. */
+export function initiativeName(initiatives: readonly InboxInitiative[] | undefined, id: string | null): string | null {
+  if (!id) return null;
+  return initiatives?.find((i) => i.id === id)?.name ?? null;
 }
 
 /**
@@ -384,9 +451,18 @@ function authorName(by: InboxAuthor): string {
 }
 
 /** One history line, in words: a lead, the bold part, the rest, and a quote under it. */
-export function historyWords(entry: InboxCardHistoryEntry): { before: string; bold: string | null; after: string; quote: string | null } {
+export function historyWords(
+  entry: InboxCardHistoryEntry,
+  /** An initiative's name by id (deleted ones too): the initiative line names it. */
+  initiativeNameOf: (id: string) => string | null = () => null,
+): { before: string; bold: string | null; after: string; quote: string | null } {
   const by = authorName(entry.by);
   switch (entry.kind) {
+    case 'initiative':
+      // Approval "board-initiatives": "Initiative: Code review by you", or "Initiative cleared by you".
+      return entry.initiative
+        ? { before: 'Initiative: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted initiative', after: ` by ${by}`, quote: null }
+        : { before: `Initiative cleared by ${by}`, bold: null, after: '', quote: null };
     case 'created':
       return { before: `Created by ${by}`, bold: null, after: '', quote: null };
     case 'sent':
