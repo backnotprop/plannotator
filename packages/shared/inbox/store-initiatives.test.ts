@@ -213,9 +213,26 @@ describe("initiatives: an agent's card names one", () => {
     store.createCard({ project_id: project.id, by: AGENT, title: "Once", idempotency_key: "k", initiative_name: "Ghost" });
     expect(store.initiatives()).toEqual([]);
 
+    // A refused note (the last check) leaves no initiative either, on create and on a later write.
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", notes: "n".repeat(4001), initiative_name: "Ghost" }))).toBe("validation_error");
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Kept" });
+    expect(refusal(() => store.updateCard(card.id, { by: AGENT, notes: "n".repeat(4001), initiative_name: "Ghost" }))).toBe("validation_error");
+    expect(store.initiatives()).toEqual([]);
+
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "x".repeat(41) }))).toBe("validation_error");
     for (let i = 0; i < 50; i++) store.createInitiative({ name: `Effort ${i}`, by: PERSON });
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "One more" }))).toBe("initiative_limit");
+    // An agent cannot delete one, so its refusal says to go without; the person's keeps "delete one first".
+    const told = (by: InboxAuthor, run: () => unknown) => {
+      try {
+        run();
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return `no refusal for ${by.kind}`;
+    };
+    expect(told(AGENT, () => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: "One more" }))).toContain("without an initiative");
+    expect(told(PERSON, () => store.createInitiative({ name: "One more", by: PERSON }))).toContain("delete one first");
     // At the limit an existing name still joins.
     expect(store.createCard({ project_id: project.id, by: AGENT, title: "y", initiative_name: "effort 7" }).card.initiative).not.toBeNull();
   });
@@ -227,6 +244,10 @@ describe("initiatives: an agent's card names one", () => {
     expect(refusal(() => store.createInitiative({ name: "Mine", by: AGENT }))).toBe("initiative_person_only");
     expect(refusal(() => store.setCardInitiative(card.id, null, AGENT))).toBe("initiative_person_only");
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative: shape.id }))).toBe("initiative_person_only");
+    // An id where the name goes is refused, not made into an initiative named after the id.
+    expect(refusal(() => store.updateCard(card.id, { by: AGENT, initiative_name: shape.id }))).toBe("validation_error");
+    expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative_name: ` ${shape.id} ` }))).toBe("validation_error");
+    expect(store.initiatives().length).toBe(1);
     // A name in other case joins the initiative; it never renames it.
     expect(store.initiative(shape.id)!.name).toBe("Shape");
   });
