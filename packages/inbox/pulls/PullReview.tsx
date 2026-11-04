@@ -41,7 +41,7 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { railRows } from './rail';
-import { layerVerdictLink, nextLayer, stackAgentsWords, stackVerdictLink } from './topology';
+import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackAgentsWords, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = lazy(() => import('#guide-reader'));
@@ -126,8 +126,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const link = routed.link;
   const blocked = routed.blocked;
   const agent = linkAgentName(link);
-  const open = stack ? stack.layers.filter((l) => l.state === 'open' || l.state === 'draft') : [];
-  const at = layer ? open.findIndex((l) => l.key === layer.key) : -1;
+  const open = stack ? stack.layers.filter(isOpen) : [];
+  // Where this layer sits on its own line of the stack (a fork's sibling branch is not counted).
+  const position = stack && layer ? layerPosition(stack, layer.key) : null;
   const next = stack && layer ? nextLayer(stack, layer.key) : null;
 
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.updated_at}` : '';
@@ -405,7 +406,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <nav ref={stripRef} className="ib-prr-layers" aria-label="Layers, bottom first">
           {stack.layers.map((l, i) => {
             const here = l.key === layer.key;
-            const reviewable = l.state === 'open' || l.state === 'draft';
+            const reviewable = isOpen(l);
             return (
               <span key={l.key} className="ib-prr-lstep">
                 {i > 0 && <Icon name="chevR" size={12} />}
@@ -565,8 +566,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <span className="ib-prr-where">
           {scope === 'stack'
             ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
-            : open.length > 1 && at >= 0
-              ? `Layer ${at + 1} of ${open.length} · only what this layer changes`
+            : position && position.of > 1
+              ? `Layer ${position.at} of ${position.of} · only what this layer changes`
               : `Only what this ${noun} changes`}
           {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
         </span>

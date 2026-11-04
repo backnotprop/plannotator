@@ -63,7 +63,7 @@ import {
 } from './model';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
-import { chainMarks, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
+import { chainMarks, isOpen, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -87,8 +87,6 @@ export interface PullsPageProps {
   /** Review sent the hand-off to `session`, the picked agent: the list reads the new thread. */
   onHanded: (session: string) => void;
 }
-
-const isOpen = (pull: InboxPull) => pull.state === 'open' || pull.state === 'draft';
 
 /** A layer's state as the Board's mark draws it. */
 function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {

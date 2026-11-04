@@ -59,6 +59,16 @@ function scripted(answer: (url: string) => Response | Promise<Response> = () => 
 
 const URL_A = "https://avatars.githubusercontent.com/u/1?v=4";
 
+/** The cached pictures once the trim (run off the request's path) has brought them down to `count`, or after 2 s. */
+async function settledImages(dir: string, count: number): Promise<string[]> {
+  const images = () => readdirSync(dir).filter((n) => n.endsWith(".img"));
+  for (let i = 0; i < 200 && images().length > count; i++) await new Promise((done) => setTimeout(done, 10));
+  return images();
+}
+
+const redirect = (location: string) => new Response(null, { status: 302, headers: { location } });
+const picture = () => new Response(png(), { headers: { "content-type": "image/png" } });
+
 describe("PR authors' pictures", () => {
   test("a login the list did not show is refused, and nothing is fetched", async () => {
     const s = scripted();
@@ -130,7 +140,8 @@ describe("PR authors' pictures", () => {
       now += 1000;
       expect((await avatars.get("github.com", login)).ok).toBe(true);
     }
-    const images = readdirSync(dir).filter((n) => n.endsWith(".img"));
+    // The folder is trimmed off the request's path: wait for it.
+    const images = await settledImages(dir, 2);
     expect(images).toHaveLength(2);
     expect(images.reduce((sum, n) => sum + statSync(join(dir, n)).size, 0)).toBeLessThanOrEqual(2500);
     // The newest two are kept: no fetch for them; the oldest is fetched again.
@@ -182,5 +193,115 @@ describe("PR authors' pictures", () => {
     // Only loopback: plain http elsewhere stays refused.
     expect(await fake.get("github.com", "far")).toEqual({ ok: false, miss: "not_https" });
     expect(sandboxed.fetched).toEqual(["http://127.0.0.1:8123/a.png"]);
+  });
+
+  test("a host the last list did not name keeps no login (its project removed, its CLI signed out)", async () => {
+    const s = scripted();
+    const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
+    avatars.allowOnly([
+      { host: "github.com", avatars: { tomas: URL_A } },
+      { host: "gitlab.com", avatars: { jun: "https://gitlab.com/uploads/-/system/user/avatar/7/a.png" } },
+    ]);
+    expect(avatars.known("gitlab.com", "jun")).toBe(true);
+    // The next list names github.com only.
+    avatars.allowOnly([{ host: "GitHub.com", avatars: { priya: URL_A } }]);
+    expect(avatars.known("gitlab.com", "jun")).toBe(false);
+    expect(avatars.known("github.com", "tomas")).toBe(false);
+    expect(avatars.known("github.com", "priya")).toBe(true);
+    expect(await avatars.get("gitlab.com", "jun")).toEqual({ ok: false, miss: "unknown" });
+    avatars.allowOnly([]);
+    expect(avatars.known("github.com", "priya")).toBe(false);
+    expect(s.fetched).toEqual([]);
+  });
+
+  test("the cache size is kept as pictures are written: a restarted Inbox learns it from the folder and trims past the cap", async () => {
+    const dir = tempDir();
+    let now = 1_000_000;
+    const s = scripted(() => new Response(png(1000), { headers: { "content-type": "image/png" } }));
+    const first = createPullAvatars({ ...s.options, dir, now: () => now, capBytes: 10_000 });
+    first.allow("github.com", { a: `${URL_A}&a`, b: `${URL_A}&b`, c: `${URL_A}&c` });
+    for (const login of ["a", "b", "c"]) {
+      now += 1000;
+      expect((await first.get("github.com", login)).ok).toBe(true);
+    }
+    expect(await settledImages(dir, 3)).toHaveLength(3);
+    // A new picture for "c" replaces its bytes: counted once, not twice.
+    now += 25 * 60 * 60 * 1000;
+    expect((await first.get("github.com", "c")).ok).toBe(true);
+    expect(await settledImages(dir, 3)).toHaveLength(3);
+    // The next Inbox has a smaller cap: its first write reads the folder and drops the oldest down to it.
+    const next = createPullAvatars({ ...s.options, dir, now: () => now, capBytes: 2500 });
+    next.allow("github.com", { d: `${URL_A}&d` });
+    now += 1000;
+    expect((await next.get("github.com", "d")).ok).toBe(true);
+    const kept = await settledImages(dir, 2);
+    expect(kept).toHaveLength(2);
+    expect(kept.reduce((sum, n) => sum + statSync(join(dir, n)).size, 0)).toBeLessThanOrEqual(2500);
+  });
+
+  describe("redirects", () => {
+    test("to a private address (a name that resolves to 10.x, or the metadata IP) is refused", async () => {
+      for (const location of ["https://internal.corp.example/a.png", "https://169.254.169.254/latest/meta-data/"]) {
+        const s = scripted((url) => (url === URL_A ? redirect(location) : picture()));
+        s.options.lookup = async (name) => (name === "internal.corp.example" ? ["10.0.0.7"] : ["140.82.112.3"]);
+        const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
+        avatars.allow("github.com", { tomas: URL_A });
+        expect(await avatars.get("github.com", "tomas")).toEqual({ ok: false, miss: "not_public" });
+        expect(s.fetched).toEqual([URL_A]);
+      }
+    });
+
+    test("to plain http is refused", async () => {
+      const s = scripted((url) => (url === URL_A ? redirect("http://avatars.example/a.png") : picture()));
+      const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
+      avatars.allow("github.com", { tomas: URL_A });
+      expect(await avatars.get("github.com", "tomas")).toEqual({ ok: false, miss: "redirect" });
+      expect(s.fetched).toEqual([URL_A]);
+    });
+
+    test("three are followed; a fourth is refused", async () => {
+      const chain = (hops: number) => (url: string) => {
+        const at = Number(new URL(url).searchParams.get("hop") ?? "0");
+        return at < hops ? redirect(`https://avatars.example/a.png?hop=${at + 1}`) : picture();
+      };
+      const three = scripted(chain(3));
+      const ok = createPullAvatars({ ...three.options, dir: tempDir() });
+      ok.allow("github.com", { tomas: "https://avatars.example/a.png" });
+      expect((await ok.get("github.com", "tomas")).ok).toBe(true);
+      expect(three.fetched).toHaveLength(4);
+
+      const four = scripted(chain(4));
+      const refused = createPullAvatars({ ...four.options, dir: tempDir() });
+      refused.allow("github.com", { tomas: "https://avatars.example/a.png" });
+      expect(await refused.get("github.com", "tomas")).toEqual({ ok: false, miss: "redirect" });
+      expect(four.fetched).toHaveLength(4);
+    });
+
+    test("to the forge's private host on another port is refused: the forge is its name and its own port", async () => {
+      const privateNames = async () => ["10.0.0.5"];
+      // The forge on 443: a redirect to :8443 (or :444) on its name is not the forge.
+      for (const location of ["https://ghe.corp.example:8443/x.png", "https://ghe.corp.example:444/x.png"]) {
+        const s = scripted((url) => (url.endsWith("/avatars/u/3") ? redirect(location) : picture()));
+        s.options.lookup = privateNames;
+        const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
+        avatars.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3" });
+        expect(await avatars.get("ghe.corp.example", "ana")).toEqual({ ok: false, miss: "not_public" });
+        expect(s.fetched).toEqual(["https://ghe.corp.example/avatars/u/3"]);
+      }
+      // On 443 named outright, the same forge: followed.
+      const same = scripted((url) => (url.endsWith("/avatars/u/3") ? redirect("https://ghe.corp.example:443/x.png") : picture()));
+      same.options.lookup = privateNames;
+      const onDefault = createPullAvatars({ ...same.options, dir: tempDir() });
+      onDefault.allow("ghe.corp.example", { ana: "https://ghe.corp.example/avatars/u/3" });
+      expect((await onDefault.get("ghe.corp.example", "ana")).ok).toBe(true);
+
+      // A forge whose URL names its port (ghe.corp.example:8443): that port is the forge's, 443 is not.
+      const ported = scripted((url) => (url.endsWith(":8443/avatars/u/3") ? redirect("https://ghe.corp.example/x.png") : picture()));
+      ported.options.lookup = privateNames;
+      const onPort = createPullAvatars({ ...ported.options, dir: tempDir() });
+      onPort.allow("ghe.corp.example:8443", { ana: "https://ghe.corp.example:8443/avatars/u/3", bo: "https://ghe.corp.example:8443/avatars/u/4" });
+      expect(await onPort.get("ghe.corp.example:8443", "ana")).toEqual({ ok: false, miss: "not_public" });
+      expect((await onPort.get("ghe.corp.example:8443", "bo")).ok).toBe(true);
+    });
   });
 });

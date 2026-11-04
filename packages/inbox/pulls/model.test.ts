@@ -22,7 +22,7 @@ import { initials, repoLabels } from './labels';
 import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { railRows } from './rail';
-import { chainMarks, landsNextLayer, layerBaseWords, layerVerdictLink, nextLayer, otherLayerAgents, stackAgentsWords, stackLink, stackVerdictLink } from './topology';
+import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, otherLayerAgents, stackAgentsWords, stackLink, stackVerdictLink } from './topology';
 
 function pr(fields: Partial<InboxPull> & { number: number; head: string }): InboxPull {
   const repo = fields.repo ?? 'northwind/payments-gateway';
@@ -205,6 +205,26 @@ describe('stack shapes (#11, #16, #20, #22)', () => {
     expect(layerBaseWords(b, stack!)).toBe('Also on #9100');
     expect(nextLayer(stack!, a.key)).toBeNull();
     expect(nextLayer(stack!, base.key)!.number).toBe(9101);
+  });
+
+  test('"Layer N of M" counts a layer\'s own line of the stack: a fork\'s sibling, listed before it, is not under it', () => {
+    // #9100 on main; #9101 and #9102 both on #9100; #9103 on #9102. The list order puts #9101 before #9102.
+    const base = pr({ number: 9100, head: 'eu-migration', base: 'main' });
+    const a = pr({ number: 9101, head: 'eu-a', base: 'eu-migration' });
+    const b = pr({ number: 9102, head: 'eu-b', base: 'eu-migration' });
+    const c = pr({ number: 9103, head: 'eu-c', base: 'eu-b' });
+    const [stack] = inboxPullStacks([base, a, b, c]);
+    expect(stack!.layers.map((l) => l.number)).toEqual([9100, 9101, 9102, 9103]);
+    expect(layerPosition(stack!, base.key)).toEqual({ at: 1, of: 3 });
+    expect(layerPosition(stack!, a.key)).toEqual({ at: 2, of: 2 });
+    expect(layerPosition(stack!, b.key)).toEqual({ at: 2, of: 3 });
+    expect(layerPosition(stack!, c.key)).toEqual({ at: 3, of: 3 });
+    // A merged layer between is passed through, never counted.
+    const merged = pr({ number: 9104, head: 'eu-d', base: 'eu-c', state: 'merged', merged_at: '2026-11-03T09:00:00.000Z' });
+    const top = pr({ number: 9105, head: 'eu-e', base: 'eu-d' });
+    const [long] = inboxPullStacks([base, b, c, merged, top]);
+    expect(layerPosition(long!, top.key)).toEqual({ at: 4, of: 4 });
+    expect(layerPosition(long!, merged.key)).toBeNull();
   });
 
   test('one layer is headed by its noun, not "Landing order"', () => {

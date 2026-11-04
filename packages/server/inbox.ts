@@ -3520,7 +3520,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
-        for (const { host } of listed.hosts) pullAvatars.allow(host, pulls.avatarUrls(host));
+        // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
+        pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};

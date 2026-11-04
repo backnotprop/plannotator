@@ -7,17 +7,21 @@
  * (`allow`), never a URL or login the page names. A login the last list did not return is refused before anything
  * runs.
  * - https only; at most 3 redirects, each https. The URL's host must be public (as the favicons check it) unless it
- *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own).
+ *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own), on
+ *   the forge's own port (the one its host names, else 443).
  * - One deadline for the whole fetch (4 s); at most 256 KB a picture.
  * - Only an image: `image/*` declared, and bytes that sniff as PNG, JPEG, GIF or WebP; never SVG.
  * - Under the test sandbox (`PLANNOTATOR_TEST_SANDBOX`) only, an `http://127.0.0.1:<port>/` or
  *   `http://localhost:<port>/` URL is fetched too: the break-ui harness and the e2e serve fake pictures there.
  * Cached on disk under `<inbox dir>/pull-avatars/`: a picture is fresh for a day, then fetched again (the old one is
- * served if that fails); at most 8 MB in all, the oldest dropped first. A miss is remembered for an hour, in memory.
+ * served if that fails); at most 8 MB in all, the oldest dropped first (the size is kept as pictures are written; the
+ * folder is read, off the request's path, only to learn it and once a write goes past the cap). A miss is remembered
+ * for an hour, in memory, and dropped after it.
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { join } from "node:path";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
@@ -53,6 +57,11 @@ const SERVED = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 export interface PullAvatars {
   /** The logins the list returned, per forge host, with the avatar URL the forge gave (replaces the host's set). */
   allow(host: string, avatars: Readonly<Record<string, string>>): void;
+  /**
+   * The last list, every host it listed: each host's set replaced, and a host it did not list (its project removed,
+   * its CLI signed out) keeps no login at all.
+   */
+  allowOnly(lists: readonly { host: string; avatars: Readonly<Record<string, string>> }[]): void;
   /** Whether a login is one the list returned on that host. */
   known(host: string, login: string): boolean;
   get(host: string, login: string): Promise<PullAvatarResult>;
@@ -61,6 +70,17 @@ export interface PullAvatars {
 const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
 
 const keyOf = (host: string, login: string) => `${host.toLowerCase()}\n${login.toLowerCase()}`;
+
+/** The forge host as an https origin's name and port ("" for 443, as URL has it); null when it is not a host. */
+function forgeOrigin(host: string): { hostname: string; port: string } | null {
+  if (!host || /[/?#@\\\s]/.test(host)) return null;
+  try {
+    const url = new URL(`https://${host}/`);
+    return { hostname: url.hostname, port: url.port };
+  } catch {
+    return null;
+  }
+}
 
 export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
   const fetchImpl = options.fetch ?? ((url, init) => fetch(url, init));
@@ -91,43 +111,79 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     }
   }
 
-  /** Keeps the pictures under the cap: the least recently fetched go first. */
-  function trim(): void {
-    let entries: { base: string; size: number; at: number }[];
-    try {
-      const names = readdirSync(options.dir).filter((n) => n.endsWith(".img"));
-      entries = names.map((name) => {
-        const base = join(options.dir, name.slice(0, -4));
-        const size = statSync(`${base}.img`).size;
-        let at = 0;
-        try {
-          at = (JSON.parse(readFileSync(`${base}.json`, "utf8")) as { at?: number }).at ?? 0;
-        } catch {
-          // No meta: the first to go.
+  /**
+   * The pictures' bytes on disk, kept as they are written (null until the folder was read once). The folder is read
+   * only to learn it (the first write) and when a write takes it past the cap: never a stat of every file per write.
+   */
+  let used: number | null = null;
+  /** Bytes written while a trim reads the folder: added to what it finds. */
+  let writtenDuringTrim = 0;
+  let trimming: Promise<void> | null = null;
+
+  /** Reads the folder off the request's path and, past the cap, drops the least recently fetched pictures. */
+  function trim(): Promise<void> {
+    if (trimming) return trimming;
+    writtenDuringTrim = 0;
+    trimming = (async () => {
+      let total = 0;
+      try {
+        const names = (await readdir(options.dir)).filter((n) => n.endsWith(".img"));
+        const entries = await Promise.all(
+          names.map(async (name) => {
+            const base = join(options.dir, name.slice(0, -4));
+            const size = await stat(`${base}.img`).then((s) => s.size, () => 0);
+            const at = await readFile(`${base}.json`, "utf8").then(
+              (text) => (JSON.parse(text) as { at?: number }).at ?? 0,
+              // No meta: the first to go.
+              () => 0,
+            );
+            return { base, size, at };
+          }),
+        );
+        total = entries.reduce((sum, e) => sum + e.size, 0);
+        if (total > capBytes) {
+          for (const entry of entries.sort((a, b) => a.at - b.at)) {
+            if (total <= capBytes) break;
+            await rm(`${entry.base}.img`, { force: true });
+            await rm(`${entry.base}.json`, { force: true });
+            total -= entry.size;
+          }
         }
-        return { base, size, at };
-      });
-    } catch {
-      return;
-    }
-    let total = entries.reduce((sum, e) => sum + e.size, 0);
-    for (const entry of entries.sort((a, b) => a.at - b.at)) {
-      if (total <= capBytes) break;
-      rmSync(`${entry.base}.img`, { force: true });
-      rmSync(`${entry.base}.json`, { force: true });
-      total -= entry.size;
-    }
+      } catch {
+        // No folder yet, or it cannot be read: learnt again at the next write.
+        used = null;
+        return;
+      }
+      used = total + writtenDuringTrim;
+    })().finally(() => {
+      trimming = null;
+      // Pictures written while it read may have taken the folder past the cap again: read it once more.
+      if (writtenDuringTrim > 0 && used !== null && used > capBytes) void trim();
+    });
+    return trimming;
   }
 
-  function writeDisk(key: string, url: string, type: string, body: Uint8Array): void {
+  /** `replaced`: the bytes of the picture this one replaces on disk (0 for none). */
+  function writeDisk(key: string, url: string, type: string, body: Uint8Array, replaced: number): void {
     try {
       mkdirSync(options.dir, { recursive: true });
       writeFileSync(`${fileOf(key)}.img`, body);
       writeFileSync(`${fileOf(key)}.json`, JSON.stringify({ type, at: now(), url }));
-      trim();
     } catch {
       // A full or read-only disk: served this once, fetched again next time.
+      return;
     }
+    const delta = body.byteLength - replaced;
+    if (trimming) writtenDuringTrim += delta;
+    else if (used !== null) used += delta;
+    if (used === null || used > capBytes) void trim();
+  }
+
+  /** Misses past their hour are dropped: the map holds only the ones still remembered. */
+  function rememberMiss(key: string, miss: PullAvatarMiss): void {
+    const at = now();
+    for (const [k, m] of misses) if (at - m.at >= missMs) misses.delete(k);
+    misses.set(key, { at, miss });
   }
 
   async function load(host: string, start: string): Promise<PullAvatarResult> {
@@ -138,15 +194,17 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       return { ok: false, miss: "not_https" };
     }
     if (!fetchable(url)) return { ok: false, miss: "not_https" };
+    const forge = forgeOrigin(host);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const aborted = new Promise<never>((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true }));
     aborted.catch(() => {});
     const deadline = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, aborted]);
-    // The forge's own host may be private (an enterprise forge on its network); any other host must be public.
+    // The forge's own host may be private (an enterprise forge on its network); any other host must be public. The
+    // forge is matched by name and port: its own URL's port when it names one, else https's default only.
     const allowed = async (target: URL) =>
       (target.protocol === "http:" && sandbox && LOOPBACK.has(target.hostname)) ||
-      target.hostname.toLowerCase() === host.split(":")[0]!.toLowerCase() ||
+      (!!forge && target.protocol === "https:" && target.hostname === forge.hostname && target.port === forge.port) ||
       (await deadline(isPublicName(target.hostname, lookup)));
     try {
       for (let hop = 0; ; hop++) {
@@ -193,11 +251,18 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     }
   }
 
+  const allow = (host: string, avatars: Readonly<Record<string, string>>) => {
+    const prefix = `${host.toLowerCase()}\n`;
+    for (const key of [...urls.keys()]) if (key.startsWith(prefix)) urls.delete(key);
+    for (const [login, url] of Object.entries(avatars)) if (login && url) urls.set(keyOf(host, login), url);
+  };
+
   return {
-    allow(host, avatars) {
-      const prefix = `${host.toLowerCase()}\n`;
-      for (const key of [...urls.keys()]) if (key.startsWith(prefix)) urls.delete(key);
-      for (const [login, url] of Object.entries(avatars)) if (login && url) urls.set(keyOf(host, login), url);
+    allow,
+    allowOnly(lists) {
+      const listed = new Set(lists.map((l) => l.host.toLowerCase()));
+      for (const key of [...urls.keys()]) if (!listed.has(key.slice(0, key.indexOf("\n")))) urls.delete(key);
+      for (const { host, avatars } of lists) allow(host, avatars);
     },
     known(host, login) {
       return urls.has(keyOf(host, login));
@@ -217,10 +282,10 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
         .then((result): PullAvatarResult => {
           if (result.ok) {
             misses.delete(key);
-            writeDisk(key, url, result.type, result.body);
+            writeDisk(key, url, result.type, result.body, disk?.body.byteLength ?? 0);
             return result;
           }
-          misses.set(key, { at: now(), miss: result.miss });
+          rememberMiss(key, result.miss);
           // A failed refetch serves the picture already kept.
           return disk ? { ok: true, type: disk.type, body: disk.body } : result;
         })

@@ -757,30 +757,38 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(listed.hosts[0]!.capped).toEqual({ shown: 2, total: null });
   });
 
-  test("two lists at once each keep their own CLI states: one never wipes the other's", async () => {
-    // gh is not installed and answers at once; glab is not installed either, but answers only when let go. The second
-    // list starts after the first has found gh missing, while both wait on glab.
+  test("two lists at once each keep their own CLI states: a second list never wipes what the first found", async () => {
+    // gh is not installed. glab is signed in to gitlab.com, and its graphql answers only when let go. The first list
+    // covers github.com (gh missing) and gitlab.com; while glab's graphql is held, a second list for gitlab.com starts.
+    // Were the CLI states shared, the second would reset them and the first would say nothing of gh (which the window
+    // reads as "gh isn't signed in").
     let letGo: () => void = () => {};
-    const glabWaits = new Promise<void>((done) => (letGo = done));
-    let glabAsked = false;
-    const run: RefRunner = async (cli) => {
-      if (cli === "glab") {
-        glabAsked = true;
-        await glabWaits;
+    const held = new Promise<void>((done) => (letGo = done));
+    let graphqlAsked = false;
+    const answer = { data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(1, { author: { username: "dana" } })] }, merged: { nodes: [] } } } };
+    const run: RefRunner = async (cli, args) => {
+      if (cli === "gh") return { stdout: "", stderr: "gh: not found", exitCode: 127 };
+      if (args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (args.includes("graphql")) {
+        graphqlAsked = true;
+        await held;
+        return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
       }
-      return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
     };
+    const ledger = { host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_2" };
     const pulls = createInboxPulls({ run });
-    const first = pulls.list(repos);
-    while (!glabAsked) await new Promise((done) => setTimeout(done, 1));
-    const second = pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_2" }]);
+    const firstList = pulls.list([...repos, ledger]);
+    while (!graphqlAsked) await new Promise((done) => setTimeout(done, 1));
+    const secondList = pulls.list([ledger]);
     await new Promise((done) => setTimeout(done, 5));
     letGo();
-    const [a, b] = await Promise.all([first, second]);
-    expect(a.clis).toEqual({ gh: "missing", glab: "missing" });
-    expect(b.clis).toEqual({ gh: "missing", glab: "missing" });
-    expect(a.unsigned).toEqual(["github.com"]);
-    expect(b.unsigned).toEqual(["gitlab.com"]);
+    const [first, second] = await Promise.all([firstList, secondList]);
+    expect(first.clis.gh).toBe("missing");
+    expect(first.clis.glab).toBe("signed_in");
+    expect(first.unsigned).toEqual(["github.com"]);
+    expect(second.clis).toEqual({ glab: "signed_in" });
+    expect(second.unsigned).toEqual([]);
   });
 
   test("the repository's default branch is read (GitHub `defaultBranchRef`, GitLab `rootRef`); absent when the forge does not say", () => {

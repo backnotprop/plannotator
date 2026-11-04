@@ -28,6 +28,27 @@ export function nextLayer(stack: InboxPullStack, key: string): InboxPull | null 
   return stack.layers.find((l) => isOpen(l) && l.key !== key && openUnder(stack, l.key)?.key === key) ?? null;
 }
 
+/**
+ * "Layer N of M" for an open layer, on its own line of the stack: N counts the open layers it sits on (through merged
+ * ones) and itself; M adds the longest line of open layers above it. In a fork each branch counts only its own
+ * layers, never a sibling's. Null for a layer that is not open.
+ */
+export function layerPosition(stack: InboxPullStack, key: string): { at: number; of: number } | null {
+  const layer = stack.layers.find((l) => l.key === key);
+  if (!layer || !isOpen(layer)) return null;
+  const at = inboxPullAncestors(stack, key).filter(isOpen).length + 1;
+  // Core's tree has no cycles; `seen` only keeps a bad one from looping.
+  const above = (from: string, seen: Set<string>): number => {
+    let most = 0;
+    for (const l of stack.layers) {
+      if (!isOpen(l) || seen.has(l.key) || openUnder(stack, l.key)?.key !== from) continue;
+      most = Math.max(most, 1 + above(l.key, new Set(seen).add(l.key)));
+    }
+    return most;
+  };
+  return { at, of: at + above(key, new Set([key])) };
+}
+
 /** Where "Open the diff" starts (layer by layer): the next layer to land that is not a draft, else the next to land. */
 export function startLayer(stack: InboxPullStack): InboxPull | null {
   const open = stack.layers.filter(isOpen);

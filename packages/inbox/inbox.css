@@ -7640,9 +7640,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-av > img[data-shown] { opacity: 1; }
 /* A PR whose author's account is gone: a grey person in the same tile. */
 .ib-pr-av.ib-pr-av-ghost { background: var(--muted); color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
-/* The agent that has a PR, on the row's third line: its mark, small, before its name. */
-.ib-pr-magent > .ib-mk { display: inline-flex; vertical-align: -2px; margin-right: 4px; }
-.ib-pr-magent > .ib-mk, .ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: 13px; height: 13px; }
+/* The agent that has a PR, on the row's third line: its mark, the scale's 16, before its name. Sat on the text's
+   bottom, it is centred on the name and the line keeps the height of a row with no agent. */
+.ib-pr-magent > .ib-mk { display: inline-flex; vertical-align: text-bottom; margin-right: 4px; width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); }
+.ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
 /* "Send to the agent" when a Whole stack covers several agents' layers: shown off, its tooltip says why. */
 .ib-rv-dest .ib-seg-o[data-off] { opacity: 0.45; cursor: not-allowed; }
 .ib-rv-dest .ib-seg-o[data-off] input { cursor: not-allowed; }
