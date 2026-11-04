@@ -77,7 +77,7 @@ type RailMode = 'walkthrough' | 'files';
 
 export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
-  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments } = state;
+  const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
   const verdict = !thread.pull_theirs;
@@ -130,6 +130,18 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
+  const readerComments = useMemo(
+    () =>
+      stateComments && {
+        ...stateComments,
+        onShowGlobalComment: (id: string) => {
+          setSelectedId(id);
+          if (folded) setSheet(true);
+        },
+      },
+    [stateComments, setSelectedId, folded],
+  );
   useEffect(() => setViewed(message.guide_viewed ?? []), [message.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);

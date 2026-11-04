@@ -679,6 +679,13 @@ export const BRIDGE_SCRIPT = `(function() {
     if (!e.data || !e.data.type) return;
     var type = e.data.type;
 
+    // Print this document, not the host's viewport-sized iframe. Live apps
+    // keep their own print behavior; no parent DOM access or sandbox change.
+    if (!LIVE && type === PREFIX + 'print') {
+      window.print();
+      return;
+    }
+
     // Copy (rich text) was pressed in the parent: build the pending text
     // range's markup now (never on selection). A throw or an oversized range
     // answers without markup, so the parent copies plain text.

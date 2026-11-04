@@ -43,5 +43,6 @@ export interface PlatformPostProps {
   /** Sends one request to the Inbox's `POST /api/inbox/pulls/review`. */
   post: (request: Record<string, unknown>) => Promise<Response>;
   onClose: () => void;
-  onPosted: (result: { action: PlatformAction; url: string }) => void;
+  /** `posted`: the ids of the comments that went (a whole stack's line comments map to no PR's lines and stay). */
+  onPosted: (result: { action: PlatformAction; url: string; posted: readonly string[] }) => void;
 }

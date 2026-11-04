@@ -172,7 +172,7 @@ export function stepTitle(row: ConnectRow): string {
     case 'connect':
       return `Connect ${row.label}`;
     case 'manual':
-      return `Connect ${row.label} by hand`;
+      return `Connect ${row.label} yourself`;
     default:
       return row.label;
   }
@@ -316,7 +316,7 @@ export function laterNote(row: ConnectRow, opts: { skipped: boolean; toolEnv: bo
   if (opts.skipped) return 'later';
   if (row.state === 'tool-off') return 'turn on';
   if (row.state === 'connect') return 'connect';
-  if (row.state === 'manual') return 'by hand';
+  if (row.state === 'manual') return 'yourself';
   return 'install';
 }
 
