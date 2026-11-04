@@ -25,7 +25,9 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServerSessionNonce, checkServerSession, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { acceptsGzip } from "@plannotator/shared/app-html";
+import { gunzipSync } from "node:zlib";
 import { shapesDirOf } from "@plannotator/shared/shape/store";
 import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
 import { loadConfig } from "@plannotator/shared/config";
@@ -170,8 +172,13 @@ function retireOwnEntry(dataDir: string, pid: number, port: number): void {
 
 export interface ShapeServerOptions {
   dataDir: string;
-  /** The built page (`apps/hook/dist/shape.html`). Absent: a short "not built" page. */
+  /** The built page (`apps/hook/dist/shape.html`). Absent (and no `pageGzip`): a short "not built" page. */
   page?: () => string;
+  /**
+   * The built page gzipped (`apps/hook/dist/shape.html.gz`, what the binary embeds). Sent as it is, with
+   * `Content-Encoding: gzip`, to a browser that takes gzip; unzipped once and kept for one that does not.
+   */
+  pageGzip?: () => Uint8Array;
   /** Shape on, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
   shape?: boolean;
   /** The port to try first. Absent: the last one used (`server.json`), else a free one. */
@@ -230,7 +237,8 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
   const crossSite = (req: Request): Response | null =>
     isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))
       ? null
-      : json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+      : json(crossOriginRefusalBody(), 403);
+  let unzippedPage: Buffer | undefined;
 
   const fetchHandler = async (req: Request): Promise<Response> => {
     const refused = hostGuard.check(req);
@@ -240,6 +248,14 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
 
     if (path === "/" || path === "/index.html") {
       if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "method not allowed" }, 405);
+      if (options.pageGzip) {
+        const gz = options.pageGzip();
+        if (acceptsGzip(req.headers.get("accept-encoding"))) {
+          return new Response(gz as BodyInit, { headers: { ...PAGE_HEADERS, "Content-Encoding": "gzip", Vary: "Accept-Encoding" } });
+        }
+        unzippedPage ??= gunzipSync(gz);
+        return new Response(unzippedPage as BodyInit, { headers: { ...PAGE_HEADERS, Vary: "Accept-Encoding" } });
+      }
       return new Response(options.page?.() ?? NOT_BUILT_PAGE, { headers: PAGE_HEADERS });
     }
 

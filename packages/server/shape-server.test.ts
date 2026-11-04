@@ -53,6 +53,42 @@ async function world(options: { config?: Record<string, unknown> | null; idleMs?
   return { root, dataDir, server, base, get, post, id: made.id };
 }
 
+// The binary embeds the page gzipped (13 MB → 3 MB). What regresses: a browser that takes gzip gets the bytes without
+// `Content-Encoding: gzip` (a page of binary garbage), or one that does not gets gzip anyway.
+test("a gzipped page: sent as it is to a browser that takes gzip, unzipped to one that does not", async () => {
+  const { gzipSync, gunzipSync } = await import("node:zlib");
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-shape-server-gz-")));
+  roots.push(root);
+  const dataDir = join(root, "data");
+  mkdirSync(dataDir, { recursive: true });
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  const html = "<!doctype html><title>shape page</title><p>Grid ✓</p>";
+  const gz = gzipSync(html);
+  const server = await startShapeServer({ dataDir, pageGzip: () => gz, shape: true, port: 0 });
+  servers.push(server);
+  const raw = (headers: Record<string, string>) =>
+    new Promise<{ headers: Record<string, string | string[] | undefined>; body: Buffer }>((done, fail) => {
+      // node:http: no Accept-Encoding of its own and no automatic unzip, so the bytes are what was sent.
+      const req = require("node:http").request({ host: "127.0.0.1", port: server.port, path: "/", headers }, (res: import("node:http").IncomingMessage) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("end", () => done({ headers: res.headers, body: Buffer.concat(chunks) }));
+      });
+      req.on("error", fail);
+      req.end();
+    });
+  const zipped = await raw({ "Accept-Encoding": "gzip, deflate, br" });
+  expect(zipped.headers["content-encoding"]).toBe("gzip");
+  expect(zipped.headers.vary).toBe("Accept-Encoding");
+  expect(Buffer.compare(zipped.body, gz)).toBe(0);
+  expect(gunzipSync(zipped.body).toString("utf8")).toBe(html);
+  for (const accept of [{}, { "Accept-Encoding": "identity" }, { "Accept-Encoding": "br, gzip;q=0" }]) {
+    const plain = await raw(accept);
+    expect(plain.headers["content-encoding"]).toBeUndefined();
+    expect(plain.body.toString("utf8")).toBe(html);
+  }
+});
+
 async function eventsStatus(base: string): Promise<number> {
   const controller = new AbortController();
   const response = await fetch(`${base}/api/shapes/events`, { signal: controller.signal });
