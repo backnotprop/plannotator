@@ -68,7 +68,7 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["unknown top-level field", (s) => (s.annotations = []), "$"],
     ["unknown guide field", (s) => (s.guide.saved = true), "$.guide"],
     ["unknown section field", (s) => (s.guide.sections[0].order = 1), "$.guide.sections[0]"],
-    ["unknown version", (s) => (s.version = 3), "$.version"],
+    ["unknown version", (s) => (s.version = 4), "$.version"],
     // Version 1 has no overview: a v1 reader never sees one.
     ["overview on a version-1 snapshot", (s) => (s.guide.overview = { text: "x" }), "$.guide"],
     ["empty overview text", (s) => { s.version = 2; s.guide.overview = { text: "  " }; }, "$.guide.overview.text"],

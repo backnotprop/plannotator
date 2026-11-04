@@ -6,14 +6,19 @@ import { useGuideHost } from './host';
 import { renderInlineMarkdown } from './renderInlineMarkdown';
 import { useGuideFileWindow } from './GuideViewportManager';
 
-function estimateDiffHeight(patch: string): number {
+/** A context note's card in the diff, roughly: two lines of text, its label and margins. */
+const NOTE_HEIGHT = 84;
+
+function estimateDiffHeight(patch: string, noteCount = 0): number {
   const lineCount = patch.split('\n').length;
-  return Math.max(150, Math.min(lineCount * 21 + 52, 620));
+  return Math.max(150, Math.min(lineCount * 21 + 52 + noteCount * NOTE_HEIGHT, 620));
 }
 
 interface GuideFileCardProps {
   file: DiffFile;
   summary?: string;
+  /** The context notes drawn in this file's diff (none: the height as before). */
+  noteCount?: number;
   /** The file's kind: a generated file starts folded, a test shows the flask while unmounted. */
   kind?: FileKind;
   focused: boolean;
@@ -29,6 +34,7 @@ interface GuideFileCardProps {
 export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   file,
   summary,
+  noteCount,
   kind,
   focused,
   revealTarget,
@@ -41,7 +47,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const [collapsed, setCollapsed] = useState(kind === 'generated');
   const fileList = useMemo(() => [file], [file]);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
-  const diffHeight = useMemo(() => estimateDiffHeight(file.patch), [file.patch]);
+  const diffHeight = useMemo(() => estimateDiffHeight(file.patch, noteCount), [file.patch, noteCount]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
   const renderedHeight = collapsed ? 49 : diffHeight;
 

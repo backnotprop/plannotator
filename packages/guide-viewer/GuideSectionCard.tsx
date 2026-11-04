@@ -206,6 +206,11 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     }
     return summaries;
   }, [section.diffs]);
+  // How many context notes each file carries (format v3): its diff shell is sized to hold them.
+  const noteCountByPath = useMemo(
+    () => new Map(section.diffs.filter((ref) => (ref.notes?.length ?? 0) > 0).map((ref) => [ref.file, ref.notes!.length])),
+    [section.diffs],
+  );
 
   // Within the chapter, files come together by kind (code, tests, generated),
   // keeping the author's order inside each kind. Chips and diff cards share it.
@@ -359,6 +364,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 key={file.path}
                 file={file}
                 summary={summaryByPath.get(file.path)}
+                noteCount={noteCountByPath.get(file.path)}
                 kind={fileKind(file.path, host.generatedFiles)}
                 focused={focusedFile === file.path}
                 revealTarget={targetBelongsHere}

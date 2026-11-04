@@ -44,13 +44,43 @@ import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, guarded, imagesNot
 export const GUIDE_DIFF_STEPS =
   "In the project folder: find the base with `git merge-base <base branch> HEAD` and read the diff with `git diff <merge-base>` (it includes uncommitted edits; `git add -N <path>` first puts a new untracked file in it). Send that exact diff as `patch`. The Inbox keeps the diff as sent and never reads your working tree again.";
 
+/** The rule for context notes (DRAFT agent text, issue #2588). */
+export const GUIDE_NOTES_RULE =
+  "Optional `diffs[].notes`: context notes the person reads beside the diff while reviewing, `[{ lineStart, lineEnd, side?, text }]`. Line numbers come from the patch's hunk headers (`side: \"old\"` for removed lines) and must sit inside one hunk. Write one short note where a hunk needs its why: why it changed and where that reason comes from (the PR description, a commit, a decision record, or your own reading). Notes are part of your review, not the person's comments: they are never counted, sent back to you or posted to a pull request.";
+
 export const GUIDE_RULES = [
   "Every `diffs[].file` is a path from the patch, copied exactly.",
   "A file belongs to one section: never place it twice.",
   "Files you leave out show in a trailing \"Everything else\" chapter; list them in `unplacedFiles`.",
   "Code diffs only: `patch` is unified diff output (`git diff`).",
   "Instead of `guide` and `patch`, `snapshot` takes a complete Plannotator guide snapshot (`kind: \"plannotator-guided-review\"`, the JSON inside an exported guide); the same checks apply.",
+  GUIDE_NOTES_RULE,
 ];
+
+/**
+ * The guide's JSON shape for an agent that writes it: a guide job's schema
+ * (GUIDE_SCHEMA_JSON, unchanged) plus the optional `notes` on a file reference.
+ */
+export function authoredGuideSchema(): Record<string, unknown> {
+  const schema = JSON.parse(GUIDE_SCHEMA_JSON) as {
+    properties: { sections: { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } } };
+  };
+  schema.properties.sections.items.properties.diffs.items.properties.notes = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        lineStart: { type: "integer" },
+        lineEnd: { type: "integer" },
+        side: { type: "string", enum: ["new", "old"] },
+        text: { type: "string" },
+      },
+      required: ["lineStart", "lineEnd", "text"],
+      additionalProperties: false,
+    },
+  };
+  return schema as unknown as Record<string, unknown>;
+}
 
 /**
  * The brief's worked example: the AUTHORED fixture of guide-cli.test.ts (the
@@ -62,7 +92,7 @@ export const GUIDE_BRIEF_EXAMPLE = {
   guide: {
     title: "Token refresh",
     intent: "Refresh tokens before they expire.",
-    sections: [{ title: "The guard", overview: "Where the refresh happens.", diffs: [{ file: "src/auth.ts", summary: "Adds the refresh guard." }] }],
+    sections: [{ title: "The guard", overview: "Where the refresh happens.", diffs: [{ file: "src/auth.ts", summary: "Adds the refresh guard.", notes: [{ lineStart: 1, lineEnd: 1, text: "Refresh happens here so callers stop retrying on their own (from the PR description)." }] }] }],
     review: { gitRef: "origin/main...HEAD", base: "origin/main" },
     generator: { engine: "claude-code", model: "claude-opus-5" },
   },
@@ -100,7 +130,7 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     const strict = buildAuthoredGuideSnapshot(
       JSON.stringify({
         ...content,
-        sections: content.sections.map((section) => ({ ...section, diffs: section.diffs.map((ref) => ({ file: ref.file, summary: ref.summary ?? "" })) })),
+        sections: content.sections.map((section) => ({ ...section, diffs: section.diffs.map((ref) => ({ file: ref.file, summary: ref.summary ?? "", ...(ref.notes && { notes: ref.notes }) })) })),
       }),
       snapshot.review.rawPatch,
       { cwd, source: snapshot.source, now: snapshot.exportedAt },
@@ -247,7 +277,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>,
+        output_schema: authoredGuideSchema(),
         diff_steps: GUIDE_DIFF_STEPS,
         rules: GUIDE_RULES,
         example: GUIDE_BRIEF_EXAMPLE,
@@ -264,7 +294,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           guide: z
             .union([z.record(z.string(), z.unknown()), z.string()])
             .optional()
-            .describe("The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief's output_schema), as an object or its JSON."),
+            .describe("The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary, notes? }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief's output_schema), as an object or its JSON."),
           patch: z.string().optional().describe("The exact unified diff the guide describes (get_guide_brief's diff_steps)."),
           snapshot: z
             .union([z.record(z.string(), z.unknown()), z.string()])

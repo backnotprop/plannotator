@@ -24,6 +24,8 @@ import {
   createGuideHtml,
   guideExportFilename,
   listGuidePatchFiles,
+  MAX_GUIDE_NOTE_CHARS,
+  MAX_GUIDE_NOTES_PER_FILE,
   parseGuideSnapshot,
   parseGuideSnapshotJson,
   resolveGuideViewerAssets,
@@ -31,6 +33,7 @@ import {
   type GuideSnapshotGenerator,
   type GuideSnapshotSource,
 } from "@plannotator/shared/guide-format";
+import { isLineRangeInPatch } from "@plannotator/shared/diff-files";
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
 import { buildSavedGuideSnapshot, findSavedGuideById, listAllSavedGuides, updateGuideShare, type SavedGuideShare } from "@plannotator/shared/guide-store";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
@@ -179,6 +182,33 @@ interface AuthoredGuideOptions {
  * that ARE in the patch, so the author can fix the guide instead of silently
  * losing a chapter. Files the guide leaves out land in "Everything else".
  */
+/**
+ * What is wrong with one file reference's `notes` (context notes): each is
+ * `{ lineStart, lineEnd, side?, text }`, and its lines must sit inside one hunk
+ * of that file's diff on that side, so the reader sees it drawn there.
+ */
+function authoredNoteProblems(notes: unknown, filePatch: string, at: string): string[] {
+  if (!Array.isArray(notes)) return [`${at}.notes must be an array of { lineStart, lineEnd, side?, text }.`];
+  if (notes.length > MAX_GUIDE_NOTES_PER_FILE) return [`${at}.notes has more than ${MAX_GUIDE_NOTES_PER_FILE} notes.`];
+  const problems: string[] = [];
+  notes.forEach((note, k) => {
+    const n = (note && typeof note === "object" ? note : {}) as Record<string, unknown>;
+    const where = `${at}.notes[${k}]`;
+    const unknownKeys = Object.keys(n).filter((key) => !["lineStart", "lineEnd", "side", "text"].includes(key));
+    if (unknownKeys.length > 0) problems.push(`${where} has unknown field(s): ${unknownKeys.join(", ")}.`);
+    if (typeof n.text !== "string" || n.text.trim() === "") problems.push(`${where}.text must be a non-empty string.`);
+    else if (n.text.length > MAX_GUIDE_NOTE_CHARS) problems.push(`${where}.text is longer than ${MAX_GUIDE_NOTE_CHARS} characters.`);
+    if (n.side !== undefined && n.side !== "new" && n.side !== "old") problems.push(`${where}.side must be "new" or "old".`);
+    const { lineStart, lineEnd } = n;
+    if (typeof lineStart !== "number" || typeof lineEnd !== "number" || !Number.isInteger(lineStart) || !Number.isInteger(lineEnd)) {
+      problems.push(`${where} needs whole-number lineStart and lineEnd.`);
+    } else if (!isLineRangeInPatch(filePatch, lineStart, lineEnd, n.side === "old" ? "old" : "new")) {
+      problems.push(`${where} lines ${lineStart}-${lineEnd} (${n.side === "old" ? "old" : "new"} side) are not inside one hunk of this file's diff.`);
+    }
+  });
+  return problems;
+}
+
 export function buildAuthoredGuideSnapshot(
   guideJson: string,
   rawPatch: string,
@@ -193,7 +223,9 @@ export function buildAuthoredGuideSnapshot(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: "Guide file must be a JSON object." };
   const g = raw as Record<string, unknown>;
 
-  const patchFiles = listGuidePatchFiles(rawPatch).map((f) => f.path);
+  const listed = listGuidePatchFiles(rawPatch);
+  const patchFiles = listed.map((f) => f.path);
+  const patchByFile = new Map(listed.map((f) => [f.path, f.patch]));
   if (patchFiles.length === 0) return { ok: false, error: "The patch contains no file diffs. Expected unified diff output, e.g. `git diff <base>...HEAD`." };
 
   const problems: string[] = [];
@@ -216,6 +248,7 @@ export function buildAuthoredGuideSnapshot(
         if (typeof r.file !== "string" || r.file === "") { problems.push(`sections[${i}].diffs[${j}].file must be a path from the patch.`); continue; }
         if (typeof r.summary !== "string") problems.push(`sections[${i}].diffs[${j}].summary must be a string.`);
         if (!patchSet.has(r.file)) unknown.add(r.file);
+        else if (r.notes !== undefined) problems.push(...authoredNoteProblems(r.notes, patchByFile.get(r.file)!, `sections[${i}].diffs[${j}]`));
         const first = seen.get(r.file);
         if (first !== undefined) problems.push(`${r.file} is placed twice (sections[${first}] and sections[${i}]); a file belongs to one section.`);
         else seen.set(r.file, i);

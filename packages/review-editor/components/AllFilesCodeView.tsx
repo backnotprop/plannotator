@@ -65,6 +65,7 @@ import type { EditSelectionAnnotationRequest, EditSelectionComment } from '../ed
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import { lineAnnotationMetadata } from '../utils/annotationDisplay';
 import { InlineAnnotation } from './InlineAnnotation';
+import { ContextNoteCard, NO_CONTEXT_NOTES, projectContextNotes, type ContextNote } from './ContextNote';
 import { InlineAIMarker } from './InlineAIMarker';
 import { detectLanguage } from '../utils/detectLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
@@ -200,6 +201,9 @@ export interface AllFilesCodeViewProps {
   // Annotation state (P4). Mirrors AllFilesDiffView's annotation surface so
   // line annotations render through CodeView item state.
   annotations: CodeAnnotation[];
+  /** Context notes drawn on the diff (a guide author's "why"): read-only, never
+   *  annotations, so nothing counts, exports or posts them. Absent: none. */
+  contextNotes?: readonly ContextNote[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   pendingSelection: SelectedLineRange | null;
@@ -498,7 +502,9 @@ function projectFileAnnotations(
   filePath: string,
   prUrl: string | undefined,
   prDiffScope: string | undefined,
+  contextNotes: readonly ContextNote[] = NO_CONTEXT_NOTES,
 ): DiffLineAnnotation<DiffAnnotationMetadata>[] {
+  const notes = projectContextNotes(contextNotes, filePath);
   const reviewAnnotations = annotations
     .filter(
       (a) =>
@@ -511,7 +517,8 @@ function projectFileAnnotations(
       lineNumber: ann.lineEnd,
       metadata: lineAnnotationMetadata(ann),
     }));
-  return [...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
+  // Notes first: on a line with both, the author's why reads above the reviewer's comment.
+  return [...notes, ...reviewAnnotations, ...projectFileAIMarkers(aiMessages, filePath)];
 }
 
 function buildItemIdentity(
@@ -525,6 +532,7 @@ function buildItemIdentity(
   seedCollapsed: boolean,
   generatedFiles: Set<string> | undefined,
   expandedGeneratedFiles: Set<string> | undefined,
+  contextNotes: readonly ContextNote[] = NO_CONTEXT_NOTES,
 ): ItemIdentity {
   const items: CodeViewItem<DiffAnnotationMetadata>[] = [];
   const filePathToItemId = new Map<string, string>();
@@ -573,7 +581,7 @@ function buildItemIdentity(
     fileDiff.cacheKey = `${id}#${patchHashes[index] ?? ''}`;
     // Seed annotations at build time so the first render (and any remount via
     // fileSetKey) already paints existing annotations without an extra update.
-    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope);
+    const fileAnnotations = projectFileAnnotations(annotations, aiMessages, file.path, prUrl, prDiffScope, contextNotes);
     // Generated files (#1317) seed collapsed like GitHub's diff view, unless
     // the user already expanded them this session. A view-state seed only —
     // the item carries the full fileDiff either way.
@@ -667,6 +675,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   fontFamily,
   fontSize,
   annotations,
+  contextNotes = NO_CONTEXT_NOTES,
   selectedAnnotationId,
   scrollTargetAnnotation,
   pendingSelection,
@@ -883,6 +892,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   annotationsRef.current = annotations;
   const aiMessagesRef = useRef(aiMessages);
   aiMessagesRef.current = aiMessages;
+  // Context notes are fixed for a diff (a guide's): seeded at build, and kept on every per-item resync.
+  const contextNotesRef = useRef(contextNotes);
+  contextNotesRef.current = contextNotes;
   // Per-file patch content hashes — shared by fileSetKey (remount detection)
   // and the items' cacheKeys (highlight cache identity). Hashed once per
   // files-identity change.
@@ -911,6 +923,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       seedCollapsed === true,
       generatedFiles,
       expandedGeneratedRef.current,
+      contextNotesRef.current,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [files, visualOrder, prUrl, prDiffScope, patchHashes, seedCollapsed, generatedKey],
@@ -1187,6 +1200,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           />
         );
       }
+      if (annotation.metadata.kind === 'context-note') return <ContextNoteCard metadata={annotation.metadata} />;
       const filePath = itemIdToFilePath.get(item.id);
       return (
         <InlineAnnotation
@@ -2054,6 +2068,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         filePath,
         prUrl,
         prDiffScope,
+        contextNotesRef.current,
       );
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);

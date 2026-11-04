@@ -37,6 +37,7 @@ import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type Guide
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
+import type { ContextNote } from '@plannotator/review-editor/components/ContextNote';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
@@ -86,13 +87,15 @@ export const GuideDiff: FC<
   GuideDiffRendererProps & {
     compactTouchLayout?: boolean;
     comments?: GuideDiffComments;
+    /** The guide author's context notes, drawn on the diff (never comments). */
+    contextNotes?: readonly ContextNote[];
     /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
     diffStyleOverride?: 'split' | 'unified';
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
+> = ({ comments, contextNotes, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -119,6 +122,7 @@ export const GuideDiff: FC<
       fontFamily={fontFamily || undefined}
       fontSize={fontSize || undefined}
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
+      {...(contextNotes && { contextNotes })}
       selectedAnnotationId={comments?.selectedAnnotationId ?? null}
       scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
       pendingSelection={comments?.pendingSelection ?? null}
@@ -137,6 +141,22 @@ function sourceLine(snapshot: GuideSnapshot): string {
   return [snapshot.source.repo, snapshot.source.branch, snapshot.review.gitRef].filter(Boolean).join(' · ');
 }
 
+/** Every context note of the guide, as the diff draws them (ids stable per file and position). */
+function guideContextNotes(snapshot: GuideSnapshot): ContextNote[] {
+  return snapshot.guide.sections.flatMap((section) =>
+    section.diffs.flatMap((ref) =>
+      (ref.notes ?? []).map((note, i) => ({
+        id: `note:${ref.file}:${i}`,
+        filePath: ref.file,
+        lineStart: note.lineStart,
+        lineEnd: note.lineEnd,
+        side: note.side === 'old' ? ('old' as const) : ('new' as const),
+        text: note.text,
+      })),
+    ),
+  );
+}
+
 function newCommentId(): string {
   return `ann-guide-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 }
@@ -146,10 +166,15 @@ function newCommentId(): string {
  * the same chain draws the same diffs and comments without the agent's chapters.
  */
 function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }[]): CodeGuideData {
+  const notesByFile = new Map(snapshot.guide.sections.flatMap((section) => section.diffs).filter((ref) => ref.notes?.length).map((ref) => [ref.file, ref.notes!]));
   return {
     title: snapshot.guide.title,
     intent: '',
-    sections: [{ title: 'Every changed file', overview: 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
+    sections: [{
+      title: 'Every changed file',
+      overview: 'In the order of the diff.',
+      diffs: files.map((file) => (notesByFile.has(file.path) ? { file: file.path, notes: notesByFile.get(file.path)! } : { file: file.path })),
+    }],
     unplacedFiles: [],
     reviewed: [false],
   };
@@ -169,6 +194,9 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
     [snapshot.guide],
   );
   const everyFile = useMemo(() => allFilesGuide(snapshot, files), [snapshot, files]);
+  // The author's context notes (format v3), drawn on each file's diff in both modes. They are the guide's, never
+  // comments: the comments wiring below never sees them, so nothing counts, sends or posts them.
+  const contextNotes = useMemo(() => guideContextNotes(snapshot), [snapshot]);
   const guide = mode === 'files' ? everyFile : walkthrough;
   const ticks = useMemo(
     () => (mode === 'files' ? [false] : guide.sections.map((_, i) => reviewed[i] ?? snapshot.guide.reviewed[i] ?? false)),
@@ -276,10 +304,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
   const getDiffRendererProps = useCallback(
     ({ file, focused }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
+      contextNotes?: readonly ContextNote[];
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
     } => ({
+      ...(contextNotes.some((note) => note.filePath === file.path) && { contextNotes }),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -299,7 +329,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
+    [contextNotes, phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
   );
   const host = useMemo(
     () => ({

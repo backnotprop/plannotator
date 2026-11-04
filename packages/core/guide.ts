@@ -25,6 +25,22 @@ export interface GuideDiffRef {
    *  for schema-enforced engines; optional here so a marker engine that omits
    *  it still yields a valid guide — the UI simply renders nothing. */
   summary?: string;
+  /** Context notes on this file's lines: why a hunk is there, written by the
+   *  guide's author for the reader. Part of the guide, never a comment: they
+   *  are not counted, exported, sent back or posted. Format version 3. */
+  notes?: GuideNote[];
+}
+
+/** One context note on a line range of a file's diff. */
+export interface GuideNote {
+  /** File line number where the note starts (the hunk header's numbering). */
+  lineStart: number;
+  /** File line number where it ends; the note is drawn under this line. */
+  lineEnd: number;
+  /** "new" (default) for added or unchanged lines, "old" for removed ones. */
+  side?: 'new' | 'old';
+  /** Short markdown: why these lines changed, and where that reason comes from. */
+  text: string;
 }
 
 export interface GuideSection {

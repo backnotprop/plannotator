@@ -10,7 +10,7 @@
  */
 
 import { parseDiffToFiles } from "./diff-files";
-import type { CodeGuideOutput, GuideDiffRef, GuideOverview, GuideOverviewDiagram, GuideOverviewDiagramKind, GuideSection } from "./guide";
+import type { CodeGuideOutput, GuideDiffRef, GuideNote, GuideOverview, GuideOverviewDiagram, GuideOverviewDiagramKind, GuideSection } from "./guide";
 
 /** Discriminator for a portable guided-review snapshot. */
 export const GUIDE_SNAPSHOT_KIND = "plannotator-guided-review" as const;
@@ -30,8 +30,21 @@ export const GUIDE_SNAPSHOT_VERSION = 1 as const;
  */
 export const GUIDE_SNAPSHOT_OVERVIEW_VERSION = 2 as const;
 
+/**
+ * Format version 3 adds `notes` on a file reference (`sections[].diffs[].notes`:
+ * the author's context notes on lines of that file). A snapshot carries
+ * version 3 exactly when a note exists, for the same reason as version 2: an
+ * older reader rejects the unknown field. Version 3 may also carry an overview.
+ */
+export const GUIDE_SNAPSHOT_NOTES_VERSION = 3 as const;
+
+/** Most notes one file reference carries (a parsing bound, not a style rule). */
+export const MAX_GUIDE_NOTES_PER_FILE = 200;
+/** Longest note text, in characters. */
+export const MAX_GUIDE_NOTE_CHARS = 2_000;
+
 /** Every snapshot version the current parser reads. */
-export const GUIDE_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION] as const;
+export const GUIDE_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION, GUIDE_SNAPSHOT_NOTES_VERSION] as const;
 export type GuideSnapshotVersion = (typeof GUIDE_SNAPSHOT_VERSIONS)[number];
 
 const OVERVIEW_DIAGRAM_KINDS: readonly GuideOverviewDiagramKind[] = ["mermaid", "html"];
@@ -162,9 +175,10 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
     Object.entries(generatorInput).filter(([, v]) => typeof v === "string" && v.length > 0),
   ) as GuideSnapshotGenerator;
   const overview = guide.overview ? copyOverview(guide.overview) : undefined;
+  const notes = guide.sections.some((section) => section.diffs.some((ref) => (ref.notes?.length ?? 0) > 0));
   return {
     kind: GUIDE_SNAPSHOT_KIND,
-    version: overview ? GUIDE_SNAPSHOT_OVERVIEW_VERSION : GUIDE_SNAPSHOT_VERSION,
+    version: notes ? GUIDE_SNAPSHOT_NOTES_VERSION : overview ? GUIDE_SNAPSHOT_OVERVIEW_VERSION : GUIDE_SNAPSHOT_VERSION,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     guide: {
       title: guide.title,
@@ -266,22 +280,53 @@ function optNum(record: Record<string, unknown>, key: string, path: string): Par
   return { ok: true, value: input };
 }
 
-function parseDiffRef(input: unknown, path: string): Parsed<GuideDiffRef> {
+function parseNote(input: unknown, path: string): Parsed<GuideNote> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  const s = strict(object.value, ["file", "summary"], path);
+  const s = strict(object.value, ["lineStart", "lineEnd", "side", "text"], path);
+  if (isFail(s)) return s;
+  const { lineStart, lineEnd, side } = s.value;
+  if (typeof lineStart !== "number" || !Number.isInteger(lineStart) || lineStart < 1) return fail(`${path}.lineStart`, "Expected a line number (1 or more)");
+  if (typeof lineEnd !== "number" || !Number.isInteger(lineEnd) || lineEnd < lineStart) return fail(`${path}.lineEnd`, "Expected a line number, at least lineStart");
+  if (side !== undefined && side !== "new" && side !== "old") return fail(`${path}.side`, 'Expected "new" or "old"');
+  const text = str(s.value.text, `${path}.text`, { nonEmpty: true });
+  if (isFail(text)) return text;
+  if (text.value.length > MAX_GUIDE_NOTE_CHARS) return fail(`${path}.text`, `Longer than ${MAX_GUIDE_NOTE_CHARS} characters`);
+  return { ok: true, value: { lineStart, lineEnd, ...(side === "old" && { side: "old" as const }), text: text.value } };
+}
+
+function parseDiffRef(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideDiffRef> {
+  const object = asRecord(input, path);
+  if (isFail(object)) return object;
+  // `notes` exists from version 3 on: an older document can never carry it.
+  const s = strict(object.value, version === GUIDE_SNAPSHOT_NOTES_VERSION ? ["file", "summary", "notes"] : ["file", "summary"], path);
   if (isFail(s)) return s;
   const file = str(s.value.file, `${path}.file`, { nonEmpty: true });
   if (isFail(file)) return file;
   const summary = optStr(s.value, "summary", path);
   if (isFail(summary)) return summary;
+  let notes: GuideNote[] | undefined;
+  if (s.value.notes !== undefined) {
+    if (!Array.isArray(s.value.notes)) return fail(`${path}.notes`, "Expected an array");
+    if (s.value.notes.length > MAX_GUIDE_NOTES_PER_FILE) return fail(`${path}.notes`, `More than ${MAX_GUIDE_NOTES_PER_FILE} notes on one file`);
+    notes = [];
+    for (let i = 0; i < s.value.notes.length; i++) {
+      const note = parseNote(s.value.notes[i], `${path}.notes[${i}]`);
+      if (isFail(note)) return note;
+      notes.push(note.value);
+    }
+  }
   return {
     ok: true,
-    value: summary.value === undefined ? { file: file.value } : { file: file.value, summary: summary.value },
+    value: {
+      file: file.value,
+      ...(summary.value !== undefined && { summary: summary.value }),
+      ...(notes && notes.length > 0 && { notes }),
+    },
   };
 }
 
-function parseSection(input: unknown, path: string): Parsed<GuideSection> {
+function parseSection(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideSection> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
   const s = strict(object.value, ["title", "overview", "diffs"], path);
@@ -293,7 +338,7 @@ function parseSection(input: unknown, path: string): Parsed<GuideSection> {
   if (!Array.isArray(s.value.diffs)) return fail(`${path}.diffs`, "Expected an array");
   const diffs: GuideDiffRef[] = [];
   for (let i = 0; i < s.value.diffs.length; i++) {
-    const ref = parseDiffRef(s.value.diffs[i], `${path}.diffs[${i}]`);
+    const ref = parseDiffRef(s.value.diffs[i], `${path}.diffs[${i}]`, version);
     if (isFail(ref)) return ref;
     diffs.push(ref.value);
   }
@@ -352,7 +397,7 @@ function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<Guide
   const sections: GuideSection[] = [];
   let refCount = 0;
   for (let i = 0; i < s.value.sections.length; i++) {
-    const section = parseSection(s.value.sections[i], `${path}.sections[${i}]`);
+    const section = parseSection(s.value.sections[i], `${path}.sections[${i}]`, version);
     if (isFail(section)) return section;
     refCount += section.value.diffs.length;
     if (refCount > MAX_GUIDE_DIFF_REFS) {

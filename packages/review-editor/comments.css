@@ -45,6 +45,21 @@
   box-shadow: 0 0 0 1px var(--primary), 0 4px 12px rgb(0 0 0 / 0.06);
 }
 
+/* A context note (ContextNote.tsx): the review author's "why" on these lines,
+   not a comment. The same frame, quieted: dashed border, no fill or lift, no
+   pointer, nothing to select. Its text reads a step softer than a comment's. */
+.review-comment.review-context-note,
+.review-comment.review-context-note:hover {
+  background: transparent;
+  border: 1px dashed var(--border);
+  box-shadow: none;
+  cursor: default;
+}
+
+.review-comment.review-context-note > .review-comment-body {
+  color: var(--muted-foreground);
+}
+
 .review-comment-header {
   display: flex;
   align-items: center;

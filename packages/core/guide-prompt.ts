@@ -9,7 +9,7 @@
  * sessions) stays there.
  */
 
-import type { CodeGuideOutput, GuideDiffRef, GuideSection } from "./guide";
+import type { CodeGuideOutput, GuideDiffRef, GuideNote, GuideSection } from "./guide";
 import type { DiffType } from "./diff-type";
 import {
   buildWorkspacePromptContextLines,
@@ -396,6 +396,22 @@ function buildWorkspaceGuideUserMessage(
   ].join("\n");
 }
 
+/** A file reference's context notes, keeping only well-formed ones (`{ lineStart, lineEnd, side?, text }`). */
+export function sanitizeGuideNotes(raw: unknown): GuideNote[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GuideNote[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const n = item as Record<string, unknown>;
+    const { lineStart, lineEnd, side, text } = n;
+    if (typeof lineStart !== "number" || !Number.isInteger(lineStart) || lineStart < 1) continue;
+    if (typeof lineEnd !== "number" || !Number.isInteger(lineEnd) || lineEnd < lineStart) continue;
+    if (typeof text !== "string" || text.trim().length === 0) continue;
+    out.push({ lineStart, lineEnd, ...(side === "old" && { side: "old" as const }), text });
+  }
+  return out;
+}
+
 /**
  * Coerces one raw (untrusted) section from model output into a well-typed
  * `GuideSection`, or drops it entirely. The validator downstream dereferences
@@ -418,7 +434,10 @@ export function sanitizeGuideSection(raw: unknown): GuideSection | null {
         .filter((d): d is Record<string, unknown> & { file: string } => !!d && typeof d === "object" && typeof (d as Record<string, unknown>).file === "string")
         .map((d) => {
           const summary = typeof d.summary === "string" && d.summary.trim().length > 0 ? d.summary : undefined;
-          return summary ? { file: d.file, summary } : { file: d.file };
+          // Context notes (an authored guide's; a guide job's schema has none). The authored path checked
+          // them strictly already (buildAuthoredGuideSnapshot); here a malformed one is dropped, never the ref.
+          const notes = sanitizeGuideNotes(d.notes);
+          return { file: d.file, ...(summary && { summary }), ...(notes.length > 0 && { notes }) };
         })
     : [];
   if (title.trim().length === 0 && overview.trim().length === 0 && diffs.length === 0) return null;

@@ -463,8 +463,9 @@ export interface DiffAnnotationMetadata {
    *  inline copy action matches the sidebar/banner — the inline card only has
    *  the projected metadata, not the full annotation. */
   copyText?: string;
-  // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  // AI marker fields (set when kind === 'ai-marker'). 'context-note': a guide
+  // author's note on these lines, drawn on the diff and never a comment.
+  kind?: 'annotation' | 'ai-marker' | 'context-note';
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;
