@@ -207,7 +207,7 @@ export function compactPrimaryIdForReviewDecision(
  * The one shape for a human review-level comment: `scope: 'general'` with the
  * ''/0/0 sentinels that keep it out of every file group. Shared by BOTH human
  * producers — the header composer's submit note (`commitReviewNote`) and the
- * sidebar's durable "+ General comment" — so the transport shape the
+ * sidebar's durable "+ Global comment" — so the transport shape the
  * review-note payload tests pin cannot fork between them.
  *
  * Deliberately carries no PR context (`prUrl`/`diffScope`): an unstamped

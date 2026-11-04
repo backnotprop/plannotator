@@ -34,7 +34,7 @@ function apiArgs(host: string, endpoint: string, extra: string[] = []): string[]
 }
 
 /** Shape of each entry from the GitLab merge_request diffs API */
-interface GitLabDiffEntry {
+export interface GitLabDiffEntry {
   diff: string;
   old_path: string;
   new_path: string;
@@ -56,7 +56,7 @@ import { parsePaginatedArray } from "./cli-pagination";
  * Each entry has: { diff, old_path, new_path, new_file, deleted_file, renamed_file }
  * We construct proper `diff --git` headers that the UI parser expects.
  */
-function reconstructPatch(diffs: GitLabDiffEntry[]): string {
+export function reconstructPatch(diffs: GitLabDiffEntry[]): string {
   const parts: string[] = [];
 
   for (const d of diffs) {

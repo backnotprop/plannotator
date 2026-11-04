@@ -211,6 +211,16 @@ The rendered patch and expanded file contents are authoritative for Stack and Br
 
 The standalone GitButler CLI installer supports macOS and Linux. On Windows, install GitButler Desktop and make `but.exe` available on `PATH`. GitButler edit mode (`gitbutler/edit`) is not treated as a virtual-branch workspace.
 
+## Naming the tab
+
+The tab reads `<repository> · Code Review`, so two reviews of one repository (say, a pull request and your local changes) share a title. `--title` names the tab instead, exactly as given:
+
+```bash
+plannotator review https://github.com/acme/payments-service/pull/12 --title "PR 12: refunds"
+```
+
+The header keeps its branch and repository. A blank title is ignored.
+
 ## The diff viewer
 
 The review UI shows your changes in a familiar diff format:

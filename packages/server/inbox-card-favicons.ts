@@ -169,7 +169,7 @@ export function createCardFavicons(options: CardFaviconOptions = {}): CardFavico
 }
 
 /** The body, or null once it passes `max` bytes (the rest is not read). */
-async function readCapped(response: Response, max: number, deadline: <T>(work: Promise<T>) => Promise<T>): Promise<Uint8Array<ArrayBuffer> | null> {
+export async function readCapped(response: Response, max: number, deadline: <T>(work: Promise<T>) => Promise<T>): Promise<Uint8Array<ArrayBuffer> | null> {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array(0);
   const chunks: Uint8Array[] = [];
@@ -201,7 +201,7 @@ async function readCapped(response: Response, max: number, deadline: <T>(work: P
 }
 
 /** Whether `hostname` is a public DNS name: not an IP literal or a local name, and every address it resolves to public. */
-async function isPublicName(hostname: string, lookup: (hostname: string) => Promise<string[]>): Promise<boolean> {
+export async function isPublicName(hostname: string, lookup: (hostname: string) => Promise<string[]>): Promise<boolean> {
   const name = hostname.replace(/\.$/, "").toLowerCase();
   if (!name.includes(".") || name.startsWith("[") || isIP(name) !== 0) return false;
   if (name === "localhost" || name.endsWith(".localhost") || name.endsWith(".local") || name.endsWith(".internal") || name.endsWith(".home.arpa")) return false;
