@@ -65,9 +65,9 @@ describe('what may enter the debug log', () => {
   });
 
   test('a near miss keeps its distance, side and the mic size; a press keeps its signed offset; anything else is dropped', () => {
-    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', w: 36, h: 36 })).toEqual({ t: 1, side: 'window', ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', w: 36, h: 36 });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', mode: 'tap', w: 36, h: 36, other: true })).toEqual({ t: 1, side: 'window', ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', mode: 'tap', w: 36, h: 36, other: true });
     expect(cleanWindowRecord({ t: 1, ev: 'voice_press', input: 'release', phase: 'listening', dx: -14, dy: 3 })).toEqual({ t: 1, side: 'window', ev: 'voice_press', input: 'release', phase: 'listening', dx: -14, dy: 3 });
-    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: -3, edge: 'the send button', w: 'wide', dx: 1e9, dy: 'up', target: 'BUTTON' })).toEqual({ t: 1, side: 'window', ev: 'voice_miss' });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: -3, edge: 'the send button', w: 'wide', dx: 1e9, dy: 'up', other: 'Send', target: 'BUTTON' })).toEqual({ t: 1, side: 'window', ev: 'voice_miss' });
   });
 
   test('a page id and its request ids are digits, and pass their own check', () => {

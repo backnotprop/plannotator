@@ -72,7 +72,7 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   // The debug log's near misses (voiceMiss.ts): listened for only while live, and only with the debug log on.
   useEffect(() => {
     if (!live || !button.current) return;
-    return watchVoiceMisses(button.current, () => session.view().phase);
+    return watchVoiceMisses(button.current, () => session.view());
   }, [live, session]);
   const iconSize = phone ? 19 : 16;
   // Opening shows from the press itself: lit, with the spinner, so a tap never looks like it did nothing. Its words

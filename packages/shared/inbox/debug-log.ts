@@ -154,6 +154,7 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     edge: listed(record.edge, VOICE_EDGES),
     w: count(record.w),
     h: count(record.h),
+    other: typeof record.other === "boolean" ? record.other : undefined,
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 }

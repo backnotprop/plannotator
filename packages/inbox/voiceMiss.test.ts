@@ -2,9 +2,10 @@
  * The debug log's `voice_miss` (voiceMiss.ts) and the offset on `voice_press` (voicePress.ts), written through the
  * window's real recorder, so they reach the Inbox's debug.log.
  *
- * What regresses: a near miss of a live mic that leaves no line (the taps the owner calls "a pain" stay unseen); a tap
- * meant for something else logged as a miss; a listener at work while the debug log is off; a burst of taps flooding
- * the log; a field the Inbox's filter would drop.
+ * What regresses: a near miss of a live mic that leaves no line (the taps the owner calls "a pain" stay unseen); a far
+ * tap logged as a miss; a tap on Send or Save draft that reads as a plain miss (no `other`); a second finger during a
+ * hold that reads as a stop tap (no `mode`); a listener or a layout read while the debug log is off; a burst of taps
+ * flooding the log; a field the Inbox's filter would drop.
  *
  * DOM (DOM_TESTS=1): the recorder stores in localStorage and wraps `fetch`, both restored after.
  */
@@ -14,7 +15,7 @@ import { cleanWindowRecord, INBOX_DEBUG_ON_HEADER } from '../shared/inbox/debug-
 import { learnDebugLog } from './debugLog';
 import { VOICE_MISS_GAP_MS, watchVoiceMisses } from './voiceMiss';
 import { voicePressProps, type VoicePoint } from './voicePress';
-import type { VoicePhase } from './voiceSession';
+import type { VoicePhase, VoiceView } from './voiceSession';
 
 const hasDom = typeof document !== 'undefined';
 const BUFFER = 'plannotator-inbox-debug-buffer';
@@ -34,7 +35,7 @@ afterEach(() => {
   for (const undo of restore.splice(0).reverse()) undo();
 });
 
-/** A 36px phone mic at (100, 100), with a neighbour well away from it. */
+/** A 36px phone mic at (100, 100), a plain spot of the page, and a Send button beside the mic. */
 function setup() {
   const realFetch = globalThis.fetch;
   // The Inbox is never reached: the recorder's sends are refused, so its lines stay in the store to be read.
@@ -43,23 +44,36 @@ function setup() {
   button.className = 'ib-vmic';
   button.getBoundingClientRect = () => ({ left: 100, top: 100, right: 136, bottom: 136, width: 36, height: 36, x: 100, y: 100, toJSON: () => ({}) }) as DOMRect;
   const other = document.createElement('div');
-  document.body.append(button, other);
+  const send = document.createElement('button');
+  send.append(document.createElement('span'));
+  document.body.append(button, other, send);
   restore.push(() => {
     globalThis.fetch = realFetch;
     button.remove();
     other.remove();
+    send.remove();
     window.localStorage.removeItem(BUFFER);
   });
   let phase: VoicePhase = 'listening';
+  let mode: VoiceView['mode'] = 'tap';
+  const rects: number[] = [];
+  const realRect = button.getBoundingClientRect;
+  button.getBoundingClientRect = () => {
+    rects.push(1);
+    return realRect.call(button);
+  };
   let clock = 1_000;
   const tap = (x: number, y: number, on: Element = other) => on.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, clientY: y, button: 0, bubbles: true }));
   return {
     button,
+    send,
     tap,
+    rectReads: () => rects.length,
     setPhase: (next: VoicePhase) => void (phase = next),
+    setMode: (next: VoiceView['mode']) => void (mode = next),
     tick: (ms: number) => void (clock += ms),
     watch: () => {
-      const stop = watchVoiceMisses(button, () => phase, () => clock);
+      const stop = watchVoiceMisses(button, () => ({ phase, mode }), () => clock);
       restore.push(stop);
       return stop;
     },
@@ -67,7 +81,7 @@ function setup() {
 }
 
 describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
-  test('a near miss of a live mic is one line: distance, side, phase and size, and the filter keeps all of it', async () => {
+  test('a near miss of a live mic is one line: distance, side, phase, mode and size, and the filter keeps all of it', async () => {
     const mic = setup();
     debugOn();
     mic.watch();
@@ -77,7 +91,7 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     const lines = misses();
     expect(lines).toHaveLength(1);
     const { t: _t, page: _page, seq: _seq, ev: _ev, ...fields } = lines[0]!;
-    expect(fields).toEqual({ px: 10, edge: 'below', phase: 'listening', w: 36, h: 36 });
+    expect(fields).toEqual({ px: 10, edge: 'below', phase: 'listening', mode: 'tap', w: 36, h: 36, other: false });
     expect(cleanWindowRecord(lines[0])).toEqual({ side: 'window', ...lines[0] });
   });
 
@@ -96,6 +110,28 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     mic.tap(90, 118); // 10px to the left, while opening: a miss.
     await settle();
     expect(misses().map((r) => [r.edge, r.px, r.phase])).toEqual([['left', 10, 'opening']]);
+  });
+
+  test('a tap on a neighbouring control is still logged, marked other; a second finger during a hold says hold', async () => {
+    const mic = setup();
+    debugOn();
+    mic.watch();
+    // Send's inner span, 6px right of the mic.
+    mic.tap(142, 118, mic.send.firstElementChild!);
+    mic.tick(VOICE_MISS_GAP_MS);
+    mic.setMode('hold');
+    mic.tap(118, 150);
+    mic.tick(VOICE_MISS_GAP_MS);
+    mic.setPhase('opening');
+    mic.setMode(null);
+    mic.tap(118, 92);
+    await settle();
+    expect(misses().map((r) => [r.edge, r.px, r.mode, r.other])).toEqual([
+      ['right', 6, 'tap', true],
+      ['below', 14, 'hold', false],
+      ['above', 8, undefined, false],
+    ]);
+    for (const line of misses()) expect(cleanWindowRecord(line)).toMatchObject({ other: line.other });
   });
 
   test("the phone's ::after (inset -4px) is part of the mic: 3px past the rect is a hit, 6px past is a 2px miss", async () => {
@@ -128,6 +164,7 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     mic.tap(118, 146);
     await settle();
     expect(added).not.toContain('pointerdown');
+    expect(mic.rectReads()).toBe(0);
     expect(window.localStorage.getItem(BUFFER)).toBeNull();
   });
 
@@ -165,16 +202,19 @@ describe.skipIf(!hasDom)('voice_press offset', () => {
   const pointer = (button: Element, x: number, y: number) =>
     ({ button: 0, clientX: x, clientY: y, pointerId: 1, currentTarget: button, preventDefault: () => {} }) as unknown as ReactPointerEvent<HTMLButtonElement>;
 
-  test('on: a press and its release carry the point\'s offset from the centre; off: no offset is read', () => {
+  test('on: a press and its release carry the point\'s offset from the centre; off: no layout is read; lost: no point', () => {
     const mic = setup();
     const seen: (VoicePoint | undefined)[] = [];
-    const props = voicePressProps({ press: (at) => seen.push(at), release: (at) => seen.push(at), lost: (at) => seen.push(at), toggle: () => {} });
+    const props = voicePressProps({ press: (at) => seen.push(at), release: (at) => seen.push(at), lost: () => seen.push(undefined), toggle: () => {} });
     debugOff();
     props.onPointerDown(pointer(mic.button, 130, 110));
+    props.onPointerUp(pointer(mic.button, 130, 110));
+    expect(mic.rectReads()).toBe(0);
     debugOn();
     props.onPointerDown(pointer(mic.button, 130, 110));
     props.onPointerUp(pointer(mic.button, 112.4, 141));
-    expect(seen).toEqual([undefined, { dx: 12, dy: -8 }, { dx: -6, dy: 23 }]);
+    props.onPointerCancel();
+    expect(seen).toEqual([undefined, undefined, { dx: 12, dy: -8 }, { dx: -6, dy: 23 }, undefined]);
     expect(cleanWindowRecord({ t: 1, ev: 'voice_press', input: 'press', phase: 'listening', mode: 'tap', dx: 12, dy: -8 })).toMatchObject({ dx: 12, dy: -8 });
   });
 });

@@ -19,8 +19,8 @@ export interface VoicePoint {
 export interface VoicePressTarget {
   press(at?: VoicePoint): void;
   release(at?: VoicePoint): void;
-  /** The system took the pointer away. */
-  lost(at?: VoicePoint): void;
+  /** The system took the pointer away: no point, since a pointercancel can carry 0,0 or a stale one. */
+  lost(): void;
   toggle(): void;
 }
 
@@ -44,7 +44,7 @@ export function voicePressProps(target: VoicePressTarget) {
       target.press(pointAt(event));
     },
     onPointerUp: (event: ReactPointerEvent<HTMLButtonElement>) => target.release(pointAt(event)),
-    onPointerCancel: (event: ReactPointerEvent<HTMLButtonElement>) => target.lost(pointAt(event)),
+    onPointerCancel: () => target.lost(),
     // The caret stays in the text: a mouse press would otherwise move focus to the button.
     onMouseDown: (event: ReactMouseEvent) => event.preventDefault(),
     // A long press on a phone is the talk, not the callout.

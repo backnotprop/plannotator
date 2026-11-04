@@ -491,8 +491,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       if (deps.now() - Math.max(pressedAt, startedAt) < HOLD_MS) set({ mode: 'tap' });
       else stop();
     },
-    lost: (at) => {
-      pressNote('lost', at);
+    lost: () => {
+      pressNote('lost');
       secondPress = false;
       if (!pressed) return;
       pressed = false;
