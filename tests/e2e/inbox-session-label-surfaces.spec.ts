@@ -4,11 +4,14 @@
  * folder), sessions are the bridge's real long-polls carrying a `label` as the Claude Code mod sends it, and their
  * messages go through the Inbox's own MCP `send_message`. No real agent runs.
  *
- * Three named Claude Code sessions in one project, one unnamed, and one that stops before it takes a message.
+ * Three named Claude Code sessions in one project, one unnamed, one that stops before it takes a message, and a named
+ * Pi session (its extension sends Pi's session name the same way, `getSessionName` on each poll).
  *  - The @ picker offers each named session by its name, the long one cut with "…" and every row inside 390 px;
  *    the unnamed one reads as an unnamed session always has.
  *  - The thread row's agent marks are named by every session's label.
- *  - A thread's authors read as their sessions' labels; an unnamed session's thread looks as it did.
+ *  - A thread's authors keep their agent's name and add the session's after it, quieter ("Claude Code · Docs pass"),
+ *    folded and open heads alike, the whole label on hover and to a screen reader, inside 390 and 320 px phones; a
+ *    named Pi session's message reads "Pi · …"; an unnamed session's thread looks as it did.
  *  - Send to another session lists the labels and its button says where it sends.
  *  - The "Tell your agents" dialog never appears and the page throws nothing.
  *
@@ -28,17 +31,21 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shotsDir = process.env.SESSION_LABEL_SURFACES_SHOTS ? resolve(process.env.SESSION_LABEL_SURFACES_SHOTS) : null;
 const BASELINE = process.env.SESSION_LABEL_SURFACES_BASELINE === '1';
-const prefix = BASELINE ? 'before-' : '';
+const prefix = BASELINE ? 'before-' : 'after-';
 
 const STRIPE = 'Stripe webhook retries';
 const DOCS = 'Docs pass';
 /** Longer than the picker's 40: cut in the middle. */
 const AUTH = 'Migrate auth tokens from the legacy cookie store to JWTs';
+/** A named Pi session: Pi's name for it, as `getSessionName()` answers. */
+const PI = 'Refactor billing exports';
 
-const S = { stripe: 'cc-stripe-6f2c9e14', docs: 'cc-docs-91b0d3aa', auth: 'cc-auth-44e1c7f0', plain: 'cc-plain-0193ab', gone: 'cc-gone-55aa01' } as const;
-const LABELS: Record<string, string | undefined> = { [S.stripe]: STRIPE, [S.docs]: DOCS, [S.auth]: AUTH };
+const S = { stripe: 'cc-stripe-6f2c9e14', docs: 'cc-docs-91b0d3aa', auth: 'cc-auth-44e1c7f0', plain: 'cc-plain-0193ab', gone: 'cc-gone-55aa01', pi: 'pi-5d1e0c7a-2b44' } as const;
+const LABELS: Record<string, string | undefined> = { [S.stripe]: STRIPE, [S.docs]: DOCS, [S.auth]: AUTH, [S.pi]: PI };
+const HOSTS: Record<string, string> = { [S.pi]: 'pi' };
 
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2, reducedMotion: 'reduce' as const };
+const PHONE_320 = { ...PHONE, viewport: { width: 320, height: 640 } };
 
 interface World {
   url: string;
@@ -46,12 +53,12 @@ interface World {
   token: string;
   project: string;
   polls: Map<string, Poll>;
-  ids: { t1: string; t1msg: string; t2: string; t3: string };
+  ids: { t1: string; t1msg: string; t2: string; t3: string; t4: string };
 }
 let world: World;
 const contexts: BrowserContext[] = [];
 
-/** One live session: the bridge's long-poll, with the tags capability and its label on every poll, as the mod sends them. */
+/** One live session: the bridge's long-poll, with the tags capability and its label on every poll, as the mod (or Pi's extension) sends them. */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
@@ -59,6 +66,7 @@ class Poll {
     readonly session: string,
     readonly label: string | undefined,
     private readonly startedAt: number,
+    readonly host = 'claude-code',
   ) {
     this.loop = this.run();
   }
@@ -70,7 +78,7 @@ class Poll {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${world.token}` },
         body: JSON.stringify({
           session: this.session,
-          host: 'claude-code',
+          host: this.host,
           waitMs: 500,
           project_path: world.project,
           started_at: this.startedAt,
@@ -231,11 +239,11 @@ test.beforeAll(async () => {
   const url = started.stdout.trim().replace(/\/$/, '');
   expect(url).not.toContain(':59812');
   const { token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { token: string };
-  world = { url, dataDir, token, project, polls: new Map(), ids: { t1: '', t1msg: '', t2: '', t3: '' } };
+  world = { url, dataDir, token, project, polls: new Map(), ids: { t1: '', t1msg: '', t2: '', t3: '', t4: '' } };
 
   const now = Date.now();
-  const sessions: [string, number][] = [[S.stripe, 4], [S.docs, 2], [S.auth, 3], [S.plain, 1], [S.gone, 5]];
-  for (const [session, hours] of sessions) world.polls.set(session, new Poll(session, LABELS[session], now - hours * 3600_000));
+  const sessions: [string, number][] = [[S.stripe, 4], [S.docs, 2], [S.auth, 3], [S.plain, 1], [S.gone, 5], [S.pi, 6]];
+  for (const [session, hours] of sessions) world.polls.set(session, new Poll(session, LABELS[session], now - hours * 3600_000, HOSTS[session]));
 
   // T1: Stripe owns it; the person tags Docs and Auth, both answer, Stripe goes on.
   const t1 = await send({
@@ -257,6 +265,8 @@ test.beforeAll(async () => {
   await send({ agent_session: S.stripe, reply_to: d1.message_id, body: 'Thanks both. I turned on the dead-letter alert and linked the doc from the runbook.' });
   // T2: the unnamed session's own thread.
   const t2 = await send({ agent_session: S.plain, subject: 'Lint config cleanup', body: 'I removed the three unused ESLint plugins. `bun run lint` is clean.' });
+  // T4: the named Pi session's own thread, one message (its head is the open one, with no fold button).
+  const t4 = await send({ agent_host: 'pi', agent_name: 'Pi', agent_session: S.pi, subject: 'CSV export columns', body: 'The billing CSV export now writes `amount_cents` and `currency` as two columns. Old reports still parse.' });
   // T3: the person writes to a session that stops before it takes the message.
   const t3 = await post<{ thread_id: string }>('/api/inbox/messages', {
     to: { host: 'claude-code', session: S.gone },
@@ -265,7 +275,7 @@ test.beforeAll(async () => {
   });
   await world.polls.get(S.gone)!.stop();
   world.polls.delete(S.gone);
-  world.ids = { t1: t1.thread_id, t1msg: t1.message_id, t2: t2.thread_id, t3: t3.thread_id };
+  world.ids = { t1: t1.thread_id, t1msg: t1.message_id, t2: t2.thread_id, t3: t3.thread_id, t4: t4.thread_id };
   // The stopped session leaves the picker once it is not live (30 s).
   await until('the stopped session to leave the picker', async () => !(await taggable(t1.thread_id)).includes(S.gone), 60_000);
 });
@@ -340,17 +350,113 @@ test('the @ picker offers named sessions by name, the long one cut; the unnamed 
   }
 });
 
-test('a thread: each author reads as its session label; the unnamed session thread looks as it did', async ({ browser }) => {
+/** Each message head's author as drawn: the agent's part, the label's part, and whether either is cut or spills. */
+async function authors(page: Page) {
+  return page.locator('section.ib-pane [data-message-article]').evaluateAll((els) =>
+    els.map((article) => {
+      const name = article.querySelector<HTMLElement>('.ib-fl-nm')!;
+      const agent = name.querySelector<HTMLElement>('[data-author-agent]');
+      const part = name.querySelector<HTMLElement>('.ib-fl-lbl');
+      const fold = article.querySelector<HTMLElement>('[data-fold-head]');
+      const box = name.getBoundingClientRect();
+      const row = name.closest<HTMLElement>('.ib-fline')!.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(name).lineHeight) || 20;
+      return {
+        folded: article.hasAttribute('data-folded'),
+        // What is drawn: the screen reader's own span left out.
+        text: [...name.childNodes].filter((n) => !(n instanceof HTMLElement && n.classList.contains('ib-sr'))).map((n) => n.textContent).join(''),
+        agent: agent?.textContent ?? null,
+        label: part?.querySelector('[data-author-label]')?.textContent ?? null,
+        agentCut: agent ? agent.scrollWidth > agent.clientWidth + 1 : false,
+        agentColor: agent ? getComputedStyle(agent).color : null,
+        labelColor: part ? getComputedStyle(part).color : null,
+        labelWeight: part ? Number(getComputedStyle(part).fontWeight) : null,
+        labelSize: part ? parseFloat(getComputedStyle(part).fontSize) : null,
+        agentSize: agent ? parseFloat(getComputedStyle(agent).fontSize) : null,
+        right: box.right,
+        rowRight: row.right,
+        oneLine: box.height < line * 1.6,
+        aria: fold?.getAttribute('aria-label') ?? null,
+        sr: name.querySelector('.ib-sr')?.textContent ?? null,
+      };
+    }),
+  );
+}
+
+/** Nothing past its head row or the screen, one line; a label never cuts its agent's name, and is quieter than it. */
+function expectQuietLabels(list: Awaited<ReturnType<typeof authors>>, width: number) {
+  for (const a of list) {
+    expect(a.right, `${a.text} stays in its row`).toBeLessThanOrEqual(a.rowRight + 0.5);
+    expect(a.right, `${a.text} stays on the screen`).toBeLessThanOrEqual(width);
+    expect(a.oneLine, `${a.text} is one line`).toBe(true);
+    if (a.label === null) continue;
+    expect(a.agentCut, `the agent's name is never cut: ${a.text}`).toBe(false);
+    expect(a.labelColor, 'the label is in the secondary colour').not.toBe(a.agentColor);
+    expect(a.labelWeight, 'the label is never bold').toBeLessThanOrEqual(450);
+    expect(a.labelSize!, 'the label is no bigger than the name').toBeLessThanOrEqual(a.agentSize!);
+  }
+}
+
+test('a thread: each author keeps its agent and adds its session label; the unnamed session thread looks as it did', async ({ browser }) => {
   const { page, errors } = await newPage(browser);
   if (!BASELINE) {
     await page.goto(`${world.url}#thread=${world.ids.t1}`);
     const pane = page.locator('section.ib-pane');
     await expect(pane.locator('h2.ib-subject')).toBeVisible();
-    const names = pane.locator('[data-session-label]');
-    await expect(names.filter({ hasText: STRIPE }).first()).toBeVisible();
-    await expect(names.filter({ hasText: DOCS }).first()).toBeVisible();
-    await expect(names.filter({ hasText: 'Migrate auth tokens' }).first()).toBeVisible();
+    await expect(pane.locator('[data-session-label]').first()).toBeVisible();
+    const list = await authors(page);
+    // Folded and open heads alike, every agent message: "Claude Code · <label>".
+    expect(list.some((a) => a.folded)).toBe(true);
+    expect(list.some((a) => !a.folded)).toBe(true);
+    const agents = list.filter((a) => a.text !== 'You');
+    expect(agents.map((a) => a.agent)).toEqual(['Claude Code', 'Claude Code', 'Claude Code', 'Claude Code']);
+    expect(agents.map((a) => a.label)).toEqual([STRIPE, DOCS, 'Migrate auth tok…e store to JWTs', STRIPE]);
+    expect(agents[0]!.text).toBe(`Claude Code · ${STRIPE}`);
+    // The person's reply (when drawn: a read thread folds it into "1 earlier message") is still "You", with no label part.
+    for (const you of list.filter((a) => a.text === 'You')) expect(you.label).toBeNull();
+    // A screen reader hears both names and the whole label on each fold button.
+    expect(agents[0]!.aria?.startsWith(`Claude Code (${STRIPE}), `), agents[0]!.aria ?? "").toBe(true);
+    expect(agents[2]!.aria?.startsWith(`Claude Code (${AUTH}), `), agents[2]!.aria ?? "").toBe(true);
+    expectQuietLabels(list, 1440);
+    // The hover says both, the whole label (the tooltip is ui's Tooltip, no native title).
+    await pane.locator('[data-message-article] .ib-fl-nm[data-session-label]').nth(2).hover();
+    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `Claude Code · ${AUTH}` })).toBeVisible();
     await shot(page, '03-thread-named-authors');
+    await page.mouse.move(0, 0);
+    // An open head (its fold button under the row): the name takes the pointer for its hover, and a click on it still folds.
+    const openArticle = pane.locator('[data-message-article]:not([data-folded])').filter({ has: page.locator('.ib-fl-hit') }).last();
+    const openName = openArticle.locator('.ib-fl-nm[data-session-label]');
+    const openId = (await openArticle.getAttribute('data-message-article'))!;
+    await openName.hover();
+    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `Claude Code · ${STRIPE}` })).toBeVisible();
+    await openName.click();
+    await expect(pane.locator(`[data-message-article="${openId}"]`)).toHaveAttribute('data-folded', '');
+
+    // A named Pi session: "Pi · <its name>", on a one-message thread's open head (no fold button: the head says it).
+    await page.goto(`${world.url}#thread=${world.ids.t4}`);
+    await expect(pane.locator('h2.ib-subject')).toHaveText('CSV export columns');
+    await expect(pane.locator('[data-session-label]').first()).toBeVisible();
+    const pi = await authors(page);
+    expect(pi.map((a) => [a.agent, a.label])).toEqual([['Pi', PI]]);
+    expect(pi[0]!.text).toBe(`Pi · ${PI}`);
+    expect(pi[0]!.sr).toBe(`Pi (${PI})`);
+    expectQuietLabels(pi, 1440);
+    await shot(page, '03-thread-named-pi');
+
+    // Phones: the same words, the label giving way with "…", nothing past the screen.
+    for (const [name, options, width] of [['phone-390', PHONE, 390], ['phone-320', PHONE_320, 320]] as const) {
+      const phone = await newPage(browser, options);
+      await phone.page.goto(`${world.url}#thread=${world.ids.t1}`);
+      const phonePane = phone.page.locator('section.ib-pane');
+      await expect(phonePane.locator('h2.ib-subject')).toBeVisible();
+      await expect.poll(async () => Math.round((await phonePane.boundingBox())?.x ?? -1), { timeout: 10_000 }).toBe(0);
+      await expect(phonePane.locator('[data-session-label]').first()).toBeVisible();
+      const small = await authors(phone.page);
+      expect(small.filter((a) => a.text !== 'You').map((a) => a.agent)).toEqual(['Claude Code', 'Claude Code', 'Claude Code', 'Claude Code']);
+      expectQuietLabels(small, width);
+      await shot(phone.page, `03-thread-named-authors-${name}`);
+      await clean(phone.page, phone.errors);
+    }
   }
   await page.goto(`${world.url}#thread=${world.ids.t2}`);
   const pane = page.locator('section.ib-pane');
@@ -358,6 +464,7 @@ test('a thread: each author reads as its session label; the unnamed session thre
   await expect(pane.locator('.ib-pbody')).toBeVisible();
   if (!BASELINE) {
     await expect(pane.locator('[data-session-label]')).toHaveCount(0);
+    await expect(pane.locator('.ib-fl-lbl')).toHaveCount(0);
     await expect(pane.locator('.ib-pbody[data-session-labels]')).toHaveCount(0);
   }
   await expect(pane.getByText('Claude Code', { exact: true }).first()).toBeVisible();

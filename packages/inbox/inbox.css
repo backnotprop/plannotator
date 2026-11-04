@@ -2742,10 +2742,19 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-fline .ib-mk.ib-big { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); }
 .ib-fline .ib-mk.ib-big > svg, .ib-fline .ib-mk.ib-big > img { width: var(--ib-mark-24-g); height: var(--ib-mark-24-g); }
 .ib-fl-nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A thread a named session wrote in (issue #2450): the name column takes a label's room, on every head alike so they
-   line up; a longer label is cut with "…" and said whole on hover. The narrow thread below has no such column. */
+/* A named session's author (issue #2450): "Claude Code · Fix login redirect", the label quieter (the secondary colour,
+   the meta size, never bold, an unread head included). The agent's name never shrinks; the label gives way with "…"
+   (its own colour), and the whole of it is on hover. Flex, so the "…" is the label's; `pre` keeps the dot's spaces. */
+.pn-inbox .ib-fl-nm[data-session-label] { display: flex; align-items: baseline; min-width: 0; }
+.ib-fl-nm[data-session-label] > .ib-fl-agent { flex: none; }
+.ib-fl-nm[data-session-label] > .ib-fl-lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; }
+.ib-fl-lbl > .ib-fl-lsep { white-space: pre; }
+/* Under an open head's fold button the name takes the pointer (its hover shows the whole label; a click folds, Thread.tsx). */
+.ib-fline > .ib-fl-hit ~ .ib-fl-nm[data-session-label] { pointer-events: auto; cursor: pointer; }
+/* A thread a named session wrote in: the name column takes a label's room, on every head alike so they line up
+   (from 176 px in a 561 px thread to 288 px in a wide one). The narrow thread below has no such column. */
 @container ib-thread (min-width: 561px) {
-  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px 176px minmax(0, 1fr) auto minmax(66px, auto); }
+  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px clamp(176px, 34cqi, 288px) minmax(0, 1fr) auto minmax(66px, auto); }
 }
 .ib-fl-sn { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-fl-sn b { font-weight: 600; color: var(--foreground); }

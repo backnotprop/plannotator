@@ -6,8 +6,9 @@
  * any differently than before; two sessions named alike (or a session named
  * "Pi") becoming the same `@` token; a label too long for the reply route's tag
  * or for a phone's line; a row's agents that never say the name; a message whose
- * author is still "Claude Code" while its session has a name, or that keeps a
- * name the list no longer gives; and a window that never reads the list again
+ * author drops the agent's name or never adds the session's (owner's decision,
+ * "Claude Code · Fix login redirect"), or that keeps a name the list no longer
+ * gives; and a window that never reads the list again
  * when only a label changed.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -199,26 +200,54 @@ async function draw(node: ReactNode) {
 }
 
 describe('drawn', () => {
-  test.skipIf(!hasDom)("a named session's message is authored by its name, the agent on hover; the unnamed one is untouched; a cleared name goes", async () => {
+  test.skipIf(!hasDom)("a named session's message keeps its agent's name and adds the label after it; the unnamed one is untouched; a cleared name goes", async () => {
     const { ThreadPane } = await import('./components/Thread');
-    setSessionLabels({ 'ses-login': 'Fix login redirect', 'ses-docs': 'Docs pass', 'ses-other': 'Not in this thread' });
+    const long = 'Fix the login redirect loop for SSO users on the admin console';
+    setSessionLabels({ 'ses-login': 'Fix login redirect', 'ses-docs': long, 'ses-other': 'Not in this thread' });
     const el = await draw(<ThreadPane thread={THREAD} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />);
     const nameOf = (id: string) => el.querySelector(`[data-message-article="${id}"] .ib-fl-nm`)!;
-    expect(nameOf('msg_1').textContent).toBe('Fix login redirect');
-    expect(nameOf('msg_2').textContent).toBe('Docs pass');
+    // Both names, the agent first, the label in its own quieter part.
+    expect(nameOf('msg_1').textContent).toBe('Claude Code · Fix login redirect');
+    expect(nameOf('msg_1').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
+    expect(nameOf('msg_1').querySelector('.ib-fl-lbl [data-author-label]')!.textContent).toBe('Fix login redirect');
     expect(nameOf('msg_1').hasAttribute('data-session-label')).toBe(true);
+    // A long label is cut in the middle, both ends kept; the agent's name is whole.
+    expect(nameOf('msg_2').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
+    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toBe(shortLabel(long, 32));
+    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toStartWith('Fix the login');
+    expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toEndWith('console');
     // Unnamed: the same element and words as before.
     expect(nameOf('msg_3').textContent).toBe('Claude Code');
     expect(nameOf('msg_3').hasAttribute('data-session-label')).toBe(false);
+    expect(nameOf('msg_3').querySelector('.ib-fl-lbl')).toBeNull();
+    expect(el.querySelector('[data-message-article="msg_3"] [data-fold-head]')!.getAttribute('aria-label')).toStartWith('Claude Code, ');
     expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(true);
-    // A screen reader hears the agent too, on the fold button.
-    const head = el.querySelector('[data-message-article="msg_1"] [data-fold-head]')!;
-    expect(head.getAttribute('aria-label')).toStartWith('Fix login redirect (Claude Code), ');
+    // A screen reader hears both names, the whole label, on the fold button (folded and open heads alike).
+    for (const id of ['msg_1', 'msg_2']) {
+      const want = id === 'msg_1' ? 'Claude Code (Fix login redirect), ' : `Claude Code (${long}), `;
+      expect(el.querySelector(`[data-message-article="${id}"] [data-fold-head]`)!.getAttribute('aria-label')).toStartWith(want);
+    }
 
     act(() => setSessionLabels({}));
     expect(nameOf('msg_1').textContent).toBe('Claude Code');
+    expect(nameOf('msg_1').querySelector('.ib-fl-lbl')).toBeNull();
     expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(false);
   });
+
+  test.skipIf(!hasDom)("a one-message thread's open head says both names to a screen reader, the whole label", async () => {
+    const { ThreadPane } = await import('./components/Thread');
+    const long = 'Fix the login redirect loop for SSO users on the admin console';
+    setSessionLabels({ 'ses-login': long });
+    const thread: InboxThread = { ...THREAD, messages: [THREAD.messages[0]!] };
+    const el = await draw(<ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />);
+    const name = el.querySelector('[data-message-article="msg_1"] .ib-fl-nm.ib-who')!;
+    expect(name.hasAttribute('aria-hidden')).toBe(false);
+    // What is drawn (the cut label) is hidden; what is heard has both names and the whole label.
+    expect(name.querySelector('[data-author-agent]')!.getAttribute('aria-hidden')).toBe('true');
+    expect(name.querySelector('.ib-fl-lbl')!.getAttribute('aria-hidden')).toBe('true');
+    expect(name.querySelector('.ib-sr')!.textContent).toBe(`Claude Code (${long})`);
+  });
+
 
   test.skipIf(!hasDom)("a row's agents say the names in their accessible name", async () => {
     const { RowAgents, RowAgentTiles } = await import('./components/RowAgents');

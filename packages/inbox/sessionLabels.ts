@@ -74,3 +74,12 @@ export function labelledAgent(label: string, host: string | null | undefined): s
   const agent = host ? (Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host) : 'An agent';
   return `${label} (${agent})`;
 }
+
+/**
+ * A named session's message author in words, the agent first as the head shows it (owner's decision on #2450,
+ * 2026-11-04): `shown` for the hover, "Claude Code · Fix login redirect"; `spoken` for a screen reader, which
+ * may skip the "·", "Claude Code (Fix login redirect)". Both carry the whole label.
+ */
+export function authorWithLabel(agent: string, label: string): { shown: string; spoken: string } {
+  return { shown: `${agent} · ${label}`, spoken: `${agent} (${label})` };
+}
