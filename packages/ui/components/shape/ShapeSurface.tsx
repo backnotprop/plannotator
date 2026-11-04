@@ -117,7 +117,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -680,14 +680,30 @@ export function ShapeSurface({ host, id, CodeGuide, CodeHoverCard, renderThread,
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
-          {/* The title comes first (owner feedback 2026-11-04, shape-board-look): no eyebrow row above it. */}
+          {/*
+            The title comes first (owner feedback 2026-11-04, shape-board-look): no eyebrow row above it. What the row
+            said that the board still needs sits in the group at the title's right: the agent drawing, Finished, and
+            the close.
+          */}
           <header className="shp-head">
             <div className="shp-title-row">
               <h1 className={fresh('title').trim()}>{version.title}</h1>
-              {!phone && generalButton(null)}
-              {host.refresh && !finished && (
-                <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>Bring it up to date</button>
-              )}
+              <div className="shp-head-side">
+                {agentDrawing && (
+                  <span className="shp-drawing" role="status" title={`${agent} is drawing v${version.n + 1}…`}>
+                    <Pebble alive reshaping size={16} />
+                    <span className={phone ? 'shp-sr' : undefined}>{`${agent} is drawing v${version.n + 1}…`}</span>
+                  </span>
+                )}
+                {finished && <span className="shp-finished">Finished</span>}
+                {!phone && generalButton(null)}
+                {host.refresh && !finished && (
+                  <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>Bring it up to date</button>
+                )}
+                {onClose && (
+                  <button type="button" className="shp-icon-btn shp-close" onClick={onClose} aria-label="Close Shape" title="Close Shape">×</button>
+                )}
+              </div>
             </div>
             <p className={`shp-claim${fresh('claim')}`}><ShapeInline text={version.claim} /></p>
           </header>

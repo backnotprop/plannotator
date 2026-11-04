@@ -44,7 +44,14 @@
 .shp-head { padding: 22px 28px 0 40px; }
 /* The title first; Global comment (and Bring it up to date) on its first line, at the right. */
 .shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
-.shp-title-row > button { margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
+.shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
+.shp-head-side:empty { display: none; }
+/* The agent is drawing the next version: the reshaping Pebble (fill only under reduced motion: Pebble.tsx) and its words. */
+.shp-drawing { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.shp-drawing .shp-pebble path { stroke: var(--primary); }
+.shp-finished { font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.shp-close { font-size: 20px; }
+.shp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
 .shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
 .shp-claim a, .shp-req-foot a, .shp-reqs a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
@@ -216,6 +223,7 @@
 /* ── phone: 390 px, the panel is a bottom sheet ── */
 .shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
 .shp-root.phone .shp-title-row .shp-quiet-btn { display: none; }
+.shp-root.phone .shp-head-side { margin-top: 1px; gap: 4px; }
 .shp-root.phone .shp-head h1, .shp-root.phone .shp-claim { padding-left: 6px; }
 .shp-root.phone .shp-head h1 { font-size: 27px; }
 .shp-root.phone .shp-claim { font-size: 15px; }
