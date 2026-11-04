@@ -382,7 +382,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Nothing sent: pick a folder to start in.');
       return;
     }
-    if (target && pulls && !(target.project.id && pulls.projects.includes(target.project.id))) {
+    // A new session (launch) is held to the same rule as a live one: it starts in the pull request's project.
+    const sendProject = target ? target.project.id : (start?.project.id ?? null);
+    if ((target || start) && pulls && !(sendProject && pulls.projects.includes(sendProject))) {
       setError("Nothing sent: the pull request's agent works in its own project.");
       return;
     }
