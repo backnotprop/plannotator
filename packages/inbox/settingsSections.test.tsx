@@ -69,11 +69,11 @@ function call(port: number, path: string, method = 'GET', body?: string): Promis
   });
 }
 
-async function spawnServer(name: string, extra: string[]): Promise<Server> {
+async function spawnServer(name: string, extra: string[], env: Record<string, string> = {}): Promise<Server> {
   const dataDir = join(dir!, name, 'data');
   mkdirSync(join(dir!, name, 'projects'), { recursive: true });
   const child = Bun.spawn(['bun', SERVER_SCRIPT, dataDir, join(dir!, name, 'projects'), '1', ...extra], {
-    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: dataDir, HOME: join(dir!, name) },
+    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: dataDir, HOME: join(dir!, name), ...env },
     stdout: 'pipe',
     // A paired phone makes the server try the relay, which tests point at a closed port; its refusals are noise here.
     stderr: 'ignore',
@@ -404,6 +404,114 @@ test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switc
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ board: { on: false } }));
   }
 });
+
+// The checklist (approval "inbox-thread-steps"): off by default, under the Board, saving config.json `inboxSteps`.
+test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under the Board, saves inboxSteps to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxSteps?: boolean }).inboxSteps;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  const group = el.querySelector('[data-settings-capabilities]')!;
+  const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
+  // Code review and Shape are held for 0.28.50: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
+  expect(rows).toEqual(['Board', 'Checklist']);
+  // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
+  expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
+  expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
+  expect(switchNamed(el, 'Checklist')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === true, 'config.json inboxSteps true');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === false, 'config.json inboxSteps false');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
+// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held for 0.28.50
+// (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
+// one who has them on keeps the row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1
+// shows both. Each saves config.json `inboxCodeReview` / `inboxShape`. 0.28.50 restores "off by default, shown".
+const HELD = [
+  { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]' },
+  { name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]' },
+] as const;
+
+function readConfig(server: Server): Record<string, unknown> {
+  try {
+    return JSON.parse(readFileSync(join(server.dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+test.skipIf(!hasDom)('Capabilities: Code review and Shape, never turned on and no preview, have no row', async () => {
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  for (const held of HELD) {
+    expect(readConfig(current!)[held.key]).toBeUndefined();
+    expect(switchNamed(el, held.name)).toBeNull();
+    expect(el.querySelector(held.selector)).toBeNull();
+  }
+});
+
+for (const held of HELD) {
+  test.skipIf(!hasDom)(`Capabilities: ${held.name} already on keeps its row, on; turning it off saves ${held.key} false, and the next load has no row`, async () => {
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify({ ...readConfig(current!), [held.key]: true }));
+    try {
+      const el = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(el, held.name) !== null, `the ${held.name} switch`);
+      expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
+      expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('true');
+      act(() => switchNamed(el, held.name)!.click());
+      await until(() => readConfig(current!)[held.key] === false, `config.json ${held.key} false`);
+      await until(() => switchNamed(el, held.name)?.getAttribute('aria-checked') === 'false', 'the switch off');
+      act(() => root?.unmount());
+      host?.remove();
+      const again = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(again, 'Checklist') !== null, 'the Checklist switch');
+      expect(switchNamed(again, held.name)).toBeNull();
+    } finally {
+      await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ [held.wire]: { on: false } }));
+    }
+  });
+}
+
+// Read only: the window keeps the first server session it saw, so a save to this second Inbox would be refused. The
+// server test (packages/server/inbox-held-switches.test.ts) proves the preview's saves and events.
+test.skipIf(!hasDom)(
+  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 shows the Code review and Shape rows while off',
+  async () => {
+    const preview = await spawnServer('preview', [], { PLANNOTATOR_INBOX_PREVIEW: '1' });
+    current = preview;
+    try {
+      const el = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
+      const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
+      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
+      for (const held of HELD) {
+        expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
+        expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
+      }
+    } finally {
+      // The window first, so nothing it still asks reaches a stopped Inbox.
+      act(() => root?.unmount());
+      root = null;
+      preview.child.kill();
+      await preview.child.exited;
+    }
+  },
+  30_000,
+);
+
 
 test.skipIf(!hasDom)('#settings/experimental (an old link) becomes Capabilities, focused on its Experimental group; decision mode saves to config.json, both ways', async () => {
   const config = () => {

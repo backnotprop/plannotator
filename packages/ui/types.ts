@@ -225,6 +225,14 @@ export interface Block {
    * `(lines a–b)` label.
    */
   diagramSourceLineOffset?: number;
+  /**
+   * Set on a whole-file code document (`renderAs: "code"`, see
+   * `codeDocumentBlocks`): the document line of `content`'s first character.
+   * The file is ONE block, so a comment's line label is counted from its
+   * position inside `content`, not the block's span (which would name every
+   * line). Unset everywhere else, so other labels stay as they were.
+   */
+  contentStartLine?: number;
 }
 
 export interface DiffResult {

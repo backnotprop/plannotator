@@ -18,11 +18,13 @@ import {
   INBOX_TIDY_RUN_SHOWN_MS,
   inboxAgentName,
   inboxSessionRef,
+  inboxStepsProgress,
   inboxTidySessionLine,
   isInboxNote,
   type InboxCard,
   type InboxCardColumn,
   type InboxMessage,
+  type InboxSteps,
   type InboxTidyAgent,
   type InboxTidyItem,
   type InboxTidyReach,
@@ -47,6 +49,12 @@ export interface InboxTidyOptions {
   reachOf: (session: string) => InboxTidyReach | null;
   /** The Board is on: its cards count. */
   boardOn: boolean;
+  /**
+   * Thread steps (approval "inbox-thread-steps", part 5): whether a session's list in a thread has gone stale (a step
+   * still doing while the session has been idle 2 h or more, or has ended; the server's `inboxStepsStale`). Absent or
+   * null: the person's switch is off, and Tidy says nothing of steps.
+   */
+  stepsStale?: ((record: InboxSteps) => boolean) | null;
 }
 
 /** One item with what its wake lists. */
@@ -212,6 +220,19 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       }
       for (const line of actions) signal(who, threadId, messages, `action item, ${shortAge(aAge)}`, [`Action item open since ${inboxTidyAge(aAge)} ago: ${line}`]);
     }
+
+    // Thread steps (only while the person's switch is on): a session's step still doing after it went quiet.
+    if (options.stepsStale) {
+      for (const record of store.threadSteps(threadId)) {
+        if (!record.agent.session || !options.stepsStale(record)) continue;
+        const { done, total, doing } = inboxStepsProgress(record.steps);
+        if (doing === null) continue;
+        const age = Math.max(0, now - Date.parse(record.updated_at));
+        signal({ session: record.agent.session, host: record.agent.host, name: inboxAgentName(record.agent) }, threadId, messages, `step in progress, ${shortAge(age)}`, [
+          `${TIDY_STEPS_LEAD}${done} of ${total} done; doing: ${oneLine(doing, 80)}, unchanged for ${inboxTidyAge(age)}. Update them if that changed (the steps action, thread_id ${threadId}).`,
+        ]);
+      }
+    }
   }
 
   // Board cards of a session that have not moved in a while.
@@ -280,6 +301,8 @@ function cooling(store: InboxStore, session: string, now: number): boolean {
     .pop();
   if (!last) return false;
   if (!last.delivery) return true;
+  // A wake the Inbox withdrew asked nothing: no cool-down.
+  if (last.delivery.host === INBOX_TIDY_WITHDRAWN_HOST) return false;
   if (now - Date.parse(last.created_at) >= INBOX_TIDY_COOLDOWN_MS) return false;
   const after = store.messageCursor(last.id) ?? 0;
   for (const threadId of store.threadIds()) {
@@ -290,6 +313,55 @@ function cooling(store: InboxStore, session: string, now: number): boolean {
     }
   }
   return true;
+}
+
+/** How a Tidy item's steps line starts (`inboxTidyPlan`), and how the body carries it (`inboxTidyBody`). */
+const TIDY_STEPS_LEAD = "Your steps here: ";
+const TIDY_STEPS_BODY_LINE = `   - ${TIDY_STEPS_LEAD}`;
+
+/**
+ * A stored Tidy body as it is handed to an agent while the person has steps
+ * off: the body is written when the run starts, so a switch turned off before
+ * delivery would still carry the steps lines. Without them: every steps line,
+ * then every thread left with nothing listed, renumbered. Any other body is
+ * returned as it is (a body with no steps line is byte-equal).
+ */
+export function inboxTidyBodyStepsOff(body: string): string {
+  if (!body.includes(`\n${TIDY_STEPS_BODY_LINE}`)) return body;
+  let n = 0;
+  return body
+    .split("\n\n")
+    .flatMap((part) => {
+      if (!/^\d+\. /.test(part)) return [part];
+      const lines = part.split("\n").filter((line) => !line.startsWith(TIDY_STEPS_BODY_LINE));
+      if (lines.length < 2) return [];
+      n += 1;
+      return [[lines[0]!.replace(/^\d+\. /, `${n}. `), ...lines.slice(1)].join("\n")];
+    })
+    .join("\n\n");
+}
+
+/** Whether a stored Tidy body, its steps lines dropped (`inboxTidyBodyStepsOff`), still lists anything. */
+export function inboxTidyBodyListsAny(body: string): boolean {
+  return body.split("\n\n").some((part) => /^\d+\. /.test(part));
+}
+
+/**
+ * The host a Tidy wake is recorded delivered to when the Inbox withdrew it
+ * itself: the person turned steps off before delivery and the wake listed only
+ * steps, so no turn goes out (amendment 2: "turning the switch off stops a Tidy
+ * that is already running"). The run reads that session "nothing" to change.
+ */
+export const INBOX_TIDY_WITHDRAWN_HOST = "plannotator-inbox";
+
+/** Whether a Tidy body lists steps lines and nothing else (it lists nothing once they are dropped). */
+export function inboxTidyIsStepsOnly(body: string): boolean {
+  return body.includes(`\n${TIDY_STEPS_BODY_LINE}`) && !inboxTidyBodyListsAny(inboxTidyBodyStepsOff(body));
+}
+
+/** The undelivered Tidy wakes that list only steps (withdrawn when steps turn off). */
+export function inboxTidyStepsOnlyWakes(store: InboxStore): InboxMessage[] {
+  return store.tidyNotes().filter((note) => note.tidy?.wake && note.to && !note.delivery && inboxTidyIsStepsOnly(note.body));
 }
 
 /** The body of a session's Tidy notes: the instruction, what tidying can mean, then the numbered list. */
@@ -370,7 +442,10 @@ export function inboxTidyRun(
         ? reach === null
           ? "ended"
           : "waiting"
-        : wroteAny || cardWrite
+        : // Withdrawn (steps turned off, only steps listed): it was never asked, whatever it writes later.
+          note.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST
+          ? "nothing"
+          : wroteAny || cardWrite
           ? "tidied"
           : idle !== null && idle > Date.parse(at)
             ? "nothing"

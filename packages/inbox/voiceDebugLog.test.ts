@@ -103,6 +103,38 @@ describe.skipIf(!hasDom)('voice in the debug log', () => {
   });
 });
 
+describe.skipIf(!hasDom)('a pointer press in the debug log', () => {
+  test("the session stores a press's and a release's offset from the mic's centre on their voice_press lines", async () => {
+    const realFetch = globalThis.fetch;
+    const realAudio = (window as unknown as { AudioContext?: unknown }).AudioContext;
+    restore.push(() => {
+      globalThis.fetch = realFetch;
+      (window as unknown as { AudioContext?: unknown }).AudioContext = realAudio;
+      window.localStorage.removeItem(BUFFER);
+    });
+    globalThis.fetch = (async () => new Response('', { status: 503 })) as unknown as typeof fetch;
+    (window as unknown as { AudioContext: unknown }).AudioContext = class {
+      constructor() {
+        throw new DOMException('refused', 'InvalidStateError');
+      }
+    };
+    learnDebugLog(new Response('{}', { status: 200, headers: { [INBOX_DEBUG_ON_HEADER]: '1' } }));
+    const session = createVoiceSession(browserDeps);
+    const detach = session.attach(field());
+    session.press({ dx: 3, dy: -2 });
+    session.release({ dx: -5, dy: 7 });
+    await wait(0);
+    detach();
+    await wait(400);
+    const presses = voiceLines().filter((r) => r.ev === 'voice_press');
+    expect(presses.map((r) => [r.input, r.dx, r.dy])).toEqual([
+      ['press', 3, -2],
+      ['release', -5, 7],
+    ]);
+    for (const line of presses) expect(cleanWindowRecord(line)).toMatchObject({ dx: line.dx, dy: line.dy });
+  });
+});
+
 // Not DOM-gated: the filter's list of trouble codes is a second copy of the session's, and a code it drops would leave
 // a stuck mic with no reason in the log.
 test('every reason a take can end without words survives the Inbox\'s filter', () => {

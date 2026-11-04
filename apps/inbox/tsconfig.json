@@ -16,10 +16,11 @@
       "@plannotator/inbox/*": ["../../packages/inbox/*"],
       "#guide-reader": ["../../packages/inbox/guide/reader-module.d.ts"],
       "#surface-guide-reader": ["../../packages/inbox/guide/surface-reader-module.d.ts"],
-      "#search-palette": ["../../packages/inbox/search/SearchPalette.tsx"]
+      "#search-palette": ["../../packages/inbox/search/SearchPalette.tsx"],
+      "#platform-post": ["../../packages/inbox/guide/platform-post-module.d.ts"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["index.tsx", "surface.tsx"]
+  "include": ["index.tsx", "surface.tsx", "shape.tsx"]
 }

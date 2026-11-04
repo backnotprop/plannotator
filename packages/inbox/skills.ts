@@ -33,6 +33,8 @@ import {
   type SkillCatalogEntry,
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
+import { inboxReviewSkill } from '@plannotator/core/inbox-review';
+import { shapeSkill } from '@plannotator/core/shape-skill';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
 
@@ -84,6 +86,25 @@ export interface InboxSkillSources {
   content: (name: string) => Promise<SkillExportContent | undefined>;
 }
 
+/**
+ * A Plannotator skill's instructions (root `plannotator`: the review skills the
+ * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
+ * from disk. Undefined for any other skill.
+ */
+export function builtinSkillContent(ref: SkillCatalogEntry): SkillExportContent | undefined {
+  if (ref.root !== 'plannotator') return undefined;
+  const skill = inboxReviewSkill(ref.name) ?? shapeSkill(ref.name);
+  return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
+}
+
+/**
+ * What a composer may offer and match in this thread: `/review-recheck` only
+ * where a review already happened (`reviewed`), every other entry as listed.
+ */
+export function inboxSkillFilter(reviewed: boolean): (entry: SkillCatalogEntry) => boolean {
+  return (entry) => reviewed || entry.root !== 'plannotator' || inboxReviewSkill(entry.name)?.afterReview !== true;
+}
+
 const windowSources: InboxSkillSources = {
   catalog: fetchSkillCatalog,
   content: async (name) => {
@@ -106,12 +127,14 @@ export async function inboxSkillsBlock(
   texts: readonly string[],
   audience: SkillBlockAudience,
   sources: InboxSkillSources = windowSources,
+  /** Which catalog entries count here (`inboxSkillFilter`); by default no skill that needs a reviewed thread. */
+  filter: (entry: SkillCatalogEntry) => boolean = inboxSkillFilter(false),
 ): Promise<string> {
   const written = texts.filter((t) => t.trim() !== '');
   if (written.length === 0) return '';
   let catalog: SkillCatalogEntry[];
   try {
-    catalog = await sources.catalog();
+    catalog = (await sources.catalog()).filter(filter);
   } catch {
     return '';
   }
@@ -122,7 +145,7 @@ export async function inboxSkillsBlock(
     refs
       .filter((ref) => ref.humanOnly)
       .map(async (ref) => {
-        const content = await sources.content(ref.name).catch(() => undefined);
+        const content = builtinSkillContent(ref) ?? (ref.root === 'plannotator' ? undefined : await sources.content(ref.name).catch(() => undefined));
         if (content) contents.set(ref.name, content);
       }),
   );

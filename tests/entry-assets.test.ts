@@ -196,13 +196,23 @@ describe('review entry assets', () => {
           ? entry.name === 'node_modules' ? [] : walk(`${dir}/${entry.name}`)
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx'];
+    // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
+    // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`.
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
     // The surface's reader (one section per screen) and its diagram engine wait the same way.
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
+    expect(read('packages/inbox/shape/ShapeParts.tsx')).toContain("lazy(() => import('#shape-board'))");
+    // The posting dialog waits for the review's ending, and nothing else imports it.
+    expect(read('packages/inbox/pulls/PostEnding.tsx')).toContain("lazy(() => import('#platform-post'))");
+    const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;
+    expect(walk('packages/inbox').filter((path) => post.test(read(path)))).toEqual([]);
+    // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
+    const board = /^import\s+(?!type\b)[^;]*from\s+['"]@plannotator\/ui\/components\/shape(?:\/ShapeSurface)?['"]/m;
+    expect(walk('packages/inbox').filter((path) => path !== 'packages/inbox/shape/ShapeBoard.tsx' && board.test(read(path)))).toEqual([]);
   });
 
   // Inbox search's palette (the approved "inbox-search" design: "the palette
@@ -346,7 +356,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a
@@ -395,10 +405,10 @@ describe('review entry assets', () => {
     });
   }
 
-  // The Inbox window and the phone's surface stay one self-contained page
-  // each (vite-plugin-singlefile): the Inbox server serves them whole, with no
+  // The Inbox window, the phone's surface and the Shape page stay one self-contained page
+  // each (vite-plugin-singlefile): their servers serve them whole, with no
   // asset route behind them.
-  for (const path of ['apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html']) {
+  for (const path of ['apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html']) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} stays single-file`, () => {
       const html = readFileSync(resolve(root, path), 'utf8');
       const facts = { path, packed: html.includes(PACKED_ASSETS_MARKER), linksAssets: /(?:src|href)="\/assets\//.test(html) };

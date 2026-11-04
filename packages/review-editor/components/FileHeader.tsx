@@ -20,6 +20,8 @@ interface FileHeaderProps {
   /** Chrome preference: false hides the Viewed button (the `V` shortcut and
    *  viewed state are unaffected). */
   showViewedControl?: boolean;
+  /** The review app's keys work here: the Viewed tooltip names its key (V). Off where they do not (the Inbox). */
+  viewedKeyHint?: boolean;
   isStaged?: boolean;
   isStaging?: boolean;
   onStage?: () => void;
@@ -130,6 +132,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isViewed = false,
   onToggleViewed,
   showViewedControl = true,
+  viewedKeyHint = true,
   isStaged = false,
   isStaging = false,
   onStage,
@@ -267,7 +270,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 ? 'bg-success/15 text-success'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
-            title={isViewed ? "Mark as not viewed (V)" : "Mark as viewed (V)"}
+            title={`${isViewed ? 'Mark as not viewed' : 'Mark as viewed'}${viewedKeyHint ? ' (V)' : ''}`}
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

@@ -128,6 +128,8 @@ export function createInboxT3Wake(options: {
   store: InboxStore;
   dataDir: string;
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
+  /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
+  skip?: (item: InboxMessage, session: string) => boolean;
   /** How the wake reaches T3 (tests pass a scripted one). Default: T3's MCP over HTTP. */
   connect?: T3Connect;
   now?: () => number;
@@ -345,7 +347,7 @@ export function createInboxT3Wake(options: {
     /** Items this pass could send: a retry is kept only for those, so nothing that cannot go runs a timer. */
     const sendable = new Set<string>();
     for (const [session, items] of pending) {
-      const work = items.filter((item) => wakesItem(item, session));
+      const work = items.filter((item) => wakesItem(item, session) && !options.skip?.(item, session));
       for (const item of work) pendingKeys.add(`${item.id}.${session}`);
       if (dead.has(session)) continue;
       const todo = work.filter((item) => !refused.has(`${item.id}.${session}`));

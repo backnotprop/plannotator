@@ -61,7 +61,7 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
   /** An item chose to put focus somewhere itself (it opened a page or a panel): the close moves none. */
   const keepFocus = useRef(false);
   /** A write on an item that may leave the items on screen: where focus goes then. */
-  const pendingFocus = useRef<{ id: string; slot: MenuSlot; until: number; state: string } | null>(null);
+  const pendingFocus = useRef<{ id: string; slot: MenuSlot; until: number; state: string; moves: boolean } | null>(null);
   /** The item's slot when the menu opened: the slot to fall back to if the item leaves while it is open. */
   const openSlot = useRef<MenuSlot | null>(null);
   /** The guard against the browser's own menu for the key's keyup (Chromium on Windows), while ours is open. */
@@ -96,8 +96,8 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
   useLayoutEffect(() => {
     const pending = pendingFocus.current;
     if (!pending) return;
-    // The items hold still, or time ran out: never move focus later, out of the blue.
-    if (options.held || Date.now() > pending.until) {
+    // The items hold still (unless this write moves its item anyway), or time ran out: never move focus later, out of the blue.
+    if ((options.held && !pending.moves) || Date.now() > pending.until) {
       pendingFocus.current = null;
       return;
     }
@@ -212,10 +212,13 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     targetId,
     open,
     close,
-    /** An item writes to `id`: if that takes it off screen (or, `followMoves`, elsewhere), focus follows. */
-    follow: (id: string) => {
-      if (options.held) return;
-      pendingFocus.current = { id, slot: options.slotOf(id), until: Date.now() + 5000, state: options.stateOf(id) };
+    /**
+     * An item writes to `id`: if that takes it off screen (or, `followMoves`, elsewhere), focus follows. `moves`:
+     * the write moves its item even while the items hold still (a snooze takes its row to the Snoozed band at once).
+     */
+    follow: (id: string, moves = false) => {
+      if (options.held && !moves) return;
+      pendingFocus.current = { id, slot: options.slotOf(id), until: Date.now() + 5000, state: options.stateOf(id), moves };
     },
     /** An item puts focus somewhere itself (a page, a panel): the menu's close moves none. */
     keepFocus: () => {

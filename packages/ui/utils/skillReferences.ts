@@ -21,7 +21,12 @@ import {
   type SkillBlockAudience,
 } from '@plannotator/core/skill-reference-block';
 
-export type SkillRootId = 'claude' | 'codex' | 'universal';
+/**
+ * Where a skill came from. `plannotator`: one of Plannotator's own skills a
+ * host serves itself (the Inbox's review skills, while Code review is on):
+ * human-only, with no folder on disk; its instructions are the host's text.
+ */
+export type SkillRootId = 'claude' | 'codex' | 'universal' | 'plannotator';
 
 export interface SkillCatalogEntry {
   name: string;
@@ -399,8 +404,15 @@ export function neutralizeSkillMarkerLines(body: string): string {
  *  and labeled so it can never read as the reviewer's own words. Body lines
  *  that imitate the markers are neutralized (see neutralizeSkillMarkerLines)
  *  so the body cannot close the block early or forge a sibling block. */
-function injectedSkillSection(name: string, body: SkillExportContent, audience: SkillBlockAudience): string {
+function injectedSkillSection(name: string, body: SkillExportContent, audience: SkillBlockAudience, builtin = false): string {
   let out = `--- BEGIN SKILL INSTRUCTIONS: ${name} ---\n`;
+  if (builtin) {
+    // One of Plannotator's own skills (root `plannotator`): no folder to name, nothing truncated.
+    out += `A Plannotator Inbox skill, included here at the ${audience.requester}'s request. Follow it when acting on this ${audience.subject}.\n\n`;
+    out += `${neutralizeSkillMarkerLines(body.content)}\n`;
+    out += `--- END SKILL INSTRUCTIONS: ${name} ---\n`;
+    return out;
+  }
   out += `This skill cannot be invoked by a model, so its instructions are included here at the ${audience.requester}'s request. Follow them when acting on this ${audience.subject}.\n`;
   out += `Skill directory: ${body.dir}\n`;
   out += `Resolve any relative paths in the instructions below (e.g. references/, scripts/, assets/) against that absolute directory; your working directory is not the skill directory.\n\n`;
@@ -478,9 +490,20 @@ export function renderSkillReferencesBlock(
   const { injectedNames } = options;
   const audience = options.audience ?? REVIEWER_SKILL_AUDIENCE;
   const external = options.external === true;
-  const toInject: Array<{ name: string; body: SkillExportContent }> = [];
+  const toInject: Array<{ name: string; body: SkillExportContent; builtin?: boolean }> = [];
   let out = `${skillsReferencedHeading(audience)}\n`;
   for (const ref of refs) {
+    if (ref.root === 'plannotator') {
+      // Plannotator's own skill: the host supplies its text; never from an external tool.
+      const body = external ? undefined : options.contentOf?.(ref.name);
+      if (body) {
+        toInject.push({ name: ref.name, body, builtin: true });
+        out += `- \`${ref.name}\` (a Plannotator Inbox skill; ${skillInstructionsIncludedNote(audience)})\n`;
+      } else {
+        out += `- \`${ref.name}\` (a Plannotator Inbox skill; its instructions could not be included)\n`;
+      }
+      continue;
+    }
     if (!ref.humanOnly) {
       out += `- \`${ref.name}\`\n`;
       continue;
@@ -505,8 +528,8 @@ export function renderSkillReferencesBlock(
       out += `- \`${ref.name}\` (${humanOnlyExportNote(audience)})\n`;
     }
   }
-  for (const { name, body } of toInject) {
-    out += `\n${injectedSkillSection(name, body, audience)}`;
+  for (const { name, body, builtin } of toInject) {
+    out += `\n${injectedSkillSection(name, body, audience, builtin)}`;
   }
   return out;
 }

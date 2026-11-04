@@ -419,8 +419,9 @@ which is the regression class this control exists to fix).
 7. **Compact/touch** (real phone or DevTools device mode, both apps). The header menu carries a
    visible positive decision row in every state; composer rows open the note dialog
    (`DecisionNoteDialog`), not an inline textarea.
-8. **Sidebar general comment** (review). "+ General comment" is reachable at zero annotations
-   (empty state) and from the General section header; creating one flips the header control to
+8. **Global comment** (review). "+ Global comment" is reachable at zero annotations (empty
+   state) and from the Global comments section header in the sidebar, and from the "Global
+   comment" button in a guided review's header; creating one flips the header control to
    `Send Feedback`.
 
 ## HTML Surface Header Manual Checklist
