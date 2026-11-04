@@ -342,6 +342,32 @@ export const diagramDocumentBlocks = (text: string, kind: 'mermaid' | 'graphviz'
 ];
 
 /**
+ * Largest code document highlighted in its language. A whole file is one
+ * Shiki pass on the main thread, and a big log or JSON dump would stall the
+ * page, so past this it shows as plain monospace text, still annotatable.
+ */
+export const CODE_DOCUMENT_HIGHLIGHT_LIMIT = 128 * 1024;
+
+/**
+ * Blocks for a whole-file config or data source (`renderAs: "code"`): ONE code
+ * block over the raw text, in `language` (see `codeDocumentLanguage`), so a
+ * TOML or YAML comment stays a comment instead of becoming a markdown heading.
+ * The file's first line is document line 1, as for a diagram file.
+ */
+export const codeDocumentBlocks = (text: string, language: string | undefined): Block[] => [
+  {
+    id: 'block-0',
+    type: 'code',
+    content: text,
+    language: language && text.length <= CODE_DOCUMENT_HIGHLIGHT_LIMIT ? language : undefined,
+    order: 1,
+    startLine: 1,
+    // A trailing newline ends the last line, it does not start another.
+    sourceLineCount: text === '' ? 0 : text.replace(/\n$/, '').split('\n').length,
+  },
+];
+
+/**
  * A simplified markdown parser that splits content into linear blocks.
  * For a production app, we would use a robust AST walker (remark),
  * but for this demo, we want predictable text-anchoring.

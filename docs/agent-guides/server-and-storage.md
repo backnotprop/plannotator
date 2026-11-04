@@ -552,7 +552,9 @@ When a user denies a plan and Claude resubmits, the UI shows what changed betwee
 **Three view modes** (toggle via `PlanDiffModeSwitcher`; `planDiffMode` in `packages/editor/App.tsx` defaults to `classic`):
 - **Classic** (`PlanCleanDiffView`, block-level, old above new): Color-coded left borders — green (added), red (removed/strikethrough), yellow (modified). The default.
 - **Rendered** (`PlanCleanDiffView` with `wordLevel`, experimental): the same view with word-level inline highlighting.
-- **Raw** (`PlanRawDiffView`): Monospace `+/-` lines, git-style
+- **Raw** (`PlanRawDiffView`): Monospace `+/-` lines, git-style. It takes no annotation props: comments are made in the other two modes.
+
+**Config and data files** (`renderAs: "code"`, see `annotate.md`): App passes `codeDocument={{ language }}` to `PlanDiffViewer`, which hands it to `PlanCleanDiffView`. Each chunk then renders as the file's own monospace text in that language (`CodeChunk`) instead of the markdown parse, unchanged chunks line up with the changed ones, and Rendered word-diffs a modified block's raw text (`computeCodeInlineDiff`; stacked like Classic past `CODE_INLINE_DIFF_LIMIT`, 8 KB). `packages/ui/utils/codeDiffSegments.ts` lays the diff over Shiki's colours (`highlightToRuns`): unchanged and added text take the new side's, removed text the old side's, and struck text never strikes a line's leading whitespace. The language is the one the document's own block resolved, so the 128 KB highlight limit applies here too. Without the prop the view is unchanged. Diagram and AsciiDoc files still diff through the markdown parse.
 
 **State** (`packages/ui/hooks/usePlanDiff.ts`): Manages base version selection, diff computation, and version fetching. The server sends `previousPlan` with the initial `/api/plan` response; the hook auto-diffs against it. Users can select any prior version from the sidebar Version Browser.
 

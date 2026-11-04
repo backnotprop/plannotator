@@ -233,6 +233,7 @@ packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
 packages/ui/components/blocks/BlockquoteBlock.test.tsx
 packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+packages/ui/components/plan-diff/PlanCleanDiffView.codeDocument.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
 packages/ui/components/AnnotationPanel.questions.test.tsx
 packages/ui/hooks/useActiveSection.test.tsx
@@ -333,6 +334,7 @@ packages/ui/hooks/useLinkedDoc.test.tsx
 packages/ui/components/DocBadges.test.tsx
 packages/editor/planDiffAutoExit.test.tsx
 packages/editor/App.archiveReadOnly.test.tsx
+packages/editor/App.codeDocument.test.tsx
 packages/editor/App.refCards.test.tsx
 packages/editor/App.htmlChrome.test.tsx
 packages/editor/App.sidebarTabsAgentTerminal.test.tsx
