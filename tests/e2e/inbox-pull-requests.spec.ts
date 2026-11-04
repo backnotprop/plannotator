@@ -652,11 +652,12 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
   await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
-  // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
+  // The head's title and count are never cut; the count and the filter are one control (inbox-pull-filters.spec.ts).
   for (const selector of ['[data-pulls-heading]', '[data-pulls-on-you]']) {
     expect(await list.locator(selector).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   }
-  await expect(list.locator('[data-board-project-chip]')).toHaveAccessibleName(/All projects/);
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('3 on you. Filter');
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
   await shot(page, '2-list');
   await fold.click();

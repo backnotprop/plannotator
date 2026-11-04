@@ -13,13 +13,15 @@
  *  - the agent drawn top left instead of on the row's third line;
  *  - two repositories of one name in the list told apart by nothing;
  *  - initials that read as "PR" or "MR" on this page;
- *  - a rail of files that share their name and last folder, each row the same text.
+ *  - a rail of files that share their name and last folder, each row the same text;
+ *  - a PR in two views or none, a stack split by a view, the menu's counts not following the view and the project,
+ *    the on-you count following the view, an assigned PR not on the person.
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxPullItems } from '@plannotator/core/inbox-types';
 import { initials, repoLabels } from './labels';
-import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
+import { layerPill, ladderHeading, pullCount, pullFilterOf, pullGroups, pullRows, pullViewOf, rowLine, rowMeta, stackTitle, type PullFilter } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { railRows } from './rail';
 import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, stackLink, stackVerdictLink } from './topology';
@@ -295,5 +297,73 @@ describe('the review rail (#17)', () => {
       { kind: 'file', path: 'src/a.ts', dir: 'src/', name: 'a.ts' },
       { kind: 'file', path: 'src/b.ts', dir: 'src/', name: 'b.ts' },
     ]);
+  });
+});
+
+describe('the views and the project (approval "pr-list-filters")', () => {
+  const W = 'northwind/web-app';
+  const B = 'northwind/billing-svc';
+  // dana's own two-layer stack in web-app with a teammate's layer on top; jun's PR asked of dana; mei's PR assigned to
+  // dana; tomas's PR asked of no one; a draft of mei's; a merged one of mei's; and in billing-svc, dana's own and one
+  // asked of her.
+  const pulls = [
+    pr({ repo: W, number: 1, head: 'a' }),
+    pr({ repo: W, number: 2, head: 'b', base: 'a', author: 'tomas', mine: false }),
+    pr({ repo: W, number: 3, head: 'c', author: 'jun', mine: false, requested: true }),
+    pr({ repo: W, number: 4, head: 'd', author: 'mei', mine: false, assigned: true }),
+    pr({ repo: W, number: 5, head: 'e', author: 'tomas', mine: false }),
+    pr({ repo: W, number: 6, head: 'f', author: 'mei', mine: false, state: 'draft' }),
+    pr({ repo: W, number: 7, head: 'g', author: 'mei', mine: false, state: 'merged', merged_at: '2026-11-02T10:00:00.000Z' }),
+    pr({ repo: B, number: 8, head: 'h' }),
+    pr({ repo: B, number: 9, head: 'i', author: 'jun', mine: false, requested: true }),
+  ];
+  const model = answer({ pulls, projects: { [`github.com/${W}`]: ['prj_web'], [`github.com/${B}`]: ['prj_bill'] } });
+  const numbers = (filter: PullFilter, project: string | null = null) =>
+    pullRows(pullGroups(model, project, filter))
+      .map((item) => item.stack.layers.map((l) => l.number).join('+'))
+      .sort();
+
+  test('each PR is in one view: the person wrote it, else it is asked of them (requested or assigned), else others', () => {
+    expect(pullViewOf({ mine: true, requested: true, assigned: true })).toBe('mine');
+    expect(pullViewOf({ mine: false, requested: true })).toBe('review');
+    expect(pullViewOf({ mine: false, requested: false, assigned: true })).toBe('review');
+    expect(pullViewOf({ mine: false, requested: false })).toBe('others');
+  });
+
+  test('a stack stays whole, kept when any open layer is in the view; a merged layer alone never puts it there', () => {
+    expect(numbers('all')).toEqual(['1+2', '3', '4', '5', '6', '8', '9']);
+    expect(numbers('mine')).toEqual(['1+2', '8']);
+    expect(numbers('review')).toEqual(['3', '4', '9']);
+    // tomas's layer on dana's stack puts the whole stack in Others too; mei's merged #7 is in no view.
+    expect(numbers('others')).toEqual(['1+2', '5', '6']);
+  });
+
+  test('the project narrows every view; the counts the menu shows follow both', () => {
+    expect(numbers('review', 'prj_bill')).toEqual(['9']);
+    expect(numbers('mine', 'prj_web')).toEqual(['1+2']);
+    expect(pullCount(model, null, 'all')).toBe(7);
+    expect(pullCount(model, null, 'mine')).toBe(2);
+    expect(pullCount(model, null, 'review')).toBe(3);
+    expect(pullCount(model, null, 'others')).toBe(3);
+    expect(pullCount(model, 'prj_web', 'all')).toBe(5);
+    expect(pullCount(model, 'prj_bill', 'others')).toBe(0);
+  });
+
+  test('on you follows the project, not the view: an assigned PR is on the person', () => {
+    // On you: #3 (requested), #4 (assigned), #9 (requested).
+    expect(pullGroups(model, null).on_you.map((i) => i.focus.number).sort()).toEqual([3, 4, 9]);
+    expect(pullGroups(model, 'prj_web').on_you.map((i) => i.focus.number).sort()).toEqual([3, 4]);
+    const assigned = pullGroups(model, null).on_you.find((i) => i.focus.number === 4)!;
+    expect(assigned.reason).toBe('assigned');
+    expect(rowLine(assigned, null)).toBe('#4 · assigned to you');
+    expect(layerPill(pulls[3]!)).toEqual({ text: 'Assigned to you', tone: 'you' });
+  });
+
+  test('the address: a known view, else All', () => {
+    expect(pullFilterOf('review')).toBe('review');
+    expect(pullFilterOf('others')).toBe('others');
+    expect(pullFilterOf(null)).toBe('all');
+    expect(pullFilterOf('everything')).toBe('all');
+    expect(pullFilterOf('')).toBe('all');
   });
 });

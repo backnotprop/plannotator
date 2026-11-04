@@ -489,7 +489,8 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
       projectNames={new Map()}
       phone={false}
       onOpenStack={(id) => id && opened.push(id)}
-      onProject={() => {}}
+      filter="all"
+      onScope={() => {}}
       onReview={() => {}}
       onOpenThread={() => {}}
       onLaunch={() => {}}
@@ -670,7 +671,8 @@ function Page({
         projectNames={new Map()}
         phone={false}
         onOpenStack={() => {}}
-        onProject={() => {}}
+        filter="all"
+        onScope={() => {}}
         onReview={(id, key, scope) => onReview?.(id, key, scope)}
         onOpenThread={(thread) => onOpenThread?.(thread)}
         {...(onOpenCard ? { onOpenCard } : {})}

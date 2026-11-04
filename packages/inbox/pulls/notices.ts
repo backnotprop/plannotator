@@ -126,7 +126,7 @@ export function pullsEmptyWords(
     }
     return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [SIGN_IN_LINE] };
   }
-  return { kind: 'nothing', head: 'Nothing open in your projects', lines: ['Pull requests you opened, and the ones you are asked to review, show here.', ...unsigned.map((n) => n.line)] };
+  return { kind: 'nothing', head: 'Nothing open in your projects', lines: ['Open pull requests in your projects show here.', ...unsigned.map((n) => n.line)] };
 }
 
 /** The CLIs whose hosts answered this read, for the foot ("From gh on this computer"). */

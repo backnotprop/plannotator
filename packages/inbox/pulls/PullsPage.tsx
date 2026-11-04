@@ -4,6 +4,10 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
+ * - The head: "PRs", and on its right the filter (approval "pr-list-filters",
+ *   take B Joined; PullFilter.tsx): the on-you count, the view (All, Mine, To
+ *   review, Others) and the project, kept in the address (`&view=`,
+ *   `&project=`).
  * - The list, in the Inbox list's own rows and bands, grouped by whose move
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
@@ -30,7 +34,6 @@ import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
-import { ProjectFilter } from '../board/ProjectFilter';
 import { RowAgentTiles } from '../components/RowAgents';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
@@ -48,6 +51,7 @@ import {
   ladderHeading,
   layerPill,
   linkAgentName,
+  pullFilterEmptyWords,
   pullGroups,
   pullHandoffAskLine,
   pullNounWord,
@@ -55,7 +59,9 @@ import {
   rowMeta,
   stackProjects,
   stackTitle,
+  type PullFilter,
 } from './model';
+import { PullFilterControl } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
@@ -67,11 +73,14 @@ export interface PullsPageProps {
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
   project: string | null;
+  /** The list's view (`&view=`): All, Mine, To review or Others. */
+  filter: PullFilter;
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
   onOpenStack: (id: string | null) => void;
-  onProject: (id: string | null) => void;
+  /** A new view and project from the filter, in one step. */
+  onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
   onOpenThread: (threadId: string) => void;
@@ -91,7 +100,9 @@ function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
 export function PullsPage(props: PullsPageProps) {
   const { state, phone } = props;
   const model = state.model;
-  const groups = useMemo(() => (model ? pullGroups(model, props.project) : null), [model, props.project]);
+  const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
+  // The count on the head follows the project, never the view.
+  const onYou = useMemo(() => (model ? pullGroups(model, props.project).on_you.length : 0), [model, props.project]);
   const open = groups && props.stackId ? findStack(groups, props.stackId) : null;
   // The filter offers the projects that have a GitHub or GitLab remote here.
   const offered = useMemo(() => {
@@ -104,15 +115,21 @@ export function PullsPage(props: PullsPageProps) {
       <div className="ib-lhead">
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
-          Pull requests
+          PRs
         </h1>
-        {groups && groups.on_you.length > 0 && (
-          <span className="ib-pr-onyou" data-pulls-on-you={groups.on_you.length}>
-            {formatCount(groups.on_you.length)} on you
-          </span>
+        {/* Shown once a first answer came: before it, there is nothing to filter. */}
+        {model && (
+          <PullFilterControl
+            model={model}
+            filter={props.filter}
+            project={props.project}
+            projects={offered}
+            names={props.projectNames}
+            phone={phone}
+            onYou={onYou}
+            onChange={props.onScope}
+          />
         )}
-        <span className="ib-sp" />
-        {offered.length > 1 && <ProjectFilter projects={offered} names={props.projectNames} value={props.project} phone={phone} onChange={props.onProject} />}
       </div>
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
         {!model && state.error && (
@@ -121,7 +138,7 @@ export function PullsPage(props: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && groups && <PullList model={model} groups={groups} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && groups && <PullList model={model} groups={groups} filter={props.filter} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
@@ -146,7 +163,21 @@ export function PullsPage(props: PullsPageProps) {
   );
 }
 
-function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPullsAnswer; groups: ReturnType<typeof pullGroups>; selected: string | null; phone: boolean; onOpen: (id: string) => void }) {
+function PullList({
+  model,
+  groups,
+  filter,
+  selected,
+  phone,
+  onOpen,
+}: {
+  model: InboxPullsAnswer;
+  groups: ReturnType<typeof pullGroups>;
+  filter: PullFilter;
+  selected: string | null;
+  phone: boolean;
+  onOpen: (id: string) => void;
+}) {
   const [waitingOpen, setWaitingOpen] = useState(false);
   const now = useRelativeClock(true);
   const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
@@ -155,6 +186,18 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
   const notices = pullsNotices(model);
+  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
+  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
+    const empty = pullFilterEmptyWords(filter);
+    return (
+      <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
+        <p className="ib-pr-empty-h">{empty.head}</p>
+        {[empty.line, ...notices.map((n) => n.line)].map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+      </div>
+    );
+  }
   if (total === 0) {
     const empty = pullsEmptyWords(model, notices);
     return (

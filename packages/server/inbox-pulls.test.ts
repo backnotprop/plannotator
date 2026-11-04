@@ -11,6 +11,9 @@
  *  - PRs of repositories that are not Inbox projects in the list;
  *  - a second forge read inside the fresh window, or none after a refresh;
  *    a rate limit not holding the host, or the last answer lost on a failure;
+ *  - an Others search run unscoped or past GitHub's length limit; a GraphQL
+ *    error read as a whole answer; Others' PRs marked as the person's or
+ *    asked of them; an assigned PR losing its mark;
  *  - a PR not tied to the thread the person handed it to, or to its agent's
  *    own thread through its URL; one tied by anything else (a branch, a
  *    Board card, another project's thread); a Board card shown while the
@@ -31,8 +34,11 @@ import {
   createInboxPulls,
   GITHUB_SEARCH_MAX_CHARS,
   githubPullSearches,
+  GITLAB_PROJECTS_PER_QUERY,
+  gitlabPullsQueries,
   INBOX_PULL_DIFF_MAX_BYTES,
   INBOX_PULLS_FRESH_MS,
+  INBOX_PULLS_RATE_FLOOR,
   linkInboxPulls,
   parseGithubPulls,
   parseGitlabPulls,
@@ -895,14 +901,31 @@ describe("the worst case (break-ui on #2590)", () => {
 
 describe("the searches (scoped to the projects' repositories)", () => {
   test("repo: qualifiers while they fit, newest first; past GitHub's limit, unscoped", () => {
-    const scoped = githubPullSearches(Date.parse("2026-11-03T00:00:00Z"), ["northwind/billing-svc", "Northwind/Web-App"]);
-    for (const q of Object.values(scoped)) {
+    const { others, ...own } = githubPullSearches(Date.parse("2026-11-03T00:00:00Z"), ["northwind/billing-svc", "Northwind/Web-App"]);
+    for (const q of [...Object.values(own), ...others]) {
       expect(q).toContain("sort:updated-desc");
       expect(q).toContain("repo:northwind/billing-svc repo:northwind/web-app");
       expect(q.length).toBeLessThanOrEqual(GITHUB_SEARCH_MAX_CHARS);
     }
+    expect(own.assigned).toContain("assignee:@me");
     const many = Array.from({ length: 12 }, (_, i) => `northwind/service-number-${i}`);
-    for (const q of Object.values(githubPullSearches(0, many))) expect(q).not.toContain("repo:");
+    const { others: _, ...unscoped } = githubPullSearches(0, many);
+    for (const q of Object.values(unscoped)) expect(q).not.toContain("repo:");
+  });
+
+  test("Others is never unscoped: the repositories are shared over searches under GitHub's limit, each once; none without repositories", () => {
+    const many = Array.from({ length: 30 }, (_, i) => `northwind/service-number-${i}`);
+    const { others } = githubPullSearches(0, many);
+    expect(others.length).toBeGreaterThan(1);
+    const named: string[] = [];
+    for (const q of others) {
+      expect(q.length).toBeLessThanOrEqual(GITHUB_SEARCH_MAX_CHARS);
+      expect(q).toMatch(/^is:pr is:open archived:false sort:updated-desc repo:/);
+      expect(q).not.toContain("@me");
+      named.push(...q.split(" ").filter((t) => t.startsWith("repo:")));
+    }
+    expect(named.sort()).toEqual(many.map((r) => `repo:${r}`).sort());
+    expect(githubPullSearches(0, []).others).toEqual([]);
   });
 
   test("the query carries the projects' repositories", async () => {
@@ -911,6 +934,107 @@ describe("the searches (scoped to the projects' repositories)", () => {
     await w.pulls();
     const args = w.forge.graphql()[0]!.args;
     expect(args.find((a) => a.startsWith("authored="))).toContain("repo:northwind/billing-svc");
+    // One Others search, its alias in the query, and the assigned search beside the person's own.
+    expect(args.find((a) => a.startsWith("others0="))).toContain("repo:northwind/billing-svc");
+    expect(args.some((a) => a.startsWith("others1="))).toBe(false);
+    expect(args.find((a) => a.startsWith("query="))).toContain("others0: search(");
+    expect(args.find((a) => a.startsWith("assigned="))).toContain("assignee:@me");
+  });
+
+  test("GitLab: the user's lists in the first query, the projects' open MRs a few to a query, numbered across them", () => {
+    const projects = Array.from({ length: GITLAB_PROJECTS_PER_QUERY + 1 }, (_, i) => `northwind/p-${i}`);
+    const queries = gitlabPullsQueries(projects);
+    expect(queries).toHaveLength(2);
+    expect(queries[0]).toContain("currentUser");
+    expect(queries[0]).toContain("assigned: assignedMergeRequests(state: opened");
+    expect(queries[1]).not.toContain("currentUser");
+    expect(queries[1]).toContain(`p${GITLAB_PROJECTS_PER_QUERY}: project(fullPath: "northwind/p-${GITLAB_PROJECTS_PER_QUERY}")`);
+    // A path is only ever a GraphQL string: a quote can't end it.
+    expect(gitlabPullsQueries(['a/b") { x } q: project(fullPath: "c'])[0]).toContain('p0: project(fullPath: "a/bxqprojectfullpathc")');
+    expect(gitlabPullsQueries([])).toHaveLength(1);
+  });
+});
+
+describe("Mine, To review and Others (the list's filters)", () => {
+  const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+
+  test("GitHub: Others' PRs are neither the person's nor asked of them; one also requested or assigned keeps that", () => {
+    const parsed = parseGithubPulls(
+      JSON.stringify({
+        data: {
+          viewer: { login: "dana" },
+          others0: { issueCount: 4, nodes: [ghPull(900, { author: { login: "mei" } }), ghPull(880, { author: { login: "tomas" } }), ghPull(891, { author: { login: "jun" } }), ghPull(412)] },
+          requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+          assigned: { nodes: [ghPull(891, { author: { login: "jun" } })] },
+          authored: { nodes: [ghPull(412)] },
+          merged: { nodes: [] },
+        },
+      }),
+      "github.com",
+    )!;
+    const by = Object.fromEntries(parsed.pulls.map((p) => [p.number, p]));
+    expect(by[900]).toMatchObject({ mine: false, requested: false });
+    expect(by[900]!.assigned).toBeUndefined();
+    expect(by[880]).toMatchObject({ mine: false, requested: true });
+    expect(by[891]).toMatchObject({ mine: false, requested: false, assigned: true });
+    expect(by[412]).toMatchObject({ mine: true, requested: false });
+    expect(parsed.open_total).toBe(4);
+  });
+
+  test("GitLab: the projects' MRs merge across queries; assigned is kept", () => {
+    const user = { data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [] }, assigned: { nodes: [GL_MR(64)] }, merged: { nodes: [] } }, p0: { mergeRequests: { count: 2, nodes: [GL_MR(64), GL_MR(58)] } } } };
+    const more = { data: { p1: { mergeRequests: { count: 3, nodes: [GL_MR(7, { project: { fullPath: "northwind/web" }, webUrl: "https://gitlab.com/northwind/web/-/merge_requests/7" })] } } } };
+    const parsed = parseGitlabPulls([JSON.stringify(user), JSON.stringify(more)], "gitlab.com")!;
+    const by = Object.fromEntries(parsed.pulls.map((p) => [p.number, p]));
+    expect(by[64]).toMatchObject({ assigned: true, mine: false });
+    expect(by[58]).toMatchObject({ mine: false, requested: false });
+    expect(by[7]!.repo).toBe("northwind/web");
+    expect(parsed.open_total).toBe(5);
+    // One query's answer not one: the whole read is not.
+    expect(parseGitlabPulls([JSON.stringify(user), "not json"], "gitlab.com")).toBeNull();
+  });
+
+  test("a GraphQL error is a failed read, even with data: the last answer stays, never a list missing a part", async () => {
+    const withError = { ...GH_ANSWER, errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", path: ["others0"], message: "Resource limits exceeded" }] };
+    expect(parseGithubPulls(JSON.stringify(withError), "github.com")).toBeNull();
+    expect(parseGitlabPulls(JSON.stringify({ data: { currentUser: { username: "dana" } }, errors: [{ message: "Query has complexity of 300" }] }), "gitlab.com")).toBeNull();
+    let now = 1_000_000;
+    let answer: unknown = GH_ANSWER;
+    const f = forge();
+    const run: RefRunner = async (cli, args, env) =>
+      cli === "gh" && args.includes("graphql") ? (f.calls.push({ cli, args }), { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 }) : f.run(cli, args, env);
+    const pulls = createInboxPulls({ run, now: () => now });
+    expect((await pulls.list(repos)).pulls).toHaveLength(3);
+    answer = withError;
+    now += INBOX_PULLS_FRESH_MS;
+    const failed = await pulls.list(repos);
+    expect(failed.hosts[0]!.error).toBe("unavailable");
+    expect(failed.pulls).toHaveLength(3);
+  });
+
+  test("the Others count is the whole: more open PRs than came back says how many the list shows, of how many", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ghPull(3000 + i, { author: { login: "mei" }, headRefName: `o${i}` }));
+    const f = forge({ data: { viewer: { login: "dana" }, others0: { issueCount: 140, nodes: many }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } });
+    const listed = await createInboxPulls({ run: f.run }).list(repos);
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 101, total: 140 });
+    const all = forge({ data: { viewer: { login: "dana" }, others0: { issueCount: 2, nodes: [ghPull(900, { author: { login: "mei" } }), ghPull(412)] }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } });
+    expect((await createInboxPulls({ run: all.run }).list(repos)).hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("GitHub's budget nearly spent: the host is held until it fills, its answer still shown", async () => {
+    let now = Date.parse("2026-11-03T10:00:00Z");
+    const reset = new Date(now + 20 * 60_000).toISOString();
+    const f = forge({ ...GH_ANSWER, data: { ...GH_ANSWER.data, rateLimit: { cost: 9, remaining: INBOX_PULLS_RATE_FLOOR - 1, resetAt: reset } } });
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    await pulls.list(repos);
+    now += INBOX_PULLS_FRESH_MS;
+    const held = await pulls.list(repos, { refresh: true });
+    expect(f.graphql()).toHaveLength(1);
+    expect(held.hosts[0]!.error).toBe("rate_limited");
+    expect(held.pulls).toHaveLength(3);
+    now = Date.parse(reset) + 1;
+    await pulls.list(repos, { refresh: true });
+    expect(f.graphql()).toHaveLength(2);
   });
 });
 

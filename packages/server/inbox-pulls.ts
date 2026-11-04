@@ -10,10 +10,14 @@
  *   those the person's own `gh` or `glab` reports as signed in
  *   (`readSignedInHosts`), github.com and gitlab.com included. `--hostname`
  *   is always named, so neither GH_HOST nor a folder's remote picks it.
- * - One GraphQL `query` per host (refused to load otherwise): the PRs whose
- *   review was requested from the person, the ones they opened, and the ones
- *   they merged in the last `INBOX_PULLS_MERGED_DAYS` (to put a stack's
- *   merged layers under it). Only PRs of the projects' repositories are kept.
+ * - GraphQL `query`s only (refused to load otherwise), one per host on GitHub
+ *   (GitLab: one per `GITLAB_PROJECTS_PER_QUERY` projects): the PRs whose
+ *   review was requested from the person, the ones assigned to them, the ones
+ *   they opened, the ones they merged in the last `INBOX_PULLS_MERGED_DAYS`
+ *   (to put a stack's merged layers under it), and every open PR of the
+ *   projects' repositories (the list's Others; never an unscoped search).
+ *   Only PRs of the projects' repositories are kept. An answer with any
+ *   GraphQL error is a failed read.
  * - Cache per host: fresh for `INBOX_PULLS_FRESH_MS`; a `refresh` (the window
  *   got its focus back, or the person asked) reads again what is older than
  *   `INBOX_PULLS_REFRESH_MS`; a failure is held `REF_FAILURE_MS` and the last
@@ -60,6 +64,8 @@ import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts
 export const INBOX_PULLS_FRESH_MS = 60_000;
 /** A refresh reads again what is older than this. */
 export const INBOX_PULLS_REFRESH_MS = 20_000;
+/** GitHub's GraphQL budget below this many points: the host is not read again until it fills (`rateLimit.resetAt`). */
+export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
@@ -78,53 +84,117 @@ const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName h
       latestReviews(first: 5) { nodes { state author { login } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
-/** One query per GitHub host: the viewer, and the three searches (the open ones with their full count: more than a read takes is said). */
-export const GITHUB_PULLS_QUERY = `query InboxPulls($requested: String!, $authored: String!, $merged: String!) {
+/** The Others searches (every open PR of the projects' repositories) answer this many PRs each at most. */
+export const INBOX_PULLS_OTHERS_MAX = 100;
+
+/**
+ * One query per GitHub host: the viewer, the rate limit, and the searches (the open ones with their full count: more
+ * than a read takes is said). `others` Others searches (`others0`, `others1`, …), each a share of the projects'
+ * repositories: every open PR there, whoever wrote it.
+ */
+export function githubPullsQuery(others: number): string {
+  const vars = Array.from({ length: others }, (_, i) => `, $others${i}: String!`).join("");
+  const searches = Array.from(
+    { length: others },
+    (_, i) => `\n  others${i}: search(type: ISSUE, query: $others${i}, first: ${INBOX_PULLS_OTHERS_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }`,
+  ).join("");
+  return `query InboxPulls($requested: String!, $authored: String!, $merged: String!, $assigned: String!${vars}) {
   viewer { login }
+  rateLimit { cost remaining resetAt }
   requested: search(type: ISSUE, query: $requested, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
   authored: search(type: ISSUE, query: $authored, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
-  merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
+  assigned: search(type: ISSUE, query: $assigned, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
+  merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }${searches}
 }`;
+}
 
 const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch diffHeadSha approved detailedMergeStatus conflicts
       diffStatsSummary { additions deletions fileCount } headPipeline { status }
       project { fullPath repository { rootRef } } sourceProject { fullPath } author { username avatarUrl }
       approvedBy(first: 3) { nodes { username } } reviewers(first: 5) { nodes { username } }`;
 
-/** One query per GitLab host: the current user's requested, opened and merged MRs. */
-export const GITLAB_PULLS_QUERY = `query InboxPulls {
+/** A GitLab query asks this many projects' open MRs at most: GitLab refuses a query past its complexity limit (250). */
+export const GITLAB_PROJECTS_PER_QUERY = 4;
+
+/** A project's full path as a GraphQL string (only the characters a GitLab path may hold; anything else is dropped). */
+function gqlPath(path: string): string {
+  return JSON.stringify(path.replace(/[^A-Za-z0-9._/-]/g, ""));
+}
+
+/**
+ * The queries for one GitLab host: the first holds the current user's requested, opened, assigned and merged MRs;
+ * every query holds up to `GITLAB_PROJECTS_PER_QUERY` projects' open MRs (`p0`, `p1`, … numbered across them, so
+ * the answers merge into one), whoever wrote them.
+ */
+export function gitlabPullsQueries(projects: readonly string[] = []): string[] {
+  const user = `
   currentUser {
     username
     requested: reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     authored: authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
+    assigned: assignedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     merged: authoredMergeRequests(state: merged, first: 20, sort: MERGED_AT_DESC) { nodes { ${GL_MR} } }
+  }`;
+  const paths = [...new Set(projects.map((p) => p.toLowerCase()))].sort();
+  const alias = (path: string, i: number) => `\n  p${i}: project(fullPath: ${gqlPath(path)}) { mergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}, sort: UPDATED_DESC) { count nodes { ${GL_MR} } } }`;
+  const queries: string[] = [];
+  for (let at = 0; at === 0 || at < paths.length; at += GITLAB_PROJECTS_PER_QUERY) {
+    const chunk = paths.slice(at, at + GITLAB_PROJECTS_PER_QUERY).map((p, i) => alias(p, at + i)).join("");
+    queries.push(`query InboxPulls {${at === 0 ? user : ""}${chunk}\n}`);
   }
-}`;
+  return queries;
+}
 
-for (const q of [GITHUB_PULLS_QUERY, GITLAB_PULLS_QUERY]) {
+for (const q of [githubPullsQuery(2), ...gitlabPullsQueries(["a/b"])]) {
   if (!/^query\b/.test(q)) throw new Error("inbox-pulls: every query must be a query");
 }
 
 /** GitHub's search refuses a query past this many characters. */
 export const GITHUB_SEARCH_MAX_CHARS = 256;
 
+/** The person's own GitHub searches, by alias. */
+export interface GithubPersonalSearches {
+  requested: string;
+  authored: string;
+  assigned: string;
+  merged: string;
+}
+
 /**
- * The three GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`), newest first.
- * With the projects' repositories (`owner/repo`) they are scoped to them (`repo:` qualifiers, as many as fit
- * GitHub's length limit in the longest search), so the 50-a-search cap is spent on the projects' PRs; past that
- * the search covers everything and the list keeps the projects' PRs.
+ * The GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`), newest first.
+ * - The person's own (`requested`, `authored`, `assigned`, `merged`): with the projects' repositories (`owner/repo`)
+ *   they are scoped to them (`repo:` qualifiers, as many as fit GitHub's length limit in the longest search), so the
+ *   50-a-search cap is spent on the projects' PRs; past that the search covers everything and the list keeps the
+ *   projects' PRs.
+ * - `others`: every open PR of the projects' repositories, the repositories shared over as many searches as GitHub's
+ *   length limit needs. Never unscoped (that would search all of GitHub): no repositories, no Others search.
  */
-export function githubPullSearches(now: number, repos: readonly string[] = []): { requested: string; authored: string; merged: string } {
+export function githubPullSearches(now: number, repos: readonly string[] = []): GithubPersonalSearches & { others: string[] } {
   const since = new Date(now - INBOX_PULLS_MERGED_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const bare = {
+  const bare: GithubPersonalSearches = {
     requested: "is:pr is:open archived:false review-requested:@me sort:updated-desc",
     authored: "is:pr is:open archived:false author:@me sort:updated-desc",
+    assigned: "is:pr is:open archived:false assignee:@me sort:updated-desc",
     merged: `is:pr is:merged author:@me merged:>=${since} sort:updated-desc`,
   };
-  const scope = [...new Set(repos.map((r) => r.toLowerCase()))].sort().map((r) => `repo:${r}`).join(" ");
+  const qualifiers = [...new Set(repos.map((r) => r.toLowerCase()))].sort().map((r) => `repo:${r}`);
+  const othersBare = "is:pr is:open archived:false sort:updated-desc";
+  const others: string[] = [];
+  for (const q of qualifiers) {
+    const last = others.at(-1);
+    if (last && last.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS) others[others.length - 1] = `${last} ${q}`;
+    else if (othersBare.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS) others.push(`${othersBare} ${q}`);
+  }
+  const scope = qualifiers.join(" ");
   const longest = Math.max(...Object.values(bare).map((q) => q.length));
-  if (!scope || longest + 1 + scope.length > GITHUB_SEARCH_MAX_CHARS) return bare;
-  return { requested: `${bare.requested} ${scope}`, authored: `${bare.authored} ${scope}`, merged: `${bare.merged} ${scope}` };
+  if (!scope || longest + 1 + scope.length > GITHUB_SEARCH_MAX_CHARS) return { ...bare, others };
+  return {
+    requested: `${bare.requested} ${scope}`,
+    authored: `${bare.authored} ${scope}`,
+    assigned: `${bare.assigned} ${scope}`,
+    merged: `${bare.merged} ${scope}`,
+    others,
+  };
 }
 
 // --- reading the answers ---
@@ -145,8 +215,15 @@ function splitPath(path: string): { owner: string; repo: string } | null {
 export interface ParsedPulls {
   login: string | null;
   pulls: InboxPull[];
-  /** The open searches (requested, authored) found more than they answered: how many came back, of how many. */
+  /** The person's open searches (requested, authored, assigned) found more than they answered: how many came back, of how many. */
   capped?: { shown: number; total: number };
+  /**
+   * Every open PR of the projects' repositories, as the Others reads counted them (GitHub `issueCount`, GitLab
+   * `count`); absent when there were none (no repositories, an older answer).
+   */
+  open_total?: number;
+  /** GitHub's GraphQL budget after this read: what is left, and when it fills again (ISO). */
+  rate?: { remaining: number; reset_at: string };
   /**
    * By author login: the profile picture's URL as the forge answered it (absolute; GitLab's relative `/uploads/…`
    * resolved on the host). Kept on the server: the window asks the Inbox for the picture, never the forge.
@@ -178,6 +255,18 @@ function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPul
   return total > shown ? { shown, total } : undefined;
 }
 
+/** The Others reads' total count (GitHub `issueCount`, GitLab `count`), or undefined when there were none. */
+function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number | undefined {
+  if (lists.length === 0) return undefined;
+  return lists.reduce<number>((sum, list) => sum + Math.max(num(obj(list)[countKey]), nodes(list).length), 0);
+}
+
+/** A GraphQL answer that reports any error is a failed read: a part left out would read as "nothing there". */
+function hasErrors(parsed: unknown): boolean {
+  const errors = obj(parsed).errors;
+  return Array.isArray(errors) && errors.length > 0;
+}
+
 /** A GitHub answer as the viewer's login and PRs; null when it is not one. */
 export function parseGithubPulls(stdout: string, host: string): ParsedPulls | null {
   let parsed: unknown;
@@ -186,12 +275,13 @@ export function parseGithubPulls(stdout: string, host: string): ParsedPulls | nu
   } catch {
     return null;
   }
+  if (hasErrors(parsed)) return null;
   const data = obj(obj(parsed).data);
   if (!data.viewer && !data.authored && !data.requested) return null;
   const login = str(obj(data.viewer).login) || null;
   const out = new Map<string, InboxPull>();
   const avatars: Record<string, string> = {};
-  const read = (list: unknown, requested: boolean) => {
+  const read = (list: unknown, flag: "requested" | "assigned" | null) => {
     for (const item of nodes(list)) {
       const repo = str(obj(item.repository).nameWithOwner);
       const parts = splitPath(repo);
@@ -223,7 +313,8 @@ export function parseGithubPulls(stdout: string, host: string): ParsedPulls | nu
         title: str(item.title),
         author,
         mine: login !== null && author === login,
-        requested: requested || earlier?.requested === true,
+        requested: flag === "requested" || earlier?.requested === true,
+        ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
         base: str(item.baseRefName),
         head: str(item.headRefName),
@@ -244,30 +335,54 @@ export function parseGithubPulls(stdout: string, host: string): ParsedPulls | nu
       });
     }
   };
-  read(data.authored, false);
-  read(data.merged, false);
-  read(data.requested, true);
-  const capped = cappedOf([data.requested, data.authored], "issueCount");
-  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
+  // Others first: the person's own searches say what a PR is to them, over it.
+  const others = Object.keys(data)
+    .filter((k) => /^others\d+$/.test(k))
+    .map((k) => data[k]);
+  for (const list of others) read(list, null);
+  read(data.authored, null);
+  read(data.merged, null);
+  read(data.assigned, "assigned");
+  read(data.requested, "requested");
+  const capped = cappedOf([data.requested, data.authored, data.assigned], "issueCount");
+  const open_total = totalOf(others, "issueCount");
+  const rate = obj(data.rateLimit);
+  const reset = str(rate.resetAt);
+  return {
+    login,
+    pulls: [...out.values()],
+    avatars,
+    ...(capped ? { capped } : {}),
+    ...(open_total !== undefined ? { open_total } : {}),
+    ...(typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {}),
+  };
 }
 
 const GL_FAIL = new Set(["FAILED", "CANCELED"]);
 const GL_QUIET = new Set(["SKIPPED", "MANUAL"]);
 
-/** A GitLab answer as the current user's name and MRs; null when it is not one. */
-export function parseGitlabPulls(stdout: string, host: string): ParsedPulls | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return null;
+/**
+ * A GitLab answer (the answers of one host's queries, `gitlabPullsQueries`) as the current user's name and MRs; null
+ * when it is not one, or when any of them is not.
+ */
+export function parseGitlabPulls(stdout: string | readonly string[], host: string): ParsedPulls | null {
+  const data: Json = {};
+  for (const one of typeof stdout === "string" ? [stdout] : stdout) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(one);
+    } catch {
+      return null;
+    }
+    if (hasErrors(parsed) || !obj(parsed).data) return null;
+    Object.assign(data, obj(obj(parsed).data));
   }
-  const user = obj(obj(obj(parsed).data).currentUser);
+  const user = obj(data.currentUser);
   if (!user.username) return null;
   const login = str(user.username) || null;
   const out = new Map<string, InboxPull>();
   const avatars: Record<string, string> = {};
-  const read = (list: unknown, requested: boolean) => {
+  const read = (list: unknown, flag: "requested" | "assigned" | null) => {
     for (const item of nodes(list)) {
       const repo = str(obj(item.project).fullPath);
       const parts = splitPath(repo);
@@ -296,7 +411,8 @@ export function parseGitlabPulls(stdout: string, host: string): ParsedPulls | nu
         title: str(item.title),
         author,
         mine: login !== null && author === login,
-        requested: requested || earlier?.requested === true,
+        requested: flag === "requested" || earlier?.requested === true,
+        ...(flag === "assigned" || earlier?.assigned === true ? { assigned: true } : {}),
         state,
         base: str(item.targetBranch),
         head: str(item.sourceBranch),
@@ -318,11 +434,18 @@ export function parseGitlabPulls(stdout: string, host: string): ParsedPulls | nu
       });
     }
   };
-  read(user.authored, false);
-  read(user.merged, false);
-  read(user.requested, true);
-  const capped = cappedOf([user.requested, user.authored], "count");
-  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
+  // The projects' open MRs first: the person's own lists say what an MR is to them, over it.
+  const projects = Object.keys(data)
+    .filter((k) => /^p\d+$/.test(k))
+    .map((k) => obj(data[k]).mergeRequests);
+  for (const list of projects) read(list, null);
+  read(user.authored, null);
+  read(user.merged, null);
+  read(user.assigned, "assigned");
+  read(user.requested, "requested");
+  const capped = cappedOf([user.requested, user.authored, user.assigned], "count");
+  const open_total = totalOf(projects, "count");
+  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}), ...(open_total !== undefined ? { open_total } : {}) };
 }
 
 // --- the reader ---
@@ -341,6 +464,8 @@ interface HostAnswer {
   pulls: InboxPull[];
   /** The open searches' raw counts: how many nodes came back, of how many they found. */
   capped?: { shown: number; total: number };
+  /** Every open PR of the projects' repositories, as the Others reads counted them; absent without them. */
+  open_total?: number;
   /** Whether the searches were limited to the projects' repositories (GitHub `repo:` qualifiers that fit). */
   scoped: boolean;
   avatars: Record<string, string>;
@@ -509,21 +634,64 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return;
       }
       const searches = state.cli === "gh" ? githubPullSearches(now(), repos) : null;
-      // GitLab's lists are the user's own, never limited to the projects; GitHub's are while the repositories fit.
+      // GitLab's own lists are the user's, never limited to the projects; GitHub's are while the repositories fit.
       const scoped = !!searches && searches.authored.includes(" repo:");
-      const args = searches
-        ? ["api", "graphql", "--hostname", host, "-f", `query=${GITHUB_PULLS_QUERY}`, "-f", `requested=${searches.requested}`, "-f", `authored=${searches.authored}`, "-f", `merged=${searches.merged}`]
-        : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
-      const result = await run(state.cli, args);
-      const parsed = result.exitCode === 0 ? (state.cli === "gh" ? parseGithubPulls(result.stdout, host) : parseGitlabPulls(result.stdout, host)) : null;
+      const calls: string[][] = searches
+        ? [
+            [
+              "api",
+              "graphql",
+              "--hostname",
+              host,
+              "-f",
+              `query=${githubPullsQuery(searches.others.length)}`,
+              "-f",
+              `requested=${searches.requested}`,
+              "-f",
+              `authored=${searches.authored}`,
+              "-f",
+              `assigned=${searches.assigned}`,
+              "-f",
+              `merged=${searches.merged}`,
+              ...searches.others.flatMap((q, i) => ["-f", `others${i}=${q}`]),
+            ],
+          ]
+        : gitlabPullsQueries(repos).map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
+      // One host's queries one after the other; the first that fails ends the read (the last answer stays).
+      const outputs: string[] = [];
+      let failed: RefCommandResult | null = null;
+      for (const args of calls) {
+        const result = await run(state.cli, args);
+        if (result.exitCode !== 0) {
+          failed = result;
+          break;
+        }
+        outputs.push(result.stdout);
+      }
+      const parsed = failed ? null : state.cli === "gh" ? parseGithubPulls(outputs[0]!, host) : parseGitlabPulls(outputs, host);
       if (!parsed) {
+        const result = failed ?? { stdout: outputs.join("\n"), stderr: "", exitCode: 1 };
         const error = refErrorOf(state.cli, { ...result, exitCode: result.exitCode || 1 });
         if (error === "rate_limited") holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
         state.error = error === "rate_limited" ? "rate_limited" : "unavailable";
         state.failedAt = now();
         return;
       }
-      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, avatars: parsed.avatars, scoped, repos: reposKey, ...(parsed.capped ? { capped: parsed.capped } : {}) };
+      // GitHub's budget nearly spent: no read of this host until it fills again (the list keeps this answer).
+      if (parsed.rate && parsed.rate.remaining < INBOX_PULLS_RATE_FLOOR) {
+        const reset = Date.parse(parsed.rate.reset_at);
+        if (Number.isFinite(reset) && reset > now()) holdUntil.set(host, reset);
+      }
+      state.answer = {
+        at: now(),
+        login: parsed.login,
+        pulls: parsed.pulls,
+        avatars: parsed.avatars,
+        scoped,
+        repos: reposKey,
+        ...(parsed.capped ? { capped: parsed.capped } : {}),
+        ...(parsed.open_total !== undefined ? { open_total: parsed.open_total } : {}),
+      };
       state.error = null;
     })()
       .catch(() => {
@@ -596,8 +764,11 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
        * known (null).
        */
       const cappedOfHost = (host: string, answer: HostAnswer | null): InboxPullHost["capped"] | undefined => {
-        if (!answer?.capped || answer.capped.total <= answer.capped.shown) return undefined;
+        if (!answer) return undefined;
         const shown = pulls.filter((p) => p.host.toLowerCase() === host && (p.state === "open" || p.state === "draft")).length;
+        // The Others reads counted every open PR of the projects' repositories: that is the whole.
+        if (answer.open_total !== undefined) return answer.open_total > shown ? { shown, total: answer.open_total } : undefined;
+        if (!answer.capped || answer.capped.total <= answer.capped.shown) return undefined;
         return { shown, total: answer.scoped ? shown + (answer.capped.total - answer.capped.shown) : null };
       };
       const times = asked.map((a) => a.state.answer?.at).filter((t): t is number => typeof t === "number");

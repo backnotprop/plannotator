@@ -36,6 +36,8 @@ export interface InboxPull {
   mine: boolean;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
+  /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
+  assigned?: boolean;
   state: InboxPullState;
   /** The branch it merges into. */
   base: string;
@@ -382,6 +384,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
 /**
  * Why a PR is where it is; the window turns it into words:
  * - `requested`: a teammate asked for the person's review;
+ * - `assigned`: a teammate's PR the person is assigned to;
  * - `agent_ready`: the person's agent opened it (not a draft, its checks done), so the person reviews it;
  * - `running`: the person's agent opened it and its checks still run;
  * - `changes`: a reviewer asked for changes on the person's PR;
@@ -396,6 +399,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
  */
 export type InboxPullReason =
   | "requested"
+  | "assigned"
   | "agent_ready"
   | "running"
   | "changes"
@@ -415,6 +419,7 @@ export function inboxPullMove(pull: InboxPull, linked: boolean): { move: InboxPu
   if (pull.state === "closed") return { move: "waiting", reason: "closed" };
   if (pull.state === "draft") return { move: "waiting", reason: "draft" };
   if (pull.requested && !pull.mine) return { move: "on_you", reason: "requested" };
+  if (pull.assigned && !pull.mine) return { move: "on_you", reason: "assigned" };
   if (!pull.mine) return { move: "waiting", reason: "others" };
   if (pull.review === "changes_requested") return { move: "on_you", reason: "changes" };
   if (pull.checks === "failure") return { move: "on_you", reason: "failing" };

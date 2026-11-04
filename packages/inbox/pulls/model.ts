@@ -23,12 +23,64 @@ import { isOpen, startLayer } from './topology';
 
 export { inboxPullLabel };
 
-/** The answer as the page shows it: the rows by whose move it is, only the chosen project's when one is. */
-export function pullGroups(answer: InboxPullsAnswer, project: string | null): InboxPullGroups {
+/**
+ * The list's views (approval "pr-list-filters", take B Joined): every open PR in the Inbox projects' repositories
+ * (`all`), the person's own (`mine`), the ones asked of them (`review`: a review requested, directly or through a
+ * team, or assigned to them), and everyone else's (`others`). Each PR is in exactly one of the last three.
+ */
+export type PullFilter = 'all' | 'mine' | 'review' | 'others';
+
+/** The views in the menu's order, with their words. */
+export const PULL_FILTERS: readonly (readonly [PullFilter, string])[] = [
+  ['all', 'All'],
+  ['mine', 'Mine'],
+  ['review', 'To review'],
+  ['others', 'Others'],
+];
+
+export function pullFilterWords(filter: PullFilter): string {
+  return PULL_FILTERS.find(([value]) => value === filter)![1];
+}
+
+/** A view from the address (`&view=`); anything else is All. */
+export function pullFilterOf(value: string | null | undefined): PullFilter {
+  return PULL_FILTERS.some(([v]) => v === value) && value ? (value as PullFilter) : 'all';
+}
+
+/** The one view a PR is in: the person wrote it, else it is asked of them, else it is someone else's. */
+export function pullViewOf(pull: Pick<InboxPull, 'mine' | 'requested' | 'assigned'>): Exclude<PullFilter, 'all'> {
+  if (pull.mine) return 'mine';
+  if (pull.requested || pull.assigned) return 'review';
+  return 'others';
+}
+
+/**
+ * The answer as the page shows it: the rows by whose move it is, only the chosen project's when one is, and only the
+ * chosen view's. A stack stays whole: it is built from every PR, then kept when any open layer is in the view.
+ */
+export function pullGroups(answer: InboxPullsAnswer, project: string | null, filter: PullFilter = 'all'): InboxPullGroups {
   const projectsOf = (pull: InboxPull) => answer.projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? [];
   const pulls = project ? answer.pulls.filter((p) => projectsOf(p).includes(project)) : answer.pulls;
-  const stacks = inboxPullStacks(pulls);
+  const stacks = inboxPullStacks(pulls).filter((stack) => filter === 'all' || stack.layers.some((l) => isOpen(l) && pullViewOf(l) === filter));
   return inboxPullGroups(inboxPullItems(stacks, (pull) => !!answer.links[pull.key]));
+}
+
+/** How many rows a view (in a project, or every one) shows: the menu's counts. */
+export function pullCount(answer: InboxPullsAnswer, project: string | null, filter: PullFilter): number {
+  const groups = pullGroups(answer, project, filter);
+  return groups.on_you.length + groups.ready.length + groups.waiting.length;
+}
+
+/** What the list says when a view (not All) has nothing in it. */
+export function pullFilterEmptyWords(filter: Exclude<PullFilter, 'all'>): { head: string; line: string } {
+  switch (filter) {
+    case 'mine':
+      return { head: 'Nothing of yours open', line: 'Pull requests you opened show here.' };
+    case 'review':
+      return { head: 'Nothing to review', line: 'Pull requests where your review is asked for, or that are assigned to you, show here.' };
+    case 'others':
+      return { head: 'Nothing else open', line: 'Open pull requests by others in your projects show here.' };
+  }
 }
 
 /** Every row, in the page's order (On you, Ready to land, then the folded ones). */
@@ -194,6 +246,8 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
   switch (item.reason) {
     case 'requested':
       return pull.author ? `${pull.author} asked for your review` : 'Your review was asked for';
+    case 'assigned':
+      return 'Assigned to you';
     case 'agent_ready': {
       // Its review thread (the person's ask, or the agent's own thread that names it); the agent unnamed, only the ask.
       const name = linkAgentName(link);
@@ -268,6 +322,7 @@ export function layerPill(pull: InboxPull): { text: string; tone: 'you' | 'ok' |
   if (pull.state === 'merged' || pull.state === 'closed') return null;
   if (pull.state === 'draft') return { text: 'Draft', tone: 'quiet' };
   if (pull.requested && !pull.mine) return { text: 'Your review', tone: 'you' };
+  if (pull.assigned && !pull.mine) return { text: 'Assigned to you', tone: 'you' };
   if (pull.review === 'changes_requested') return { text: 'Changes requested', tone: 'bad' };
   if (pull.conflicts === true) return { text: 'Conflicts', tone: 'bad' };
   if (pull.review === 'approved') return { text: 'Approved', tone: 'ok' };
