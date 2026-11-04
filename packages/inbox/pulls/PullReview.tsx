@@ -36,6 +36,8 @@ import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
+import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
+import { postablePull, postedWords } from './postRules';
 import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullVerdictReply } from './model';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -169,13 +171,20 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     keep(keptId, value);
   };
   const canDecide = !!link?.last;
+  // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
+  // teammate's, with or without an agent. The person chooses at the end where the review goes.
+  const canPost = !!postablePull(layer);
+  const [picked, pick] = useReviewDestination();
+  const ending = reviewEnding(layer, canDecide, picked);
+  const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
+  useEffect(() => setPosted(null), [keptId]);
   const save = (annotation: CodeAnnotation) => write({ comments: [...comments.filter((c) => c.id !== annotation.id), annotation] });
   const remove = (id: string) => write({ comments: comments.filter((c) => c.id !== id) });
   const showComment = (id: string) => {
     setSelectedId(id);
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
-  const readerComments = canDecide ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget } : undefined;
+  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget } : undefined;
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const snapshot = useMemo(
@@ -319,7 +328,34 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             {comments.length}
           </button>
         )}
-        {canDecide ? (
+        {canPost ? (
+          <PostEnding
+            pull={layer}
+            agent={
+              canDecide && agent
+                ? {
+                    name: agent,
+                    host: link?.agent?.host ?? null,
+                    control: (
+                      <span className="ib-rv-decide" data-review-decision="">
+                        <DecisionControl spec={spec} handlers={handlers} busy={sending || !snapshot} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={setNotes} />
+                      </span>
+                    ),
+                  }
+                : null
+            }
+            comments={comments}
+            anchor={scope === 'stack' ? 'stack' : 'diff'}
+            busy={sending || !snapshot}
+            picked={picked}
+            onPick={pick}
+            onPosted={(result) => {
+              keep(keptId, { comments: [], viewed });
+              setComments([]);
+              setPosted({ label: result.label, url: result.url, action: result.action });
+            }}
+          />
+        ) : canDecide ? (
           <span className="ib-rv-decide" data-review-decision="">
             <DecisionControl spec={spec} handlers={handlers} busy={sending || !snapshot} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={setNotes} />
           </span>
@@ -407,7 +443,19 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </select>
             </div>
           )}
-          {!canDecide && (
+          {posted && (
+            <div className="ib-prr-posted" role="status" data-pull-review-posted={posted.action}>
+              <Icon name="checkCircle" size={15} />
+              <span>
+                {postedWords(posted)}
+              </span>
+              <a href={posted.url} target="_blank" rel="noreferrer noopener">
+                View on {posted.label}
+                <Icon name="external" size={13} />
+              </a>
+            </div>
+          )}
+          {!canDecide && !posted && (
             <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
               {layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s pull request`}
             </p>
@@ -470,7 +518,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             : open.length > 1 && at >= 0
               ? `Layer ${at + 1} of ${open.length} · only what this layer changes`
               : 'Only what this pull request changes'}
-          {agent && canDecide && !phone ? ` · your verdict goes to ${agent}` : ''}
+          {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
         </span>
         <span className="ib-sp" />
         {next && (

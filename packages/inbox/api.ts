@@ -1385,6 +1385,19 @@ export const inboxApi = {
   /** The person handed a PR (a stack's open layers) to an agent: `threadId` is the thread compose's Send (or Hand to an agent) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
+  /**
+   * Post a review to the PR on GitHub/GitLab (`POST /api/inbox/pulls/review`): the raw answer, which the review app's
+   * own submit (`submitPlatformReviewTargets`, through `#platform-post`) reads as it reads `/api/pr-action`'s. The
+   * review app's page session is not this window's: the Inbox's own goes instead.
+   */
+  pullReviewPost: (request: Record<string, unknown>): Promise<Response> => {
+    const { serverSession: _theirs, ...rest } = request;
+    return fetch(inboxUrl('/pulls/review'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(pageSession ? { ...rest, serverSession: pageSession } : rest),
+    });
+  },
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */

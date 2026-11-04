@@ -20,7 +20,14 @@ import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-if (hasDom) mock.module('#guide-reader', () => ({ default: () => null }));
+if (hasDom) {
+  mock.module('#guide-reader', () => ({ default: () => null }));
+  // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
+  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
+  const seam: string = './guide/PlatformPost.tsx';
+  const real = (await import(seam)) as Record<string, unknown>;
+  mock.module('#platform-post', () => real);
+}
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 const { ReviewCard } = (hasDom ? await import('./components/ReviewCard') : {}) as typeof import('./components/ReviewCard');
 const { readReviewNotes, clearReviewNotes } = (hasDom ? await import('./reviewVerdict') : {}) as typeof import('./reviewVerdict');
@@ -63,11 +70,21 @@ let posted: Record<string, unknown>[] = [];
 let others: (typeof OTHER)[] = [];
 let replyAnswer: () => Response = () => Response.json({ reply: {}, questions: [], replayed: false });
 let backs = 0;
+/** Post to GitHub/GitLab: what went to `POST /api/inbox/pulls/review`, and the list the review reads its PR from. */
+let reviewPosts: Record<string, unknown>[] = [];
+const PR_KEY = 'github.com/acme/ledger#880';
+const PR = {
+  key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
+  author: 'tomas', mine: false, requested: true, state: 'open', base: 'main', head: 'rtl', head_repo: 'acme/ledger', head_sha: 'a'.repeat(40),
+  additions: 4, deletions: 1, files: 1, review: null, approved_by: null, reviewers: [], checks: 'success', updated_at: '2026-10-11T10:00:00.000Z', merged_at: null,
+};
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
+  reviewPosts = [];
+  window.localStorage.clear();
   others = [OTHER];
   backs = 0;
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
@@ -75,12 +92,17 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
     if (init?.method === 'POST') {
+      if (path.endsWith('/pulls/review')) {
+        reviewPosts.push(JSON.parse(String(init.body)));
+        return Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+      }
       if (path.endsWith('/reply')) {
         posted.push(JSON.parse(String(init.body)));
         return replyAnswer();
       }
       return Response.json({});
     }
+    if (path.endsWith('/api/inbox/pulls')) return Response.json({ fetched_at: null, hosts: [], pulls: [PR], links: {}, projects: {}, cards: {} });
     if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
@@ -151,6 +173,35 @@ test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): 
   };
   expect(card(true)).toContain('Waiting on you');
   expect(card(false)).not.toContain('Waiting on you');
+});
+
+test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while its agent path stays verdict-free (no reply, no choice)", async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  // Posting is the only ending here: no agent verdict control, no choice of where it goes.
+  expect(document.querySelector('[data-review-destination]')).toBeNull();
+  expect(document.querySelector('[data-review-decision]:not([data-review-posts])')).toBeNull();
+  const primary = document.querySelector<HTMLElement>('[data-review-posts="github"] [data-decision-primary]');
+  expect(primary?.textContent).toContain('Approve');
+  await act(async () => primary!.click());
+  await settle();
+  const approve = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === 'Approve')!;
+  await act(async () => approve.click());
+  await settle();
+  expect(reviewPosts).toHaveLength(1);
+  expect(reviewPosts[0]).toMatchObject({ key: PR_KEY, head_sha: PR.head_sha, action: 'approve' });
+  expect(posted).toEqual([]);
+  expect(document.querySelector('[data-pull-review-posted]')?.textContent).toContain('Approved on GitHub');
+});
+
+test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {
+  const mine = { ...PR, mine: true, author: 'me' };
+  globalThis.fetch = ((inner) => (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith('/api/inbox/pulls') ? Response.json({ fetched_at: null, hosts: [], pulls: [mine], links: {}, projects: {}, cards: {} }) : inner(input, init)) as typeof fetch)(globalThis.fetch);
+  await render({ ...thread, pull_keys: [PR_KEY] });
+  expect(document.querySelector('[data-review-destination]')?.getAttribute('data-review-destination')).toBe('agent');
+  expect(document.querySelector('[data-review-posts]')).toBeNull();
+  await click('[data-review-destination-choice="forge"] input');
+  expect(document.querySelector('[data-review-posts="github"]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the review built for the test', () => {

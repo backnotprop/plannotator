@@ -29,6 +29,11 @@ if (hasDom) {
       return null;
     },
   }));
+  // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
+  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
+  const seam: string = '../guide/PlatformPost.tsx';
+  const real = (await import(seam)) as Record<string, unknown>;
+  mock.module('#platform-post', () => real);
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
@@ -103,6 +108,8 @@ let posted: { path: string; body: Record<string, unknown> }[] = [];
 const liveSession = (session: string, _project: string) => ({ session, host: 'claude-code', started_at: '2026-11-03T08:00:00.000Z', last_seen_at: '2026-11-03T09:59:00.000Z', busy: false, idle_since: null, last_thread: null });
 /** Compose's live sessions: one in billing-svc (prj_1), one in another project; launch only when a test sets it. */
 let sessionsAnswer: Record<string, unknown> = {};
+/** What `POST /api/inbox/pulls/review` answers (Post to GitHub/GitLab), and its status. */
+let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -118,6 +125,7 @@ beforeEach(() => {
     ],
   };
   shown.length = 0;
+  reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -125,6 +133,7 @@ beforeEach(() => {
       posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
       if (url.pathname.endsWith('/api/inbox/messages')) return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
+      if (url.pathname.endsWith('/pulls/review')) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }
     if (url.pathname.endsWith('/api/inbox/sessions')) return Response.json(sessionsAnswer);
@@ -221,6 +230,125 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(teammate.url);
   expect(document.querySelector('[data-pull-scope-choice]')).toBeNull();
+});
+
+// --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
+
+const SHA = 'a'.repeat(40);
+/** A comment kept for a layer's review, as the review keeps them (per push). */
+function keepComment(p: InboxPull, text: string) {
+  const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
+  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.updated_at}`, JSON.stringify({ comments: [comment], viewed: [] }));
+}
+const dialogButton = (words: string) => {
+  const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words);
+  if (!found) throw new Error(`no "${words}" in the dialog: ${[...document.querySelectorAll('[role="dialog"] button')].map((b) => b.textContent).join(' | ')}`);
+  return found;
+};
+
+test.skipIf(!hasDom)('a PR with no agent offers posting only: the comments go on it inline, pinned to the head the list read', async () => {
+  const own = pull(872, { repo: 'northwind/web-app', head: 'vite', head_sha: SHA });
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.number === 872 ? own : p)) };
+  keepComment(own, 'Cap the backoff.');
+  mount(<Review stackId={own.key} from={own.key} answer={answer} />);
+  await settle();
+  // No agent: no choice of where it goes, no agent verdict, and posting instead of "Open on GitHub".
+  expect(document.querySelector('[data-review-destination]')).toBeNull();
+  expect(document.querySelector('[data-pull-review-forge]')).toBeNull();
+  expect(el('[data-review-posts]').getAttribute('data-review-posts')).toBe('github');
+  expect(el('[data-pull-review-foot]').textContent).toContain('your review goes on the GitHub PR');
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  const sent = posted.filter((p) => p.path.endsWith('/pulls/review'));
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.body).toMatchObject({
+    key: own.key,
+    head_sha: SHA,
+    action: 'comment',
+    fileComments: [{ path: 'src/retry.ts', line: 12, side: 'RIGHT', body: 'Cap the backoff.' }],
+  });
+  // Nothing went to a thread; the posted confirmation links the PR, and the comments are cleared.
+  expect(posted.some((p) => p.path.includes('/reply'))).toBe(false);
+  expect(el('[data-pull-review-posted]').textContent).toContain('Review posted on GitHub');
+  expect(el<HTMLAnchorElement>('[data-pull-review-posted] a').href).toBe(own.url);
+});
+
+test.skipIf(!hasDom)("a teammate's PR posts the full verdict: Approve goes on the PR as an approval, never into a thread", async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) };
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={answer} />);
+  await settle();
+  const primary = el('[data-review-posts] [data-decision-primary]');
+  expect(primary.textContent).toContain('Approve');
+  await act(async () => primary.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  const sent = posted.filter((p) => p.path.endsWith('/pulls/review'));
+  expect(sent.map((p) => p.body.action)).toEqual(['approve']);
+  expect(posted.some((p) => p.path.includes('/reply'))).toBe(false);
+  expect(el('[data-pull-review-posted]').textContent).toContain('Approved on GitHub');
+});
+
+test.skipIf(!hasDom)('with an agent, the person chooses: the agent by default, Post to the PR on the other side', async () => {
+  const layer = { ...stack[0]!, head_sha: SHA };
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? layer : p)) };
+  mount(<Review stackId={STACK_ID} from={layer.key} answer={answer} />);
+  await settle();
+  expect(el('[data-review-destination]').getAttribute('data-review-destination')).toBe('agent');
+  expect(document.querySelector('[data-review-posts]')).toBeNull();
+  await act(async () => el<HTMLInputElement>('[data-review-destination-choice="forge"] input').click());
+  await settle();
+  expect(el('[data-review-destination]').getAttribute('data-review-destination')).toBe('forge');
+  // The person's own PR: GitHub refuses their approval, so the primary is muted and posts nothing, as in the review app.
+  expect(el('[data-review-posts] [data-decision-primary]').getAttribute('aria-disabled')).toBe('true');
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  // Back to the agent: today's verdict reply.
+  await act(async () => el<HTMLInputElement>('[data-review-destination-choice="agent"] input').click());
+  await settle();
+  await act(async () => el('[data-review-decision] [data-decision-primary]').click());
+  await settle();
+  expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${LAST}/reply`]);
+});
+
+test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, with its retry; a refusal says why', async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA, platform: 'gitlab' as const, host: 'gitlab.com', key: 'gitlab.com/northwind/web-app#880:pull', url: 'https://gitlab.com/northwind/web-app/-/merge_requests/880' };
+  const answer = { ...model, pulls: [...model.pulls.filter((p) => p.number !== 880), theirs], projects: { ...model.projects, 'gitlab.com/northwind/web-app': ['prj_2'] } };
+  keepComment(theirs, 'Broken.');
+  reviewAnswer = {
+    status: 200,
+    body: {
+      ok: true,
+      prUrl: theirs.url,
+      submission: {
+        status: 'partial',
+        postedFileCommentCount: 0,
+        failedFileComments: [{ comment: { path: 'src/retry.ts', line: 12, side: 'RIGHT', body: 'Broken.' }, error: "src/retry.ts:12: 400 line_code can't be blank" }],
+        reviewBodyPosted: true,
+        approval: 'not-requested',
+        retry: { action: 'comment', fileComments: [{ path: 'src/retry.ts', line: 12, side: 'RIGHT', body: 'Broken.' }] },
+      },
+    },
+  };
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={answer} />);
+  await settle();
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  // Still open, on the unposted comment and its retry; nothing claimed posted.
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("line_code can't be blank");
+  dialogButton('Retry Unposted');
+  expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
+  reviewAnswer = { status: 409, body: { error: 'This pull request has new commits since you read it. Read it again, then post.', code: 'pull_moved' } };
+  await act(async () => dialogButton('Retry Unposted').click());
+  await settle();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('new commits since you read it');
+  expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones folded; a stack is one row with its chain', async () => {

@@ -29,6 +29,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxPulls, GITHUB_SEARCH_MAX_CHARS, githubPullSearches, INBOX_PULL_DIFF_MAX_BYTES, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls, safeBranch } from "./inbox-pulls";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
+import type { PRRuntime } from "@plannotator/shared/pr-provider";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -53,6 +54,7 @@ const ghPull = (number: number, fields: Record<string, unknown> = {}) => ({
   mergedAt: null,
   baseRefName: "main",
   headRefName: `branch-${number}`,
+  headRefOid: String(number).padStart(40, "a"),
   additions: 10,
   deletions: 2,
   changedFiles: 3,
@@ -110,7 +112,33 @@ function forge(answer: unknown = GH_ANSWER): Forge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean } = {}) {
+/** The `gh` / `glab` a posted review runs through: each call kept (its stdin parsed), answered by `answer`. */
+interface PostForge {
+  runtime: PRRuntime;
+  calls: { cmd: string; args: string[]; input?: unknown }[];
+  answer: (cmd: string, args: string[], input?: unknown) => { stdout: string; stderr: string; exitCode: number };
+}
+
+function postForge(): PostForge {
+  const f: PostForge = {
+    calls: [],
+    answer: () => ({ stdout: "{}", stderr: "", exitCode: 0 }),
+    runtime: {
+      runCommand: async (cmd, args) => {
+        f.calls.push({ cmd, args });
+        return f.answer(cmd, args);
+      },
+      runCommandWithInput: async (cmd, args, input) => {
+        const parsed = JSON.parse(input) as unknown;
+        f.calls.push({ cmd, args, input: parsed });
+        return f.answer(cmd, args, parsed);
+      },
+    },
+  };
+  return f;
+}
+
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -119,15 +147,17 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const f = forge(options.answer);
+  const f = options.gitlab ? gitlabForge() : forge(options.answer);
+  const post = postForge();
   const server = await startInboxServer({
     dataDir,
     phones: false,
+    prRuntime: post.runtime,
     ...(options.codeReview === undefined ? {} : { codeReview: options.codeReview }),
     ...(options.tailscale ? { tailscale: options.tailscale } : {}),
     ...(options.board === undefined ? {} : { board: options.board }),
     refRunner: f.run,
-    readProjectRepo: async () => ({ display: "northwind/billing-svc", host: "github.com" }),
+    readProjectRepo: async () => (options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" }),
   });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -145,7 +175,51 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, thread_id: threadId, ...extra }) });
   const check = (keys: string[], projectId: string) =>
     fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, project_id: projectId, validate_only: true }) });
-  return { root, project, dataDir, base, server, forge: f, send, pulls, own, check, setCodeReview };
+  const review = (fields: Record<string, unknown>) =>
+    fetch(`${base}/api/inbox/pulls/review`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(fields) });
+  return { root, project, dataDir, base, server, forge: f, post, send, pulls, own, check, review, setCodeReview };
+}
+
+const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
+  iid: String(iid),
+  title: `MR ${iid}`,
+  webUrl: `https://gitlab.com/northwind/data/ledger/-/merge_requests/${iid}`,
+  state: "opened",
+  draft: false,
+  updatedAt: "2026-11-03T10:00:00Z",
+  mergedAt: null,
+  sourceBranch: `b${iid}`,
+  targetBranch: "main",
+  diffHeadSha: String(iid).padStart(40, "b"),
+  approved: false,
+  detailedMergeStatus: "NOT_APPROVED",
+  diffStatsSummary: { additions: 3, deletions: 1, fileCount: 2 },
+  headPipeline: { status: "SUCCESS" },
+  project: { fullPath: "northwind/data/ledger" },
+  sourceProject: { fullPath: "northwind/data/ledger" },
+  author: { username: "jun" },
+  approvedBy: { nodes: [] },
+  reviewers: { nodes: [{ username: "dana" }] },
+  ...fields,
+});
+
+/** glab signed in to gitlab.com only; gh signed in nowhere. One MR, !61, by jun, asking dana for a review. */
+function gitlabForge(): Forge {
+  const f: Forge = {
+    calls: [],
+    fail: null,
+    graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
+    run: async (cli, args) => {
+      f.calls.push({ cli, args });
+      if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (cli === "gh" && args[0] === "auth") return { stdout: "", stderr: "not logged in", exitCode: 1 };
+      if (cli === "glab" && args.includes("graphql")) {
+        return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(61)] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    },
+  };
+  return f;
 }
 
 describe("off", () => {
@@ -607,6 +681,111 @@ describe("the searches (scoped to the projects' repositories)", () => {
   });
 });
 
+describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the end)", () => {
+  const PR412 = "github.com/northwind/billing-svc#412";
+  const SHA412 = "412".padStart(40, "a");
+
+  test("GitHub: one review on the PR, pinned to the commit read, as the review app's provider posts it", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const comment = { path: "src/retry.ts", line: 12, side: "RIGHT", body: "Cap the backoff.", start_line: 10, start_side: "RIGHT" };
+    const res = await w.review({ key: PR412, head_sha: SHA412, action: "request_changes", body: "Two things.", fileComments: [comment] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, prUrl: "https://github.com/northwind/billing-svc/pull/412", submission: { status: "complete" } });
+    expect(w.post.calls).toEqual([
+      {
+        cmd: "gh",
+        args: ["api", "repos/northwind/billing-svc/pulls/412/reviews", "--method", "POST", "--input", "-"],
+        input: { commit_id: SHA412, body: "Two things.", event: "REQUEST_CHANGES", comments: [comment] },
+      },
+    ]);
+  });
+
+  test("GitLab: a note, a discussion per line comment, then the approval", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const key = "gitlab.com/northwind/data/ledger#61:pull";
+    const sha = "61".padStart(40, "b");
+    w.post.answer = (cmd, args) =>
+      cmd === "glab" && args[1] === "projects/northwind%2Fdata%2Fledger/merge_requests/61" && args.length === 2
+        ? { stdout: JSON.stringify({ diff_refs: { base_sha: "c".repeat(40), start_sha: "d".repeat(40), head_sha: sha } }), stderr: "", exitCode: 0 }
+        : { stdout: "{}", stderr: "", exitCode: 0 };
+    const res = await w.review({ key, head_sha: sha, action: "approve", body: "Looks right.", fileComments: [{ path: "ledger.py", line: 4, side: "RIGHT", body: "Nit." }] });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { submission: { status: string } }).submission.status).toBe("complete");
+    const posts = w.post.calls.filter((c) => c.args.includes("POST"));
+    expect(posts.map((c) => c.args[1])).toEqual([
+      "projects/northwind%2Fdata%2Fledger/merge_requests/61/notes",
+      "projects/northwind%2Fdata%2Fledger/merge_requests/61/discussions",
+      "projects/northwind%2Fdata%2Fledger/merge_requests/61/approve",
+    ]);
+    expect(posts[0]!.input).toEqual({ body: "Looks right." });
+    expect(posts[1]!.input).toEqual({
+      body: "Nit.",
+      position: { position_type: "text", base_sha: "c".repeat(40), head_sha: sha, start_sha: "d".repeat(40), new_path: "ledger.py", old_path: "ledger.py", new_line: 4 },
+    });
+  });
+
+  test("a partial failure comes back as the provider says it, with the narrowed retry", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const key = "gitlab.com/northwind/data/ledger#61:pull";
+    const sha = "61".padStart(40, "b");
+    w.post.answer = (cmd, args, input) => {
+      if (args.length === 2) return { stdout: JSON.stringify({ diff_refs: { base_sha: "c".repeat(40), start_sha: "d".repeat(40), head_sha: sha } }), stderr: "", exitCode: 0 };
+      if (String(args[1]).endsWith("/discussions") && (input as { body?: string }).body === "Broken.") return { stdout: "", stderr: "400 line_code can't be blank", exitCode: 1 };
+      return { stdout: "{}", stderr: "", exitCode: 0 };
+    };
+    const res = await w.review({
+      key,
+      head_sha: sha,
+      action: "comment",
+      body: "Notes.",
+      fileComments: [
+        { path: "a.py", line: 1, side: "RIGHT", body: "Fine." },
+        { path: "b.py", line: 2, side: "RIGHT", body: "Broken." },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const { submission } = (await res.json()) as { submission: { status: string; postedFileCommentCount: number; failedFileComments: { comment: { body: string } }[]; retry: { action: string; fileComments: { body: string }[] } } };
+    expect(submission.status).toBe("partial");
+    expect(submission.postedFileCommentCount).toBe(1);
+    expect(submission.failedFileComments.map((f) => f.comment.body)).toEqual(["Broken."]);
+    expect(submission.retry).toMatchObject({ action: "comment", fileComments: [{ body: "Broken." }] });
+  });
+
+  test("refused before anything runs: a moved head, an unknown PR, a bad action, and Code review off", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const moved = await w.review({ key: PR412, head_sha: "f".repeat(40), action: "approve", body: "" });
+    expect(moved.status).toBe(409);
+    expect(((await moved.json()) as { code: string }).code).toBe("pull_moved");
+    expect((await w.review({ key: "github.com/northwind/billing-svc#999", head_sha: SHA412, action: "approve" })).status).toBe(404);
+    expect((await w.review({ key: PR412, head_sha: SHA412, action: "merge" })).status).toBe(422);
+    expect((await w.review({ key: PR412, head_sha: SHA412, action: "comment", fileComments: [{ path: "a", line: 0, side: "RIGHT", body: "x" }] })).status).toBe(422);
+    expect(w.post.calls).toEqual([]);
+    const off = await world();
+    const refused = await off.review({ key: PR412, head_sha: SHA412, action: "approve" });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code: string }).code).toBe("code_review_off");
+    expect(off.post.calls).toEqual([]);
+  });
+
+  test("a forge that refuses the review: an error the window shows, nothing claimed posted", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.post.answer = () => ({ stdout: "", stderr: "HTTP 422: Unprocessable Entity (Review cannot request changes on your own pull request)", exitCode: 1 });
+    const res = await w.review({ key: PR412, head_sha: SHA412, action: "request_changes", body: "x" });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ code: "pull_review_failed", error: expect.stringContaining("your own pull request") });
+  });
+});
+
 describe("who may read it", () => {
   test("a tailnet guest is refused and runs nothing; the owner over the tailnet reads", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
@@ -635,7 +814,8 @@ describe("who may read it", () => {
         else serve.set(httpsPort, args.at(-1)!);
         return ok(`https://${MAGIC}:${httpsPort}/\n`);
       };
-      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, refRunner: f.run, readProjectRepo: async () => null });
+      const post = postForge();
+      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, refRunner: f.run, prRuntime: post.runtime, readProjectRepo: async () => null });
       servers.push(server);
       const listener = server.tailscale.listenerPort();
       expect(listener).not.toBeNull();
@@ -651,7 +831,16 @@ describe("who may read it", () => {
         body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
       });
       expect(handGuest.status).toBe(403);
+      // Nor post a review with the owner's gh account: the Inbox's one forge write is the owner's alone.
+      const postGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "github.com/northwind/billing-svc#412", head_sha: "412".padStart(40, "a"), action: "approve", body: "" }),
+      });
+      expect(postGuest.status).toBe(403);
+      expect(((await postGuest.json()) as { code: string }).code).toBe("local_only");
       expect(f.calls).toEqual([]);
+      expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
       // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
       const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
@@ -661,6 +850,14 @@ describe("who may read it", () => {
       });
       expect(handOwner.status).toBe(422);
       expect(((await handOwner.json()) as { field?: string; code?: string }).code).not.toBe("local_only");
+      // The owner over the tailnet is never blocked: past the guards (this Inbox has no project for the PR, so 404).
+      const postOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "github.com/northwind/billing-svc#412", head_sha: "412".padStart(40, "a"), action: "approve", body: "" }),
+      });
+      expect(postOwner.status).toBe(404);
+      expect(((await postOwner.json()) as { code: string }).code).toBe("pull_unknown");
     } finally {
       if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
       else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;

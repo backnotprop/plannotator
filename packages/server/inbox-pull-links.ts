@@ -37,6 +37,8 @@ export interface InboxPullLinks {
   set(keys: readonly string[], threadId: string, extra?: { ask?: InboxPullAsk | null; theirs?: boolean }, at?: string): void;
   /** The thread owns pull requests, every one a teammate's: its reviews take no verdict. */
   theirs(threadId: string): boolean;
+  /** The pull requests the thread owns, oldest hand-over first. */
+  keys(threadId: string): string[];
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -91,6 +93,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);
+    },
+    keys(threadId) {
+      const out: string[] = [];
+      for (const [key, owner] of load()) if (owner.thread_id === threadId) out.push(key);
+      return out;
     },
     theirs(threadId) {
       let any = false;

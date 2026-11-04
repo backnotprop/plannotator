@@ -1558,6 +1558,11 @@ export interface InboxThread {
    * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
    */
   pull_theirs?: true;
+  /**
+   * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
+   * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
+   */
+  pull_keys?: string[];
   messages: InboxMessageWire[];
 }
 

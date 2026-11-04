@@ -7371,6 +7371,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-review .ib-vhead .ib-fn { flex: none; }
 .ib-review .ib-vhead .ib-from { min-width: 0; }
 .ib-rv-decide { display: inline-flex; flex: none; }
+/* Where a pull request's review goes (the owner's answer C on #2590): the forge or the agent, chosen at the end. */
+.ib-rv-dest { flex: none; }
+.ib-rv-dest .ib-seg-o { gap: 5px; }
+.ib-rv-dest .ib-rv-dest-mark { width: 14px; height: 14px; flex: none; }
+.ib-rv-dest .ib-atile { width: 16px; height: 16px; background: transparent; }
+.ib-prr-posted { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); background: color-mix(in oklab, var(--success, var(--primary)) 9%, var(--card)); border: 1px solid color-mix(in oklab, var(--success, var(--primary)) 30%, var(--border)); }
+.ib-prr-posted > .ib-ic { color: var(--success, var(--primary)); flex: none; }
+.ib-prr-posted a { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--primary); font-weight: 550; text-decoration: none; }
+.ib-prr-posted a:hover { text-decoration: underline; }
+@media (forced-colors: active) { .ib-prr-posted { border-color: CanvasText; } }
 .ib-rrail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 14px 12px; border-right: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
 .ib-rv-modes { display: flex; }
 .ib-rv-modes .ib-seg-o { flex: 1; justify-content: center; }
@@ -7549,7 +7559,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-lstep { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--muted-foreground); }
 .pn-inbox .ib-prr-layer { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-prr-layer:not(:disabled):hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
-.pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
+.pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
 .pn-inbox .ib-prr-layer:disabled { cursor: default; }
 .pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-prr-lt { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }

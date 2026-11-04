@@ -63,9 +63,14 @@ export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
 
+/** A commit id as the forge answered it (40 or 64 hex digits), or null. */
+function shaOf(value: unknown): string | null {
+  return typeof value === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value) ? value.toLowerCase() : null;
+}
+
 // --- the queries ---
 
-const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName additions deletions changedFiles reviewDecision
+const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName headRefName headRefOid additions deletions changedFiles reviewDecision
       repository { nameWithOwner } headRepository { nameWithOwner } author { login }
       reviewRequests(first: 5) { nodes { requestedReviewer { __typename ... on User { login } ... on Team { slug } } } }
       latestReviews(first: 5) { nodes { state author { login } } }
@@ -79,7 +84,7 @@ export const GITHUB_PULLS_QUERY = `query InboxPulls($requested: String!, $author
   merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
 }`;
 
-const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch approved detailedMergeStatus
+const GL_MR = `iid title webUrl state draft updatedAt mergedAt sourceBranch targetBranch diffHeadSha approved detailedMergeStatus
       diffStatsSummary { additions deletions fileCount } headPipeline { status }
       project { fullPath } sourceProject { fullPath } author { username }
       approvedBy(first: 3) { nodes { username } } reviewers(first: 5) { nodes { username } }`;
@@ -180,6 +185,7 @@ export function parseGithubPulls(stdout: string, host: string): { login: string 
         base: str(item.baseRefName),
         head: str(item.headRefName),
         head_repo: str(obj(item.headRepository).nameWithOwner) || null,
+        head_sha: shaOf(item.headRefOid),
         additions: num(item.additions),
         deletions: num(item.deletions),
         files: num(item.changedFiles),
@@ -244,6 +250,7 @@ export function parseGitlabPulls(stdout: string, host: string): { login: string 
         base: str(item.targetBranch),
         head: str(item.sourceBranch),
         head_repo: str(obj(item.sourceProject).fullPath) || null,
+        head_sha: shaOf(item.diffHeadSha),
         additions: num(stats.additions),
         deletions: num(stats.deletions),
         files: num(stats.fileCount),

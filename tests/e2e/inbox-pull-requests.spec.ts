@@ -30,6 +30,11 @@
  *     person's reply.
  *  7. Reply at the stack's foot goes into the agent's thread.
  *  8. The same at 390 px (a phone).
+ *  9. Post to GitHub (the owner's answer C on #2590: the person chooses at
+ *     the end): the choice on a PR with an agent, a teammate's PR posting its
+ *     approval with a line comment (the fake gh's stdin is the review the
+ *     review app's provider builds), and a refusal from GitHub shown in the
+ *     dialog with nothing claimed posted.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -128,6 +133,13 @@ function writeForge(dir: string) {
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
+    // A review posted (Post to GitHub): `gh api <endpoint> --method POST --input -`, the review on stdin, kept.
+    'if [ "$1" = api ] && [ "$3" = --method ]; then',
+    '  echo "gh post $2" >> "$calls"',
+    '  cat > "$dir/gh-posted.json"',
+    '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
+    '  echo \'{"id":1}\'; exit 0',
+    'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
     '  f="$dir/gh-$(name "$4").patch"',
@@ -182,6 +194,7 @@ function ghPull(repoName: string, number: number, fields: Record<string, unknown
     mergedAt: null,
     baseRefName: 'main',
     headRefName: `b${number}`,
+    headRefOid: String(number).padStart(40, '0'),
     additions: 0,
     deletions: 0,
     changedFiles: 0,
@@ -425,6 +438,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     mergedAt: null,
     targetBranch: 'main',
     sourceBranch: `b${iid}`,
+    diffHeadSha: String(iid).padStart(40, '0'),
     approved: false,
     detailedMergeStatus: 'NOT_APPROVED',
     diffStatsSummary: { additions: 0, deletions: 0, fileCount: 0 },
@@ -876,6 +890,147 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
   }
 });
 
+const TEAMMATE = 'github.com/northwind/web-app#880';
+
+/** A line comment on the layer review's diff: the line's number, then the composer's words. */
+async function commentOn(page: Page, file: string, line: number, words: string): Promise<void> {
+  const shell = page.locator(`[data-pull-review] [data-guide-file-shell="${file}"]`);
+  const added = shell.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
+  await expect(added).toBeVisible({ timeout: 30_000 });
+  await shell.hover();
+  await added.click();
+  const composer = page.getByPlaceholder('Leave feedback...');
+  await expect(composer).toBeVisible();
+  await composer.fill(words);
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+}
+
+test("Post to GitHub (the owner's answer C): the choice beside the decision, a teammate's approval posted with its comment, a refusal shown", async ({ browser }) => {
+  const { page } = world;
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
+  await page.locator('[data-pulls-stack] [data-pulls-review-layers]').click();
+  const review = page.locator('[data-pull-review]');
+  await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
+  await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
+  // The person's own PR with its agent: both endings, the agent's first; GitHub on a pick.
+  const choice = review.locator('[data-review-destination]');
+  await expect(choice).toHaveAttribute('data-review-destination', 'agent');
+  await expect(choice).toContainText('GitHub');
+  await expect(choice).toContainText('Claude Code');
+  await review.locator('[data-review-destination-choice="forge"]').click();
+  await expect(review.locator('[data-review-posts="github"]')).toBeVisible();
+  await expect(review.locator('[data-pull-review-foot]')).toContainText('your review goes on the GitHub PR');
+  await shot(page, '10-ending-choice');
+  {
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
+    const p = await phone.newPage();
+    try {
+      await p.goto(`${world.url}#pulls&stack=${encodeURIComponent(STACK_ID)}&layer=${encodeURIComponent(LAYER_412)}&scope=layer`);
+      await expect(p.locator('[data-review-destination]')).toBeVisible({ timeout: 30_000 });
+      await p.locator('[data-review-destination-choice="forge"]').click();
+      await expect(p.locator('[data-review-posts="github"]')).toBeVisible();
+      for (const scheme of ['light', 'dark'] as const) {
+        await p.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+        await p.waitForTimeout(400);
+        await p.screenshot({ path: join(proofDir, `phone-10-ending-choice-${scheme}.png`) });
+      }
+    } finally {
+      await phone.close();
+    }
+  }
+  // Back to the agent: the next reviews start where the person left the choice.
+  await review.locator('[data-review-destination-choice="agent"]').click();
+  expect(forgeCalls().filter((c) => c.startsWith('gh post'))).toEqual([]);
+
+  // A teammate's PR, no agent: posting is the only ending.
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${TEAMMATE}"]`).click();
+  await page.locator('[data-pulls-stack] [data-pulls-review-layers]').click();
+  await expect(review).toHaveAttribute('data-pull-review', TEAMMATE);
+  await expect(review.locator('[data-review-destination]')).toHaveCount(0);
+  await commentOn(page, 'src/settings/Layout.tsx', 3, 'ms-6 flips with dir; check the sidebar in Hebrew too.');
+  // With a comment the primary posts comments (as the review app); the caret's Approve with comments approves.
+  await expect(review.locator('[data-review-posts] [data-decision-primary]')).toContainText('Post Comments');
+  await review.locator('[data-review-posts] [data-decision-caret]').click();
+  await page.getByRole('menuitem', { name: /Approve with comments/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Approve PR');
+  await expect(dialog).toContainText('1 comment');
+  await shot(page, '11-post-dialog');
+  await dialog.getByRole('button', { name: 'Approve', exact: true }).click();
+  const posted = review.locator('[data-pull-review-posted]');
+  await expect(posted).toContainText('Approved on GitHub');
+  await expect(posted.getByRole('link')).toHaveAttribute('href', 'https://github.com/northwind/web-app/pull/880');
+  expect(forgeCalls().filter((c) => c.startsWith('gh post'))).toEqual(['gh post repos/northwind/web-app/pulls/880/reviews']);
+  const sent = JSON.parse(readFileSync(join(world.forge, 'gh-posted.json'), 'utf8')) as Record<string, unknown>;
+  expect(sent).toEqual({
+    commit_id: '880'.padStart(40, '0'),
+    body: expect.any(String),
+    event: 'APPROVE',
+    comments: [{ path: 'src/settings/Layout.tsx', line: 3, side: 'RIGHT', body: 'ms-6 flips with dir; check the sidebar in Hebrew too.' }],
+  });
+  await shot(page, '12-posted');
+
+  // GitHub refuses the next one: the dialog says why, offers a retry, and nothing reads as posted.
+  writeFileSync(join(world.forge, 'gh-post-fail'), 'HTTP 422: Unprocessable Entity (Review body is too long for this pull request)\n');
+  try {
+    await page.reload();
+    await expect(review.locator('[data-review-posts]')).toBeVisible({ timeout: 30_000 });
+    await review.locator('[data-review-posts] [data-decision-caret]').click();
+    await page.getByRole('menuitem', { name: /Request changes/ }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.locator('textarea').fill('The layout flips, but the sidebar icons do not. Mirror them too.');
+    await dialog.getByRole('button', { name: 'Request Changes', exact: true }).click();
+    await expect(dialog).toContainText('Review body is too long');
+    await expect(dialog.getByRole('button', { name: /Retry/ })).toBeVisible();
+    await expect(review.locator('[data-pull-review-posted]')).toHaveCount(0);
+    await shot(page, '13-post-failed');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+  } finally {
+    rmSync(join(world.forge, 'gh-post-fail'), { force: true });
+  }
+  expect(world.errors).toEqual([]);
+});
+
+test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment, approved on GitHub; the choice on the person\'s own', async ({ browser }) => {
+  test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
+  const dir = join(proofDir, 'posting-video');
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light', recordVideo: { dir, size: { width: 1440, height: 900 } } });
+  const page = await context.newPage();
+  const pause = (ms: number) => page.waitForTimeout(ms);
+  try {
+    await page.goto(`${world.url}#pulls`);
+    await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
+    await page.locator('[data-pulls-stack] [data-pulls-review-layers]').click();
+    const review = page.locator('[data-pull-review]');
+    await expect(review.locator('[data-review-destination]')).toBeVisible({ timeout: 30_000 });
+    await pause(1800);
+    await review.locator('[data-review-destination-choice="forge"]').click();
+    await pause(1600);
+    await review.locator('[data-review-destination-choice="agent"]').click();
+    await pause(1200);
+    await page.goto(`${world.url}#pulls`);
+    await page.locator(`[data-pulls-row="${TEAMMATE}"]`).click();
+    await pause(1200);
+    await page.locator('[data-pulls-stack] [data-pulls-review-layers]').click();
+    await pause(1200);
+    await commentOn(page, 'src/settings/Layout.tsx', 3, 'ms-6 flips with dir; check the sidebar in Hebrew too.');
+    await pause(1500);
+    await review.locator('[data-review-posts] [data-decision-caret]').click();
+    await pause(900);
+    await page.getByRole('menuitem', { name: /Approve with comments/ }).click();
+    await pause(2000);
+    await page.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click();
+    await expect(review.locator('[data-pull-review-posted]')).toContainText('Approved on GitHub');
+    await pause(3500);
+  } finally {
+    await context.close();
+  }
+  const [recorded] = readdirSync(dir).filter((f) => f.endsWith('.webm'));
+  renameSync(join(dir, recorded!), join(proofDir, 'posting.webm'));
+});
+
 test('the walkthrough video (35 s): a PR with no agent, the ask, handed over, its guided review arriving as Start review', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'video');
@@ -914,7 +1069,7 @@ test('the walkthrough video (35 s): a PR with no agent, the ask, handed over, it
     await page.locator('[data-pulls-stack] [data-pulls-start-review]').click();
     // A teammate's PR: the review reads with no verdict.
     await expect(page.locator('[data-review-chapters]')).toBeVisible();
-    await expect(page.locator('[data-review-decision]')).toHaveCount(0);
+    await expect(page.locator('[data-review-decision]:not([data-review-posts])')).toHaveCount(0);
     await pause(5000);
   } finally {
     await context.close();

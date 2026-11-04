@@ -43,6 +43,11 @@ export interface InboxPull {
   head: string;
   /** The repository its head branch lives in (`owner/repo`); another one is a fork. Null when unknown. */
   head_repo: string | null;
+  /**
+   * Its head commit as the list read it (GitHub `headRefOid`, GitLab `diffHeadSha`): a review posted to the forge
+   * from the Inbox is pinned to it. Absent or null when unknown (an older Inbox, a forge that did not say).
+   */
+  head_sha?: string | null;
   additions: number;
   deletions: number;
   files: number;

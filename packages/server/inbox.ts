@@ -208,6 +208,8 @@ import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
+import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { INBOX_PULL_OWNER_KEYS_MAX } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
@@ -423,6 +425,11 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /**
+   * Tests: the `gh` / `glab` a review posted to the forge runs through (Pull requests' Post to GitHub/GitLab; the review
+   * app's providers, `submitPRReview`). Default the Bun command runtime (pr.ts).
+   */
+  prRuntime?: PRRuntime;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -472,6 +479,35 @@ export interface InboxServerOptions {
  * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
  */
 export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
+
+/** A review posted to the forge from the Inbox: its main comment (GitHub refuses one over 65,536), and its comments. */
+const PULL_REVIEW_BODY_MAX = 65_536;
+const PULL_REVIEW_COMMENTS_MAX = 500;
+
+/** The review's line comments as the review app builds them (`PRReviewFileComment`), or null when any is malformed. */
+function pullReviewComments(value: unknown): PRReviewFileComment[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PULL_REVIEW_COMMENTS_MAX) return null;
+  const line = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n > 0 && n < 10_000_000;
+  const side = (v: unknown) => v === "LEFT" || v === "RIGHT";
+  const out: PRReviewFileComment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const c = item as Record<string, unknown>;
+    if (typeof c.path !== "string" || c.path.length === 0 || c.path.length > 1000 || !line(c.line) || !side(c.side) || typeof c.body !== "string" || c.body.length > PULL_REVIEW_BODY_MAX) return null;
+    if (c.start_line !== undefined && !line(c.start_line)) return null;
+    if (c.start_side !== undefined && !side(c.start_side)) return null;
+    out.push({
+      path: c.path,
+      line: c.line as number,
+      side: c.side as "LEFT" | "RIGHT",
+      body: c.body,
+      ...(c.start_line !== undefined ? { start_line: c.start_line as number } : {}),
+      ...(c.start_side !== undefined ? { start_side: c.start_side as "LEFT" | "RIGHT" } : {}),
+    });
+  }
+  return out;
+}
 
 /** Settings' Archived block: rows per page of `GET /api/inbox/threads/archived`, and the most one page may ask for. */
 export const INBOX_ARCHIVED_PAGE = 50;
@@ -3418,6 +3454,52 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
         return json({ serverSession, ok: true });
       }
+      // Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end): the review the person
+      // wrote in the Inbox goes on the pull request, as `plannotator review <PR url>` posts it (the review app's
+      // providers). The Inbox's only write to a forge: as the person's own gh / glab account, so only the owner may
+      // (on this computer, or the owner over the tailnet); every other gh / glab call the Inbox makes reads.
+      if (path === "/api/inbox/pulls/review") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const action = parsePRReviewAction(body.action);
+        if (!action) throw new InboxError("validation_error", "action: approve, comment or request_changes.", { field: "action" });
+        const text = typeof body.body === "string" ? body.body : "";
+        if (text.length > PULL_REVIEW_BODY_MAX) throw new InboxError("validation_error", `body: at most ${PULL_REVIEW_BODY_MAX} characters.`, { field: "body" });
+        const fileComments = pullReviewComments(body.fileComments);
+        if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
+        const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
+        if (!pulls.find(key)) await pulls.list((await pullProjects()).wanted, { refresh: false });
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (pull.state !== "open" && pull.state !== "draft") return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
+        // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
+        if (!pull.head_sha) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+        if (body.head_sha !== pull.head_sha) return json({ error: "This pull request has new commits since you read it. Read it again, then post.", code: "pull_moved" }, 409);
+        const ref: PRRef | null =
+          pull.platform === "github"
+            ? (() => {
+                const [owner, repo] = pull.repo.split("/");
+                return owner && repo ? { platform: "github" as const, host: pull.host, owner, repo, number: pull.number } : null;
+              })()
+            : { platform: "gitlab" as const, host: pull.host, projectPath: pull.repo, iid: pull.number };
+        if (!ref) return json({ error: "That pull request's repository can't be read here.", code: "pull_unknown" }, 404);
+        try {
+          const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, pull.head_sha, action, text, fileComments, fileLevelComments);
+          // The list reads the forge again on its next look: the review moved the PR's state there.
+          return json({ serverSession, ok: true, prUrl: pull.url, submission });
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : "The review was not posted.";
+          return json({ error: message, code: "pull_review_failed" }, 502);
+        }
+      }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
       // refused like the other read routes. The phone's door and agents send no fetch metadata.
@@ -3938,7 +4020,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
         // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
-        const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) }, ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}) };
+        // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
+        const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
+        const withRepo = {
+          ...thread,
+          project: { ...thread.project, repo: repos.get(thread.project.root) },
+          ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
+          ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
+        };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
         const row = store.listRow(thread.thread_id);
         return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row && withSnooze(row) });
