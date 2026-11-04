@@ -858,7 +858,8 @@ const fold = (text: string) => text.replace(/\s+/g, ' ').trim();
 export function shapeHtmlMarks(html: string): { id: string; text: string }[] {
   const out = new Map<string, string>();
   const stack: { tag: string; mark: string | null; text: string[] }[] = [];
-  const re = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|([^<]+)/g;
+  // `<[!]--`, not the bare comment opener: some JS parsers (Semgrep's) read `<!--` as an HTML-like comment.
+  const re = /<[!]--[\s\S]*?-->|<(\/?)([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*?)(\/?)>|([^<]+)/g;
   let m: RegExpExecArray | null;
   const close = (frame: { mark: string | null; text: string[] }) => {
     if (frame.mark && !out.has(frame.mark)) out.set(frame.mark, fold(frame.text.join(' ')));
