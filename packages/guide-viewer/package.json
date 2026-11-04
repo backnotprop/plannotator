@@ -13,6 +13,7 @@
     "./GuideView": "./GuideView.tsx",
     "./GuideSectionCard": "./GuideSectionCard.tsx",
     "./GuideOverview": "./GuideOverview.tsx",
+    "./GuideGlobalComments": "./GuideGlobalComments.tsx",
     "./GuideFileCard": "./GuideFileCard.tsx",
     "./GuideViewportManager": "./GuideViewportManager.tsx",
     "./GuideSkeleton": "./GuideSkeleton.tsx",

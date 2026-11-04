@@ -7,6 +7,7 @@ import { renderInlineMarkdown, type GuideLinkRenderer } from './renderInlineMark
 import { GuideSectionCard } from './GuideSectionCard';
 import { GuideOverview } from './GuideOverview';
 import { GUIDE_EAGER_MOUNT_MAX_FILES, GuideViewportProvider } from './GuideViewportManager';
+import { GuideGlobalCommentButton, GuideGlobalCommentList } from './GuideGlobalComments';
 
 interface GuideViewProps {
   guide: CodeGuideData;
@@ -74,6 +75,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   headerActions,
 }) => {
   const host = useGuideHost();
+  const addGlobalComment = host.globalComments?.onAdd;
   const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
   // Only the guide's own files register shells; in-app the review may hold many more.
   const guideFileCount = resolved.sectionFiles.reduce((n, files) => n + files.length, 0) + resolved.unplacedFiles.length;
@@ -183,7 +185,13 @@ export const GuideView: React.FC<GuideViewProps> = ({
   return (
     <GuideViewportProvider className="w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8" eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
       {/* Header actions sit in a row above the title on narrow screens and float beside it from md up (desktop unchanged). */}
-      {headerActions && <div className="mb-3 flex items-center justify-end gap-2 md:float-right md:mb-0 md:ml-6">{headerActions}</div>}
+      {/* The host's global comments add their button to the same row, ahead of the host's own controls. */}
+      {(headerActions || addGlobalComment) && (
+        <div className="mb-3 flex items-center justify-end gap-2 md:float-right md:mb-0 md:ml-6">
+          {addGlobalComment && <GuideGlobalCommentButton onAdd={addGlobalComment} />}
+          {headerActions}
+        </div>
+      )}
       <div className="max-w-[72ch]">
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground [text-wrap:balance]">{guide.title}</h1>
         {guide.intent && (
@@ -225,6 +233,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
           </p>
         )}
       </div>
+
+      {host.globalComments && <GuideGlobalCommentList globalComments={host.globalComments} />}
 
       {guide.overview && <GuideOverview overview={guide.overview} renderLink={renderLink} />}
 

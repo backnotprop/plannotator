@@ -5013,7 +5013,7 @@ const ReviewApp: React.FC = () => {
   ]);
 
   // Note → scope:'general' CodeAnnotation at submit time: it rides the
-  // existing export (## General) and the /api/feedback annotations array with
+  // existing export (## Global comments) and the /api/feedback annotations array with
   // no server change on either runtime (#1449 transport). Shape (sentinels,
   // no PR context) lives in createGeneralReviewComment; deliberately NOT
   // recorded in review history — it lives for one submit.
@@ -5043,6 +5043,15 @@ const ReviewApp: React.FC = () => {
     if (localDraftTarget) note.localReviewTarget = localDraftTarget;
     addCodeAnnotationsWithHistory([note]);
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
+
+  // A global comment chosen in the guide's list: the sidebar's Annotations tab
+  // shows it selected (its edit and delete live there).
+  const handleShowGlobalComment = useCallback((id: string) => {
+    reviewSidebar.open('annotations');
+    setScrollTargetAnnotation(null);
+    selectedAnnotationIdRef.current = id;
+    setSelectedAnnotationId(id);
+  }, [reviewSidebar.open]);
 
   // The commit above is a state write, so feedbackMarkdown/handleSendFeedback
   // (which close over `allAnnotations`) only see the note on the NEXT render.
@@ -6550,6 +6559,8 @@ const ReviewApp: React.FC = () => {
                 onOpenFixedGuide={handleOpenGuide}
                 onOpenSavedGuide={handleOpenGuide}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
+                onShowGlobalComment={handleShowGlobalComment}
               />
             </div>
           )}

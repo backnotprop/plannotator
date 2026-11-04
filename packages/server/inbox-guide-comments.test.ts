@@ -230,3 +230,59 @@ test("Send carries the comments as the review app's export under the guided revi
   expect(JSON.stringify(answer)).toContain("Refresh before it expires, not after.");
   expect(JSON.stringify(answer)).toContain("src/auth.ts");
 });
+
+/** A global comment as the guide reader makes it: the review app's general comment, on no file and no lines. */
+function globalComment(overrides: Record<string, unknown> = {}) {
+  return { id: "ann-guide-global", type: "comment", scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new", text: "Split the guard and the retry into two PRs.", createdAt: 2, ...overrides };
+}
+
+test("a global comment is kept with the thread's comments, counts with them, and Send carries it under Global comments before the files", async () => {
+  const { project, dataDir } = world();
+  let server = await start(dataDir);
+  let client = await agent(server);
+  const sent = await sendGuide(client, project);
+  const route = `/api/inbox/messages/${sent.message_id}/guide/annotations`;
+
+  // Refused: a global comment on a file, or with no words.
+  for (const bad of [globalComment({ filePath: "src/auth.ts" }), globalComment({ text: "  " }), globalComment({ text: undefined })]) {
+    const answer = await post(server, route, { annotation: bad });
+    expect(answer.status).toBe(422);
+  }
+
+  const saved = await post(server, route, { annotation: globalComment({ lineStart: 7, side: "old" }) });
+  expect(saved.status).toBe(200);
+  const record = ((await saved.json()) as { annotation: InboxAnnotationRecord }).annotation;
+  // The sentinels are the store's, whatever the client sent for lines.
+  expect(record).toMatchObject({ path: "", attachment_id: "", guide: { title: "Token refresh", file: "", side: "new", line_start: 0, line_end: 0, scope: "general" } });
+  expect(record.annotation).toMatchObject({ scope: "general", filePath: "", lineStart: 0, lineEnd: 0 });
+  // Its id is its own: a line comment cannot take it over.
+  expect((await post(server, route, { annotation: comment({ id: "ann-guide-global" }) })).status).toBe(422);
+  expect((await post(server, route, { annotation: comment() })).status).toBe(200);
+  // An edit keeps it a global comment.
+  expect((await post(server, route, { annotation: globalComment({ text: "Split it into two PRs." }) })).status).toBe(200);
+
+  // Kept across a restart, and counted with the line comment.
+  server.stop();
+  servers.splice(servers.indexOf(server), 1);
+  await client.close();
+  server = await start(dataDir);
+  client = await agent(server);
+  const records = await pending(server, sent.thread_id);
+  expect(records.map((r) => r.id).sort()).toEqual(["ann-guide-1", "ann-guide-global"]);
+
+  const feedback = attachmentFeedback(records, [], new Map(), project);
+  const reply = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, {
+    idempotency_key: "send-global",
+    words: "Notes on the review.",
+    feedback,
+    annotation_ids: records.map((r) => r.id),
+  });
+  expect(reply.status).toBe(200);
+  const body = ((await reply.json()) as { reply: { body: string } }).reply.body;
+  const heading = body.indexOf("## Global comments");
+  expect(heading).toBeGreaterThan(body.indexOf("# Feedback on the guided review"));
+  expect(body.indexOf("Split it into two PRs.")).toBeGreaterThan(heading);
+  expect(body.indexOf("Split it into two PRs.")).toBeLessThan(body.indexOf("## src/auth.ts"));
+  expect(body).not.toContain("Line 0");
+  expect(await pending(server, sent.thread_id)).toHaveLength(0);
+});
