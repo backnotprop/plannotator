@@ -187,7 +187,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setSelectedId(id);
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
-  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget } : undefined;
+  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: keptId } : undefined;
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const snapshot = useMemo(
