@@ -92,7 +92,7 @@ callback serves the header primary, the global `Mod+Enter` handler, and the comp
 Transport routing is pure in `packages/review-editor/reviewDecision.ts` and single-endpoint:
 every decision POSTs `/api/feedback` with `approved` as the only fork; a change-request note
 becomes a `scope:'general'` `CodeAnnotation` (sentinel `filePath ''`/0/0, riding the export's
-`## General` section) with a one-render deferred submit — zero server change. Approve-carrying
+`## Global comments` section, which the export writes before the per-file sections) with a one-render deferred submit — zero server change. Approve-carrying
 menu items (`Approve with notes`, `Approve with a note…`) are capability-gated on the
 server-sent `approvalNotesSupported` advert, which rides every diff payload (`/api/diff`,
 `/api/diff/switch`, `/api/pr-diff-scope`, `/api/pr-switch`, both runtimes) and reads as false
@@ -222,8 +222,8 @@ the live spec (the dialog closes), while the desktop popover composer keeps draf
 id — an intentional asymmetry, not a bug.
 
 The review sidebar carries the durable human producer for review-level comments:
-**"+ General comment"** renders in the Annotations tab's General section header (even with zero
-general comments) AND in the all-empty state, opening the shared `DecisionNoteField` in a small
+**"+ Global comment"** renders in the Annotations tab's "Global comments" section header (even with zero
+global comments) AND in the all-empty state, opening the shared `DecisionNoteField` in a small
 anchored popover whose width clamps to the resizable panel (200-600px persisted) so it never
 clips inside the sidebar's `overflow-x: hidden` scroll area. Composer state (open + draft) lives
 in `ReviewSidebar`, shared by both placements: the draft survives a dismissal, a placement flip

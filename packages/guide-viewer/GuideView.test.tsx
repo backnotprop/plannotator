@@ -475,3 +475,36 @@ describe('GuideView per-file windowing', () => {
     expect(latestByFile.get('b.ts')?.isActive).toBe(false);
   });
 });
+
+describe('GuideView global comments', () => {
+  // Guards the button leaking into hosts that take no comments (guides.show, the VS Code reader), a read-only
+  // review still offering it, and the composer opening anywhere but on the button.
+  test.skipIf(!hasDom)('draws the Global comment button and the list only for a host that passes them', async () => {
+    await renderView(makeGuide());
+    expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
+    expect(host!.querySelector('[data-guide-global-comments]')).toBeNull();
+
+    const anchors: HTMLElement[] = [];
+    const chosen: string[] = [];
+    await renderView(makeGuide(), {
+      state: {
+        ...makeState(),
+        globalComments: { comments: [{ id: 'g1', text: 'Split it in two.' }], onAdd: (anchor) => anchors.push(anchor), onSelect: (id) => chosen.push(id) },
+      },
+    });
+    const add = host!.querySelector<HTMLButtonElement>('[data-guide-global-comment-add]')!;
+    expect(add.textContent).toBe('Global comment');
+    await act(async () => add.click());
+    expect(anchors).toEqual([add]);
+    const list = host!.querySelector('[data-guide-global-comments]')!;
+    // Under the header, before the first section.
+    expect(list.compareDocumentPosition(host!.querySelector('[data-guide-section]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => list.querySelector<HTMLButtonElement>('[data-guide-global-comment="g1"] button')!.click());
+    expect(chosen).toEqual(['g1']);
+
+    // Read-only: the comments stay, the button goes.
+    await renderView(makeGuide(), { state: { ...makeState(), globalComments: { comments: [{ id: 'g1', text: 'Split it in two.' }] } } });
+    expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
+    expect(host!.querySelector('[data-guide-global-comments]')!.textContent).toContain('Split it in two.');
+  });
+});

@@ -33,7 +33,8 @@ import type {
 } from '@plannotator/ui/types';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
-import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps } from '@plannotator/guide-viewer';
+import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
+import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/CommentPopover';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
@@ -212,7 +213,26 @@ export default function GuideReader({
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
   pendingRef.current = pendingSelection;
-  const annotations = useMemo(() => (comments ? [...comments.annotations] : NO_ANNOTATIONS), [comments?.annotations]);
+  // Line comments go to the diffs; global comments (on the whole review) to the guide's header.
+  const annotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope !== 'general') : NO_ANNOTATIONS), [comments?.annotations]);
+  const globalAnnotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope === 'general') : NO_ANNOTATIONS), [comments?.annotations]);
+  /** The global comment composer, open on the header's "Global comment" button. */
+  const [globalAnchor, setGlobalAnchor] = useState<HTMLElement | null>(null);
+  const globalDraftKey = comments ? `guide-global:${comments.draftScope}` : null;
+  const addGlobalComment = useCallback((text: string) => {
+    const wiring = commentsRef.current;
+    const trimmed = text.trim();
+    setGlobalAnchor(null);
+    if (!wiring || !trimmed) return;
+    const draftKey = `guide-global:${wiring.draftScope}`;
+    // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
+    void wiring
+      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, createdAt: Date.now() })
+      // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
+      .then((saved) => {
+        if (!saved) restoreCommentDraft(draftKey, text);
+      });
+  }, []);
   const addComment = useCallback<GuideDiffComments['onAddAnnotationForFile']>(
     (filePath, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta) => {
       const range = pendingRef.current;
@@ -324,6 +344,33 @@ export default function GuideReader({
     }),
     [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions],
   );
+  // Global comments: the list under the header and its button, while the review takes comments (as line comments).
+  // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
+  const showGlobalComment = useCallback((id: string) => {
+    const wiring = commentsRef.current;
+    if (wiring?.onShowGlobalComment) wiring.onShowGlobalComment(id);
+    else wiring?.onSelect(id);
+  }, []);
+  const globalComments = useMemo<GuideGlobalComments | undefined>(
+    () =>
+      comments
+        ? {
+            comments: globalAnnotations.map((a) => ({ id: a.id, text: a.text ?? '' })),
+            onAdd: setGlobalAnchor,
+            onSelect: showGlobalComment,
+            selectedId: comments.selectedId,
+          }
+        : undefined,
+    [comments, globalAnnotations, showGlobalComment],
+  );
+  // A global comment chosen in the panel: its place in the guide's list comes into view.
+  useEffect(() => {
+    if (!scrollTarget || !globalAnnotations.some((a) => a.id === scrollTarget.id)) return;
+    const item = Array.from(document.querySelectorAll<HTMLElement>('[data-guide-global-comment]')).find((el) => el.dataset.guideGlobalComment === scrollTarget.id);
+    item?.scrollIntoView?.({ block: 'nearest' });
+    // Only a new target moves the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollTarget]);
   const host = useMemo(
     () => ({
       files,
@@ -333,8 +380,9 @@ export default function GuideReader({
       ...(phone ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
+      ...(globalComments ? { globalComments } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments],
   );
 
   return (
@@ -348,6 +396,19 @@ export default function GuideReader({
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
       />
+      {globalAnchor && globalDraftKey && (
+        <CommentPopover
+          anchorEl={globalAnchor}
+          contextText=""
+          isGlobal
+          // The export prints a global comment's words only.
+          allowImages={false}
+          // The words typed survive a close (Escape, a click outside) and a refused save, one draft per message.
+          draftKey={globalDraftKey}
+          onSubmit={addGlobalComment}
+          onClose={() => setGlobalAnchor(null)}
+        />
+      )}
     </GuideHostProvider>
   );
 }

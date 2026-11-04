@@ -10,7 +10,10 @@ export {
   type GuideDiffRendererContext,
   type GuideRevealTarget,
   type GuideActiveSearchMatch,
+  type GuideGlobalComment,
+  type GuideGlobalComments,
 } from './host';
+export { GuideGlobalCommentButton, GuideGlobalCommentList } from './GuideGlobalComments';
 export { GuideView, resolveGuideSectionFiles } from './GuideView';
 export { GuideSectionCard } from './GuideSectionCard';
 export { GuideOverview } from './GuideOverview';

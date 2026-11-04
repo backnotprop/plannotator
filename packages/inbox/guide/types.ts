@@ -12,11 +12,18 @@ export interface GuideReaderComments {
   /** The comment selected (a card in the panel, or one clicked in the diff). */
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  /** A new comment, or an edit of one (same id). */
-  onSave: (annotation: CodeAnnotation) => void;
+  /** A new comment, or an edit of one (same id). Answers whether the store kept it. */
+  onSave: (annotation: CodeAnnotation) => Promise<boolean>;
   onDelete: (id: string) => void;
   /** Bumped with an id to bring that comment into view (the panel's card). */
   scrollTarget: { id: string; token: number } | null;
+  /** Names this review's unsaved words (the message's id): one draft per message, never shared with another thread. */
+  draftScope: string;
+  /**
+   * A global comment chosen in the guide: the pane shows it in its comments
+   * (opens its folded sheet, where its edit and delete are). Absent: it is selected.
+   */
+  onShowGlobalComment?: (id: string) => void;
 }
 
 export interface GuideReaderProps {
