@@ -28,6 +28,12 @@ interface GuideViewProps {
    * counts, source line) and the host's 16px page margins, so the width goes to the code.
    */
   bare?: boolean;
+  /**
+   * Each file's box as tall as its diff (an estimate from the hunks' rows, then the height the renderer reports;
+   * capped as before). Opt-in for a host whose renderer reports it (the Inbox's AllFilesCodeView). Default: on in
+   * `bare`, off otherwise (the fixed estimate the review app, guides.show and VS Code use).
+   */
+  fitFileHeights?: boolean;
 }
 
 export interface ResolvedGuideSections {
@@ -79,7 +85,9 @@ export const GuideView: React.FC<GuideViewProps> = ({
   sourceLine,
   headerActions,
   bare = false,
+  fitFileHeights,
 }) => {
+  const fit = fitFileHeights ?? bare;
   const host = useGuideHost();
   const addGlobalComment = host.globalComments?.onAdd;
   const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
@@ -271,7 +279,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
             onActivate={onFocusFile}
             onRequestReveal={handleRequestReveal}
             renderLink={renderLink}
-            fitFileHeights={bare}
+            fitFileHeights={fit}
             {...(actionsOnTab && index === 0 ? { tabLead: actions } : {})}
           />
         ))}
@@ -288,7 +296,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
             revealTarget={revealTarget}
             onActivate={onFocusFile}
             onRequestReveal={handleRequestReveal}
-            fitFileHeights={bare}
+            fitFileHeights={fit}
             {...(actionsOnTab && firstCardIndex === guide.sections.length ? { tabLead: actions } : {})}
           />
         )}

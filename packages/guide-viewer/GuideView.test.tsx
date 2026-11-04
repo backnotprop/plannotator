@@ -110,6 +110,7 @@ async function renderView(
     state?: GuideHostValue<Record<string, unknown>>;
     onFocusFile?: (path: string) => void;
     bare?: boolean;
+    fitFileHeights?: boolean;
   } = {},
 ) {
   const Harness = () => {
@@ -128,6 +129,7 @@ async function renderView(
           onFocusFile={handleFocusFile}
           onRegenerate={options.onRegenerate}
           bare={options.bare}
+          fitFileHeights={options.fitFileHeights}
         />
       </GuideHostProvider>
     );
@@ -545,8 +547,117 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(boxHeight('m.sql')).toBe('620px');
   });
 
-  // Guards the shared chain's default (the review app, guides.show, the Inbox's guided reviews): unchanged.
-  test.skipIf(!hasDom)('outside bare the box keeps its estimate and the renderer is asked for no height', async () => {
+  // Guards the Inbox's guided review in a thread (not bare) getting the fit through the opt-in.
+  test.skipIf(!hasDom)('a host opts in without bare: the box fits, the heading stays', async () => {
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'm.sql' }] }] });
+    await renderView(guide, { fitFileHeights: true, state: makeState({ files: [addedFile('m.sql', 5)] }) });
+    expect(boxHeight('m.sql')).toBe('159px');
+    expect(host!.querySelector('h1')).not.toBeNull();
+    expect(latestCodeViewProps.at(-1)!.onContentHeightChange).toBeFunction();
+  });
+
+  // Guards the Split over-count: a replaced line is one row in Split, two in Unified; before a measure the box follows the host's layout.
+  test.skipIf(!hasDom)('the first estimate follows the layout the host draws: Split pairs removed and added lines', async () => {
+    const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,4 +1,5 @@\n ctx\n-a\n-b\n+A\n+B\n+C\n ctx2\n-d\n';
+    const file: DiffFile = { path: 'a.ts', patch, additions: 3, deletions: 3, status: 'modified' };
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
+    // Rows: ctx, ctx2, then 3 (max of 2 removed, 3 added) and 1 → 6 in Split; ctx, ctx2, 5 and 1 → 8 in Unified.
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
+    expect(boxHeight('a.ts')).toBe(`${59 + 6 * 20}px`);
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
+    expect(boxHeight('a.ts')).toBe(`${59 + 8 * 20}px`);
+  });
+
+  // Guards a commented file's box dipping for a frame: a remounted CodeView first reports its layout before its
+  // inline comments are drawn. A real shrink still lands once the viewer has drawn.
+  test.skipIf(!hasDom)('after a remount a shrinking report waits until the viewer has drawn', async () => {
+    const originalObserver = globalThis.IntersectionObserver;
+    Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: FakeIntersectionObserver });
+    const realFrame = globalThis.requestAnimationFrame;
+    const realCancel = globalThis.cancelAnimationFrame;
+    try {
+      const files = Array.from({ length: 20 }, (_, index) => addedFile(`src/file-${index}.ts`, 5));
+      const guide = makeGuide({ sections: [{ title: 'Large', overview: '', diffs: files.map((file) => ({ file: file.path })) }] });
+      await renderView(guide, { fitFileHeights: true, state: makeState({ files }) });
+      const observer = FakeIntersectionObserver.latest!;
+      const shells = [...host!.querySelectorAll<HTMLElement>('[data-guide-file-shell]')];
+      const near = (matches: (index: number) => boolean) => act(async () => {
+        observer.trigger(shells.map((target, index) => ({ target, isIntersecting: matches(index) })));
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+      const path = files[1]!.path;
+      const report = () => [...latestCodeViewProps].reverse().find((p) => (p.files as DiffFile[])[0]?.path === path)!.onContentHeightChange as (h: number) => void;
+      await near((index) => index < 8);
+      // The file with its comments drawn.
+      await act(async () => report()(400));
+      expect(boxHeight(path)).toBe('402px');
+
+      // Past the mount lease, the window moves away and the CodeView unmounts; the box keeps its height.
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_550)); });
+      await near((index) => index >= 8 && index < 16);
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).toBeNull();
+      expect(boxHeight(path)).toBe('402px');
+
+      // Frames by hand while a wait runs: happy-dom's run at once, and the wait is counted in frames. (The viewport
+      // manager needs real ones to move the window, so `back` brings the file in first.)
+      const queued = new Map<number, FrameRequestCallback>();
+      let frameId = 0;
+      const back = async () => {
+        globalThis.requestAnimationFrame = realFrame;
+        globalThis.cancelAnimationFrame = realCancel;
+        await act(async () => {
+          shells[1]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        });
+        globalThis.requestAnimationFrame = (callback) => {
+          frameId += 1;
+          queued.set(frameId, callback);
+          return frameId;
+        };
+        globalThis.cancelAnimationFrame = (id) => void queued.delete(id);
+      };
+      const frame = () => act(async () => {
+        const due = [...queued.values()];
+        queued.clear();
+        for (const callback of due) callback(0);
+      });
+
+      // Back: the first report, before the comments are drawn, does not shrink the box; a growth lands at once.
+      await back();
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).not.toBeNull();
+      await act(async () => report()(157));
+      expect(boxHeight(path)).toBe('402px');
+      await act(async () => report()(410));
+      expect(boxHeight(path)).toBe('412px');
+      // The wait is over: a report that really is smaller lands at once.
+      await act(async () => report()(300));
+      expect(boxHeight(path)).toBe('302px');
+
+      // A shrink alone, the viewer drawn with no later report: it lands after two frames.
+      globalThis.requestAnimationFrame = realFrame;
+      globalThis.cancelAnimationFrame = realCancel;
+      await act(async () => {
+        shells[8]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 1_550));
+      });
+      await near((index) => index >= 8 && index < 16);
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).toBeNull();
+      await back();
+      await act(async () => report()(157));
+      await frame();
+      expect(boxHeight(path)).toBe('302px');
+      await frame();
+      expect(boxHeight(path)).toBe('159px');
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+      globalThis.cancelAnimationFrame = realCancel;
+      FakeIntersectionObserver.latest = null;
+      Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: originalObserver });
+    }
+  });
+
+  // Guards the shared chain's default (the review app, guides.show, VS Code): unchanged.
+  test.skipIf(!hasDom)('with neither bare nor the opt-in the box keeps its estimate and the renderer is asked for no height', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { state: makeState({ files: [addedFile('m.sql', 5)] }) });
     expect(boxHeight('m.sql')).toBe('304px');

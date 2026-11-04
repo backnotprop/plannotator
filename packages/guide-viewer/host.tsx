@@ -151,6 +151,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * Absent (guides.show, the VS Code reader): no button and no list.
    */
   globalComments?: GuideGlobalComments;
+  /**
+   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
+   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
+   * which the renderer's measured height then corrects).
+   */
+  diffStyle?: 'split' | 'unified';
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

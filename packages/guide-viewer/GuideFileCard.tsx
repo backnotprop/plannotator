@@ -17,29 +17,48 @@ function estimateDiffHeight(patch: string): number {
 }
 
 /**
- * The box a file's diff fills when the guide fits boxes to their content (GuideView `bare`), before the renderer
- * measures it: the rows the diff draws (its hunks' lines, not git's header lines), a separator before each hunk that
- * does not start the file, the file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, a 33 px
- * header, 32 px separators, 8 px above and below the list, 8 px in the code block, a 1 px border). A patch with no
- * hunk (a binary file, a rename) keeps the old estimate.
+ * The box a file's diff fills when the guide fits boxes to their content (GuideView `fitFileHeights`), before the
+ * renderer measures it: the rows the diff draws (its hunks' lines, not git's header lines; in Split a run of removed
+ * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
+ * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, a 33 px header, 32 px separators,
+ * 8 px above and below the list, 8 px in the code block, a 1 px border). A patch with no hunk (a binary file, a
+ * rename) keeps the old estimate.
  */
-function estimateFitDiffHeight(patch: string): number {
+function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified'): number {
   let rows = 0;
   let hunks = 0;
   let separators = 0;
   let inHunk = false;
+  // The change block being read: its removed and added lines (Split draws max of the two rows).
+  let removed = 0;
+  let added = 0;
+  const closeBlock = () => {
+    rows += diffStyle === 'split' ? Math.max(removed, added) : removed + added;
+    removed = 0;
+    added = 0;
+  };
   for (const line of patch.split('\n')) {
     if (line.startsWith('@@')) {
+      closeBlock();
       const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
       if (hunks > 0 || (at && (Number(at[1]) > 1 || Number(at[2]) > 1))) separators += 1;
       hunks += 1;
       inHunk = true;
     } else if (line.startsWith('diff --git')) {
+      closeBlock();
       inHunk = false;
-    } else if (inHunk && (line[0] === ' ' || line[0] === '+' || line[0] === '-')) {
+    } else if (inHunk && line[0] === '-') {
+      // A removal after additions starts a new block.
+      if (added > 0) closeBlock();
+      removed += 1;
+    } else if (inHunk && line[0] === '+') {
+      added += 1;
+    } else if (inHunk && line[0] === ' ') {
+      closeBlock();
       rows += 1;
     }
   }
+  closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
   return Math.min(2 + 16 + 33 + 8 + rows * 20 + separators * 32, MAX_DIFF_HEIGHT);
 }
@@ -53,7 +72,7 @@ interface GuideFileCardProps {
   revealTarget: { filePath: string; token: number } | null;
   onActivate: (filePath: string) => void;
   /**
-   * Size the box to the diff's content (GuideView `bare`, the Inbox's PR page): an estimate from the hunks' rows,
+   * Size the box to the diff's content (GuideView `fitFileHeights`: the Inbox): an estimate from the hunks' rows,
    * then the height the renderer reports, both capped at the usual maximum. Off: the fixed estimate, as before.
    */
   fitContent?: boolean;
@@ -73,18 +92,62 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(kind === 'generated');
   const fileList = useMemo(() => [file], [file]);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
-  const diffHeight = useMemo(() => (fitContent ? estimateFitDiffHeight(file.patch) : estimateDiffHeight(file.patch)), [fitContent, file.patch]);
+  const diffHeight = useMemo(
+    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle) : estimateDiffHeight(file.patch)),
+    [fitContent, file.patch, diffStyle],
+  );
   // The content's height as the renderer last reported it (plus the box's border), kept while the CodeView is
   // unmounted so the box does not jump when it leaves the outer window.
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
-  const onContentHeightChange = useCallback((height: number) => setMeasuredHeight(height + 2), []);
+  const measuredRef = useRef<number | null>(null);
+  // Back in the outer window, the CodeView's first report is its layout before its inline comments are drawn: a
+  // box that held comments would shrink for a frame and grow back. A first report that shrinks the box waits two
+  // frames for the viewer to draw; a growth in that time lands at once and ends the wait, else the latest report lands.
+  const settledRef = useRef(true);
+  const pendingRef = useRef<number | null>(null);
+  const settleFrameRef = useRef<number | null>(null);
+  const applyMeasured = useCallback((height: number) => {
+    measuredRef.current = height;
+    setMeasuredHeight(height);
+  }, []);
+  const stopWaiting = useCallback(() => {
+    if (settleFrameRef.current !== null) cancelAnimationFrame(settleFrameRef.current);
+    settleFrameRef.current = null;
+    pendingRef.current = null;
+    settledRef.current = true;
+  }, []);
+  useEffect(() => {
+    if (!mounted || !fitContent || measuredRef.current === null) return;
+    settledRef.current = false;
+    return stopWaiting;
+  }, [mounted, fitContent, stopWaiting]);
+  const onContentHeightChange = useCallback((height: number) => {
+    const next = height + 2;
+    if (!settledRef.current) {
+      if (measuredRef.current !== null && next < measuredRef.current) {
+        pendingRef.current = next;
+        if (settleFrameRef.current === null) {
+          settleFrameRef.current = requestAnimationFrame(() => {
+            settleFrameRef.current = requestAnimationFrame(() => {
+              const pending = pendingRef.current;
+              stopWaiting();
+              if (pending !== null) applyMeasured(pending);
+            });
+          });
+        }
+        return;
+      }
+      stopWaiting();
+    }
+    applyMeasured(next);
+  }, [applyMeasured, stopWaiting]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
   const renderedHeight = collapsed
     ? COLLAPSED_HEIGHT
