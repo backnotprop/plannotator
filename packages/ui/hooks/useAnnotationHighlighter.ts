@@ -12,6 +12,7 @@ import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } f
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
+  dropEmptyNodes,
   trimWhitespaceOnlyBoundaryNodes,
   type SelectedNodeLike,
 } from '../utils/selectionBoundary';
@@ -1512,12 +1513,14 @@ export function useAnnotationHighlighter({
 
     // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
     // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
+    // Empty text nodes go wherever they are: a selection over a highlight inside a highlight takes the
+    // empty halves the library's own splits left in the inner wrapper, and wrapping them throws.
     // The hook's callback type is `(...args: unknown[]) => SelectedNode[]`; a SelectedNode
     // structurally satisfies SelectedNodeLike, so the trimmed subset goes back through the
     // hook's own callback type rather than importing SelectedNode from the package's dist/.
     type SelectedNodesTap = Parameters<typeof highlighter.hooks.Render.SelectedNodes.tap>[0];
     highlighter.hooks.Render.SelectedNodes.tap(((...args: unknown[]) =>
-      trimWhitespaceOnlyBoundaryNodes(args[1] as SelectedNodeLike[])) as SelectedNodesTap);
+      trimWhitespaceOnlyBoundaryNodes(dropEmptyNodes(args[1] as SelectedNodeLike[]))) as SelectedNodesTap);
 
     highlighterRef.current = highlighter;
     // Whether the library's pointer-end handler is attached (`run()`), and whether this effect was cleaned up.
