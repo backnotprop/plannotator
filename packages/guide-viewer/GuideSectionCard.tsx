@@ -365,7 +365,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 onActivate={onActivate}
               />
             ))
-          ) : (
+          ) : host.renderSectionEmpty?.(index) ?? (
             <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
               <div>
                 <p className="text-xs font-medium text-foreground">No chapter files in the current diff</p>

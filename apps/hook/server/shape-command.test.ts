@@ -1,0 +1,162 @@
+/**
+ * `plannotator shape …` in process: what an agent sees from each command.
+ * Every run gets its own data dir and project folder under the OS temp
+ * folder, and a stand-in for the project rule (no git). Nothing here reads
+ * the person's data, environment or Inbox.
+ */
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { parseShapeCommand, runShapeCommand } from "./shape-command";
+
+const roots: string[] = [];
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+function world(env: Record<string, string | undefined> = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-")));
+  roots.push(root);
+  const dataDir = join(root, "data");
+  const project = join(root, "kettle");
+  mkdirSync(project, { recursive: true });
+  const run = async (...argv: string[]) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await runShapeCommand(argv, {
+      dataDir,
+      cwd: project,
+      env,
+      stdout: (t) => out.push(t),
+      stderr: (t) => err.push(t),
+      projectRootOf: async (folder) => ({ root: folder, name: basename(folder) }),
+    });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  };
+  const board = (name: string, words: string) => {
+    const path = join(project, name);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        title: "The kettle whistles once",
+        claim: "Built. Nothing waits on you.",
+        views: { picture: { html: `<p data-mark="p-whistle">${words}</p>` } },
+      }),
+    );
+    return name;
+  };
+  return { run, board, project };
+}
+
+describe("shape update", () => {
+  test("creates a shape, then adds versions only from the latest base", async () => {
+    const w = world();
+    const first = await w.run("update", "--file", w.board("b1.json", "whistles once"));
+    expect(first.code).toBe(0);
+    const { id, v, created } = JSON.parse(first.out);
+    expect([v, created]).toEqual([1, true]);
+
+    const noBase = await w.run("update", "--file", w.board("b2.json", "whistles twice"), "--id", id);
+    expect(noBase.code).toBe(1);
+    expect(noBase.err).toStartWith("base_required:");
+
+    const second = await w.run("update", "--file", "b2.json", "--id", id, "--base", "1");
+    expect(second.code).toBe(0);
+    expect(JSON.parse(second.out)).toMatchObject({ id, v: 2, created: false, changed: ["Picture: 1 changed"] });
+
+    const stale = await w.run("update", "--file", w.board("b3.json", "whistles thrice"), "--id", id, "--base", "1");
+    expect(stale.code).toBe(1);
+    expect(stale.err).toStartWith("stale_base:");
+    // The latest version comes back, so the agent can fold its change into it.
+    expect(JSON.parse(stale.out).latest.n).toBe(2);
+  });
+
+  test("an invalid board is refused with every problem by field", async () => {
+    const w = world();
+    writeFileSync(join(w.project, "bad.json"), JSON.stringify({ title: "", claim: "c", views: { how: { html: "<script>x</script>" } } }));
+    const result = await w.run("update", "--file", "bad.json");
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("- title: is empty");
+    expect(result.err).toContain("- views.how.html: <script> is not allowed");
+  });
+});
+
+describe("shape read", () => {
+  test("--notes hands over the notes waiting for the agent once", async () => {
+    const w = world();
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "whistles once"))).out);
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    // The person's Change it, as the board would post it.
+    const dataDir = join(w.project, "..", "data");
+    createShapeStore({ dataDir }).addNote(id, { kind: "change", v: 1, view: "picture", part: "p-whistle", text: "Twice" });
+
+    const read = JSON.parse((await w.run("read", id, "--notes")).out);
+    expect(read.version.n).toBe(1);
+    expect(read.notes.map((n: { text: string }) => n.text)).toEqual(["Twice"]);
+    expect(JSON.parse((await w.run("read", id, "--notes")).out).notes).toEqual([]);
+  });
+
+  test("notes whose hand-over fails (a closed pipe) still wait for the next read", async () => {
+    const w = world();
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "whistles once"))).out);
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    createShapeStore({ dataDir }).addNote(id, { kind: "change", v: 1, view: "picture", part: "p-whistle", text: "Twice" });
+
+    const err: string[] = [];
+    const broken = await runShapeCommand(["read", id, "--notes"], {
+      dataDir,
+      cwd: w.project,
+      env: {},
+      stdout: () => Promise.reject(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+      stderr: (t) => err.push(t),
+      projectRootOf: async (folder) => ({ root: folder, name: basename(folder) }),
+    });
+    expect(broken).toBe(1);
+    expect(err.join()).toStartWith("output_failed:");
+    expect(JSON.parse((await w.run("read", id, "--notes")).out).notes.map((n: { text: string }) => n.text)).toEqual(["Twice"]);
+    expect(JSON.parse((await w.run("read", id, "--notes")).out).notes).toEqual([]);
+  });
+
+  test("with no id, a session reads its own newest shape, not another session's", async () => {
+    const mine = world({ PI_SESSION_ID: "sess-mine" });
+    const { id: own } = JSON.parse((await mine.run("update", "--file", mine.board("a.json", "mine"))).out);
+    // Same data dir and folder, another session draws a newer shape.
+    const other = await runShapeCommand(["update", "--file", "a.json"], {
+      dataDir: join(mine.project, "..", "data"),
+      cwd: mine.project,
+      env: { PI_SESSION_ID: "sess-other" },
+      stdout: () => {},
+      stderr: () => {},
+      projectRootOf: async (folder) => ({ root: folder, name: basename(folder) }),
+    });
+    expect(other).toBe(0);
+    expect(JSON.parse((await mine.run("read")).out).shape.id).toBe(own);
+  });
+});
+
+describe("shape done and drawing", () => {
+  test("a finished shape refuses drawing and new versions", async () => {
+    const w = world();
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "x"))).out);
+    expect((await w.run("done", id)).code).toBe(0);
+    expect((await w.run("drawing", id)).err).toStartWith("finished:");
+    expect((await w.run("update", "--file", "b.json", "--id", id, "--base", "1")).err).toStartWith("finished:");
+    expect((await w.run("list")).out).toContain("No active shapes");
+    expect((await w.run("list", "--all")).out).toContain(`${id}  v1`);
+  });
+});
+
+describe("parseShapeCommand", () => {
+  test("a flag another command owns is refused, not ignored", () => {
+    expect(parseShapeCommand(["read", "--base", "2"])).toMatchObject({ ok: false });
+    expect(parseShapeCommand(["update", "--id", "shp_x"])).toMatchObject({ ok: false, error: "shape update needs --file <board.json>." });
+    expect(parseShapeCommand(["update", "--file", "b.json", "--thread", "not-a-message"])).toMatchObject({ ok: false });
+  });
+
+  test("--through takes a message id, as --thread does", () => {
+    expect(parseShapeCommand(["update", "--file", "b.json", "--through", "../../x"])).toMatchObject({ ok: false, error: "--through takes an Inbox message id (msg_…)." });
+    expect(parseShapeCommand(["update", "--file", "b.json", "--through", "msg_01JC0000000000000000000000"])).toMatchObject({ ok: true });
+  });
+});
