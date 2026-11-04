@@ -56,12 +56,12 @@ export interface LightboxRegionComments {
   mentionSource?: MentionSource;
 }
 
-/** `Region 3 · 356 × 486 px`, the comment box's header. */
 /** The image a region draft is kept for: its src as written, or a hash of a data URL (which can be megabytes long). */
 function imageRegionDraftScope(writtenSrc: string): string {
   return writtenSrc.startsWith('data:') ? `data:${hashDraftScope(writtenSrc)}` : writtenSrc;
 }
 
+/** `Region 3 · 356 × 486 px`, the comment box's header. */
 function regionHeader(n: number, box: NaturalBox): string {
   return `Region ${n} · ${box.w} × ${box.h} px`;
 }
