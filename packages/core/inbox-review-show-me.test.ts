@@ -90,6 +90,27 @@ describe("checkInboxDrawing", () => {
     expect(!checked.ok && checked.problems).toEqual(['data-code="src/other.ts#L1": src/other.ts is not a file in this review']);
   });
 
+  test("a code the board would draw is checked wherever it is written: the delta-4 review's payloads", () => {
+    for (const source of [
+      // noscript: the sanitizer parses with scripting off, so this div is markup and stays.
+      '<noscript><div data-mark="a" data-code="src/zzz.ts#L1">part</div></noscript>',
+      // An end tag the browser ignores inside foreignObject's HTML, then a text element or CDATA.
+      '<svg><foreignObject><div></svg></div></foreignObject><textarea><b data-code="src/zzz.ts#L1">x</b></textarea></svg>',
+      '<svg><foreignObject><div></svg></div></foreignObject><xmp><b data-code="src/zzz.ts#L1">x</b></xmp></svg>',
+      '<svg><foreignObject><span></svg></span></foreignObject><noframes><b data-code="src/zzz.ts#L1">x</b></noframes></svg>',
+      '<svg><foreignObject><div></foreignObject><![CDATA[x><b data-code="src/zzz.ts#L1">x</b>]]></div></foreignObject></svg>',
+      '<math><annotation-xml><svg><foreignObject><section><![CDATA[x><b data-code="src/zzz.ts#L1">x</b>]]></section></foreignObject></svg></annotation-xml></math>',
+      // The delta-3 ones: odd comment ends, `<!--` in a text element, a tag inside another's attribute.
+      '<!--><div data-mark="a" data-code="src/zzz.ts#L1">x</div>',
+      '<textarea><a title="</textarea><div data-code=src/zzz.ts#L1>">',
+    ]) {
+      const checked = checkInboxDrawing({ ...ok, source }, files);
+      expect([source, !checked.ok && checked.problems]).toEqual([source, ['data-code="src/zzz.ts#L1": src/zzz.ts is not a file in this review']]);
+    }
+    const unreadable = checkInboxDrawing({ ...ok, source: '<noscript><div data-code="not a target">x</div></noscript>' }, files);
+    expect(!unreadable.ok && unreadable.problems).toContain('source: data-code="not a target" is not a file and line in the project (write path#L42)');
+  });
+
   test("the guide's diagram takes no title", () => {
     const checked = checkInboxDrawing(ok, files, { withTitle: false });
     expect(!checked.ok && checked.problems[0]).toStartWith("title: is not a field");
