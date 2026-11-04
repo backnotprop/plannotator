@@ -142,3 +142,15 @@ describe('guided-review comments as feedback', () => {
     expect(recordQuote(record(comments[0]!))).toBe('if (expired) refresh();');
   });
 });
+
+// A record written before the store checked its fields can hold a label's decorations as a string (or a label that is
+// not one). The export reads them defensively: one bad comment must never make every Send on the thread fail.
+test('a stored comment with a string decorations or a non-string label still exports', () => {
+  const bad = [
+    { ...globals[0]!, id: 'g-bad', conventionalLabel: 'issue', decorations: 'blocking' },
+    { id: 'l-bad', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 3, lineEnd: 3, side: 'new', text: 'Guard it.', createdAt: 9, conventionalLabel: 7, decorations: { x: 1 } },
+  ] as unknown as CodeAnnotation[];
+  const text = guideFeedback(bad.map((a) => record(a)));
+  expect(text).toContain(`## Global comments\n\n**issue:** ${globals[0]!.text}`);
+  expect(text).toContain('### Line 3 (new)\nGuard it.');
+});

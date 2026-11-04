@@ -5026,7 +5026,7 @@ const ReviewApp: React.FC = () => {
     return note.id;
   }, [identity, localDraftTarget]);
 
-  // Sidebar "+ General comment" — the durable human producer for a
+  // Sidebar "+ Global comment" — the durable human producer for a
   // scope:'general' review-level comment (spec §3.3). Unlike the submit note
   // above, it goes through history (undoable, draft-persisted, deletable via
   // the sidebar's existing delete); like it, it is deliberately NOT

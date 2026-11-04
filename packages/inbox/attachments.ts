@@ -394,6 +394,18 @@ function fenced(code: string): string {
 }
 
 /**
+ * The review app's conventional prefix ("**issue (blocking):** "). Read
+ * defensively: a record written before the store checked its fields may hold
+ * a label or decorations of another kind, and must not break a Send.
+ */
+function conventionalPrefix(comment: CodeAnnotation): string {
+  const label = comment.conventionalLabel;
+  if (typeof label !== 'string' || label === '') return '';
+  const decorations = Array.isArray(comment.decorations) ? comment.decorations.filter((d) => typeof d === 'string') : [];
+  return `**${label}${decorations.length ? ` (${decorations.join(', ')})` : ''}:** `;
+}
+
+/**
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
  * and side, the comment, the lines it is on, any suggested code. Kept equal
@@ -404,9 +416,7 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
   const token = comment.tokenText
     ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
     : '';
-  const prefix = comment.conventionalLabel
-    ? `**${comment.conventionalLabel}${comment.decorations?.length ? ` (${comment.decorations.join(', ')})` : ''}:** `
-    : '';
+  const prefix = conventionalPrefix(comment);
   let output = `${heading} ${range} (${comment.side})${token}\n`;
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
@@ -440,9 +450,7 @@ export function guideCommentSections(comments: readonly CodeAnnotation[]): strin
   if (global.length > 0) {
     output += `## ${GUIDE_GLOBAL_COMMENTS_HEADING}\n\n`;
     for (const comment of global) {
-      const prefix = comment.conventionalLabel
-        ? `**${comment.conventionalLabel}${comment.decorations?.length ? ` (${comment.decorations.join(', ')})` : ''}:** `
-        : '';
+      const prefix = conventionalPrefix(comment);
       if (comment.text) output += `${prefix}${comment.text}\n`;
       else if (prefix) output += `${prefix.trimEnd()}\n`;
       output += '\n';

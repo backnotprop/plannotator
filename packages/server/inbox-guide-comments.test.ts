@@ -286,3 +286,55 @@ test("a global comment is kept with the thread's comments, counts with them, and
   expect(body).not.toContain("Line 0");
   expect(await pending(server, sent.thread_id)).toHaveLength(0);
 });
+
+// What a comment on a guided review keeps is what the export reads: a field of the wrong kind is refused (a string
+// `decorations` once broke every Send on the thread), a field the export does not know is dropped, and a global
+// comment is words only.
+test("a guided-review comment keeps only the fields the export reads: wrong kinds and suggestions on a global comment are refused, extras dropped", async () => {
+  const { project, dataDir } = world();
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const sent = await sendGuide(client, project);
+  const route = `/api/inbox/messages/${sent.message_id}/guide/annotations`;
+  const refusedOn = async (annotation: unknown, field: string) => {
+    const answer = await post(server, route, { annotation });
+    expect(answer.status).toBe(422);
+    expect((await answer.json()) as { code: string; field?: string }).toMatchObject({ code: "validation_error", field: `annotation.${field}` });
+  };
+
+  // The global comment's words: 10,000 characters at most.
+  await refusedOn(globalComment({ text: "x".repeat(10_001) }), "text");
+  expect((await post(server, route, { annotation: globalComment({ text: "x".repeat(10_000) }) })).status).toBe(200);
+  // A global comment is words: no suggestion, no quoted lines, no token, no images, and type "comment".
+  await refusedOn(globalComment({ id: "ann-g2", type: "suggestion" }), "type");
+  await refusedOn(globalComment({ id: "ann-g2", suggestedCode: "x()" }), "suggestedCode");
+  await refusedOn(globalComment({ id: "ann-g2", selectedText: "old" }), "selectedText");
+  await refusedOn(globalComment({ id: "ann-g2", images: [{ path: "/tmp/a.png", name: "a" }] }), "images");
+  // Wrong kinds, on either path.
+  for (const bad of [{ decorations: "blocking" }, { decorations: [1] }, { conventionalLabel: 5 }, { author: {} }]) {
+    await refusedOn(globalComment({ id: "ann-g3", conventionalLabel: "issue", ...bad }), Object.keys(bad)[0]!);
+    await refusedOn(comment({ id: "ann-l3", conventionalLabel: "issue", ...bad }), Object.keys(bad)[0]!);
+  }
+  await refusedOn(comment({ id: "ann-l3", type: "deletion" }), "type");
+  await refusedOn(comment({ id: "ann-l3", charStart: -1 }), "charStart");
+  await refusedOn(comment({ id: "ann-l3", images: [{ path: "/tmp/a.png", name: "a" }] }), "images");
+
+  // Extras are dropped; what is kept is what the export reads.
+  const global = await post(server, route, {
+    annotation: globalComment({ id: "ann-g4", text: "Ship it behind a flag.", conventionalLabel: "issue", decorations: ["blocking"], reasoning: "x", prUrl: "https://x", source: "eslint" }),
+  });
+  expect(global.status).toBe(200);
+  const kept = ((await global.json()) as { annotation: InboxAnnotationRecord }).annotation.annotation as Record<string, unknown>;
+  expect(Object.keys(kept).sort()).toEqual(["conventionalLabel", "createdAt", "decorations", "filePath", "id", "lineEnd", "lineStart", "scope", "side", "text", "type"]);
+  const line = await post(server, route, { annotation: comment({ id: "ann-l4", suggestedCode: "refresh();", originalCode: "old", reasoning: "x", severity: "nit" }) });
+  expect(line.status).toBe(200);
+  const lineKept = ((await line.json()) as { annotation: InboxAnnotationRecord }).annotation.annotation as Record<string, unknown>;
+  expect(lineKept).toMatchObject({ suggestedCode: "refresh();", originalCode: "old" });
+  expect(lineKept.reasoning).toBeUndefined();
+  expect(lineKept.severity).toBeUndefined();
+
+  // And the thread still sends, with the label and its decoration.
+  const records = await pending(server, sent.thread_id);
+  const feedback = attachmentFeedback(records, [], new Map(), project);
+  expect(feedback).toContain("**issue (blocking):** Ship it behind a flag.");
+});
