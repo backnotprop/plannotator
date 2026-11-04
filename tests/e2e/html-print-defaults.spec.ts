@@ -52,16 +52,17 @@ test('an unmarked page of 30 short sections is not printed one per sheet', async
   expect(await sheets(page, framed(FAQ))).toBeLessThan(5);
 });
 
-// An unmarked page prints as it would from a browser tab: a <pre> and a
-// <table> that cross a page boundary are split there, not pushed whole onto
-// the next sheet (which turned 2 sheets into 3).
+// An unmarked page prints as it would from a browser tab: a <pre> that
+// crosses a page boundary is split there, not pushed whole onto the next
+// sheet (which turned 2 sheets into 3). The <table> follows the <pre> and only
+// has to stay present; it is not what crosses the page.
 const CROSSING = `<!doctype html><html><head><title>Report</title></head><body>${
   Array.from({ length: 8 }, (_, i) => para(i)).join('')
 }<pre>${Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n')}</pre><table>${
   Array.from({ length: 15 }, (_, i) => `<tr><td>row ${i + 1}</td><td>value</td></tr>`).join('')
 }</table></body></html>`;
 
-test('an unmarked page with a <pre> and a <table> across a page prints on as many sheets as the raw page', async ({ page }) => {
+test('an unmarked page with a <pre> across a page prints on as many sheets as the raw page', async ({ page }) => {
   const raw = await sheets(page, CROSSING);
   expect(raw).toBeGreaterThan(1);
   expect(await sheets(page, framed(CROSSING))).toBe(raw);

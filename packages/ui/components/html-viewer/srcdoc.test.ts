@@ -5101,4 +5101,14 @@ describe("injectPrintDefaults", () => {
   test("a fragment with no doctype and no <head> gets the style first", () => {
     expect(styleAt(injectPrintDefaults("<p>x</p>"))).toBe(0);
   });
+
+  test("without sectionBreaks only the no-clip and pre-wrap rules are added, no pagination", () => {
+    const out = injectPrintDefaults("<!doctype html><html><head></head><body><section>a</section></body></html>");
+    const css = out.match(STYLE)?.[0] ?? "";
+    expect(css).toContain("overflow: visible");
+    expect(css).toContain("pre-wrap");
+    expect(css).not.toContain("break-inside");
+    expect(css).not.toContain("break-after");
+    expect(css).not.toContain("min-height");
+  });
 });
