@@ -5,12 +5,16 @@
  * seeded at day 4 with six threads (inbox-board-reveal-seed.ts), Snooze's announcement shown on day 1.5 and the Board
  * never decided (config.json `inboxBoard` unset).
  *
+ * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
+ *
  *  - Desktop: never on load, and no Board row. Past a minute on the page the person reads a thread and closes it: the
- *    Board's own first-visit dialog (BoardIntro) opens, the Board row is in the sidebar with it, and config.json has
- *    the Board on and the first-visit dialog stamped. A second tab reaching its moment shows nothing. Not now closes
- *    it and the Board stays on; the Board's first visit shows no dialog; its "?" opens it again. A reload reaching the
- *    moment again shows nothing.
- *  - A 390 px phone: the same, with the sidebar sheet before and after.
+ *    Board's own first-visit dialog (BoardIntro) opens as an offer (Not now, Turn it on), config.json has the reveal
+ *    stamped (never the Board's welcome) and the Board still unset, and there is no Board row. A second tab reaching its
+ *    moment shows nothing. Not now closes it and the Board stays off (unset, no row). A reload reaching the moment
+ *    again shows nothing.
+ *  - A 390 px phone: the dialog as a sheet, Turn it on on top; Turn it on writes the Board on and its row is in the
+ *    sidebar sheet, and at once in a desktop tab open beside it (settings sync everywhere: `event: capabilities`); the
+ *    Board's first visit shows its welcome with Copy prompt once (the owner, 2026-11-04), never again.
  *
  * Each scene is shot in light and dark (the Inbox follows the system's mode). The page's thresholds are real (60 s,
  * 5 s, 2.5 s). Build the apps first (bun run --cwd apps/review build && bun run build:hook), then `bunx playwright test
@@ -163,7 +167,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: never on load; at the calm moment the Board turns on with its first-visit dialog; once, and the Board stays on', async ({ browser }) => {
+test('desktop: never on load; at the calm moment the first-visit dialog offers the Board and turns nothing on; Not now leaves it off; once', async ({ browser }) => {
   test.setTimeout(360_000);
   const w = await world();
   const ctx = await context(browser);
@@ -180,34 +184,29 @@ test('desktop: never on load; at the calm moment the Board turns on with its fir
   // The moment: a thread read and closed, back to the list.
   await readAndLeave(a, w.ids['invoice-pdf']!);
   await expect(a.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
-  // The claim turned the Board on and stamped its first-visit dialog, before the person did anything with it.
+  // The claim stamped the reveal, never the Board's welcome, and turned nothing on.
   const saved = config(w);
-  expect(saved.inboxBoard).toBe(true);
-  expect(saved.inboxBoardIntro.shownAt).toBe(saved.inboxReveals.board.shownAt);
-  // The Board row arrives with the dialog.
-  await expect(a.locator('[data-board-nav]')).toBeVisible();
+  expect(saved.inboxBoard).toBeUndefined();
+  expect(saved.inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
+  expect(saved.inboxBoardIntro).toBeUndefined();
+  await expect(a.locator('[data-board-nav]')).toHaveCount(0);
+  await expect(a.locator(`${DIALOG} [data-board-intro-close]`)).toHaveText('Not now');
+  await expect(a.locator(`${DIALOG} [data-board-intro-on]`)).toHaveText('Turn it on');
+  await expect(a.locator(`${DIALOG} [data-board-intro-copy]`)).toHaveCount(0);
+  // No line about the prompt in the offer (there is no Copy prompt to point at).
+  await expect(a.locator(`${DIALOG} .ib-bi-q`)).toHaveCount(0);
   await shots(a, 'desktop-{s}-reveal');
   // The second tab reaches its own moment: the Inbox says no.
   await readAndLeave(b, w.ids['refund-window']!);
   await b.waitForTimeout(5_000);
   await expect(b.locator(DIALOG)).toHaveCount(0);
-  // Not now: closed, the Board stays on.
+  // Not now: closed, the Board stays off (unset), no row.
   await a.locator('[data-board-intro-close]').click();
   await expect(a.locator(DIALOG)).toHaveCount(0);
   await a.mouse.move(4, 4);
   await shots(a, 'desktop-{s}-after');
-  expect(config(w).inboxBoard).toBe(true);
-  // The Board: its first visit shows no dialog (the reveal was it); "?" opens it again.
-  await a.locator('[data-board-nav]').click();
-  await expect(a.locator('[data-board-about]')).toBeVisible();
-  await a.waitForTimeout(1_500);
-  await expect(a.locator(DIALOG)).toHaveCount(0);
-  await a.mouse.move(4, 4);
-  await shots(a, 'desktop-{s}-board');
-  await a.locator('[data-board-about]').click();
-  await expect(a.locator(DIALOG)).toBeVisible();
-  await a.keyboard.press('Escape');
-  await expect(a.locator(DIALOG)).toHaveCount(0);
+  expect(config(w).inboxBoard).toBeUndefined();
+  await expect(a.locator('[data-board-nav]')).toHaveCount(0);
   // A reload and the same moment a minute on: never again.
   await a.goto(`${w.url.replace(/#.*$/, '')}`);
   await expect(rowOf(a, w.ids['release-notes']!)).toBeVisible();
@@ -215,13 +214,18 @@ test('desktop: never on load; at the calm moment the Board turns on with its fir
   await readAndLeave(a, w.ids['release-notes']!);
   await a.waitForTimeout(5_000);
   await expect(a.locator(DIALOG)).toHaveCount(0);
-  expect(config(w).inboxBoard).toBe(true);
+  expect(config(w).inboxBoard).toBeUndefined();
 });
 
-test('a 390 px phone: the sidebar sheet before and after, the dialog as a sheet, the Board from the row', async ({ browser }) => {
+test('a 390 px phone: the dialog as a sheet; Turn it on writes the Board on, its row in the sidebar sheet and a desktop tab, the welcome on the first visit', async ({ browser }) => {
   test.setTimeout(240_000);
   const w = await world();
   const page = await (await context(browser, true)).newPage();
+  // A desktop tab open beside the phone: it hears the switch live, with no reload.
+  const desk = await (await context(browser, false)).newPage();
+  await desk.goto(w.url);
+  await expect(rowOf(desk, w.ids['invoice-pdf']!)).toBeVisible();
+  await expect(desk.locator('[data-board-nav]')).toHaveCount(0);
   await page.goto(w.url);
   await expect(rowOf(page, w.ids['invoice-pdf']!)).toBeVisible();
   await shots(page, 'phone-{s}-before-list');
@@ -234,16 +238,32 @@ test('a 390 px phone: the sidebar sheet before and after, the dialog as a sheet,
   await page.waitForTimeout(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['invoice-pdf']!, true);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
-  expect(config(w).inboxBoard).toBe(true);
+  expect(config(w).inboxBoard).toBeUndefined();
+  // Stacked, the primary on top.
+  const on = await page.locator('[data-board-intro-on]').boundingBox();
+  const not = await page.locator('[data-board-intro-close]').boundingBox();
+  expect(on!.y).toBeLessThan(not!.y);
   await shots(page, 'phone-{s}-reveal');
-  await page.locator('[data-board-intro-close]').click();
+  await page.locator('[data-board-intro-on]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
+  await expect.poll(() => config(w).inboxBoard).toBe(true);
+  await expect(desk.locator('[data-board-nav]')).toBeVisible({ timeout: 5_000 });
   await page.locator('[data-sidebar="trigger"]').first().click();
   await expect(page.locator('[data-board-nav]')).toBeVisible();
   await shots(page, 'phone-{s}-after');
   await page.locator('[data-board-nav]').click();
   await expect(page.locator('[data-board-view="phone"]')).toBeVisible();
-  await page.waitForTimeout(1_500);
+  // The first visit: the welcome, with Copy prompt (the offer had none).
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(`${DIALOG} [data-board-intro-copy]`)).toBeVisible();
+  await expect(page.locator(`${DIALOG} [data-board-intro-on]`)).toHaveCount(0);
+  await shots(page, 'phone-{s}-welcome');
+  await page.locator('[data-board-intro-close]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(config(w).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
   await shots(page, 'phone-{s}-board');
+  // The desktop tab's first visit: the welcome was this machine's, once.
+  await desk.locator('[data-board-nav]').click();
+  await desk.waitForTimeout(1_500);
+  await expect(desk.locator(DIALOG)).toHaveCount(0);
 });
