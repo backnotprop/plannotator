@@ -35,6 +35,7 @@ import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -473,7 +474,12 @@ export function windowedThread(
   const thread = store.agentThread(threadId, input.caller ?? null);
   if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
   // A reply that tags agents names its owner as `to` (the session it goes to anyway), so the transcript says who it is for.
-  const all = thread.messages.map((message) => {
+  // A Tidy run whose wake to a session was withdrawn (steps turned off, only steps listed) asked it nothing: its notes are left out.
+  const withdrawn = thread.messages.some((m) => m.tidy)
+    ? new Set(store.tidyNotes().filter((m) => m.tidy?.wake && m.to && m.delivery?.host === INBOX_TIDY_WITHDRAWN_HOST).map((m) => `${m.tidy!.id}|${m.to!.session}`))
+    : null;
+  const listed = withdrawn && withdrawn.size > 0 ? thread.messages.filter((m) => !(m.tidy && m.to && withdrawn.has(`${m.tidy.id}|${m.to.session}`))) : thread.messages;
+  const all = listed.map((message) => {
     // A Tidy note reads as one line here: its session had the whole list in its wake.
     if (message.tidy) return { ...message, body: `Tidy: the person asked ${INBOX_HOST_NAMES[message.to?.host ?? ""] ?? "the agent"} to tidy its threads; this one was listed.` };
     if (message.to || !(message as { tagged?: unknown }).tagged) return message;
@@ -681,7 +687,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
 }
 
 /** The whole windowed read as text: complete for an agent (the JSON adds nothing it needs). */
-export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = ""): string {
+export function windowedThreadText(result: ThreadWindowResult, order: readonly string[], extra = "", steps: readonly string[] = []): string {
   const { thread, window } = result;
   const persons = thread.participants.filter((p) => p.kind === "person").reduce((sum, p) => sum + p.messages, 0);
   const out: string[] = [];
@@ -717,6 +723,8 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   if (thread.questions?.length) {
     out.push(`Questions of messages not shown: ${thread.questions.map((q) => `${q.message_id}/${questionWords(q, true)}`).join("; ")}`);
   }
+  // Thread steps (approval "inbox-thread-steps"): given only while the person has them on.
+  out.push(...steps);
   const range = window.after !== undefined || window.before !== undefined
     ? ` Range:${window.after !== undefined ? ` after ${window.after}` : ""}${window.before !== undefined ? ` before ${window.before}` : ""}; ${window.left_out} other message${window.left_out === 1 ? "" : "s"} left out.`
     : "";

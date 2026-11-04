@@ -158,7 +158,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                   setSnoozeView(null);
                 }}
                 onPick={(until) => {
-                  menu.follow(target.thread_id);
+                  // A snooze moves its row even while a thread is open (App.tsx `moveSnoozedRow`): focus follows it.
+                  menu.follow(target.thread_id, true);
                   props.onSnooze?.(target, until);
                 }}
                 onClose={menu.close}

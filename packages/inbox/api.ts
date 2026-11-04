@@ -58,6 +58,7 @@ import type {
   InboxCardHistoryEntry,
   InboxCardRef,
   InboxCardWire,
+  InboxStepsWire,
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
@@ -115,6 +116,8 @@ export interface CardsModel {
   seen_seq?: number | null;
   /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
   threads?: Record<string, InboxListRow | null>;
+  /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
+  steps?: Record<string, InboxStepsWire[]>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -402,6 +405,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
   board?: { on: boolean };
+  /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
+  steps?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1090,6 +1095,23 @@ export const inboxApi = {
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
   /** The Board on or off (Settings → Capabilities): agents get the card action from their next session. */
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
+  /** Thread steps on or off (Settings → Capabilities, approval "inbox-thread-steps"): every window hears `event: capabilities`. */
+  saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
+  /**
+   * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
+   * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
+   * read as off.
+   */
+  threadSteps: async (threadId: string): Promise<{ on: boolean; steps: InboxStepsWire[] }> => {
+    if (machineOf(threadId)) return { on: false, steps: [] };
+    try {
+      const answer = await get<{ on?: unknown; steps?: unknown }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/steps`));
+      return { on: answer.on === true, steps: Array.isArray(answer.steps) ? (answer.steps as InboxStepsWire[]) : [] };
+    } catch (cause) {
+      if (cause instanceof InboxApiError && cause.status === 404) return { on: false, steps: [] };
+      throw cause;
+    }
+  },
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
@@ -1529,7 +1551,9 @@ export type InboxEvent =
   | { seq: number; kind: 'question'; id: string; thread_id?: string | null; question: InboxQuestion }
   | { seq: number; kind: 'annotation'; id: string; annotation: InboxAnnotationRecord }
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
-  | { seq: number; kind: 'card'; id: string; card: InboxCardWire };
+  | { seq: number; kind: 'card'; id: string; card: InboxCardWire }
+  /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
+  | { seq: number; kind: 'steps'; id: string; thread_id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
@@ -1597,6 +1621,8 @@ export interface InboxEventHandlers {
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
+  /** A capability switch was saved, here or in another window (`event: capabilities`, today thread steps); never called by an older Inbox. */
+  onCapabilities?: (capabilities: { steps?: { on: boolean } }) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1632,7 +1658,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1715,10 +1741,21 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         // A malformed frame changes nothing.
       }
       return;
+    case 'capabilities':
+      try {
+        const data = JSON.parse(frame.data) as { steps?: { on?: unknown } };
+        handlers.onCapabilities?.(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {});
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
     case 'machine':
       try {
         const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
         if (typeof data.machine === 'string' && typeof data.seq === 'number') {
+          // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
+          // neither rings nor makes the open thread read again.
+          if ((data.record as { kind?: unknown } | undefined)?.kind === 'steps') return;
           rememberMachine(idsIn(data.record), data.machine);
           handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
         }

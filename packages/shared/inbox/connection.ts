@@ -48,6 +48,7 @@ export const INBOX_TOOL_ACTIONS = [
   'submit_guide',
   'get_guide_brief',
   'card',
+  'steps',
 ] as const
 
 export type InboxToolAction = (typeof INBOX_TOOL_ACTIONS)[number]
@@ -237,6 +238,9 @@ export function inboxSessionThreadsText(result: unknown, toolName: string = INBO
     const open = typeof questions?.open === 'number' && questions.open > 0 ? questions.open : 0
     if (open > 0) parts.push(`${open} open question${open === 1 ? '' : 's'}`)
     if (thread!.unread === true) parts.push('the person wrote something you have not read')
+    // Your steps there (approval "inbox-thread-steps"): the Inbox lists them only while the person has steps on.
+    const steps = thread!.steps as { done?: unknown; total?: unknown } | undefined
+    if (typeof steps?.done === 'number' && typeof steps.total === 'number' && steps.total > 0) parts.push(`steps ${steps.done}/${steps.total}`)
     const at = time(thread!.last_at)
     if (at) parts.push(`last ${thread!.last_author === 'person' ? 'the person' : 'an agent'} ${at}`)
     lines.push(parts.join(' · '))
@@ -388,6 +392,44 @@ export const INBOX_TOOL_HELP_NOTE = "Every field and question syntax: `plannotat
 export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlasts a reply) is off until the person turns it on; see `plannotator card --help`."
 
 /**
+ * Thread steps (approval "inbox-thread-steps", 2026-11-03): the owner's
+ * approved text word for word, after `steps: `. It rides the `steps` field's
+ * description (a field description does not count toward Claude Code's 2,048
+ * characters; the owner chose this over a cut description) and is the MCP
+ * tool's description. Served only while the person has steps on (config.json
+ * `inboxSteps`): off, no agent text carries any of it.
+ */
+export const INBOX_STEPS_LEAD =
+  'your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.'
+
+/** The agent tool's line for the `steps` action (the owner, 2026-11-03): short, so the description stays under 2,048. */
+export const INBOX_STEPS_ACTION_LINE = "keep the person's checklist for this thread current (details on the steps field)."
+
+/** The `steps` field (the action's, and send_message's while steps are on): the approved text, then where a list goes before there is a thread. */
+export const INBOX_STEPS_FIELD_DESCRIPTION = `steps: ${INBOX_STEPS_LEAD} No thread yet: send it with the send_message that starts one.`
+
+/**
+ * The wake's one line on a reply in a thread where the session keeps steps
+ * (approval "inbox-thread-steps", approved text): "Your steps here: 3 of 6
+ * done; doing: X. Update them if that changed." Without a step in progress,
+ * the `doing` part is left out.
+ */
+export function inboxStepsWakeLine(steps: { done: number; total: number; doing: string | null }): string {
+  return `Your steps here: ${steps.done} of ${steps.total} done${steps.doing ? `; doing: ${steps.doing}` : ''}. Update them if that changed.`
+}
+
+/** A command's `steps` as the wake may print it, or null (absent, or not the Inbox's shape). */
+function wakeSteps(value: unknown): { done: number; total: number; doing: string | null } | null {
+  if (!value || typeof value !== 'object') return null
+  const { done, total, doing } = value as Record<string, unknown>
+  const count = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 12
+  if (!count(done) || !count(total) || total === 0 || done > total) return null
+  // One line, no control or separator characters: it goes into the session's prompt.
+  const step = typeof doing === 'string' ? doing.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : ''
+  return { done, total, doing: step || null }
+}
+
+/**
  * The agent tool's own line for an action whose Inbox lead is long (the
  * description must stay under Claude Code's 2,048 characters, and every Pi and
  * OpenCode request carries it).
@@ -400,6 +442,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   search: 'Find messages by words, older ones too (read-only).',
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
+  steps: INBOX_STEPS_ACTION_LINE,
 }
 
 /**
@@ -926,6 +969,13 @@ export interface InboxReplyCommand {
    * message and the body still says what it is. Absent on every other command.
    */
   tidy?: boolean
+  /**
+   * The receiving session's steps in this thread (approval
+   * "inbox-thread-steps"), only while the person has steps on and the session
+   * keeps a list there: the wake adds `inboxStepsWakeLine`. Absent otherwise;
+   * an older connection ignores it.
+   */
+  steps?: { done: number; total: number; doing: string | null }
 }
 
 /**
@@ -1233,6 +1283,7 @@ export function inboxWakeText(
     reask_items?: unknown
     reask_one?: unknown
     tidy?: boolean
+    steps?: unknown
   },
   toolName: string = INBOX_TOOL_NAME,
 ): string {
@@ -1245,7 +1296,9 @@ export function inboxWakeText(
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  const closing = `\n\n${inboxWakeClosingLine(command.thread_id, toolName)}`
+  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
+  const steps = wakeSteps(command.steps)
+  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${inboxWakeClosingLine(command.thread_id, toolName)}`
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   // The thread was handed to another session: the notice alone.
   if (command.handed_away && typeof command.handed_away === 'object') {

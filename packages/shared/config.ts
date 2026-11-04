@@ -463,6 +463,15 @@ export interface PlannotatorConfig {
    */
   inboxBoard?: boolean;
   /**
+   * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
+   * person turns on, off by default. On: the thread's steps button, the
+   * steps in the Board's opened card, and the agents' `steps` tool, wake
+   * line, compaction line and Tidy rule. Off: none of it, every list kept.
+   * Written by the Inbox's Settings → Capabilities (`POST
+   * /api/inbox/settings` `{ steps: { on } }`), read on every request.
+   */
+  inboxSteps?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
