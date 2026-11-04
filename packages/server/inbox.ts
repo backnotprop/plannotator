@@ -131,7 +131,7 @@ import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggest
 import { createInboxTidy } from "./inbox-tidy";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
-import { InboxError } from "@plannotator/shared/inbox/schema";
+import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
@@ -214,6 +214,7 @@ import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type Inbo
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -440,6 +441,8 @@ export interface InboxServerOptions {
   prRuntime?: PRRuntime;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
+  /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
+  pullAvatars?: Partial<PullAvatarOptions>;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
   /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
@@ -681,6 +684,11 @@ const ERROR_STATUS: Record<string, number> = {
   card_backlog_person_only: 409,
   card_dropped_by_person: 409,
   card_person_only: 403,
+  // The Board's initiatives (approval "board-initiatives"): only the person's; one name each.
+  initiative_not_found: 404,
+  initiative_exists: 409,
+  initiative_limit: 409,
+  initiative_person_only: 403,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
   tailscale_env_decides: 409,
   // Settings → Capabilities → Experimental, while PLANNOTATOR_EXPERIMENTAL decides.
@@ -998,6 +1006,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
+  const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
@@ -1011,6 +1021,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const root = store.message(id);
       return root && root.thread_id === id ? store.canonicalProjectId(root.project_id) : null;
     },
+    // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
+    sessionLive: (session) => live.isSessionLive(session),
   };
   // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
   // A project's origin is read once before its first list (the cache is read-behind), so the first open after a
@@ -1328,7 +1340,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (lists.length > 0) steps[id] = lists;
       }
     }
-    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads, ...(steps ? { steps } : {}) };
+    // `initiatives` (additive, approval "board-initiatives"): every one, deleted ones too (an opened card's
+    // history names them); the window offers only the live ones.
+    return {
+      serverSession,
+      cursor: store.cursor(),
+      cards,
+      dropped_unseen: droppedUnseen,
+      seen_seq: readInboxBoardSeen(store.dir),
+      threads,
+      ...(steps ? { steps } : {}),
+      initiatives: store.initiatives(),
+    };
   };
 
   /**
@@ -1360,8 +1383,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "send":
         // Sent to an agent: `thread_id` is the thread the window just started for it (compose's Send).
         return store.sendCard(id, { thread_id: body.thread_id });
+      case "initiative":
+        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none.
+        if (body.initiative === undefined) throw new InboxError("validation_error", "initiative: an ini_ id, or null for none.", { field: "initiative" });
+        return store.setCardInitiative(id, body.initiative, by);
       default:
-        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link or send.", { field: "op" });
+        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link, send or initiative.", { field: "op" });
     }
   };
 
@@ -2420,6 +2447,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A session's steps in a thread (approval "inbox-thread-steps"): silent, never a notification or unread.
         // `thread_id` so a window reads the open thread's steps again only for its own. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
+      case "initiative":
+        // A Board initiative (approval "board-initiatives"): silent. A reader that does not know the kind skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id, initiative: line.record };
     }
   };
 
@@ -3515,13 +3545,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/avatar") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        // A PR author's picture (the list's top-left spot): only a login the last list showed on that host, fetched by
+        // the Inbox from the URL the forge gave (inbox-pull-avatars.ts); the window's CSP never loads a remote image.
+        if (path === "/api/inbox/pulls/avatar") {
+          const host = url.searchParams.get("host") ?? "";
+          const login = url.searchParams.get("login") ?? "";
+          if (host.length === 0 || host.length > 255) throw new InboxError("validation_error", "host: a forge host from the list.", { field: "host" });
+          if (login.length === 0 || login.length > 100) throw new InboxError("validation_error", "login: an author's login from the list.", { field: "login" });
+          if (!pullAvatars.known(host, login)) return json({ error: "No such author in the list.", code: "avatar_unknown" }, 404);
+          const picture = await pullAvatars.get(host, login);
+          if (!picture.ok) return json({ error: "No picture for this author.", code: "avatar_miss", miss: picture.miss }, 404);
+          return new Response(picture.body, {
+            headers: {
+              "content-type": picture.type,
+              "cache-control": "private, max-age=86400",
+              "x-content-type-options": "nosniff",
+              "content-security-policy": "sandbox; default-src 'none'",
+              "cross-origin-resource-policy": "same-origin",
+            },
+          });
+        }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
           const scope = url.searchParams.get("scope") ?? "layer";
@@ -3536,6 +3586,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
+        pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
@@ -4045,8 +4097,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           refs,
           idempotency_key: body.idempotency_key,
           send_thread_id: body.thread_id ?? undefined,
+          // A New card on a Board filtered to an initiative starts in it (approval "board-initiatives").
+          initiative: body.initiative ?? undefined,
         });
         return json({ card: store.cardWire(made.card), replayed: made.replayed });
+      }
+      // The Board's initiatives (approval "board-initiatives"): the person makes one (`POST`, `name`).
+      if (path === "/api/inbox/initiatives") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ initiative: store.createInitiative({ name: body.name, by: { kind: "person" } }) });
+      }
+      // One initiative: `op` rename (`name`) or delete (its cards read as in none; no card is written).
+      const initiativeAt = /^\/api\/inbox\/initiatives\/([^/]+)$/.exec(path);
+      if (initiativeAt) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const id = decodeURIComponent(initiativeAt[1]!);
+        if (!isInboxId("ini", id)) throw new InboxError("validation_error", "An initiative id (ini_).", { field: "initiative" });
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (body.op === "rename") return json({ initiative: store.renameInitiative(id, body.name) });
+        if (body.op === "delete") return json({ initiative: store.deleteInitiative(id) });
+        throw new InboxError("validation_error", "op: rename or delete.", { field: "op" });
       }
       // The person opened the Board: the look runs through the store's cursor when that Board was read (never back, never ahead).
       if (path === "/api/inbox/cards/seen") {

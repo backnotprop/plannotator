@@ -158,7 +158,7 @@ import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
-import { boardViewOf, newCardProject, type BoardView } from './board/model';
+import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
@@ -311,6 +311,13 @@ interface Route {
    * way back lands on the same filtered Board. On the Board itself the filter is `project` (`#board&project=prj_…`).
    */
   boardProject?: string | null;
+  /**
+   * The Board's initiative filter (approval "board-initiatives"): on the Board `#board&initiative=ini_…` (or
+   * `none`, the cards in none), beside `project`; on a thread opened from a card, `&board-initiative=`, so its
+   * way back lands on the same filtered Board.
+   */
+  initiative?: string | null;
+  boardInitiative?: string | null;
   /** The onboarding tour's step (`#tour=3`, approval "inbox-onboarding-tour"): 1 to 6. */
   step?: number;
   /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
@@ -369,7 +376,15 @@ function routeOf(fullHash: string): Route {
     const layer = stack ? params.get('layer') || null : null;
     return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
   }
-  if (params.has('board')) return { page: 'board', project: params.get('project') || null, thread: null, board: boardViewOf(params.get('board')), card: params.get('card') };
+  if (params.has('board'))
+    return {
+      page: 'board',
+      project: params.get('project') || null,
+      initiative: boardInitiativeOf(params.get('initiative'), null),
+      thread: null,
+      board: boardViewOf(params.get('board')),
+      card: params.get('card'),
+    };
   const thread = params.get('thread');
   const fileId = thread ? params.get('file') : null;
   return {
@@ -386,6 +401,7 @@ function routeOf(fullHash: string): Route {
     // The Board list the card was opened from (Done, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
     boardProject: thread && params.get('card') ? params.get('board-project') || null : null,
+    boardInitiative: thread && params.get('card') ? boardInitiativeOf(params.get('board-initiative'), null) : null,
   };
 }
 
@@ -399,7 +415,7 @@ function hashOf(route: Route): string {
   else if (route.page === 'board')
     hash =
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
-      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      boardFilterHash({ project: route.project, initiative: route.initiative }) +
       (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
   else if (route.page === 'pulls')
     hash =
@@ -431,6 +447,7 @@ function hashOf(route: Route): string {
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
+    if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
     // `&artifacts`, a flag: written without its empty `=`.
     hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
   }
@@ -1605,6 +1622,12 @@ function Inbox() {
    */
   const boardFilter =
     route.page === 'board' && route.project && (latest === null || latest.projects.some((p) => p.id === route.project)) ? route.project : null;
+  /**
+   * The initiative the Board is filtered to (`#board&initiative=ini_…`, or `none`; approval
+   * "board-initiatives"). One the Inbox does not hold (deleted, a stale link) is no filter once the
+   * cards have loaded; before that the id filters as it stands.
+   */
+  const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {
       setBoardVisit(null);
@@ -1627,7 +1650,7 @@ function Inbox() {
    * look to record (no `seen_seq`): nothing is bold beyond this visit there.
    */
   const lookRecorded = useRef(false);
-  const boardShowsAll = onBoard && boardFilter === null;
+  const boardShowsAll = onBoard && boardFilter === null && boardInitiative === null;
   useEffect(() => {
     if (!boardVisit) {
       lookRecorded.current = false;
@@ -1794,7 +1817,8 @@ function Inbox() {
       unsubscribe = subscribeInboxEvents(first.cursor, {
         onRecord: (event) => {
           // A Board card (approval "inbox-board"): only the Board reads it; it never changes the list or a thread.
-          if (event?.kind === 'card') {
+          // A Board initiative (approval "board-initiatives") reaches the Board through its cards' read too.
+          if (event?.kind === 'card' || event?.kind === 'initiative') {
             if (cardsTimer) clearTimeout(cardsTimer);
             cardsTimer = setTimeout(() => void refreshCards(), 60);
             return;
@@ -4284,11 +4308,12 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
-  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read only while
-  // the page is open, never from a tailnet guest's page (it runs this computer's gh / glab).
+  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
+  // page is open, and for the sidebar's count once at start and on focus; never from a tailnet guest's page (it runs
+  // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown);
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
@@ -4751,7 +4776,8 @@ function Inbox() {
     setThreadFull(false);
   };
   leaveFullRef.current = leaveFull;
-  const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
+  const backToCard = () =>
+    close({ page: 'board', project: route.boardProject ?? null, initiative: route.boardInitiative ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
   // ⌘K's "Shape" group: the boards whose title or project the words find, newest change first.
   const searchShapes = useCallback(
     (q: string): SearchShape[] =>
@@ -5173,19 +5199,34 @@ function Inbox() {
         openCard={route.card ?? null}
         onOpenCard={(id) => {
           if (id) handleCard(id);
-          const next: Route = { page: 'board', project: route.project, thread: null, board: route.board ?? 'lanes', card: id };
+          const next: Route = { page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: route.board ?? 'lanes', card: id };
           // Another card replaces the open one's entry; opening the first and closing are entries of their own (a phone's Back closes it).
           if (id === null && route.card) close(next);
           else writeRoute(next, { replace: !!route.card && id !== null });
         }}
         rowOf={(threadId) => rowById.get(threadId) ?? null}
-        onView={(next) => go({ page: 'board', project: route.project, thread: null, board: next })}
+        onView={(next) => go({ page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: next })}
         project={boardFilter}
         // The filter is a place, like the list's project: each pick is a history entry, and Back undoes it.
         onProject={(project) => {
           // An opened card stays open while the Board still shows it.
           const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
-          go({ page: 'board', project, thread: null, board: route.board ?? 'lanes', card: open && (project === null || open.project_id === project) ? open.id : null });
+          go({
+            page: 'board',
+            project,
+            initiative: boardInitiative,
+            thread: null,
+            board: route.board ?? 'lanes',
+            card: open && (project === null || open.project_id === project) ? open.id : null,
+          });
+        }}
+        initiative={boardInitiative}
+        onClearFilter={() => go({ page: 'board', project: null, initiative: null, thread: null, board: route.board ?? 'lanes', card: route.card ?? null })}
+        // The other half of the one filter: a pick is a history entry too, and Back undoes it.
+        onInitiative={(initiative) => {
+          const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
+          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives)).length > 0;
+          go({ page: 'board', project: route.project, initiative, thread: null, board: route.board ?? 'lanes', card: shows ? open.id : null });
         }}
         onMove={moveCard}
         // A card that leaves the lanes from its right-click menu: the one toast, with Undo (`Z`).
@@ -5200,7 +5241,9 @@ function Inbox() {
         }}
         onSeeDrops={seeDrops}
         tidy={boardTidy}
-        onOpenThread={(card, threadId) => go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter })}
+        onOpenThread={(card, threadId) =>
+          go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
+        }
         onCreateThread={(card, session, opener) => openCompose({ session, card: { id: card.id, title: card.title } }, opener)}
         // The lane marks run this computer's gh / glab: never asked from a tailnet guest's page.
         marks={settings !== null && !guestPage}
@@ -5675,7 +5718,7 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (nothing reads while the page is closed).
+            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
             onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}

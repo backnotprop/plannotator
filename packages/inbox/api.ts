@@ -11,6 +11,7 @@ import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import type {
   InboxCardMark,
+  InboxInitiative,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -120,6 +121,8 @@ export interface CardsModel {
   threads?: Record<string, InboxListRow | null>;
   /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
   steps?: Record<string, InboxStepsWire[]>;
+  /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
+  initiatives?: InboxInitiative[];
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -1375,8 +1378,25 @@ export const inboxApi = {
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
-  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
-    post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  createCard: (input: {
+    project?: string | null;
+    title: string;
+    notes?: string | null;
+    column?: 'backlog' | 'todo';
+    refs?: string[];
+    thread_id?: string;
+    idempotency_key?: string;
+    /** The initiative the Board is filtered to: the new card starts in it. */
+    initiative?: string | null;
+  }) => post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  /** The card's initiative (an `ini_` id), or none (null). */
+  setCardInitiative: (id: string, initiative: string | null) =>
+    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
+  /** A new initiative, named. */
+  createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
+  /** An initiative renamed, or deleted (its cards read as in none). */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' }) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -1392,6 +1412,8 @@ export const inboxApi = {
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
   pulls: (refresh = false, signal?: AbortSignal) => get<InboxPullsAnswer>(inboxUrl(`/pulls${refresh ? '?refresh=1' : ''}`), signal),
+  /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
+  pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
@@ -1626,7 +1648,9 @@ export type InboxEvent =
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
   | { seq: number; kind: 'card'; id: string; card: InboxCardWire }
   /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
-  | { seq: number; kind: 'steps'; id: string; thread_id: string };
+  | { seq: number; kind: 'steps'; id: string; thread_id: string }
+  /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
+  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
