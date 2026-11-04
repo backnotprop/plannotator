@@ -1330,6 +1330,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (lists.length > 0) steps[id] = lists;
       }
     }
+    const initiativeThreads = store.initiativeThreads();
+    for (const ids of Object.values(initiativeThreads)) for (const id of ids) if (!(id in threads)) threads[id] = store.listRow(id);
     // `initiatives` (additive, approval "board-initiatives"): every one, deleted ones too (an opened card's
     // history names them); the window offers only the live ones.
     return {
@@ -1341,6 +1343,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       threads,
       ...(steps ? { steps } : {}),
       initiatives: store.initiatives(),
+      // `initiative_threads` (additive, prototype "board-hashtags"): per live initiative, the threads a
+      // message tags it in (`#Shape`), latest first; their list rows join `threads` above.
+      initiative_threads: initiativeThreads,
     };
   };
 

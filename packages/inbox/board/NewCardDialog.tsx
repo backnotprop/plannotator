@@ -5,6 +5,8 @@ import type { ComposeSessionsModel, ProjectFolder } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
+import { HashtagFieldMenu } from '../components/HashtagFieldMenu';
+import { useHashtagPicker, useInitiativeTags } from '../hashtags';
 import { SessionDetail, ToPicker } from '../compose/ToPicker';
 import { composeGroups, findTarget, hostLabel, type ComposeTarget } from '../compose/model';
 
@@ -87,8 +89,15 @@ export function NewCardDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
+  // `#` in the title or notes picks the card's initiative (prototype "board-hashtags"): the token below says it, the text drops the tag.
+  const known = useInitiativeTags();
+  const tags = useMemo(() => (fixed ? { ...known, initiatives: [] } : { ...known, initiatives: initiatives.length > 0 ? initiatives : known.initiatives }), [fixed, initiatives, known]);
+  const pickInitiative = (picked: InboxInitiative) => setInitiative(picked.id);
+  const titleHash = useHashtagPicker({ text: title, setText: setTitle, fieldRef: titleRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });
+  const notesHash = useHashtagPicker({ text: notes, setText: setNotes, fieldRef: notesRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });
   useEffect(() => titleRef.current?.focus(), []);
   const projectRow = projects.find((p) => p.id === project) ?? null;
   const groups = useMemo(() => composeGroups(sessions?.projects ?? [], projectRow ? { id: projectRow.id, root: projectRow.root } : null), [sessions, projectRow]);
@@ -169,31 +178,60 @@ export function NewCardDialog({
           <label className="ib-sr" htmlFor={`ib-ncd-title-${uid}`}>
             Title
           </label>
-          <input
-            id={`ib-ncd-title-${uid}`}
-            ref={titleRef}
-            className="ib-ncd-title"
-            type="text"
-            placeholder="Title"
-            value={title}
-            maxLength={INBOX_CARD_TITLE_MAX}
-            onChange={(event) => setTitle(event.target.value)}
-            readOnly={fixed !== null}
-            data-new-card-title=""
-          />
+          <div className="ib-hashwrap">
+            {titleHash.menu && <HashtagFieldMenu id={`ib-ncd-hash-t-${uid}`} field={titleRef.current} menu={titleHash.menu} onSelect={titleHash.select} />}
+            <input
+              id={`ib-ncd-title-${uid}`}
+              ref={titleRef}
+              className="ib-ncd-title"
+              type="text"
+              placeholder="Title"
+              value={title}
+              maxLength={INBOX_CARD_TITLE_MAX}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                titleHash.onSelect();
+              }}
+              onSelect={titleHash.onSelect}
+              onKeyDown={(event) => {
+                if (titleHash.onKeyDown(event)) event.stopPropagation();
+              }}
+              readOnly={fixed !== null}
+              role={titleHash.menu ? 'combobox' : undefined}
+              aria-expanded={titleHash.menu ? true : undefined}
+              aria-controls={titleHash.menu ? `ib-ncd-hash-t-${uid}` : undefined}
+              aria-activedescendant={titleHash.menu?.activeIndex != null ? `ib-ncd-hash-t-${uid}-option-${titleHash.menu.activeIndex}` : undefined}
+              data-new-card-title=""
+            />
+          </div>
           <label className="ib-sr" htmlFor={`ib-ncd-notes-${uid}`}>
             Notes
           </label>
-          <textarea
-            id={`ib-ncd-notes-${uid}`}
-            className="ib-ncd-notes"
-            placeholder={mode === 'send' ? 'Notes: what the agent should do. They are the message it gets.' : 'Notes (optional)'}
-            value={notes}
-            maxLength={INBOX_CARD_NOTES_MAX}
-            onChange={(event) => setNotes(event.target.value)}
-            readOnly={fixed !== null}
-            data-new-card-notes=""
-          />
+          <div className="ib-hashwrap ib-hashwrap-notes">
+            {notesHash.menu && <HashtagFieldMenu id={`ib-ncd-hash-n-${uid}`} field={notesRef.current} menu={notesHash.menu} onSelect={notesHash.select} />}
+            <textarea
+              id={`ib-ncd-notes-${uid}`}
+              ref={notesRef}
+              className="ib-ncd-notes"
+              placeholder={mode === 'send' ? 'Notes: what the agent should do. They are the message it gets.' : 'Notes (optional)'}
+              value={notes}
+              maxLength={INBOX_CARD_NOTES_MAX}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                notesHash.onSelect();
+              }}
+              onSelect={notesHash.onSelect}
+              onKeyDown={(event) => {
+                if (notesHash.onKeyDown(event)) event.stopPropagation();
+              }}
+              readOnly={fixed !== null}
+              role={notesHash.menu ? 'combobox' : undefined}
+              aria-expanded={notesHash.menu ? true : undefined}
+              aria-controls={notesHash.menu ? `ib-ncd-hash-n-${uid}` : undefined}
+              aria-activedescendant={notesHash.menu?.activeIndex != null ? `ib-ncd-hash-n-${uid}-option-${notesHash.menu.activeIndex}` : undefined}
+              data-new-card-notes=""
+            />
+          </div>
           {fixed === null && (
           <label className="ib-ncd-links">
             <Icon name="link" size={15} />

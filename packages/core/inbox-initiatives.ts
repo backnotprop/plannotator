@@ -70,3 +70,67 @@ export function inboxCardInitiativeOf(card: { initiative?: string | null }, live
   const id = card.initiative ?? null;
   return id !== null && live.has(id) ? id : null;
 }
+
+// ─────────────── Hashtags (prototype "board-hashtags") ───────────────
+// `#Shape` in what the person writes names an initiative. A tag is `#`, then
+// a letter or digit, then letters, digits, `_` or `-`; never all digits
+// (`#123` is an issue), never after a letter, digit, `/`, `&` or `#` (a URL's
+// fragment, `owner/repo#1`, `##`). Code (fenced or `inline`) holds no tag.
+
+/** A hashtag's key: letters and digits only, lowercased, so `#CodeReview`, `#code-review` and "Code review" are one. */
+export function inboxInitiativeTagKey(name: string): string {
+  return name.normalize("NFKC").toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+/** How a pick is written: `#Shape`, `#CodeReview` (the words joined, each after the first capitalised). */
+export function inboxInitiativeTag(name: string): string {
+  const words = name
+    .normalize("NFKC")
+    .split(/\s+/)
+    .map((word) => word.replace(/[^\p{L}\p{N}_-]/gu, ""))
+    .filter(Boolean);
+  return `#${words.map((word, i) => (i === 0 ? word : word.charAt(0).toLocaleUpperCase() + word.slice(1))).join("")}`;
+}
+
+/** Code blocked out (same length, spaces), so a `#name` in code is never a tag. */
+function withoutCode(text: string): string {
+  const blank = (match: string) => match.replace(/[^\n]/g, " ");
+  return text.replace(/```[\s\S]*?(```|$)/g, blank).replace(/`[^`\n]*`/g, blank);
+}
+
+export interface InboxHashtag {
+  /** Index of the `#`. */
+  start: number;
+  /** Index just past the tag. */
+  end: number;
+  /** As written, without the `#`. */
+  tag: string;
+  key: string;
+}
+
+/** Every hashtag in `text`, in order. */
+export function inboxHashtags(text: string): InboxHashtag[] {
+  const out: InboxHashtag[] = [];
+  const re = /(^|[^\p{L}\p{N}_&/#])#([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
+  const plain = withoutCode(text);
+  for (let match = re.exec(plain); match; match = re.exec(plain)) {
+    const tag = match[2]!.replace(/[-_]+$/, "");
+    if (/^\d+$/.test(tag)) continue;
+    const start = match.index + match[1]!.length;
+    out.push({ start, end: start + 1 + tag.length, tag, key: inboxInitiativeTagKey(tag) });
+  }
+  return out;
+}
+
+/** The live initiative a tag names, or null. */
+export function inboxInitiativeOfTag<T extends Pick<InboxInitiative, "name" | "deleted_at">>(key: string, initiatives: readonly T[]): T | null {
+  if (!key) return null;
+  return initiatives.find((i) => i.deleted_at === null && inboxInitiativeTagKey(i.name) === key) ?? null;
+}
+
+/** The live initiative the last tag in `text` that names one names, or null (what a message puts its thread's card in). */
+export function inboxTaggedInitiative<T extends Pick<InboxInitiative, "name" | "deleted_at">>(text: string, initiatives: readonly T[]): T | null {
+  let found: T | null = null;
+  for (const tag of inboxHashtags(text)) found = inboxInitiativeOfTag(tag.key, initiatives) ?? found;
+  return found;
+}
