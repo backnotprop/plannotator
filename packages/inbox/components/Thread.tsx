@@ -62,6 +62,7 @@ import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainIte
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
+import { labelledAgent, labelOf, useSessionLabels } from '../sessionLabels';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -2004,7 +2005,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
   const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
-  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
+  // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
+  const sessionLabels = useSessionLabels();
+  const tagOwner =wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
@@ -5198,7 +5201,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         )}
       </div>
       {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
-      <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
+      <div
+        className={`ib-pbody${one ? '' : ' ib-folding'}`}
+        ref={bodyRef}
+        hidden={artifactsOn}
+        // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
+        data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
+      >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
         {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
@@ -5357,7 +5366,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             );
           }
           const isAgent = message.author.kind === 'agent';
-          const name = isAgent ? agentName(message.author) : 'You';
+          // A named session writes as its label (issue #2450), the agent's mark beside it and its name on hover;
+          // the session's poll names it, never the model, and an unnamed one reads as it always did.
+          const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
+          const name = isAgent ? (authorLabel ?? agentName(message.author)) : 'You';
+          const nameTip = authorLabel ? labelledAgent(authorLabel, message.author.kind === 'agent' ? message.author.host : null) : name;
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
@@ -5376,7 +5389,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               },
             });
             const snippet = foldSnippet(message, thread.messages);
-            const label = `${name}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
+            const label = `${nameTip}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
             before.push(
               <article
                 className="ib-message ib-folded"
@@ -5398,8 +5411,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                       <Icon name="reply" />
                     </span>
                   )}
-                  <Tip content={name} cut>
-                    <span className="ib-fl-nm">{name}</span>
+                  <Tip content={nameTip} cut={!authorLabel}>
+                    <span className="ib-fl-nm" data-session-label={authorLabel ? '' : undefined}>
+                      {authorLabel ? <bdi>{name}</bdi> : name}
+                    </span>
                   </Tip>
                   {/* An answers snippet is shortened (each prompt cut at a word): its whole text always; words only while cut. */}
                   <Tip content={snippetText(snippet)} cut={snippet.kind !== 'answers'}>
@@ -5488,7 +5503,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               )}
             </>
           );
-          const foldLabel = `${name}, ${time}${isNew ? ', new' : ''}. Fold this message`;
+          const foldLabel = `${nameTip}, ${time}${isNew ? ', new' : ''}. Fold this message`;
           const revealed = revealedId === message.id;
           before.push(
             <article
@@ -5527,8 +5542,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                         </span>
                       )}
                     </span>
-                    <Tip content={one ? name : null} cut>
-                      <span className="ib-fl-nm ib-who" aria-hidden={hide}>
+                    <Tip content={authorLabel ? nameTip : one ? name : null} cut={!authorLabel}>
+                      <span className="ib-fl-nm ib-who" aria-hidden={hide} data-session-label={authorLabel ? '' : undefined}>
                         <bdi>{name}</bdi>
                       </span>
                     </Tip>

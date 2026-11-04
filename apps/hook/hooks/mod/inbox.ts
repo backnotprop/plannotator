@@ -390,6 +390,150 @@ export function sessionNamesAfterCommand(
   return carried ? withSessionName(record, run.after, carried, now) : record
 }
 
+/**
+ * The session's title as Claude Code itself shows it: the latest
+ * `{"type":"custom-title","customTitle":…}` line of its transcript. `/rename`
+ * writes one, and so do `claude --name`, a rename from a phone or the resume
+ * picker, and a hook or tool that appends one (#2450). The engine gives a plugin
+ * no transcript path, so it is worked out from Claude Code's own layout
+ * (`claudeTranscriptPaths`).
+ *
+ * Cheap on purpose, since every poll asks: a stat, and nothing more while the
+ * file has not grown. When it grew, one `/bin/sh` reads only the bytes added
+ * since the last read (the first read: the file's last
+ * TRANSCRIPT_TITLE_FIRST_READ_BYTES, where Claude Code keeps a resumed
+ * session's title), and `grep` hands back only the title lines, so a long
+ * transcript is never copied into the module. No `/bin/sh` (Windows), no file
+ * found, or a read that fails: null, and the `/rename` store answers.
+ */
+export const TRANSCRIPT_TITLE_FIRST_READ_BYTES = 4 * 1024 * 1024
+/** How long a transcript that was not found waits before it is looked for again. */
+export const TRANSCRIPT_TITLE_LOCATE_RETRY_MS = 60_000
+/** The longest title line read: a real one is short, and anything longer is cut and refused. */
+const TRANSCRIPT_TITLE_LINE_MAX = 4_096
+/**
+ * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes: each
+ * title line (the last few), then `end:<bytes counted>:<last line's bytes>`.
+ * `awk` in the C locale counts bytes on every platform. A title's quotes are
+ * bare only in a real record: inside any other line's string they are escaped
+ * (`\"type\":…`), so the pattern finds no message text.
+ */
+export const TRANSCRIPT_TITLE_SCRIPT = `tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { print "end:" o ":" last }' | tail -n 20; exit 0`
+
+/** Claude Code's folder name for a project: every character but a letter or digit is `-`. Null past 200 (Claude Code adds a hash there). */
+export function claudeProjectSlug(folder: string): string | null {
+  const slug = folder.replace(/[^a-zA-Z0-9]/g, '-')
+  return slug && slug.length <= 200 ? slug : null
+}
+
+/** Where Claude Code keeps `sessionId`'s transcript for each folder it may have started in, first first. */
+export function claudeTranscriptPaths(configDir: string, folders: readonly string[], sessionId: string): string[] {
+  if (!configDir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sessionId)) return []
+  const base = configDir.replace(/\/+$/, '')
+  const out: string[] = []
+  for (const folder of folders) {
+    const slug = folder ? claudeProjectSlug(folder) : null
+    const path = slug ? `${base}/projects/${slug}/${sessionId}.jsonl` : null
+    if (path && !out.includes(path)) out.push(path)
+  }
+  return out
+}
+
+/**
+ * The newest title in TRANSCRIPT_TITLE_SCRIPT's output for a read from `start`
+ * over `length` bytes, and where the next read starts: past the region, or at
+ * its last line when the region ended inside it (Claude Code was still writing
+ * it), so that line is read again whole. Null when the output has no `end:`
+ * (the read did not run through). `title`: undefined when the region had none.
+ */
+export function transcriptTitleOf(output: string, sessionId: string, start: number, length: number): { title: string | undefined; next: number } | null {
+  let title: string | undefined
+  let end: { counted: number; last: number } | null = null
+  for (const line of output.split('\n')) {
+    const counts = /^end:(\d*):(\d*)$/.exec(line)
+    if (counts) {
+      end = { counted: Number(counts[1] || 0), last: Number(counts[2] || 0) }
+      continue
+    }
+    let record: { type?: unknown; customTitle?: unknown; sessionId?: unknown } | null = null
+    try {
+      const parsed = JSON.parse(line)
+      record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    } catch {
+      // Cut short (the region's end, or the line cap): never a title.
+      continue
+    }
+    if (record?.type !== 'custom-title' || typeof record.customTitle !== 'string') continue
+    if (typeof record.sessionId === 'string' && record.sessionId !== sessionId) continue
+    title = Array.from(record.customTitle.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trim()
+  }
+  if (!end) return null
+  // Every line but the last ended with a newline; one more byte counted than read says the last did not.
+  const cut = end.counted > length ? end.last : 0
+  return { title, next: start + length - cut }
+}
+
+export class TranscriptTitle {
+  private path: string | null = null
+  private lookedAt = Number.NEGATIVE_INFINITY
+  /** Nothing read from this file yet: the first read takes its end only. */
+  private fresh = true
+  /** Where the next read starts. */
+  private offset = 0
+  /** The size read through whole; -1 when the next poll must read again. */
+  private readThrough = -1
+  private title: string | null = null
+
+  constructor(
+    private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
+  async read(): Promise<string | null> {
+    const path = await this.locate()
+    if (!path) return this.title
+    const size = await this.host.fileSize(path).catch(() => null)
+    if (size === null) {
+      // Gone (moved, deleted): looked for again after the wait.
+      this.path = null
+      return this.title
+    }
+    if (size === this.readThrough) return this.title
+    // A file that shrank was rewritten: read its end again, as if new.
+    if (size < this.offset) this.fresh = true
+    const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
+    const length = size - start
+    const result = await this.host.run(['/bin/sh', '-c', TRANSCRIPT_TITLE_SCRIPT, 'sh', String(start + 1), path, String(length)], { timeoutMs: 5_000 }).catch(() => null)
+    if (!result || result.exitCode !== 0) return this.title
+    const found = transcriptTitleOf(result.stdout, this.sessionId, start, length)
+    if (!found) return this.title
+    if (found.title !== undefined) this.title = found.title
+    this.fresh = false
+    this.offset = found.next
+    this.readThrough = found.next === size ? size : -1
+    return this.title
+  }
+
+  private async locate(): Promise<string | null> {
+    if (this.path) return this.path
+    const now = await this.host.now()
+    if (now - this.lookedAt < TRANSCRIPT_TITLE_LOCATE_RETRY_MS) return null
+    this.lookedAt = now
+    for (const path of await this.candidates().catch(() => [] as string[])) {
+      if ((await this.host.fileSize(path).catch(() => null)) === null) continue
+      this.fresh = true
+      this.offset = 0
+      this.readThrough = -1
+      this.path = path
+      return path
+    }
+    return null
+  }
+}
+
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
 export const INBOX_CLAIM_EXIT = { won: 0, lost: 3, failed: 4 } as const
 

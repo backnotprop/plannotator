@@ -58,6 +58,8 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
+  /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
+  label?: string;
 }
 
 /**
@@ -367,6 +369,23 @@ export function createInboxLiveSessions(options: {
   };
 
   /** A poll arrived: the session is live, and says where it works. Returns the call to make when the poll answers. */
+  /**
+   * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
+   * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
+   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
+   * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   */
+  const labels = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
+    return out;
+  };
+  /** One session's label (`labels`); null when it has none. */
+  const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
+  /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
+  let labelChanges = 0;
+  const labelVersion = () => labelChanges;
+
   const pollStarted = async (session: string, host: string, body: Record<string, unknown>): Promise<() => void> => {
     const at = now();
     const root = await rootOf(body.project_path);
@@ -389,7 +408,9 @@ export function createInboxLiveSessions(options: {
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
     // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
-    entry.label = cleanInboxSessionLabel(body.label);
+    const label = cleanInboxSessionLabel(body.label);
+    if ((entry.label ?? null) !== label) labelChanges += 1;
+    entry.label = label;
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -904,12 +925,25 @@ export function createInboxLiveSessions(options: {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
     });
 
-  /** The window's routes; null when the path is not one of them. */
-  const route = async (req: Request, path: string): Promise<Response | null> => {
+  /**
+   * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
+   * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
+   */
+  const route = async (req: Request, path: string, owner = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
-      const live = liveFor(sessionsMatch[1]!);
+      const found = liveFor(sessionsMatch[1]!);
+      // Send to another session's rows (issue #2450): the label, absent when the session has none.
+      const live = owner
+        ? {
+            ...found,
+            sessions: found.sessions.map((session) => {
+              const label = labelOf(session.session);
+              return label ? { ...session, label } : session;
+            }),
+          }
+        : found;
       const asker = new URL(req.url).searchParams.get("asker");
       const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
         .split(",")
@@ -1044,5 +1078,8 @@ export function createInboxLiveSessions(options: {
     mcpAgents,
     tagTargets,
     wakesTagged,
+    labels,
+    labelOf,
+    labelVersion,
   };
 }
