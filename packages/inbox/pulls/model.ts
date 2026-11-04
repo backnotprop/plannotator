@@ -123,8 +123,8 @@ export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string
 /** The person's own words for a custom curation are kept to this many characters. */
 export const PULL_HANDOFF_CUSTOM_MAX = 1000;
 
-/** The guided review's words for a stack, after `/review-curate`. */
-const STACK_ASK_WORDS = "Walk it layer by layer, in landing order: one chapter per layer, on that layer's own diff, with what to watch in it";
+/** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
+const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
 
 /** The layers a hand-off names: the stack's open ones, else its top one. */
 function handoffLayers(stack: InboxPullStack): InboxPull[] {
@@ -134,20 +134,30 @@ function handoffLayers(stack: InboxPullStack): InboxPull[] {
 
 /**
  * Step 1 of the hand-off, one line: the guided review through phase 1's `/review-curate` (its approved instructions
- * go with the message as the skills block), with the stack's words or the person's own after it, in place of the
- * default. A teammate's PR adds what the person might ask its author. `pullLaunchAsk` looks for this line.
+ * go with the message as the skills block). One PR: its diff against its base, the person's words (custom curation)
+ * after `/review-curate`, and on a teammate's PR what the person might ask its author. A stack (approval
+ * "stack-show-me"): the whole stack's diff, from its base to the top layer's head, walked layer by layer, or the
+ * person's words in place of that walk. `pullLaunchAsk` looks for this line.
  */
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
   const layers = handoffLayers(stack);
-  const what = layers.length > 1 ? 'the stack' : `its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}`;
-  const words = ask.kind === 'custom' ? ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX) : layers.length > 1 ? STACK_ASK_WORDS : '';
-  const theirs = ask.kind === 'guide' && layers.length === 1 && !layers[0]!.mine ? ` Include what I might ask ${authorOf(layers[0]!)}.` : '';
-  return `1. Send me a guided review of ${what}, using /review-curate${words ? ` ${words}` : ''} (its instructions are at the end of this message).${theirs}`;
+  const custom = ask.kind === 'custom' ? ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX) : '';
+  const skill = '/review-curate (its instructions are at the end of this message).';
+  if (layers.length > 1) {
+    const top = layers[layers.length - 1]!;
+    const from = safeBranch(stack.open_base) ?? "the stack's base branch";
+    const to = safeBranch(top.head) ?? `the top ${stack.platform === 'gitlab' ? 'merge request' : 'pull request'}'s branch`;
+    const after = ask.kind === 'custom' ? custom : STACK_WALK;
+    return `1. Send me a guided review of the whole stack's diff, from ${from} to ${to}, using ${skill}${after ? ` ${after}` : ''}`;
+  }
+  const theirs = ask.kind === 'guide' && !layers[0]!.mine ? ` Include what I might ask ${authorOf(layers[0]!)}.` : '';
+  return `1. Send me a guided review of its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}, using /review-curate${custom ? ` ${custom}` : ''} (its instructions are at the end of this message).${theirs}`;
 }
 
 /**
  * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent), the owner's approved
- * text (`.product/approved/pull-handoff-message/`; the stack's wording awaits approval): help me review and
+ * text (`.product/approved/pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the rest of a stack's wording
+ * awaits approval): help me review and
  * understand it, and change no code unless I say so; what it is; then the guided review (`pullHandoffAskLine`) and
  * the discussion, with no push, comment, approval or merge. One version for every PR, the person's own or a
  * teammate's. Everything from the forge is its author's: titles through `pullTitleLine`, branches only when safe,

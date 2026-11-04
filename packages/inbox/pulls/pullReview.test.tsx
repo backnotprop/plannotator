@@ -625,8 +625,8 @@ test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's li
   expect(start.body.to).toEqual({ host: 'claude-code', session: 'ses_billing' });
   const body = String(start.body.body);
   expect(body.split('\n').filter((line) => /^- #/.test(line)).map((line) => line.slice(0, 6))).toEqual(['- #412', '- #413', '- #414']);
-  // The ask: /review-curate, layer by layer for a stack, with phase 1's approved instructions as its skills block.
-  expect(body).toContain('/review-curate Walk it layer by layer, in landing order');
+  // The ask: the whole stack's diff through /review-curate, layer by layer, with phase 1's approved instructions as its skills block.
+  expect(body).toContain("\n1. Send me a guided review of the whole stack's diff, from main to retry/dunning, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.\n");
   expect(body).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
   expect(posted[2]!.body).toMatchObject({ keys: stack.map((l) => l.key), thread_id: 'thr_new', ask: 'guide' });
   expect(handed).toEqual(['ses_billing']);
@@ -808,7 +808,8 @@ test.skipIf(!hasDom)('with no live agent, Review launches a new one with the cho
   });
   await act(async () => el('[data-pulls-review]').click());
   expect(launched).toHaveLength(1);
-  expect(launched[0]).toContain('/review-curate just the retry loop');
+  // A stack: the person's words take the place of the walk, after /review-curate's sentence.
+  expect(launched[0]).toContain('using /review-curate (its instructions are at the end of this message). just the retry loop\n');
   expect(posted).toEqual([]);
 });
 
@@ -1037,7 +1038,7 @@ test('a hostile title stays one inert line: no new line, no "- Link:" line of it
   expect(pullTitleLine(' \n\u202E ')).toBe('(no title)');
 });
 
-test('a stack: one line per open layer, bottom first; the stack ask words in step 1; plural in step 2', () => {
+test("a stack: one line per open layer, bottom first; step 1 the whole stack's diff, base to top head; plural in step 2", () => {
   expect(pullHandoffMessage(inboxPullStacks(stack)[0]!)).toBe(`You're being asked to help me review and understand a stack of pull requests. Don't change any code unless I explicitly tell you to.
 
 Pull requests
@@ -1051,15 +1052,31 @@ Stack
 - Author: me
 
 What to do
-1. Send me a guided review of the stack, using /review-curate Walk it layer by layer, in landing order: one chapter per layer, on that layer's own diff, with what to watch in it (its instructions are at the end of this message).
+1. Send me a guided review of the whole stack's diff, from main to retry/dunning, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.
 2. After that, we discuss it in this thread. Don't push to the branches, comment on the pull requests, approve them or merge them.`);
-  // Custom words replace the stack's; a teammate's layer names its author; an unsafe head or link is left out.
+  // Custom words replace the walk; a teammate's layer names its author; an unsafe top head becomes "the top pull
+  // request's branch"; an unsafe link is left out.
   const mixed = inboxPullStacks([stack[0]!, stack[1]!, pull(414, { head: 'x`y', base: 'retry/backoff', mine: false, author: 'tomas', url: 'https://evil.example/414' })])[0]!;
   const text = pullHandoffMessage(mixed, { kind: 'custom', words: 'Only the SQL' });
-  expect(text).toContain('\n1. Send me a guided review of the stack, using /review-curate Only the SQL (its instructions are at the end of this message).\n');
+  expect(text).toContain("\n1. Send me a guided review of the whole stack's diff, from main to the top pull request's branch, using /review-curate (its instructions are at the end of this message). Only the SQL\n");
+  expect(text).not.toContain('Walk it layer by layer');
   expect(text).toContain('\n- Authors: me (#412, #413), tomas (#414)\n');
   expect(text).toContain('\n- #414 Layer 414\n');
+  expect(text).not.toContain('x`y');
   expect(text).not.toContain('Include what I might ask');
+});
+
+test('a GitLab stack: the same step 1, "merge requests" where the text says "pull requests"', () => {
+  const mr = (number: number, fields: Partial<InboxPull>) =>
+    pull(number, { platform: 'gitlab', host: 'gitlab.com', key: `gitlab.com/northwind/billing-svc!${number}`, url: `https://gitlab.com/northwind/billing-svc/-/merge_requests/${number}`, ...fields });
+  const text = pullHandoffMessage(inboxPullStacks([mr(61, { head: 'retry/schedule' }), mr(62, { head: 'retry/backoff', base: 'retry/schedule' })])[0]!);
+  expect(text).toContain("\n1. Send me a guided review of the whole stack's diff, from main to retry/backoff, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.\n");
+  expect(text).toContain('a stack of merge requests.');
+  expect(text).toContain('\nMerge requests\n- !61 ');
+  expect(text).toContain('comment on the merge requests, approve them or merge them.');
+  expect(text.toLowerCase()).not.toContain('pull request');
+  const unsafeTop = pullHandoffMessage(inboxPullStacks([mr(61, { head: 'retry/schedule' }), mr(62, { head: 'a..b', base: 'retry/schedule' })])[0]!);
+  expect(unsafeTop).toContain("from main to the top merge request's branch, using /review-curate");
 });
 
 test("+ New agent's Send: the guided review when step 1 is still a line of its own, else a custom curation", () => {
