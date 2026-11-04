@@ -407,6 +407,8 @@ export interface SettingsModel {
   board?: { on: boolean };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
   steps?: { on: boolean };
+  /** Code review (config.json `inboxCodeReview`, approval "inbox-code-review-direction"): off unless the person turned it on. Absent from an older Inbox (off then). */
+  code_review?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1097,6 +1099,8 @@ export const inboxApi = {
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
   /** Thread steps on or off (Settings → Capabilities, approval "inbox-thread-steps"): every window hears `event: capabilities`. */
   saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
+  /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
+  saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
   /**
    * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
    * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
@@ -1208,6 +1212,8 @@ export const inboxApi = {
        * words; a newer, different draft from another window stays.
        */
       clear_draft?: string;
+      /** The person's verdict on the review this message carries (Approve / Send feedback in the review's header; Code review on). */
+      review_verdict?: 'approved' | 'changes_requested';
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
@@ -1239,6 +1245,9 @@ export const inboxApi = {
   /** The person's reviewed ticks on that guide, kept on the message. */
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(messageUrl(messageId, `/guide/reviewed`), { reviewed }),
+  /** The files ticked Viewed in a review (code review in the Inbox), as the patch names them. */
+  saveGuideViewed: (messageId: string, viewed: string[]) =>
+    post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
     post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }),
@@ -1622,7 +1631,7 @@ export interface InboxEventHandlers {
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`, today thread steps); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { steps?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { steps?: { on: boolean }; code_review?: { on: boolean } }) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1743,8 +1752,11 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { steps?: { on?: unknown } };
-        handlers.onCapabilities?.(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {});
+        const data = JSON.parse(frame.data) as { steps?: { on?: unknown }; code_review?: { on?: unknown } };
+        handlers.onCapabilities?.({
+          ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
+          ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
+        });
       } catch {
         // A malformed frame changes nothing.
       }

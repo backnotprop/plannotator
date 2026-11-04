@@ -21,6 +21,8 @@
  * answers name folders on this computer. The phone's device door carries both
  * (contract 7.46, 7.47). Agents never use these: MCP has no skills field.
  */
+import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { listReferenceSkills } from "./review-skill-loader";
 import { handleReferenceSkillContent, handleReferenceSkills } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -33,10 +35,37 @@ function noStore(res: Response): Response {
   return res;
 }
 
-/** The answer for a skills path, or null for any other path. */
-export function inboxSkillsRoute(req: Request, url: URL): Response | null {
+/**
+ * The catalog with Plannotator's own review skills first (code review in the
+ * Inbox, approval "inbox-code-review-direction"), while the person has Code
+ * review on: `root: "plannotator"` (the list's "Plannotator"), human-only so
+ * the window pastes their instructions into the reply that names one, and no
+ * folder (the window carries their text, `@plannotator/core/inbox-review`).
+ * A skill of the person's own with the same name wins: the built-in is left
+ * out. Off, the catalog is exactly the discovered skills.
+ */
+export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills): Response {
+  if (!codeReview) return handleReferenceSkills();
+  let skills: ReturnType<typeof listReferenceSkills>;
+  try {
+    skills = discovered();
+  } catch {
+    skills = [];
+  }
+  const own = new Set(skills.map((skill) => skill.name));
+  const builtins = INBOX_REVIEW_SKILLS.filter((skill) => !own.has(skill.name)).map((skill) => ({
+    name: skill.name,
+    root: INBOX_BUILTIN_SKILL_ROOT,
+    description: skill.description,
+    humanOnly: true,
+  }));
+  return Response.json({ skills: [...builtins, ...skills] });
+}
+
+/** The answer for a skills path, or null for any other path. `codeReview`: the person's Code review switch. */
+export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean } = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? handleReferenceSkills() : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true) : handleReferenceSkillContent(req));
 }

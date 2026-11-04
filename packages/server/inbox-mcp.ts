@@ -278,6 +278,13 @@ export interface InboxMcpContext {
    * a `steps` call answers `steps_off` with nothing written. Absent: off.
    */
   stepsOn?: () => boolean;
+  /**
+   * Whether code review is on (config.json `inboxCodeReview`, read on every
+   * request; approval "inbox-code-review-direction"). Off: submit_guide has
+   * no `review` field, so a call with one is refused as an unknown field.
+   * Absent: off.
+   */
+  codeReviewOn?: () => boolean;
 }
 
 
