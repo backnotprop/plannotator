@@ -197,7 +197,18 @@ const SECTION_BREAK_PRINT_CSS = `
  * a script that precedes the real head is skipped.
  */
 function printDefaultsPosition(rawHtml: string): number {
-  const tokens = /<!--[\s\S]*?(?:-->|$)|<script\b[\s\S]*?(?:<\/script\s*>|$)|<!doctype\b[^>]*>|<head\b[^>]*>|<body\b/gi;
+  // Built from strings: Semgrep's TypeScript parser cannot read this pattern
+  // as a regex literal, and a file it cannot parse fails the security scan.
+  const tokens = new RegExp(
+    [
+      "<!--[\\s\\S]*?(?:-->|$)",
+      "<script\\b[\\s\\S]*?(?:</script\\s*>|$)",
+      "<!doctype\\b[^>]*>",
+      "<head\\b[^>]*>",
+      "<body\\b",
+    ].join("|"),
+    "gi",
+  );
   let afterDoctype = 0;
   for (let match = tokens.exec(rawHtml); match; match = tokens.exec(rawHtml)) {
     const token = match[0].toLowerCase();
