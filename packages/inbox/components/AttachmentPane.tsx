@@ -60,7 +60,7 @@ import { showsContents, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
-import { FullViewBar, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
 import { useHtmlPageComment } from './HtmlPageComment';
@@ -459,10 +459,84 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const full = props.full;
   /** Full screen's composer: an image, a film and an HTML page draw it (the comment row of the first two goes inside it). */
   const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'html');
-  /** The toolbar: showing (pinned), tucked into its corner handle, or out for a moment (revealed). Every opening of full screen starts showing. */
+  /**
+   * The tools: showing (pinned), or gathered into the corner control (tucked) by » or the composer's ⌄. Every opening
+   * of full screen starts showing.
+   */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
   const barRef = useRef<FullViewBarHandle>(null);
-  /** ⋯ is open (a popover of the toolbar: it does not tuck while open). */
+  /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
+  const gatheredFrom = useRef<'bar' | 'composer'>('bar');
+  /**
+   * How far each floating control is from the corner control, and how small it must get to match it (`--ib-gx`,
+   * `--ib-gy`, `--ib-gs`, read by inbox.css), measured where they rest:
+   * - `rest`: the tools are showing (before » or ⌄ gathers them, and after a resize);
+   * - `gathered`: after a resize while gathered, each read with its flight's transform taken off for the moment (no
+   *   transition), so the way back starts from where it rests now;
+   * - `tucking`: a pinch's tuck is committed but not drawn yet: read with the pane showing its tools for the moment,
+   *   so nothing has moved and the tuck still animates from where they rest.
+   * The Contents rail flies by its ticks (its dock), not by the whole box that holds its panel.
+   */
+  const measureGather = (mode: 'rest' | 'gathered' | 'tucking' = 'rest') => {
+    const section = sectionRef.current;
+    const target = section?.querySelector<HTMLElement>('[data-full-view-handle]');
+    if (!section || !target) return;
+    const floating = [...section.querySelectorAll<HTMLElement>(GATHERED)];
+    const anchorOf = (el: HTMLElement) => (el.matches('.pn-contents-rail') ? el.querySelector<HTMLElement>('.pn-contents-rail-dock') : null) ?? el;
+    if (mode === 'gathered') {
+      for (const el of floating) {
+        el.style.setProperty('transition', 'none');
+        el.style.setProperty('transform', 'none');
+      }
+    }
+    const drawn = section.getAttribute('data-tools');
+    if (mode === 'tucking') section.setAttribute('data-tools', 'pinned');
+    const to = target.getBoundingClientRect();
+    const boxes = floating.map((el) => anchorOf(el).getBoundingClientRect());
+    if (mode === 'tucking' && drawn !== null) section.setAttribute('data-tools', drawn);
+    if (mode === 'gathered') {
+      for (const el of floating) el.style.removeProperty('transform');
+      // The flight's transform is back before the transition is, so it does not animate.
+      void section.offsetWidth;
+      for (const el of floating) el.style.removeProperty('transition');
+    }
+    const tx = to.left + to.width / 2;
+    const ty = to.top + to.height / 2;
+    const size = Math.max(target.offsetWidth, 32);
+    floating.forEach((el, i) => {
+      const at = boxes[i]!;
+      if (!at.width || !at.height) return;
+      el.style.setProperty('--ib-gx', `${Math.round(tx - (at.left + at.width / 2))}px`);
+      el.style.setProperty('--ib-gy', `${Math.round(ty - (at.top + at.height / 2))}px`);
+      el.style.setProperty('--ib-gs', Math.min(0.6, Math.max(0.05, size / at.width)).toFixed(3));
+    });
+  };
+  /** The tools as drawn now (the pinch's tuck included), for the listeners below. */
+  const shownToolbarRef = useRef<ToolbarState>('pinned');
+  // A resize or a rotation (or a phone's keyboard closing as ⌄ takes focus out of the field) moves where things rest:
+  // measured again once per frame, however many resize events the frame brings.
+  useEffect(() => {
+    if (!full) return;
+    let frame = 0;
+    const remeasure = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        measureGather(shownToolbarRef.current === 'tucked' ? 'gathered' : 'rest');
+      });
+    };
+    remeasure();
+    window.addEventListener('resize', remeasure);
+    window.addEventListener('orientationchange', remeasure);
+    window.visualViewport?.addEventListener('resize', remeasure);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', remeasure);
+      window.removeEventListener('orientationchange', remeasure);
+      window.visualViewport?.removeEventListener('resize', remeasure);
+    };
+  }, [full, attachment.id]);
+  /** ⋯ is open (a popover in the toolbar). */
   const [moreOpen, setMoreOpen] = useState(false);
   /** Beside the thread in a narrow pane: the header's button opens the panel as a sheet over the file (inbox.css). */
   const folded = !full && (phone || narrowPane);
@@ -611,7 +685,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!full || !section || (kind !== 'image' && kind !== 'video' && !(kind === 'html' && hasComposer))) return;
     const place = () => {
       const row = fileFootRow(section);
-      section.style.setProperty('--ib-fvfoot', `${row ? Math.round(row.getBoundingClientRect().height) : 0}px`);
+      // The layout height (offsetHeight), not the box on screen: a card flying into the corner control is scaled down.
+      section.style.setProperty('--ib-fvfoot', `${row ? row.offsetHeight : 0}px`);
     };
     place();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
@@ -836,7 +911,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // The comment row kept hidden in full screen's composer (the card on Reply, or minimized): the card
     // comes back on its Comment tab, and focus goes to the words once it is drawn.
     const threadId = props.composer?.threadId;
-    if (threadId && area.closest('[data-fcomp-comment-slot][hidden]')) {
+    // Gathered into the corner, the card is inert: the tools come back first (the words are where they were).
+    const gathered = area.closest('[inert]') !== null && area.closest('[data-fcomp]') !== null;
+    if (gathered) setToolbar('pinned');
+    if (threadId && (gathered || area.closest('[data-fcomp-comment-slot][hidden]'))) {
       pickComposerMode(threadId, 'comment');
       setComposerMinimized(threadId, false);
       requestAnimationFrame(() => {
@@ -1544,16 +1622,39 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [pinched]);
   const pinchTucks = pinched && !pinchShown && !htmlComment.open;
   const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
+  shownToolbarRef.current = shownToolbar;
+  // Every way back to showing (the corner control, Keep writing, ⌘⇧X, leaving full screen, a pinch let go) forgets
+  // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
+  useEffect(() => {
+    if (shownToolbar === 'pinned') gatheredFrom.current = 'bar';
+  }, [shownToolbar]);
+  // A pinch's tuck does not pass through the toolbar's state: measured as it is committed, before it is drawn. (A tuck
+  // by hand is measured in onState; with the tools already gathered there is nothing to fly.)
+  const pinchFromShowing = pinchTucks && toolbar === 'pinned';
+  useLayoutEffect(() => {
+    if (pinchFromShowing) measureGather('tucking');
+  }, [pinchFromShowing]);
   // A zoom does not follow the person to the next file, where the browser lets go of it.
   useEffect(() => {
     if (phoneHtml) return releaseWindowZoom;
   }, [phoneHtml, attachment.id]);
+  /** The composer's ⌄: the same gather as », and back from the corner focus returns to the card's field. */
+  const gatherFromComposer = useCallback(() => {
+    gatheredFrom.current = 'composer';
+    barRef.current?.hide();
+  }, []);
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    // A phone's Show tools brings the toolbar out (revealed) and the reply back with it; only Hide tucks the reply.
-    // A computer's revealed toolbar is a peek from the corner: the reply waits for the pin.
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: phone ? shownToolbar === 'tucked' : toolbar !== 'pinned' } : null),
-    [hasComposer, props.composer, toolbar, shownToolbar, phone],
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', onGather: gatherFromComposer } : null),
+    [hasComposer, props.composer, shownToolbar, gatherFromComposer],
   );
+  /** Back from the corner: focus where the person gathered from. The card's field, when it was the card's ⌄. */
+  const restoreTarget = () => {
+    const from = gatheredFrom.current;
+    gatheredFrom.current = 'bar';
+    if (from !== 'composer') return null;
+    const card = sectionRef.current?.querySelector<HTMLElement>('[data-fcomp]');
+    return card?.querySelector<HTMLElement>('.ib-fcomp-row > :not([hidden]) textarea') ?? sectionRef.current?.querySelector<HTMLElement>('[data-fcomp-pill]') ?? card ?? null;
+  };
 
   const remove = async (id: string) => {
     viewerRef.current?.removeHighlight(id);
@@ -1750,7 +1851,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       data-attachment-pane={attachment.id}
       data-version={effectiveVersion}
       data-full-view={full ? '' : undefined}
-      // Hide (») hides what else floats over the file with the toolbar (inbox.css): the size chip, the composer.
+      // Hide (») or the composer's ⌄ gathers what floats over the file into the corner control (inbox.css).
       data-tools={full ? shownToolbar : undefined}
     >
       <FullScreenComposerContext.Provider value={composerValue}>
@@ -1760,10 +1861,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           phone={phone}
           state={shownToolbar}
           onState={(next) => {
-            // Over a pinch's tuck: only the handle's tap comes here, and the person's own state stays what it was.
+            // Each control flies from where it rests: measured before the state changes.
+            if (next === 'tucked' && shownToolbar !== 'tucked') measureGather();
+            // Over a pinch's tuck: only the corner control's tap comes here, and the person's own state stays what it was.
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
+          draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
+          restoreTarget={restoreTarget}
           announce={announce}
           armed={armed}
           // A linked page takes no comments: no pen while it is shown.
