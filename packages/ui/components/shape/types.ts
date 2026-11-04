@@ -102,7 +102,10 @@ export type ShapePanelTab = 'ask' | 'thread' | 'refs';
 export interface ShapeSurfaceProps {
   host: ShapeHost;
   id: string;
-  /** The Pebble closes Shape (the Inbox: back to the thread). Absent: the Pebble is only the mark. */
+  /**
+   * Kept for hosts that pass it; the board draws no close button since the eyebrow row went (owner feedback
+   * 2026-11-04): the host closes it (Esc, Back, its own Pebble).
+   */
   onClose?: () => void;
   /** The Code view's Guided Review. Absent: the Code view lists the guide's steps without diffs. */
   CodeGuide?: ComponentType<ShapeCodeGuideProps>;

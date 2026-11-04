@@ -24,7 +24,7 @@ import { ShapeApiError } from './api';
 
 const hasDom = typeof document !== 'undefined';
 // The board itself (ShapeSurface and its Code view's guide chain) has its own tests; here it is a stand-in that
-// shows which board is open and closes on its Pebble, as ShapeBoard does.
+// shows which board is open and calls onClose when clicked.
 mock.module('#shape-board', () => ({
   default: ({ id, onClose }: { id: string; onClose: () => void }) => (
     <button type="button" data-stub-board={id} onClick={onClose}>

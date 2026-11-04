@@ -33,11 +33,7 @@
 /* ── the Pebble ── */
 .shp-pebble { overflow: visible; display: block; }
 .shp-pebble path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; transition: fill .4s, stroke .4s; }
-.shp-hb { position: relative; width: 36px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: var(--foreground); border: 0; background: transparent; cursor: pointer; flex: none; }
-span.shp-hb { cursor: default; }
-button.shp-hb:hover { background: var(--muted); }
-.shp-hb.open { background: color-mix(in oklab, var(--muted) 85%, transparent); }
-.shp-hb.open .shp-pebble path, .shp-pill .shp-pebble[data-on] path { fill: color-mix(in oklab, var(--primary) 24%, transparent); stroke: var(--primary); }
+.shp-pill .shp-pebble[data-on] path { fill: color-mix(in oklab, var(--primary) 24%, transparent); stroke: var(--primary); }
 .shp-pebble[data-busy] path { fill: color-mix(in oklab, var(--primary) 34%, transparent); }
 
 .shp-loading, .shp-failed { flex: 1; display: grid; place-items: center; color: var(--muted-foreground); font-size: 14px; padding: 24px; }
@@ -45,14 +41,11 @@ button.shp-hb:hover { background: var(--muted); }
 
 /* ── the board ── */
 .shp-surface { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--shp-paper); }
-.shp-head { padding: 14px 28px 0 40px; }
-.shp-top { display: flex; align-items: center; gap: 10px; height: 34px; }
-.shp-eyebrow { font: 500 11.5px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.shp-versions { display: inline-flex; gap: 4px; align-items: center; flex: none; }
-.shp-versions i { width: 5px; height: 5px; border-radius: 50%; background: color-mix(in oklab, var(--muted-foreground) 40%, transparent); }
-.shp-versions i.cur { background: var(--primary); width: 6px; height: 6px; animation: shp-dot-in .5s cubic-bezier(.2,.9,.3,1.3); }
-@keyframes shp-dot-in { from { transform: scale(0); } }
-.shp-head h1 { font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 8px 0 6px; text-wrap: balance; }
+.shp-head { padding: 22px 28px 0 40px; }
+/* The title first; Global comment (and Bring it up to date) on its first line, at the right. */
+.shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
+.shp-title-row > button { margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
+.shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
 .shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
 .shp-claim a, .shp-req-foot a, .shp-reqs a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .shp-claim code, .shp-reqs code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
@@ -221,12 +214,11 @@ button.shp-hb:hover { background: var(--muted); }
 [data-shape-message].shp-flash { background: color-mix(in oklab, var(--primary) 14%, transparent); transition: background-color .15s; }
 
 /* ── phone: 390 px, the panel is a bottom sheet ── */
-.shp-root.phone .shp-head { padding: 8px 16px 0 10px; }
-.shp-root.phone .shp-top .shp-quiet-btn { display: none; }
+.shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
+.shp-root.phone .shp-title-row .shp-quiet-btn { display: none; }
 .shp-root.phone .shp-head h1, .shp-root.phone .shp-claim { padding-left: 6px; }
-.shp-root.phone .shp-head h1 { font-size: 27px; margin-top: 6px; }
+.shp-root.phone .shp-head h1 { font-size: 27px; }
 .shp-root.phone .shp-claim { font-size: 15px; }
-.shp-root.phone .shp-eyebrow { font-size: 10.5px; }
 .shp-root.phone .shp-view { padding: 14px 16px 90px; }
 .shp-root.phone .shp-view.v-code { padding: 0; }
 .shp-root.phone .shp-req-group { grid-template-columns: 1fr; gap: 6px; padding: 12px 0; }
@@ -241,7 +233,7 @@ button.shp-hb:hover { background: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) {
   .shp-rb.flash { animation: none; background: var(--primary); color: var(--primary-foreground); }
-  .shp-ready-dot, .shp-versions i.cur, .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
+  .shp-ready-dot, .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
   .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
   .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
 }

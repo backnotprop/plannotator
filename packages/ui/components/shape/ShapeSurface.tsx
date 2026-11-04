@@ -89,14 +89,6 @@ const RefsIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="non
 
 const SHORT: Record<ShapeViewId, string> = { picture: 'Picture', how: 'How', reqs: 'Reqs', code: 'Code' };
 
-function asOf(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
-  return `${date}, ${time} UTC`;
-}
-
 type Viewer =
   | { kind: 'image'; ref: ShapeRef }
   | { kind: 'file'; path: string; contents: string; line?: number; token: number }
@@ -125,7 +117,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -688,29 +680,15 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
+          {/* The title comes first (owner feedback 2026-11-04, shape-board-look): no eyebrow row above it. */}
           <header className="shp-head">
-            <div className="shp-top">
-              {onClose ? (
-                <button type="button" className="shp-hb open" onClick={onClose} title="Close Shape" aria-label="Close Shape">
-                  <Pebble alive reshaping={busy} />
-                </button>
-              ) : (
-                <span className="shp-hb open" aria-hidden="true"><Pebble alive reshaping={busy} /></span>
-              )}
-              <span className="shp-eyebrow">
-                {loaded.shape.project.name} · Shape · {busy && agentDrawing ? `${agent} is drawing v${version.n + 1}…` : `as of ${asOf(version.asOf ?? version.at)}`}
-                {finished ? ' · Finished' : ''}
-              </span>
-              <span className="shp-versions" title={`Version ${version.n}`} aria-label={`Version ${version.n}`}>
-                {Array.from({ length: Math.min(version.n, 12) }, (_, i) => <i key={i} className={i === Math.min(version.n, 12) - 1 ? 'cur' : ''} />)}
-              </span>
-              <span className="shp-grow" />
+            <div className="shp-title-row">
+              <h1 className={fresh('title').trim()}>{version.title}</h1>
               {!phone && generalButton(null)}
               {host.refresh && !finished && (
                 <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>Bring it up to date</button>
               )}
             </div>
-            <h1 className={fresh('title').trim()}>{version.title}</h1>
             <p className={`shp-claim${fresh('claim')}`}><ShapeInline text={version.claim} /></p>
           </header>
 

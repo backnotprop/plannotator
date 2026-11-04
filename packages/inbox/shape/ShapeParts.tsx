@@ -61,7 +61,7 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
   );
 }
 
-/** The board, over the thread (or over the grid): the Pebble in its header closes it. */
+/** The board, over the thread (or over the grid): Esc or Back closes it (the board draws no close button). */
 export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
   return (
     <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape">
