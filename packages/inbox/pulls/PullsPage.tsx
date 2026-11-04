@@ -344,21 +344,29 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </span>
           )}
           <span>{plural(stack.layers.length, stack.platform === 'gitlab' ? 'merge request' : 'pull request')}</span>
+          {/* Each chip says what it opens ("Thread", "Board"), with its own mark: a thread and its card often share a title. */}
           {link && (
-            <button type="button" className="ib-pr-chip" onClick={() => props.onOpenThread(link.thread_id)} data-pulls-thread={link.thread_id}>
-              <Icon name="questionBubble" size={13} />
-              <span dir="auto">{link.thread_subject ?? 'Thread'}</span>
-            </button>
+            <Tip content="Open the agent's thread">
+              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenThread(link.thread_id)} data-pulls-thread={link.thread_id}>
+                <Icon name="questionBubble" size={13} />
+                <span className="ib-pr-chip-k">Thread</span>
+                <span dir="auto">{link.thread_subject ?? 'Untitled'}</span>
+              </button>
+            </Tip>
           )}
           {link?.card &&
             (props.onOpenCard ? (
-              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenCard!(link.card!.id)} data-pulls-card={link.card.id}>
-                <Icon name="board" size={13} />
-                <span dir="auto">{link.card.title}</span>
-              </button>
+              <Tip content="Open its card on the Board">
+                <button type="button" className="ib-pr-chip" onClick={() => props.onOpenCard!(link.card!.id)} data-pulls-card={link.card.id}>
+                  <Icon name="board" size={13} />
+                  <span className="ib-pr-chip-k">Board</span>
+                  <span dir="auto">{link.card.title}</span>
+                </button>
+              </Tip>
             ) : (
               <span className="ib-pr-chip" data-pulls-card={link.card.id}>
                 <Icon name="board" size={13} />
+                <span className="ib-pr-chip-k">Board</span>
                 <span dir="auto">{link.card.title}</span>
               </span>
             ))}

@@ -514,6 +514,11 @@ test('on: the row under Board, and the list by whose move it is, the stack one r
   await expect(stackRow).toContainText('3 open, 1 merged · start at #412');
   await expect(stackRow).toContainText('Retry failed charges');
   await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
+  // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
+  for (const selector of ['[data-pulls-heading]', '[data-pulls-on-you]']) {
+    expect(await list.locator(selector).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  }
+  await expect(list.locator('[data-board-project-chip]')).toHaveAccessibleName(/All projects/);
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
   await shot(page, '2-list');
   await fold.click();
@@ -542,7 +547,9 @@ test('the stack view: layers from main up, Lands next, the agent, its thread and
   await expect(pane.locator('.ib-pr-base')).toContainText('main');
   await expect(pane).toContainText('Claude Code');
   await expect(pane.locator('[data-pulls-thread]')).toBeVisible();
-  await expect(pane.locator('[data-pulls-card]')).toContainText('Retry failed charges');
+  // The thread and its card share a title: each chip says which it is.
+  await expect(pane.locator('[data-pulls-thread]')).toHaveText(/^Thread\s*Retry failed charges$/);
+  await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
   await expect(pane.getByRole('button', { name: 'Review layer by layer' })).toBeVisible();
   await expect(pane.getByRole('button', { name: 'Whole stack' })).toBeVisible();
@@ -565,6 +572,14 @@ test('Review layer by layer: the layer\'s own diff, Whole stack from main, Next 
   await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 1 of 3 · only what this layer changes');
   await expect(review.getByRole('button', { name: /merge/i })).toHaveCount(0);
   expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/pulls/412');
+  // No chapter card repeating the rail: the diffs take the width.
+  await expect(review.locator('[data-guide-section-narrative]')).toBeHidden();
+  // The rail's paths are cut at their start inside the rail, the +/- still in view.
+  const rail = await review.locator('.ib-rrail').boundingBox();
+  for (const row of await review.locator('[data-review-files] .ib-rv-n').all()) {
+    const box = (await row.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(rail!.x + rail!.width);
+  }
   await shot(page, '4-layer-review');
 
   await review.locator('[data-pull-scope-choice="stack"]').click();
