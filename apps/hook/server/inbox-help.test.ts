@@ -19,7 +19,7 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { HARNESSES, harnessPanel, shellLine } from "@plannotator/inbox/harnesses";
 import { parseInboxQuestionBlocks, parseInboxSupersedeRef } from "@plannotator/core/inbox-questions";
 import { startInboxServer } from "@plannotator/server/inbox";
-import { INBOX_FILLED_ARGUMENTS } from "@plannotator/shared/inbox/connection";
+import { INBOX_FILLED_ARGUMENTS, INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
 import { formatTopLevelHelp } from "./cli";
 import { INBOX_AGENT_LABELS, inboxAttachmentKind, inboxAttachmentNameRefusal } from "@plannotator/core/inbox-types";
 import { INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
@@ -200,6 +200,41 @@ describe("the guide against what it describes", () => {
     expect(help).toContain("\n### card\n");
     expect(cardText(help).length).toBeGreaterThan(0);
     expect(formatTopLevelHelp({ board: true })).toContain("plannotator card ");
+  });
+
+  // What regresses: an agent whose person never turned thread steps on reads about them in the guide
+  // (approval "inbox-thread-steps": off adds zero words), or, on, a guide that names a field the Inbox does not take.
+  test("with thread steps off the guide says nothing of them; on, it covers the steps tool and send_message's field as served", async () => {
+    const word = /(?<![A-Za-z_])steps(?![A-Za-z_])/gi;
+    const hits = (text: string) => [...text.matchAll(word)].map((m) => text.slice(Math.max(0, m.index! - 40), m.index! + 20));
+    expect(hits(help)).toEqual([]);
+    expect(hits(helpBoardOff)).toEqual([]);
+    const helpSteps = formatInboxHelp({ command: COMMAND, dataDir: DATA_DIR, platform: "linux", steps: true });
+    expect(helpSteps).toContain("\n### steps\n");
+    expect(helpSteps).toContain(`steps: ${INBOX_STEPS_LEAD}`);
+    expect(helpSteps).toContain("plannotator inbox steps [--session <id>] <thread> --json '<list>'");
+    const savedData = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = join(root, "served-steps-data");
+    const server = await startInboxServer({ dataDir: join(root, "served-steps-data"), steps: true, phones: false });
+    const client = new Client({ name: "inbox-help-test", version: "1.0.0" });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+      const { tools } = await client.listTools();
+      for (const name of ["steps", "send_message"]) {
+        const properties = Object.keys((tools.find((tool) => tool.name === name)!.inputSchema as { properties?: Record<string, unknown> }).properties ?? {});
+        expect(properties).toContain("steps");
+        const section = helpSteps.slice(helpSteps.indexOf(`\n### ${name}\n`), helpSteps.indexOf("\n### ", helpSteps.indexOf(`\n### ${name}\n`) + 5));
+        for (const property of properties) {
+          const covered = (INBOX_FILLED_ARGUMENTS as readonly string[]).includes(property) || section.includes(`\`${property}\``);
+          expect(covered, `${name}'s argument ${property} is not in the guide`).toBe(true);
+        }
+      }
+    } finally {
+      await client.close();
+      server.stop();
+      if (savedData === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = savedData;
+    }
   });
 
   // Deliberate: the top-level help is where an agent learns this guide exists.

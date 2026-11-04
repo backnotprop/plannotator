@@ -104,6 +104,88 @@ export function caretAnchor(line: VerticalBox, visible: VerticalBox, field: { le
   return { top, bottom: top + Math.min(height, Math.max(0, visible.bottom - visible.top)), left: field.left, width: field.width };
 }
 
+/**
+ * The part of the page the person can see, in the coordinates
+ * getBoundingClientRect uses: the visual viewport. On iOS with the keyboard up
+ * it is shorter than the layout viewport (`innerHeight` can still read the
+ * full height), so a list sized against `innerHeight` runs under the keyboard.
+ */
+export function seenBox(view: Window = window): VerticalBox {
+  const vv = view.visualViewport;
+  if (vv && Number.isFinite(vv.height) && Number.isFinite(vv.offsetTop) && vv.height > 0) return { top: vv.offsetTop, bottom: vv.offsetTop + vv.height };
+  // No usable reading (none at all, or one caught mid-rotation): the layout viewport.
+  const height = Number.isFinite(view.innerHeight) && view.innerHeight > 0 ? view.innerHeight : view.document.documentElement.clientHeight;
+  return { top: 0, bottom: height };
+}
+
+/** The overlap of two vertical boxes (a zero-height box at `a`'s clamped top when they miss). Pure. */
+export function overlapBox(a: VerticalBox, b: VerticalBox): VerticalBox {
+  const top = Math.max(a.top, b.top);
+  return { top, bottom: Math.max(top, Math.min(a.bottom, b.bottom)) };
+}
+
+/**
+ * The room a composer's skill list may use: what the person sees, under the
+ * thread's header when the field is in a thread (the reply box, New message),
+ * so the list never opens under, or over, the header's Back and actions.
+ */
+export function skillListRoom(field: Element): VerticalBox {
+  const view = field.ownerDocument.defaultView ?? window;
+  const seen = seenBox(view);
+  const head = field.closest('.ib-pane')?.querySelector(':scope > .ib-phead');
+  const r = head?.getBoundingClientRect();
+  if (!r || r.height === 0) return seen;
+  return overlapBox(seen, { top: r.bottom, bottom: seen.bottom });
+}
+
+/**
+ * Whether the person can type in `field` and see it: it has focus, it is not
+ * inert, it has a box on screen (not inside a scroll container's hidden part)
+ * and nothing is drawn over the middle of what shows of it. The list is drawn
+ * at the Inbox's root, above the whole shell, so without this it floated over
+ * whatever covered its field: full view over the reply box (a press on a row
+ * inserted into the hidden reply), a tucked full-screen card, a sheet, and on
+ * a phone an action item's note that hides the reply foot. A hit inside
+ * `surface` counts as the field: its own box (the token mirror sits over the
+ * textarea), or the box it belongs to (the reply foot, whose Send row is held
+ * over the words when the foot scrolls under an iPhone keyboard on its side; a
+ * dialog). So does a hit on `own`, the list's own box, which may lie over it.
+ */
+export function fieldInSight(field: HTMLElement, surface: Element, stopAt: Element | null, own: Element | null): boolean {
+  const doc = field.ownerDocument;
+  if (doc.activeElement !== field) return false;
+  if (field.closest('[inert]')) return false;
+  const r = field.getBoundingClientRect();
+  // No box: hidden (`display: none`), unless nothing has one (a DOM with no layout, as in unit tests).
+  if (!(r.width > 0 && r.height > 0)) return !(doc.documentElement.getBoundingClientRect().width > 0);
+  const shown = overlapBox(visibleBox(field, stopAt), seenBox(doc.defaultView ?? window));
+  if (shown.bottom - shown.top < 1) return false;
+  const hit = typeof doc.elementFromPoint === 'function' ? doc.elementFromPoint(r.left + r.width / 2, (shown.top + shown.bottom) / 2) : null;
+  // No answer (a DOM with no layout): nothing is known to cover it.
+  if (!hit) return true;
+  return surface.contains(hit) || (own !== null && own.contains(hit));
+}
+
+/** A phone's list: at most 4½ rows of 44 px and 40% of what is visible, never under 1½ rows. Pure. */
+export const PHONE_SKILL_LIST_HEIGHT = 198;
+export function phoneSkillListHeight(seenHeight: number): number {
+  return Math.min(PHONE_SKILL_LIST_HEIGHT, Math.max(66, Math.round(seenHeight * 0.4)));
+}
+
+/**
+ * The box the list hangs off for a field (not the caret): the field's box,
+ * cut to the part on screen, so a field half scrolled out of a scrolling foot
+ * keeps the list against its visible edge. `gap` widens the box upward: the
+ * list keeps the field's former distance above it. Pure but for the reading.
+ */
+export function fieldAnchor(field: Element, stopAt: Element | null, gap = 0, widen = 0): AnchorBox {
+  const r = field.getBoundingClientRect();
+  const visible = visibleBox(field, stopAt);
+  const top = Math.min(Math.max(r.top, visible.top), visible.bottom);
+  const bottom = Math.max(top, Math.min(r.bottom, visible.bottom));
+  return { top: top - gap, bottom, left: r.left - widen, width: r.width + 2 * widen };
+}
+
 function px(value: string | null | undefined): number {
   const n = parseFloat(value ?? '');
   return Number.isFinite(n) ? n : 0;

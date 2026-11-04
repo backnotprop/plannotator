@@ -28,15 +28,28 @@ import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'pulls' | 'shapes';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /**
+   * Pull requests (approval "inbox-code-review-direction", item 4): a row of its own (after Board when the Board is on; it needs none), shown only with
+   * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
+   */
+  onPulls?: () => void;
+  pullsCount?: number;
+  /**
+   * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
+   * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
+   */
+  onShape?: () => void;
+  shapeChanged?: number;
   projectId: string | null;
   /** The machine the list shows (the Machines filter), or null for every machine. */
   machineId?: string | null;
@@ -381,6 +394,42 @@ export function Sidebar(props: SidebarProps) {
         >
           <Icon name="board" />
           Board
+        </button>
+      )}
+      {props.onShape && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
+          onClick={pick(props.onShape)}
+          aria-current={props.page === 'shapes' ? 'page' : undefined}
+          data-shape-nav=""
+        >
+          <span className="ib-pebble-ico" aria-hidden="true">
+            <Pebble alive={false} size={18} />
+          </span>
+          Shape
+          {(props.shapeChanged ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.shapeChanged} changed since you looked`}>
+              {formatCount(props.shapeChanged ?? 0)}
+            </span>
+          )}
+        </button>
+      )}
+      {props.onPulls && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'pulls' ? ' ib-on' : ''}`}
+          onClick={pick(props.onPulls)}
+          aria-current={props.page === 'pulls' ? 'page' : undefined}
+          data-pulls-nav=""
+        >
+          <Icon name="pullRequest" />
+          Pull requests
+          {(props.pullsCount ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
+              {formatCount(props.pullsCount ?? 0)}
+            </span>
+          )}
         </button>
       )}
       {(props.draftsCount ?? 0) > 0 && props.onDrafts && (

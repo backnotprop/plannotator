@@ -109,7 +109,7 @@ import {
   handleGoalSetupServerReady,
 } from "@plannotator/server/goal-setup";
 import { type DiffType, detectManagedVcs, prepareLocalReviewDiff, gitRuntime } from "@plannotator/server/vcs";
-import { loadConfig, resolveAIEnabled, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
+import { loadConfig, resolveAIEnabled, resolveSessionTailscale, sessionTailscaleOptOut, resolveDefaultDiffType, resolveDefaultDiffTypeFor, resolveSharingEnabled, resolveUpdateCheck } from "@plannotator/shared/config";
 import { formatIgnoredReviewWords, parseReviewArgs, resolveReviewTarget, withReviewDirectory, type ParsedReviewArgs } from "@plannotator/shared/review-args";
 import { resolveReviewOpenState, type ReviewOpenState } from "@plannotator/shared/review-open-state";
 import { listBranches, type AvailableBranches } from "@plannotator/shared/review-core";
@@ -235,12 +235,15 @@ import {
   parseTitleOption,
   isUninstallConfirmationAccepted,
   parseUninstallOptions,
+  hasHelpFlag,
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
+import { runShapeCommand, SHAPE_OFF_TEXT } from "./shape-command";
 import { runInboxCallCommand } from "./inbox-call-command";
+import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
@@ -333,6 +336,27 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
+// `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
+// HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
+// strict-annotate parse, which takes `--file`-style flags for itself.
+{
+  const args = rawArgs;
+  // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
+  // learns nothing of it (the same switch hides the Pebble, the row and the routes).
+  if (args[0] === "shape" && loadConfig().inboxShape !== true) {
+    process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
+    process.exit(1);
+  }
+  if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
+    process.exit(
+      await runShapeCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+      }),
+    );
+  }
+}
 // `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
 // Here, like the card command: it takes its own flags, and JSON is not ours to scan.
 {
@@ -345,6 +369,21 @@ const rawArgs = process.argv.slice(2);
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox steps <thread> --json '<list>'`: an agent's thread steps, sugar over `inbox call steps` (inbox-steps-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "steps") {
+    const stepsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxStepsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(stepsDataDir),
       }),
     );
   }
@@ -443,14 +482,28 @@ const TAILSCALE_COMMANDS = new Set(["review", "annotate", "annotate-last", "last
 // `plannotator inbox --tailscale` is the Inbox's own flag (inbox-command.ts):
 // a long-lived, owner-only publication, never this per-session transport.
 const tailscaleIdx = args[0] === "inbox" ? -1 : args.indexOf("--tailscale");
-const tailscaleFlag = tailscaleIdx !== -1;
-if (tailscaleFlag) {
+if (tailscaleIdx !== -1) {
   args.splice(tailscaleIdx, 1);
   if (!TAILSCALE_COMMANDS.has(args[0] ?? "")) {
     console.error(
       "--tailscale is only supported with: plannotator review, annotate, annotate-last (last)",
     );
     process.exit(1);
+  }
+}
+// PLANNOTATOR_TAILSCALE / config.json "tailscale" make the flag the default
+// for the same subcommands (every other subcommand ignores them), so a host
+// or agent need not pass it on every call.
+const tailscaleResolved = TAILSCALE_COMMANDS.has(args[0] ?? "")
+  ? resolveSessionTailscale(loadConfig(), process.env, tailscaleIdx !== -1)
+  : { on: false, source: "default" as const };
+const tailscaleFlag = tailscaleResolved.on;
+const tailscaleOptOut = sessionTailscaleOptOut(tailscaleResolved.source);
+if (tailscaleFlag) {
+  if (tailscaleResolved.source !== "flag") {
+    process.stderr.write(
+      `[plannotator] Publishing over your tailnet (${tailscaleResolved.source === "env" ? "PLANNOTATOR_TAILSCALE" : 'config.json "tailscale"'}).\n`,
+    );
   }
   if (isRemoteSession()) {
     process.stderr.write(
@@ -514,7 +567,7 @@ async function handleTailscaleReady(port: number): Promise<void> {
     ({ url } = enableTailscaleServe(port));
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
-    process.stderr.write("To keep working on this computer, run the same command without --tailscale.\n");
+    process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
     process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
@@ -673,6 +726,10 @@ if (isVersionInvocation(args)) {
 
 /** The person turned the Inbox's Board on (config.json `inboxBoard`): only then does either help mention cards. */
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
+// Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
+const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
+const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
@@ -688,7 +745,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   console.log(
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp() })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
       : formatSubcommandHelp(helpSubcommand),
   );
   process.exit(0);
@@ -1807,7 +1864,7 @@ if (args[0] === "sessions") {
   // terminal treats tailnet publication; the server throw backstops this.
   if (liveAppResolved && tailscaleFlag) {
     exitAnnotateStartupFailure(
-      "Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). Run without --tailscale, or use --static to annotate a converted snapshot of the page.",
+      `Live app annotation is unavailable with --tailscale (the session is reachable across your tailnet). To annotate it live, ${tailscaleOptOut}; or use --static to annotate a converted snapshot of the page.`,
     );
   }
 
