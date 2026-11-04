@@ -2,14 +2,17 @@
  * The Board reveal for returning users and the reveals' queue (approval "inbox-feature-reveal", 2026-11-03) on a real
  * Inbox in a temp data dir.
  *
- * What regresses: the reveal turning on a Board the person set (on or off) or writing anything but unset -> true; two
- * tabs both showing it; a guest claiming it, or the owner's own pages (their phone, an allowed login on a tagged
- * machine) being held back; the claim not stamping the Board's first-visit dialog (it would show twice); `card` or any
- * other agent word arriving before the claim, or not after it; a dev build deciding it; the Snooze announcement losing
- * its 48 h spacing or its stamp of the spacing clock; a stuck Snooze holding the Board back. The Checklist reveal
- * (approval "inbox-checklist-reveal", 2026-11-04): its claim writing anything but `inboxSteps` unset -> true, or touching
- * a Checklist the person set; agent text changing before the claim, or not being the steps text after it; a guest
- * claiming it; its 5 days or 5 threads moving; it needing the Board on.
+ * What regresses: the claim turning anything on (reveals are opt-in, the owner 2026-11-04: only the dialog's "Turn it
+ * on" writes the switch) or touching a Board the person set, or one 0.28.49's reveal turned on; two tabs both showing it;
+ * a guest claiming it, or the owner's own pages (their phone, an allowed login on a tagged machine) being held back; the
+ * claim stamping the Board's first-visit welcome (the owner, #2598 finding 5: the first visit to a Board turned on from
+ * the offer, or later in Settings, shows it with Copy prompt; once seen, never again); a lost claim answer losing the
+ * offer (the same page's key is shown it again, no other key is); `card` or any other agent word arriving
+ * after the claim and Not now, or not after Turn it on; a dev build deciding it; the Snooze announcement losing its 48 h
+ * spacing or its stamp of the spacing clock; a stuck Snooze holding the Board back. The Checklist reveal (approval
+ * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
+ * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; a guest claiming it; its
+ * 5 days or 5 threads moving; it needing the Board on.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -142,7 +145,7 @@ async function world(options: Options = {}) {
   };
   const settings = async () => (await (await fetch(`${base}/api/inbox/settings?store=0`)).json()) as Json;
   const next = async () => (await settings()).reveal.next as string | null;
-  const claim = async (id = "board") => (await (await post("/api/inbox/reveal", { id })).json()) as { show: boolean; reveal: { next: string | null }; board: { on: boolean }; steps: { on: boolean } };
+  const claim = async (id = "board", key?: string) => (await (await post("/api/inbox/reveal", { id, ...(key ? { key } : {}) })).json()) as { show: boolean; reveal: { next: string | null }; board: { on: boolean }; steps: { on: boolean } };
   const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Json;
   let rpcId = 0;
   const rpc = async (method: string, params: Record<string, unknown>) => {
@@ -166,7 +169,7 @@ async function world(options: Options = {}) {
 }
 
 describe("the Board reveal at day 4", () => {
-  test("next is the Board; before the claim no card and agent text byte-equal to a Board switched off; the claim turns it on in one save", async () => {
+  test("next is the Board; the claim stamps it in one save and turns nothing on; Not now leaves agent text byte-equal to a Board switched off", async () => {
     // Today's Board-off Inbox, the same day 4: what agents read.
     const off = await world({ config: { inboxBoard: false } });
     expect(await off.next()).toBeNull();
@@ -180,20 +183,60 @@ describe("the Board reveal at day 4", () => {
     expect(await w.toolNames()).not.toContain("card");
     expect(await w.agentText()).toBe(today);
 
+    // The dialog shows: the claim is all the Inbox hears. Not now (and Escape, a click outside) sends nothing more.
     const answer = await w.claim();
-    expect(answer).toEqual({ show: true, reveal: { next: null }, board: { on: true }, steps: { on: false } });
+    expect(answer).toEqual({ show: true, reveal: { next: null }, board: { on: false }, steps: { on: false } });
     const config = w.saved();
-    expect(config.inboxBoard).toBe(true);
-    // One instant for the Board's own stamp, the reveal's and the spacing clock: the same save.
+    expect(config.inboxBoard).toBeUndefined();
+    // One instant for the reveal's stamp and the spacing clock: the same save. Never the Board's first-visit welcome
+    // (the owner, finding 5 of #2598): the offer has no Copy prompt, so the first visit to the Board still shows it.
     const at = config.inboxReveals.board.shownAt;
-    expect(config.inboxBoardIntro.shownAt).toBe(at);
     expect(config.inboxReveals.lastShownAt).toBe(at);
-    // The first visit to #board never shows its dialog again; the switch stays the person's.
-    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
-    expect(await w.toolNames()).toContain("card");
-    // Never again: not next, and a second claim (a reload, another tab) shows nothing.
+    expect(config.inboxBoardIntro).toBeUndefined();
+    expect((await w.settings()).board).toEqual({ on: false });
+    // A new session after Not now: no card, every agent word byte-equal to a Board switched off.
+    expect(await w.toolNames()).not.toContain("card");
+    expect(await w.agentText()).toBe(today);
+    // Never again: not next, and a second claim (a reload, another tab) shows nothing and writes nothing.
+    const after = readFileSync(join(w.dataDir, "config.json"), "utf8");
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(after);
+  });
+
+  test("Turn it on: the dialog's switch save writes true; card from the next session; the first visit to #board shows the welcome, once", async () => {
+    const on = await world({ config: { inboxBoard: true } });
+    const onText = await on.agentText();
+
+    const w = await world();
+    expect((await w.claim()).show).toBe(true);
+    expect(w.saved().inboxBoard).toBeUndefined();
+    // "Turn it on" saves the switch as Settings does.
+    expect((await w.post("/api/inbox/settings", { board: { on: true } })).ok).toBe(true);
+    expect(w.saved().inboxBoard).toBe(true);
+    expect((await w.settings()).board).toEqual({ on: true });
+    expect(await w.toolNames()).toContain("card");
+    expect(await w.agentText()).toBe(onText);
+    // The first visit to #board: the welcome with Copy prompt (the offer had none), then never again.
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: true });
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
+    expect(await w.next()).toBeNull();
+  });
+
+  test("Not now, then the Board turned on later in Settings: the first visit shows the welcome; the 48 h runs from the offer", async () => {
+    const w = await world({ days: 6 });
+    expect((await w.claim()).show).toBe(true);
+    const at = w.saved().inboxReveals.board.shownAt;
+    // Not now sends nothing. Before the switch, #board is not there: no welcome claimed.
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
+    expect(w.saved().inboxBoardIntro).toBeUndefined();
+    // Days later, Settings, Capabilities.
+    expect((await w.post("/api/inbox/settings", { board: { on: true } })).ok).toBe(true);
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: true });
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
+    // The board claim's own stamp holds the next reveal back (the Checklist is due at day 6).
+    expect(w.saved().inboxReveals.lastShownAt).toBe(at);
+    expect((await w.claim("steps")).show).toBe(false);
   });
 
   test("never over a Board the person set: on stays on, off stays off, nothing is written", async () => {
@@ -206,11 +249,53 @@ describe("the Board reveal at day 4", () => {
     }
   });
 
+  test("turned on by 0.28.49's reveal (true, with its stamp): theirs now, never touched", async () => {
+    const at = new Date(Date.now() - DAY).toISOString();
+    const w = await world({ config: { inboxBoard: true, inboxBoardIntro: { shownAt: at }, inboxReveals: { lastShownAt: at, board: { shownAt: at } } } });
+    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect(await w.next()).toBeNull();
+    expect((await w.claim()).show).toBe(false);
+    expect((await w.settings()).board).toEqual({ on: true });
+    expect(await w.toolNames()).toContain("card");
+    // They saw the welcome with it: the Board's first visit never shows it again.
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+  });
+
   test("two tabs claim at once: exactly one shows it", async () => {
     const w = await world();
     const answers = await Promise.all([w.claim(), w.claim(), w.claim()]);
     expect(answers.filter((a) => a.show)).toHaveLength(1);
-    expect(w.saved().inboxBoard).toBe(true);
+    expect(w.saved().inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxBoard).toBeUndefined();
+  });
+
+  // Review of #2598, finding 2: the phone's network drops after the Inbox stamped the claim but before its answer
+  // arrives. With opt-in that would lose the offer for good, the Board still off. The page's retry, with its key, is
+  // shown it again; nothing else is (another tab, the phone), and the 48 h spacing still runs from the one stamp.
+  test("a lost answer: the same page's key is shown it again; any other key, tab or device is not; one stamp, the 48 h kept", async () => {
+    const w = await world({ days: 6, tailnet: "owner" });
+    const KEY = "0b6f6c1e-4d0a-4c55-9d43-2b1f7a3c9e11";
+    expect((await w.claim("board", KEY)).show).toBe(true);
+    const stamped = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect(w.saved().inboxReveals.board.key).toBe(KEY);
+    // The retry: shown again, nothing written again (the spacing clock and the stamp are the first claim's).
+    expect(await w.claim("board", KEY)).toMatchObject({ show: true, board: { on: false } });
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    // Another tab (its own key, or an older page with none) and the owner's phone: one offer per person.
+    expect((await w.claim("board", "6a1d2b4c-other-tab")).show).toBe(false);
+    expect((await w.claim("board")).show).toBe(false);
+    expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board", key: "phone-key-1234" })).json()) as Json).show).toBe(false);
+    // The same key never claims another reveal: the Checklist (due at day 6) waits out the 48 h after the Board.
+    expect((await w.claim("steps", KEY)).show).toBe(false);
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    // Turned on meanwhile (Turn it on, or Settings): the retry is not shown the offer.
+    expect((await w.post("/api/inbox/settings", { board: { on: true } })).ok).toBe(true);
+    expect((await w.claim("board", KEY)).show).toBe(false);
+    // A key that is not a key.
+    const bad = await w.post("/api/inbox/reveal", { id: "board", key: "../x" });
+    expect(bad.status).toBe(422);
+    expect(((await bad.json()) as Json).field).toBe("key");
   });
 
   test("405, 409, and an id that is not a reveal", async () => {
@@ -260,17 +345,20 @@ describe("the Board reveal at day 4", () => {
     expect(await w.next()).toBe("board");
   });
 
-  test("someone who already saw the Board's first-visit dialog (before the Board was a switch): the claim turns the Board on, no dialog", async () => {
+  test("someone who already saw the Board's first-visit dialog (before the Board was a switch): offered too, nothing on, their old stamp kept", async () => {
     const seen = new Date(Date.now() - 20 * DAY).toISOString();
     const w = await world({ config: { inboxBoardIntro: { shownAt: seen } } });
     expect(await w.next()).toBe("board");
     const answer = await w.claim();
-    expect(answer.show).toBe(false);
-    expect(answer.board.on).toBe(true);
+    expect(answer.show).toBe(true);
+    expect(answer.board.on).toBe(false);
     const saved = w.saved();
-    expect(saved.inboxBoard).toBe(true);
+    expect(saved.inboxBoard).toBeUndefined();
     expect(saved.inboxBoardIntro.shownAt).toBe(seen);
     expect(saved.inboxReveals.board.shownAt).toBe(saved.inboxReveals.lastShownAt);
+    // Turned on: they saw the welcome before, so the first visit does not show it again.
+    expect((await w.post("/api/inbox/settings", { board: { on: true } })).ok).toBe(true);
+    expect(await (await w.post("/api/inbox/board/intro")).json()).toEqual({ show: false });
     // Spent: never claimed again.
     expect(await w.next()).toBeNull();
     expect((await w.claim()).show).toBe(false);
@@ -297,7 +385,7 @@ describe("the Checklist reveal at day 6", () => {
   const day6 = (config: Record<string, unknown> = {}, more: Options = {}) =>
     world({ days: 6, config: { inboxBoard: true, inboxReveals: { lastShownAt: new Date(Date.now() - 3 * DAY).toISOString() }, ...config }, ...more });
 
-  test("next is the Checklist; agent text byte-equal to a Checklist off until the claim, the steps text after; the claim writes unset -> true in one save", async () => {
+  test("next is the Checklist; the claim only stamps it; Not now leaves agent text byte-equal to a Checklist off; Turn it on gives the steps text", async () => {
     const off = await day6({ inboxSteps: false });
     expect(await off.next()).toBeNull();
     const today = await off.agentText();
@@ -314,19 +402,37 @@ describe("the Checklist reveal at day 6", () => {
     expect(await w.toolNames()).not.toContain("steps");
     expect(await w.agentText()).toBe(today);
 
+    // The dialog shows: the claim is all the Inbox hears. Not now (and Escape, a click outside) sends nothing more.
     const answer = await w.claim("steps");
-    expect(answer).toEqual({ show: true, reveal: { next: null }, board: { on: true }, steps: { on: true } });
+    expect(answer).toEqual({ show: true, reveal: { next: null }, board: { on: true }, steps: { on: false } });
     const config = w.saved();
-    expect(config.inboxSteps).toBe(true);
+    expect(config.inboxSteps).toBeUndefined();
     expect(config.inboxReveals.steps.shownAt).toBe(config.inboxReveals.lastShownAt);
-    expect((await w.settings()).steps).toEqual({ on: true });
-    // From the next session: the approved steps text, byte for byte.
-    expect(await w.agentText()).toBe(stepsText);
+    expect((await w.settings()).steps).toEqual({ on: false });
+    // A new session after Not now: every agent word byte-equal to a Checklist off.
+    expect(await w.toolNames()).not.toContain("steps");
+    expect(await w.agentText()).toBe(today);
     // Never again: not next, and a second claim (a reload, another tab) shows nothing and writes nothing.
     const after = readFileSync(join(w.dataDir, "config.json"), "utf8");
     expect(await w.next()).toBeNull();
     expect((await w.claim("steps")).show).toBe(false);
     expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(after);
+
+    // Turn it on (the dialog saves the switch as Settings does): from the next session, the approved steps text.
+    expect((await w.post("/api/inbox/settings", { steps: { on: true } })).ok).toBe(true);
+    expect(w.saved().inboxSteps).toBe(true);
+    expect((await w.settings()).steps).toEqual({ on: true });
+    expect(await w.agentText()).toBe(stepsText);
+  });
+
+  test("turned on by 0.28.49's reveal (true, with its stamp): theirs now, never touched", async () => {
+    const at = new Date(Date.now() - DAY).toISOString();
+    const w = await day6({ inboxSteps: true, inboxReveals: { lastShownAt: at, steps: { shownAt: at } } });
+    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("steps")).show).toBe(false);
+    expect((await w.settings()).steps).toEqual({ on: true });
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
   });
 
   test("never over a Checklist the person set: on stays on, off stays off, nothing is written", async () => {
@@ -344,7 +450,7 @@ describe("the Checklist reveal at day 6", () => {
     const w = await day6({ inboxBoard: false });
     expect(await w.next()).toBe("steps");
     expect((await w.claim("steps")).show).toBe(true);
-    expect(w.saved().inboxSteps).toBe(true);
+    expect(w.saved().inboxSteps).toBeUndefined();
     expect(w.saved().inboxBoard).toBe(false);
   });
 
@@ -362,7 +468,8 @@ describe("the Checklist reveal at day 6", () => {
     const w = await day6();
     const answers = await Promise.all([w.claim("steps"), w.claim("steps"), w.claim("steps")]);
     expect(answers.filter((a) => a.show)).toHaveLength(1);
-    expect(w.saved().inboxSteps).toBe(true);
+    expect(w.saved().inboxReveals.steps.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxSteps).toBeUndefined();
   });
 
   test("tenure and threads: under 5 days or under 5 threads, it waits", async () => {
@@ -378,6 +485,17 @@ describe("the Checklist reveal at day 6", () => {
     expect(w.saved().inboxSteps).toBeUndefined();
   });
 
+  test("a lost answer: the same page's key is shown it again, another key is not, nothing written twice", async () => {
+    const w = await day6();
+    const KEY = "5c2e9a70-1f3b-4e8d-a6c4-7d0b9e2f1a33";
+    expect((await w.claim("steps", KEY)).show).toBe(true);
+    const stamped = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    expect(await w.claim("steps", KEY)).toMatchObject({ show: true, steps: { on: false } });
+    expect((await w.claim("steps", "another-tab-key")).show).toBe(false);
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
+    expect(w.saved().inboxSteps).toBeUndefined();
+  });
+
   test("over the tailnet: a guest is never armed and never claims; the owner's phone claims", async () => {
     const w = await day6({}, { tailnet: "owner" });
     const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
@@ -387,7 +505,8 @@ describe("the Checklist reveal at day 6", () => {
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal).toEqual({ next: "steps" });
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "steps" })).json()) as Json).show).toBe(true);
-    expect(w.saved().inboxSteps).toBe(true);
+    expect(w.saved().inboxReveals.steps.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxSteps).toBeUndefined();
   });
 });
 
@@ -401,7 +520,8 @@ describe("over the tailnet", () => {
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal).toEqual({ next: "board" });
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(true);
-    expect(w.saved().inboxBoard).toBe(true);
+    expect(w.saved().inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxBoard).toBeUndefined();
   });
 
   test("the Board's first-visit dialog: a guest never claims it, the owner's phone does, once", async () => {
@@ -426,7 +546,8 @@ describe("over the tailnet", () => {
     const settings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(settings.reveal).toEqual({ next: "board" });
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(true);
-    expect(w.saved().inboxBoard).toBe(true);
+    expect(w.saved().inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxBoard).toBeUndefined();
   });
 });
 

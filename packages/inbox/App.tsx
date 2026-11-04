@@ -117,6 +117,8 @@ import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
 import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
+import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -1853,12 +1855,12 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
-        // A capability switch saved here or in another window (approval "inbox-thread-steps"): every window follows.
+        // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
-          const { steps, code_review: codeReview, shape } = capabilities;
           // Code review and Shape move the "/" list: the next box reads the catalog again.
-          if (codeReview || shape) reloadSkillCatalog();
-          if (steps || codeReview || shape) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}) } : current));
+          if (capabilities.code_review || capabilities.shape) reloadSkillCatalog();
+          // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
+          if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
           else void refreshSettings();
         },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
@@ -4189,8 +4191,8 @@ function Inbox() {
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
   });
-  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim turns the Board on, so its
-  // sidebar row appears with the Board's own first-visit dialog (BoardIntro). No new dialog.
+  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim only stamps it, and the Board's own
+  // first-visit dialog (BoardIntro) offers it: "Turn it on" turns it on (its sidebar row appears), "Not now" leaves it.
   const boardReveal = useBoardReveal({
     due: snoozeIntroLatch.current?.next === 'board',
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4202,10 +4204,11 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    on: settings?.board?.on === true,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
-  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim turns the Checklist on,
-  // then ChecklistIntro opens.
+  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim only stamps it, then
+  // ChecklistIntro offers it.
   const stepsReveal = useStepsReveal({
     due: snoozeIntroLatch.current?.next === 'steps',
     listLoaded: snoozeIntroLatch.current !== null,
@@ -4217,8 +4220,21 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
+  const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
+    void turnOnRevealFeature(feature, close, {
+      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      setSettings,
+      showToast,
+      dismissToast,
+      refreshSettings,
+      openSettings: () => {
+        window.location.hash = '#settings/capabilities';
+      },
+    });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -5776,17 +5792,10 @@ function Inbox() {
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
-      {boardReveal.stage === 'open' && <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} />}
-      {stepsReveal.stage === 'open' && (
-        <ChecklistIntro
-          phone={phone}
-          onClose={stepsReveal.close}
-          onSettings={() => {
-            stepsReveal.close();
-            go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
-          }}
-        />
+      {boardReveal.stage === 'open' && (
+        <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
       )}
+      {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

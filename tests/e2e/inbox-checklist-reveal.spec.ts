@@ -5,11 +5,13 @@
  * dir, seeded at day 8 with six threads (inbox-board-reveal-seed.ts), Snooze and the Board already revealed (the Board
  * on, its reveal 3 days ago, so the 48 h spacing holds), the Checklist as each case says.
  *
- *  - Desktop: never on load. Past a minute on the page the person reads a thread and closes it: ChecklistIntro opens,
- *    and the claim has already turned the Checklist on (config.json `inboxSteps` unset -> true, its stamp the spacing
- *    clock's). "Open Settings" lands on Settings → Capabilities with the Checklist switch on. A reload reaching the
- *    moment again shows nothing, and the Checklist stays on.
- *  - A 390 px phone: the dialog as a sheet; "Got it" closes it and the Checklist stays on (never written false).
+ * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
+ *
+ *  - Desktop: never on load. Past a minute on the page the person reads a thread and closes it: ChecklistIntro opens
+ *    as an offer, and the claim stamped it (its stamp the spacing clock's) with `inboxSteps` still unset. "Turn it on"
+ *    writes it true, and Settings → Capabilities shows the Checklist switch on. A reload reaching the moment again
+ *    shows nothing, and the Checklist stays on.
+ *  - A 390 px phone: the dialog as a sheet, Turn it on on top; "Not now" closes it and the Checklist stays unset.
  *  - A person who set the Checklist, on or off: the moment shows nothing, their setting stays, and no reveal is stamped.
  *  - In every case the "Tell your agents" dialog never appears.
  *
@@ -173,23 +175,25 @@ async function reveal(page: Page, w: World, phone = false) {
   expect(config(w).inboxSteps).toBeUndefined();
   await readAndLeave(page, w.ids['invoice-pdf']!, phone);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
-  // The claim turned the Checklist on (unset -> true) and stamped the spacing clock, in one save, before any click.
+  // The claim stamped the reveal and the spacing clock, in one save, and turned nothing on.
   const saved = config(w);
-  expect(saved.inboxSteps).toBe(true);
+  expect(saved.inboxSteps).toBeUndefined();
   expect(saved.inboxReveals.steps.shownAt).toBe(saved.inboxReveals.lastShownAt);
+  await expect(page.locator(`${DIALOG} [data-checklist-intro-close]`)).toHaveText('Not now');
+  await expect(page.locator(`${DIALOG} [data-checklist-intro-on]`)).toHaveText('Turn it on');
   // The Board's own stamps are left as they were.
   expect(saved.inboxBoard).toBe(true);
 }
 
-/** A reload and the same moment a minute on: nothing, and the Checklist still on. */
-async function neverAgain(page: Page, w: World, phone = false) {
+/** A reload and the same moment a minute on: nothing, and the Checklist as the person left it. */
+async function neverAgain(page: Page, w: World, steps: boolean | undefined, phone = false) {
   await page.goto(w.url.replace(/#.*$/, ''));
   await expect(rowOf(page, w.ids['release-notes']!)).toBeVisible();
   await page.waitForTimeout(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['release-notes']!, phone);
   await page.waitForTimeout(5_000);
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  expect(config(w).inboxSteps).toBe(true);
+  expect(config(w).inboxSteps).toBe(steps);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -210,7 +214,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: never on load; at the calm moment the claim turns the Checklist on; Open Settings lands on Capabilities with it on; once', async ({ browser }) => {
+test('desktop: never on load; at the calm moment the dialog offers the Checklist and turns nothing on; Turn it on turns it on; once', async ({ browser }) => {
   test.setTimeout(360_000);
   const w = await world();
   const page = await (await context(browser)).newPage();
@@ -219,34 +223,39 @@ test('desktop: never on load; at the calm moment the claim turns the Checklist o
   await reveal(page, w);
   await shots(page, 'desktop-{s}-reveal');
   await noAgentNote(page);
-  // Open Settings: the dialog closes on Settings → Capabilities, the Checklist switch on.
-  await page.locator('[data-checklist-intro-settings]').click();
+  // Turn it on: the dialog closes and the switch is saved; Settings → Capabilities reads it on.
+  await page.locator('[data-checklist-intro-on]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  await expect(page).toHaveURL(/#settings\/capabilities$/);
+  await expect.poll(() => config(w).inboxSteps).toBe(true);
+  await page.goto(`${w.url.replace(/#.*$/, '')}#settings/capabilities`);
   await expect(page.locator('[data-settings-steps]')).toBeVisible();
   await expect(page.locator('[data-settings-steps] [role="switch"]')).toHaveAttribute('aria-checked', 'true');
   await page.mouse.move(4, 4);
   await shots(page, 'desktop-{s}-settings');
   expect(config(w).inboxSteps).toBe(true);
   await noAgentNote(page);
-  await neverAgain(page, w);
+  await neverAgain(page, w, true);
   await noAgentNote(page);
 });
 
-test('a 390 px phone: the dialog as a sheet; Got it closes it and the Checklist stays on; once', async ({ browser }) => {
+test('a 390 px phone: the dialog as a sheet, Turn it on on top; Not now closes it and the Checklist stays unset; once', async ({ browser }) => {
   test.setTimeout(300_000);
   const w = await world();
   const page = await (await context(browser, true)).newPage();
   await guardAgentNote(page);
   await page.goto(w.url);
   await reveal(page, w, true);
+  const on = await page.locator('[data-checklist-intro-on]').boundingBox();
+  const not = await page.locator('[data-checklist-intro-close]').boundingBox();
+  expect(on!.y).toBeLessThan(not!.y);
   await shots(page, 'phone-{s}-reveal');
   await page.locator('[data-checklist-intro-close]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
-  // Got it never writes false: the switch stays the person's, and the claim left it on.
-  expect(config(w).inboxSteps).toBe(true);
+  // Not now writes nothing: the Checklist stays unset (off), and only Settings turns it on from here.
+  await page.waitForTimeout(1_000);
+  expect(config(w).inboxSteps).toBeUndefined();
   await noAgentNote(page);
-  await neverAgain(page, w, true);
+  await neverAgain(page, w, undefined, true);
   await noAgentNote(page);
 });
 
