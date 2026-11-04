@@ -497,47 +497,159 @@ export function shapeHtmlProblems(html: string): string[] {
 }
 
 const isHtmlSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
+const isAsciiAlpha = (c: string | undefined) => !!c && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+/** ASCII-only lower case, as the tokenizer folds tag and attribute names (a whole-string toLowerCase can change its length). */
+const asciiLower = (text: string) => text.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+const startsWithCi = (html: string, word: string, at: number) => asciiLower(html.slice(at, at + word.length)) === word;
+
+/** Elements whose content is text up to their own end tag (RAWTEXT and RCDATA; noscript as with scripting on, as the board draws). */
+const RAW_TEXT_TAGS = new Set(['style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript']);
+/** Start tags that end `<svg>` or `<math>` content (the tree builder's breakout list). */
+const FOREIGN_BREAKOUT = new Set(['b', 'big', 'blockquote', 'body', 'br', 'center', 'code', 'dd', 'div', 'dl', 'dt', 'em', 'embed', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'hr', 'i', 'img', 'li', 'listing', 'menu', 'meta', 'nobr', 'ol', 'p', 'pre', 'ruby', 's', 'small', 'span', 'strong', 'strike', 'sub', 'sup', 'table', 'tt', 'u', 'ul', 'var']);
+
+/** Where a comment that starts after `<!--` (at `from`) ends: `-->`, `--!>`, or at once for `<!-->` and `<!--->`. */
+function commentEnd(html: string, from: number): number {
+  if (html[from] === '>') return from + 1;
+  if (html[from] === '-' && html[from + 1] === '>') return from + 2;
+  for (let k = html.indexOf('--', from); k >= 0; k = html.indexOf('--', k + 1)) {
+    let j = k + 2;
+    while (html[j] === '-') j++;
+    if (html[j] === '>') return j + 1;
+    if (html[j] === '!' && html[j + 1] === '>') return j + 2;
+  }
+  return html.length;
+}
+
+/** The `<` of the end tag that closes a raw-text element (`</name` then a space, `/` or `>`), from `from`. */
+function rawTextEnd(html: string, from: number, name: string): number {
+  for (let k = html.indexOf('</', from); k >= 0; k = html.indexOf('</', k + 2)) {
+    const after = html[k + 2 + name.length];
+    if (startsWithCi(html, name, k + 2) && (isHtmlSpace(after) || after === '/' || after === '>')) return k;
+  }
+  return html.length;
+}
+
+/** A script's content, by the tokenizer's script-data states (a `<!--` … `<script>` in it holds a `</script>` as text). */
+function scriptEnd(html: string, from: number): number {
+  const n = html.length;
+  const endsHere = (k: number) => {
+    const after = html[k + 8];
+    return startsWithCi(html, '</script', k) && (isHtmlSpace(after) || after === '/' || after === '>');
+  };
+  const scriptWord = (k: number) => {
+    const after = html[k + 6];
+    return startsWithCi(html, 'script', k) && (isHtmlSpace(after) || after === '/' || after === '>');
+  };
+  let state: 'data' | 'escaped' | 'double' = 'data';
+  let i = from;
+  while (i < n) {
+    const c = html[i];
+    if (state === 'data') {
+      if (c !== '<') i++;
+      else if (endsHere(i)) return i;
+      else if (html.startsWith('<!--', i)) {
+        // The escape's own dashes may close it again at once (`<!-->`).
+        i += 4;
+        while (html[i] === '-') i++;
+        if (html[i] === '>') i++;
+        else state = 'escaped';
+      } else i++;
+    } else if (c === '-' && html[i + 1] === '-') {
+      i += 2;
+      while (html[i] === '-') i++;
+      if (html[i] === '>') {
+        state = 'data';
+        i++;
+      }
+    } else if (c === '<' && state === 'escaped') {
+      if (endsHere(i)) return i;
+      if (isAsciiAlpha(html[i + 1]) && scriptWord(i + 1)) {
+        state = 'double';
+        i += 7;
+      } else i++;
+    } else if (c === '<' && html[i + 1] === '/' && scriptWord(i + 2)) {
+      state = 'escaped';
+      i += 8;
+    } else i++;
+  }
+  return n;
+}
 
 /**
- * Every `data-code` value in drawn HTML, as a browser reads the attribute: a
- * small scan by the HTML tokenizer's own rules for start tags (a value quoted
- * or not, a stray quote inside an unquoted one kept, an attribute after `/`
- * or straight after another's closing quote; comments, end tags and `<!…>`
- * skipped), named references decoded. In order. It never misses a tag the
- * browser reads; it may read one the browser takes as text, which only makes
- * a check stricter.
+ * Every `data-code` value in drawn HTML, as a browser reads the attribute,
+ * by the HTML tokenizer's rules: tags (a value quoted or not, a stray quote
+ * inside an unquoted one kept, an attribute after `/` or straight after
+ * another's closing quote, end tags' attributes read past, a tag cut off at
+ * the end dropped); comments (ended by `-->`, `--!>`, `<!-->` or `<!--->`);
+ * the elements whose content is text (script with its escapes, style,
+ * textarea, title, xmp, iframe, noembed, noframes, noscript as with scripting
+ * on; plaintext to the end), skipped to their end tag; and svg and math, where
+ * none of those is text and a CDATA section is. Named references decoded; in
+ * order. It does not build the tree, so markup that leans on the tree builder
+ * can read otherwise: an end tag inside svg that closes an HTML element
+ * around it, or a tag the builder drops (in a `<select>` or `<template>`, a
+ * table's misplaced content). It may also read a code the browser drops (a
+ * repeated attribute), which only makes a check stricter. A test holds it to
+ * parse5 on random markup (packages/shared/shape/html-codes-parse5.test.ts).
  */
 export function shapeHtmlDataCodes(html: string): string[] {
   const out: string[] = [];
   const n = html.length;
+  // The open <svg>/<math> (and the svg or math elements of the same names in them), and the parts inside them
+  // whose content is HTML again (svg's foreignObject, desc and title; math's text and annotation-xml ones).
+  // `doubt`: an end tag of none of its own came in it, which may have closed an HTML element around it, and it.
+  const open: { name: string; content: 'svg' | 'math' | 'html'; doubt?: boolean }[] = [];
+  const foreign = () => {
+    const top = open[open.length - 1];
+    return top && top.content !== 'html' ? top.content : null;
+  };
   let i = 0;
   while (i < n) {
     const lt = html.indexOf('<', i);
     if (lt < 0) break;
     i = lt + 1;
     if (html.startsWith('!--', i)) {
-      const end = html.indexOf('-->', i + 3);
+      i = commentEnd(html, i + 3);
+      continue;
+    }
+    // A CDATA section is text only in svg or math; anywhere else (or where that is in doubt) a comment to the next `>`.
+    if (html[i] === '!' && foreign() && !open[open.length - 1]!.doubt && html.startsWith('[CDATA[', i + 1)) {
+      const end = html.indexOf(']]>', i + 8);
       i = end < 0 ? n : end + 3;
       continue;
     }
-    if (html[i] === '!' || html[i] === '?' || html[i] === '/') {
+    const closing = html[i] === '/';
+    if (html[i] === '!' || html[i] === '?' || (closing && !isAsciiAlpha(html[i + 1]))) {
+      // `</>` is nothing; any other `<!…>`, `<?…>` or `</…>` that names no tag is a comment to the next `>`.
       const end = html.indexOf('>', i);
       i = end < 0 ? n : end + 1;
       continue;
     }
-    if (!/[A-Za-z]/.test(html[i] ?? '')) continue;
+    if (closing) i++;
+    else if (!isAsciiAlpha(html[i])) continue;
+    const nameStart = i;
     while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>') i++;
+    const tag = asciiLower(html.slice(nameStart, i));
+    const attrs: { name: string; value: string }[] = [];
+    let ended = false;
+    let selfClosing = false;
     for (;;) {
-      while (i < n && (isHtmlSpace(html[i]) || html[i] === '/')) i++;
+      while (i < n && isHtmlSpace(html[i])) i++;
       if (i >= n) break;
+      if (html[i] === '/') {
+        i++;
+        if (html[i] === '>') selfClosing = true;
+        continue;
+      }
       if (html[i] === '>') {
         i++;
+        ended = true;
         break;
       }
       const start = i;
       i++; // A name may start with `=`.
       while (i < n && !isHtmlSpace(html[i]) && html[i] !== '/' && html[i] !== '>' && html[i] !== '=') i++;
-      const name = html.slice(start, i).toLowerCase();
+      const name = asciiLower(html.slice(start, i));
       while (i < n && isHtmlSpace(html[i])) i++;
       let value = '';
       if (html[i] === '=') {
@@ -554,8 +666,42 @@ export function shapeHtmlDataCodes(html: string): string[] {
           value = html.slice(from, i);
         }
       }
-      if (name === 'data-code') out.push(decodeEntities(value));
+      attrs.push({ name, value });
     }
+    // A tag the end of the text cuts off is never made.
+    if (!ended) break;
+    if (closing) {
+      const ns = foreign();
+      if (ns && (tag === 'p' || tag === 'br')) {
+        while (foreign()) open.pop();
+      } else if (ns || tag === 'svg' || tag === 'math' || open[open.length - 1]?.name === tag) {
+        const k = open.map((o) => o.name).lastIndexOf(tag);
+        if (k >= 0) open.length = k;
+        else if (ns) open[open.length - 1]!.doubt = true;
+      }
+      continue;
+    }
+    for (const a of attrs) if (a.name === 'data-code') out.push(decodeEntities(a.value));
+    let ns = foreign();
+    if (ns && (FOREIGN_BREAKOUT.has(tag) || (tag === 'font' && attrs.some((a) => a.name === 'color' || a.name === 'face' || a.name === 'size')))) {
+      while (foreign()) open.pop();
+      ns = null;
+    }
+    if (ns) {
+      if (selfClosing) continue;
+      if (ns === 'svg' && (tag === 'foreignobject' || tag === 'desc' || tag === 'title')) open.push({ name: tag, content: 'html' });
+      else if (ns === 'math' && (tag === 'mi' || tag === 'mo' || tag === 'mn' || tag === 'ms' || tag === 'mtext')) open.push({ name: tag, content: 'html' });
+      else if (ns === 'math' && tag === 'annotation-xml') {
+        const encoding = asciiLower(decodeEntities(attrs.find((a) => a.name === 'encoding')?.value ?? ''));
+        if (encoding === 'text/html' || encoding === 'application/xhtml+xml') open.push({ name: tag, content: 'html' });
+      } else if (tag === 'svg' || tag === 'math') open.push({ name: tag, content: ns, doubt: open[open.length - 1]!.doubt });
+      continue;
+    }
+    if (tag === 'svg' || tag === 'math') {
+      if (!selfClosing) open.push({ name: tag, content: tag });
+    } else if (tag === 'plaintext') break;
+    else if (tag === 'script') i = scriptEnd(html, i);
+    else if (RAW_TEXT_TAGS.has(tag)) i = rawTextEnd(html, i, tag);
   }
   return out;
 }

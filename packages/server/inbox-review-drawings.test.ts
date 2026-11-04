@@ -274,14 +274,21 @@ describe("Show me while Code review is on", () => {
       // A stray quote in an unquoted value: the browser still reads the code.
       "<div data-code=src/zzz.ts#L1 title=it's>x</div>",
       '<div title=a"b data-code=src/zzz.ts#L1>x</div>',
+      // Comments end as the browser ends them, and `<!--` in a text element is text.
+      '<!--><div data-mark="a" data-code="src/zzz.ts#L1">x</div>',
+      '<!-- a --!><div data-code="src/zzz.ts#L1">x</div>',
+      "<textarea><!--</textarea><div data-code=src/zzz.ts#L1>x</div>",
+      "<noscript><!--</noscript><div data-code=src/zzz.ts#L1>x</div>",
     ]) {
       const refused = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source } });
       expect(refused.status).toBe(422);
       expect((await json(refused)).problems).toContain('data-code="src/zzz.ts#L1": src/zzz.ts is not a file in this review');
     }
-    const unreadable = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source: "<div data-code=src/auth.ts>x</div>" } });
-    expect(unreadable.status).toBe(422);
-    expect((await json(unreadable)).problems).toContain('source: data-code="src/auth.ts" is not a file and line in the project (write path#L42)');
+    for (const source of ["<div data-code=src/auth.ts>x</div>", '<!---><div data-code="src/auth.ts">x</div>']) {
+      const unreadable = await w.cli(path, { turn: "turn-0001", drawing: { ...GOOD_DRAWING, source } });
+      expect(unreadable.status).toBe(422);
+      expect((await json(unreadable)).problems).toContain('source: data-code="src/auth.ts" is not a file and line in the project (write path#L42)');
+    }
   });
 
   test("a Show me again asked again (the Ask window's retry) is the same turn, not a refusal", async () => {
