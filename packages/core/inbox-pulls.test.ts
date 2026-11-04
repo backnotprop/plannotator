@@ -75,6 +75,29 @@ describe("inboxPullStacks", () => {
     expect(inboxPullLandsNext(stack!)?.number).toBe(412);
   });
 
+  test("a merged long-lived branch, or one other open PRs are based on, is never a stack's bottom", () => {
+    const release = pr({ number: 50, head: "develop", base: "main", state: "merged" });
+    const onDevelop = pr({ number: 51, head: "feat/a", base: "develop" });
+    const [stack] = inboxPullStacks([onDevelop, release]);
+    expect(keys(stack!.layers)).toEqual([51]);
+    expect(stack!.base).toBe("develop");
+
+    // A merged branch two separate open PRs are based on is shared ground, not a layer of either.
+    const shared = pr({ number: 60, head: "platform-v2", base: "main", state: "merged" });
+    const a = pr({ number: 61, head: "a", base: "platform-v2" });
+    const b = pr({ number: 62, head: "b", base: "platform-v2" });
+    const stacks = inboxPullStacks([a, b, shared]);
+    expect(stacks.map((s) => keys(s.layers))).toEqual([[61], [62]]);
+  });
+
+  test("the whole stack runs from the lowest open layer's base, under the merged layers", () => {
+    const merged = pr({ number: 411, head: "retry/charge-client", base: "main", state: "merged" });
+    const low = pr({ number: 412, head: "retry/schedule", base: "retry/charge-client" });
+    const [stack] = inboxPullStacks([low, merged]);
+    expect(stack!.base).toBe("main");
+    expect(stack!.open_base).toBe("retry/charge-client");
+  });
+
   test("the same branch name in another repository, or from a fork, is not a layer", () => {
     const low = pr({ number: 1, head: "feature/a", base: "main" });
     const otherRepo = pr({ number: 2, head: "feature/b", base: "feature/a", repo: "northwind/web-app" });

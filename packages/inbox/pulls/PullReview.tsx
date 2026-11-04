@@ -36,7 +36,7 @@ import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
-import { findStack, forgeName, inboxPullLabel, linkAgentName, nextLayer, pullGroups, pullVerdictReply, stackLink } from './model';
+import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullVerdictReply } from './model';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = lazy(() => import('#guide-reader'));
@@ -83,12 +83,35 @@ function keep(id: string, value: { comments: CodeAnnotation[]; viewed: string[] 
   }
 }
 
-export function PullReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+/**
+ * One review per layer and scope: moving to another layer (Next layer, the strip) or switching This layer |
+ * Whole stack starts afresh, so a note drafted on #412 never rides into #413's verdict.
+ */
+export function PullReview(props: PullReviewProps) {
+  return <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />;
+}
+
+/** Stored comments of a layer from before its last push: their lines may have moved, so they go. */
+function dropStale(layerKey: string, scope: string, keptId: string): void {
+  try {
+    const prefix = `${STORE}${layerKey}:${scope}:`;
+    for (let i = window.localStorage.length - 1; i >= 0; i--) {
+      const name = window.localStorage.key(i);
+      if (name && name.startsWith(prefix) && name !== STORE + keptId) window.localStorage.removeItem(name);
+    }
+  } catch {
+    // Storage off.
+  }
+}
+
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
-  const link = stack && model ? stackLink(stack, model.links) : null;
+  // The verdict goes to this layer's own agent thread (its stack's only as a fallback), and only on the person's
+  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict.
+  const link = stack && model && layer ? layerVerdictLink(layer, stack, model.links) : null;
   const agent = linkAgentName(link);
   const open = stack ? stack.layers.filter((l) => l.state === 'open' || l.state === 'draft') : [];
   const at = layer ? open.findIndex((l) => l.key === layer.key) : -1;
@@ -124,7 +147,11 @@ export function PullReview({ model, modelError, stackId, layerKey, scope, onLaye
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer?.key, scope, layer?.updated_at]);
 
-  const keptId = `${layerKey}:${scope}`;
+  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean.
+  const keptId = `${layerKey}:${scope}:${layer?.updated_at ?? ''}`;
+  useEffect(() => {
+    if (layer) dropStale(layerKey, scope, keptId);
+  }, [layer, layerKey, scope, keptId]);
   const [comments, setComments] = useState<CodeAnnotation[]>(() => readKept(keptId).comments);
   const [viewed, setViewed] = useState<string[]>(() => readKept(keptId).viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -381,8 +408,10 @@ export function PullReview({ model, modelError, stackId, layerKey, scope, onLaye
             </div>
           )}
           {!canDecide && (
-            <p className="ib-prr-note" data-pull-review-readonly="">
-              No agent thread is tied to this pull request here, so the diff reads without a verdict. Review it on {forgeName(stack)}.
+            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
+              {layer.mine
+                ? `No agent thread is tied to this pull request here, so the diff reads without a verdict. Review it on ${forgeName(stack)}.`
+                : `This is ${layer.author ?? 'a teammate'}'s pull request, so the diff reads here without a verdict. Review it on ${forgeName(stack)}.`}
             </p>
           )}
           {sendError && (

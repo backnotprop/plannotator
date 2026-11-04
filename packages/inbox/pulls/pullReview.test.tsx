@@ -244,3 +244,55 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });
+
+// --- the review's findings (#2590): who a verdict may go to ---
+
+const OTHER_LAST = 'msg_01M4H6G73M9H3Z32T859E72XYZ';
+const linkTo = (thread: string, last: string): InboxPullLink => ({ ...link, thread_id: thread, last: { message_id: last, preview: 'Up.', at: '2026-11-03T09:00:00.000Z' } });
+
+test.skipIf(!hasDom)("a teammate's layer in a stack with the person's linked one: no verdict, Open on GitHub", async () => {
+  const mine = pull(1, { head: 'b1' });
+  const theirs = pull(2, { head: 'b2', base: 'b1', mine: false, requested: true, author: 'tomas' });
+  const answer: InboxPullsAnswer = { ...model, pulls: [mine, theirs], links: { [mine.key]: link } };
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={answer} />);
+  await settle();
+  expect(asked).toEqual([{ key: theirs.key, scope: 'layer' }]);
+  expect(document.querySelector('[data-review-decision]')).toBeNull();
+  expect(el('[data-pull-review-readonly]').getAttribute('data-pull-review-readonly')).toBe('teammate');
+  expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(theirs.url);
+});
+
+test.skipIf(!hasDom)("a layer's verdict goes to its own thread, not the stack's top one", async () => {
+  const low = pull(31, { head: 'c1' });
+  const top = pull(32, { head: 'c2', base: 'c1' });
+  const answer: InboxPullsAnswer = { ...model, pulls: [low, top], links: { [low.key]: linkTo('thr_low', LAST), [top.key]: linkTo('thr_top', OTHER_LAST) } };
+  mount(<Review stackId={top.key} from={low.key} answer={answer} />);
+  await settle();
+  await act(async () => el('[data-review-decision] [data-decision-primary]').click());
+  await settle();
+  expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${LAST}/reply`]);
+  expect(String(posted[0]!.body.words)).toContain('pull request #31');
+});
+
+test.skipIf(!hasDom)("an unlinked layer of the person's stack falls back to the stack's thread", async () => {
+  const low = pull(41, { head: 'd1' });
+  const top = pull(42, { head: 'd2', base: 'd1' });
+  const answer: InboxPullsAnswer = { ...model, pulls: [low, top], links: { [top.key]: linkTo('thr_top', OTHER_LAST) } };
+  mount(<Review stackId={top.key} from={low.key} answer={answer} />);
+  await settle();
+  await act(async () => el('[data-review-decision] [data-decision-primary]').click());
+  await settle();
+  expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${OTHER_LAST}/reply`]);
+});
+
+test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones of this push are kept', async () => {
+  const layer = stack[0]!;
+  const store = 'plannotator-inbox-pull-review:';
+  const comment = { id: 'c1', type: 'comment', filePath: 'a.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'old line', createdAt: 1 };
+  window.localStorage.setItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`, JSON.stringify({ comments: [comment], viewed: [] }));
+  window.localStorage.setItem(`${store}${layer.key}:layer:${layer.updated_at}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
+  mount(<Review stackId={STACK_ID} from={layer.key} answer={model} />);
+  await settle();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`)).toBeNull();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${layer.updated_at}`)).not.toBeNull();
+});

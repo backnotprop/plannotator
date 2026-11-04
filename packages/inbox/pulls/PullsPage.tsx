@@ -29,6 +29,9 @@ import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { SidebarTrigger } from '../shell/sidebar';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { newUuid } from '../uuid';
+import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui/shortcuts';
+import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
   checksWords,
   findStack,
@@ -500,6 +503,7 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
   const [sent, setSent] = useState(false);
   const key = useRef<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   useEffect(() => {
     if (open) box.current?.focus();
   }, [open]);
@@ -534,7 +538,8 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
             aria-label={`Reply to ${agent}`}
             onChange={(event) => setWords(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              // The registry's Send (`inboxThreadShortcuts.send`, Mod+Enter), as the thread's reply box and compose match it.
+              if (!event.nativeEvent.isComposing && resolveShortcutBindings(inboxThreadShortcuts.shortcuts.send).some((binding) => matchesShortcutBinding(event.nativeEvent, binding))) {
                 event.preventDefault();
                 void send();
               } else if (event.key === 'Escape' && !words.trim()) {
@@ -555,8 +560,9 @@ function StackReply({ link, agent, onOpenThread }: { link: InboxPullLink; agent:
             <button type="button" className="ib-btn" onClick={() => setOpen(false)} disabled={sending}>
               Cancel
             </button>
-            <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || !words.trim()} data-pulls-reply-send="">
+            <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || !words.trim()} aria-keyshortcuts={sendKeys} data-pulls-reply-send="">
               {sending ? 'Sending…' : 'Send'}
+              <ShortcutHint scope={inboxThreadShortcuts} action="send" />
             </button>
           </div>
         </div>

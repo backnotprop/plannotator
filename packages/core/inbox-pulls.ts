@@ -141,13 +141,23 @@ export interface InboxPullStack {
   layers: InboxPull[];
   /** The branch the bottom layer merges into (`main`). */
   base: string;
+  /**
+   * The branch the lowest open layer is based on: "Whole stack" runs from it, so layers already merged (a squash
+   * merge leaves their commits under the open ones) are not read again. `base` when no layer is merged.
+   */
+  open_base: string;
 }
+
+/** Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer. */
+const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
 
 /**
  * The stacks among the PRs: one per chain of open PRs where each one's base is
  * the head of the one under it, in the same repository; every other open PR is
  * a stack of one. Merged PRs whose head is still the base of a stack's lowest
- * open layer go under it (at most 5). Closed PRs, and merged PRs under no
+ * open layer go under it (at most 5), unless that head is a long-lived branch
+ * or the base of another open PR outside the stack (then it is a shared
+ * branch, not a layer). Closed PRs, and merged PRs under no
  * stack, are left out. A branch with two PRs on it (a tree) is one stack, its
  * layers in depth order, siblings by number. Stacks come in the PRs' order of
  * their top layers.
@@ -190,13 +200,21 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
     const under: InboxPull[] = [];
     let base = root.base;
     for (let i = 0; i < 5; i++) {
-      const below = merged.find((pull) => ownHead(pull) && repoKey(pull) === repoKey(root) && pull.head === base && !under.includes(pull));
+      const below = merged.find(
+        (pull) =>
+          ownHead(pull) &&
+          repoKey(pull) === repoKey(root) &&
+          pull.head === base &&
+          !under.includes(pull) &&
+          !LONG_LIVED.test(pull.head) &&
+          !open.some((other) => repoKey(other) === repoKey(root) && other.base === pull.head && !layers.includes(other)),
+      );
       if (!below) break;
       under.unshift(below);
       base = below.base;
     }
     const all = [...under, ...layers];
-    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, base: all[0]!.base });
+    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, base: all[0]!.base, open_base: root.base });
   }
   const order = new Map(unique.map((pull, i) => [pull.key, i]));
   return stacks.sort((a, b) => Math.min(...a.layers.map((l) => order.get(l.key)!)) - Math.min(...b.layers.map((l) => order.get(l.key)!)));

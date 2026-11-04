@@ -18,13 +18,14 @@
  *    asked for a PR the list never named reaching the CLI.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls } from "./inbox-pulls";
+import { createInboxPulls, GITHUB_SEARCH_MAX_CHARS, githubPullSearches, INBOX_PULL_DIFF_MAX_BYTES, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls, safeBranch } from "./inbox-pulls";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
 
 const roots: string[] = [];
@@ -86,7 +87,7 @@ interface Forge {
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
-function forge(): Forge {
+function forge(answer: unknown = GH_ANSWER): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
@@ -97,7 +98,7 @@ function forge(): Forge {
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (cli === "gh" && args.includes("graphql")) {
         if (f.fail) return { stdout: "", stderr: f.fail, exitCode: 1 };
-        return { stdout: JSON.stringify(GH_ANSWER), stderr: "", exitCode: 0 };
+        return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
       }
       if (cli === "gh" && args[0] === "api") return { stdout: `diff of ${args[3]}\n`, stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "unexpected", exitCode: 1 };
@@ -106,7 +107,7 @@ function forge(): Forge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -115,13 +116,14 @@ async function world(options: { codeReview?: boolean } = {}) {
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const f = forge();
+  const f = forge(options.answer);
   const branches: string[] = [];
   const branch = { value: null as string | null };
   const server = await startInboxServer({
     dataDir,
     phones: false,
     ...(options.codeReview === undefined ? {} : { codeReview: options.codeReview }),
+    ...(options.tailscale ? { tailscale: options.tailscale } : {}),
     refRunner: f.run,
     readProjectRepo: async () => ({ display: "northwind/billing-svc", host: "github.com" }),
     pullBranch: async (folder) => {
@@ -334,5 +336,234 @@ describe("parsing", () => {
     const by = Object.fromEntries(answer.pulls.map((p) => [p.number, p]));
     expect(by[61]).toMatchObject({ repo: "northwind/data/ledger", checks: "pending", review: "review_required", reviewers: ["jun"], key: "gitlab.com/northwind/data/ledger#61:pull" });
     expect(by[57]).toMatchObject({ review: "approved", approved_by: "jun", checks: "success", reviewers: [] });
+  });
+});
+
+// --- the review's findings (#2590): links stay in their project and repository, forks, stacks, guests ---
+
+/** Several projects: `billing-svc` and its second clone `billing-svc-2` (one origin), and `web-app` (another). */
+async function projects(answer: unknown) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-many-")));
+  roots.push(root);
+  const dirs: Record<string, string> = {};
+  for (const name of ["billing-svc", "billing-svc-2", "web-app"]) {
+    dirs[name] = join(root, name);
+    mkdirSync(dirs[name]!, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: dirs[name]!, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+  }
+  const dataDir = join(root, "data");
+  mkdirSync(dataDir, { recursive: true });
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  const f = forge(answer);
+  const branchOf: Record<string, string> = {};
+  const server = await startInboxServer({
+    dataDir,
+    phones: false,
+    codeReview: true,
+    refRunner: f.run,
+    readProjectRepo: async (dir) => ({ display: dir.endsWith("web-app") ? "northwind/web-app" : "northwind/billing-svc", host: "github.com" }),
+    pullBranch: async (folder) => branchOf[folder] ?? null,
+  });
+  servers.push(server);
+  const base = `http://127.0.0.1:${server.port}`;
+  const client = new Client({ name: "inbox-pulls-many", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  clients.push(client);
+  const send = async (project: string, body: string, thread: string) => {
+    const result = (await client.callTool({ name: "send_message", arguments: { project_path: dirs[project], body, thread, agent_session: `ses_${thread}`, agent_name: "Claude Code", agent_host: "claude-code" } })) as { structuredContent: { thread_id: string } };
+    return result.structuredContent.thread_id;
+  };
+  const list = async () => (await (await fetch(`${base}/api/inbox/pulls`)).json()) as InboxPullsAnswer;
+  return { dirs, f, branchOf, send, list, base };
+}
+
+const answerOf = (authored: unknown[], requested: unknown[] = [], merged: unknown[] = []) => ({ data: { viewer: { login: "dana" }, requested: { nodes: requested }, authored: { nodes: authored }, merged: { nodes: merged } } });
+
+describe("links (findings D, E and two clones)", () => {
+  test("a PR URL quoted in another project's thread does not link it; one in its own project's does", async () => {
+    const w = await projects(answerOf([ghPull(7, { headRefName: "feat-7" })]));
+    await w.send("web-app", "Depends on https://github.com/northwind/billing-svc/pull/7 landing first.", "web-thread");
+    expect((await w.list()).links["github.com/northwind/billing-svc#7"]).toBeUndefined();
+    const own = await w.send("billing-svc", "Opened https://github.com/northwind/billing-svc/pull/7", "own-thread");
+    await new Promise((done) => setTimeout(done, 5));
+    const fresh = await fetch(`${w.base}/api/inbox/pulls?refresh=1`);
+    expect(((await fresh.json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#7"]).toMatchObject({ via: "url", thread_id: own });
+  });
+
+  test("a branch links only the person's PR from the repository itself, never a fork's or one from a resting branch", async () => {
+    const w = await projects(
+      answerOf([
+        ghPull(8, { headRefName: "main", headRepository: { nameWithOwner: "dana/billing-svc" } }),
+        ghPull(9, { headRefName: "feat-9", headRepository: { nameWithOwner: "dana/billing-svc" } }),
+        ghPull(10, { headRefName: "main" }),
+        ghPull(11, { headRefName: "feat-11" }),
+      ]),
+    );
+    const thread = await w.send("billing-svc", "Working on the docs.", "docs");
+    // The folder is on main for #8 and #10; #9's branch is checked out too, but it is a fork's.
+    w.branchOf[w.dirs["billing-svc"]!] = "main";
+    let links = (await w.list()).links;
+    expect(links["github.com/northwind/billing-svc#8"]).toBeUndefined();
+    expect(links["github.com/northwind/billing-svc#10"]).toBeUndefined();
+    w.branchOf[w.dirs["billing-svc"]!] = "feat-9";
+    await new Promise((done) => setTimeout(done, 5));
+    links = ((await (await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).json()) as InboxPullsAnswer).links;
+    expect(links["github.com/northwind/billing-svc#9"]).toBeUndefined();
+    expect(thread).toBeTruthy();
+  });
+
+  test("two clones of one origin: a thread in the second clone links by URL and by branch", async () => {
+    const w = await projects(answerOf([ghPull(12, { headRefName: "feat-12" }), ghPull(13, { headRefName: "feat-13" })]));
+    const byUrl = await w.send("billing-svc-2", "Up for review: https://github.com/northwind/billing-svc/pull/12", "clone-url");
+    const byBranch = await w.send("billing-svc-2", "Working on the retry table.", "clone-branch");
+    // Only the newest thread per folder is asked its branch: the folder is the second clone's.
+    w.branchOf[w.dirs["billing-svc-2"]!] = "feat-13";
+    await w.send("billing-svc", "Unrelated.", "first-clone");
+    const answer = await w.list();
+    expect(answer.links["github.com/northwind/billing-svc#12"]).toMatchObject({ via: "url", thread_id: byUrl });
+    expect(answer.links["github.com/northwind/billing-svc#13"]?.via).toBe("branch");
+    expect([byUrl, byBranch]).toContain(answer.links["github.com/northwind/billing-svc#13"]!.thread_id);
+  });
+});
+
+describe("the whole stack's diff (finding C and merged layers)", () => {
+  const stackAnswer = answerOf(
+    [
+      ghPull(21, { headRefName: "feat", baseRefName: "charge-client" }),
+      ghPull(22, { headRefName: "feat-2", baseRefName: "feat", headRepository: { nameWithOwner: "dana/billing-svc" } }),
+    ],
+    [],
+    [ghPull(20, { state: "MERGED", headRefName: "charge-client", mergedAt: "2026-11-02T10:00:00Z" })],
+  );
+
+  test("a fork layer's head is owner:branch, never the same-named upstream branch; it runs from the lowest open layer's base", async () => {
+    const w = await world({ codeReview: true, answer: stackAnswer });
+    await w.send("Stack is up.", "stack");
+    await w.pulls();
+    const before = w.forge.calls.length;
+    const answer = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#22")}&scope=stack`)).json()) as { head: string; base: string };
+    const call = w.forge.calls[before]!;
+    expect(call.args[3]).toBe("repos/northwind/billing-svc/compare/charge-client...dana:feat-2");
+    expect(answer).toMatchObject({ base: "charge-client", head: "dana:feat-2" });
+  });
+
+  test("the lowest open layer's base gone (a merged branch deleted): the stack's own base", async () => {
+    const f = forge(stackAnswer);
+    const run: typeof f.run = async (cli, args, env) => {
+      if (args[3]?.includes("compare/charge-client...")) {
+        f.calls.push({ cli, args });
+        return { stdout: "", stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
+      }
+      return f.run(cli, args, env);
+    };
+    const pulls = createInboxPulls({ run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const answer = await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    expect(answer.base).toBe("main");
+    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname").map((c) => c.args[3])).toEqual([
+      "repos/northwind/billing-svc/compare/charge-client...feat",
+      "repos/northwind/billing-svc/compare/main...feat",
+    ]);
+  });
+
+  test("GitLab: a fork layer's whole stack is refused with a note, and nothing runs", async () => {
+    const mr = {
+      iid: "5", title: "MR 5", webUrl: "https://gitlab.com/northwind/ledger/-/merge_requests/5", state: "opened", draft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
+      sourceBranch: "feat", targetBranch: "main", approved: false, detailedMergeStatus: "NOT_APPROVED", diffStatsSummary: { additions: 1, deletions: 0, fileCount: 1 },
+      headPipeline: null, project: { fullPath: "northwind/ledger" }, sourceProject: { fullPath: "dana/ledger" }, author: { username: "dana" }, approvedBy: { nodes: [] }, reviewers: { nodes: [] },
+    };
+    const calls: string[][] = [];
+    const run = async (cli: string, args: string[]) => {
+      calls.push([cli, ...args]);
+      if (cli === "glab" && args[0] === "auth") return { stdout: "  ✓ Logged in to gitlab.com as dana", stderr: "", exitCode: 0 };
+      if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [mr] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "", exitCode: 1 };
+    };
+    const pulls = createInboxPulls({ run: run as never });
+    expect((await pulls.list([{ host: "gitlab.com", repo: "northwind/ledger", project_id: "prj_1" }])).pulls).toHaveLength(1);
+    const before = calls.length;
+    await expect(pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack")).rejects.toMatchObject({ code: "pull_diff_fork" });
+    expect(calls.length).toBe(before);
+  });
+
+  test("a diff past the cap is refused as too large", async () => {
+    const f = forge();
+    const run: typeof f.run = async (cli, args, env) =>
+      args[0] === "api" && args[1] === "--hostname" ? { stdout: "x".repeat(INBOX_PULL_DIFF_MAX_BYTES + 1), stderr: "", exitCode: 0 } : f.run(cli, args, env);
+    const pulls = createInboxPulls({ run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    await expect(pulls.diff("github.com/northwind/billing-svc#412", "layer")).rejects.toMatchObject({ code: "pull_diff_too_large" });
+  });
+
+  test("branch names a compare would misread are refused", () => {
+    for (const bad of ["-x", "/x", "a..b", "a:b", "a~1", "a^", "a b", "a@{1}", ""]) expect(safeBranch(bad)).toBe(false);
+    for (const good of ["retry/schedule", "feat-2", "release_1.2"]) expect(safeBranch(good)).toBe(true);
+  });
+});
+
+describe("the searches (scoped to the projects' repositories)", () => {
+  test("repo: qualifiers while they fit, newest first; past GitHub's limit, unscoped", () => {
+    const scoped = githubPullSearches(Date.parse("2026-11-03T00:00:00Z"), ["northwind/billing-svc", "Northwind/Web-App"]);
+    for (const q of Object.values(scoped)) {
+      expect(q).toContain("sort:updated-desc");
+      expect(q).toContain("repo:northwind/billing-svc repo:northwind/web-app");
+      expect(q.length).toBeLessThanOrEqual(GITHUB_SEARCH_MAX_CHARS);
+    }
+    const many = Array.from({ length: 12 }, (_, i) => `northwind/service-number-${i}`);
+    for (const q of Object.values(githubPullSearches(0, many))) expect(q).not.toContain("repo:");
+  });
+
+  test("the query carries the projects' repositories", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Hello.", "hello");
+    await w.pulls();
+    const args = w.forge.graphql()[0]!.args;
+    expect(args.find((a) => a.startsWith("authored="))).toContain("repo:northwind/billing-svc");
+  });
+});
+
+describe("who may read it", () => {
+  test("a tailnet guest is refused and runs nothing; the owner over the tailnet reads", async () => {
+    const MAGIC = "macbook-pro.tail0000.ts.net";
+    const OWNER = "ramos@example.com";
+    const GUEST = "guest@example.com";
+    const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    try {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-guest-")));
+      roots.push(root);
+      const dataDir = join(root, "data");
+      mkdirSync(dataDir, { recursive: true });
+      process.env.PLANNOTATOR_DATA_DIR = dataDir;
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxCodeReview: true }));
+      const f = forge();
+      const serve = new Map<number, string>();
+      const tailscale: TailscaleRunner = (args) => {
+        const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+        if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+        if (args[1] === "status") {
+          if (serve.size === 0) return ok("{}");
+          return ok(JSON.stringify({ TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])), Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])) }));
+        }
+        const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+        if (args.includes("off")) serve.delete(httpsPort);
+        else serve.set(httpsPort, args.at(-1)!);
+        return ok(`https://${MAGIC}:${httpsPort}/\n`);
+      };
+      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, refRunner: f.run, readProjectRepo: async () => null, pullBranch: async () => null });
+      servers.push(server);
+      const listener = server.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      const through = (login: string) =>
+        fetch(`http://127.0.0.1:${listener}/api/inbox/pulls`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login } });
+      const guest = await through(GUEST);
+      expect(guest.status).toBe(403);
+      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      expect(f.calls).toEqual([]);
+      expect((await through(OWNER)).status).toBe(200);
+    } finally {
+      if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+      else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
+    }
   });
 });

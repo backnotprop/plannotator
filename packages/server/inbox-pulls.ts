@@ -50,7 +50,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefRunner } from "./ref-cards";
+import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
 export const INBOX_PULLS_FRESH_MS = 60_000;
@@ -96,14 +96,26 @@ for (const q of [GITHUB_PULLS_QUERY, GITLAB_PULLS_QUERY]) {
   if (!/^query\b/.test(q)) throw new Error("inbox-pulls: every query must be a query");
 }
 
-/** The three GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`). */
-export function githubPullSearches(now: number): { requested: string; authored: string; merged: string } {
+/** GitHub's search refuses a query past this many characters. */
+export const GITHUB_SEARCH_MAX_CHARS = 256;
+
+/**
+ * The three GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`), newest first.
+ * With the projects' repositories (`owner/repo`) they are scoped to them (`repo:` qualifiers, as many as fit
+ * GitHub's length limit in the longest search), so the 50-a-search cap is spent on the projects' PRs; past that
+ * the search covers everything and the list keeps the projects' PRs.
+ */
+export function githubPullSearches(now: number, repos: readonly string[] = []): { requested: string; authored: string; merged: string } {
   const since = new Date(now - INBOX_PULLS_MERGED_DAYS * 86_400_000).toISOString().slice(0, 10);
-  return {
-    requested: "is:pr is:open archived:false review-requested:@me",
-    authored: "is:pr is:open archived:false author:@me",
-    merged: `is:pr is:merged author:@me merged:>=${since}`,
+  const bare = {
+    requested: "is:pr is:open archived:false review-requested:@me sort:updated-desc",
+    authored: "is:pr is:open archived:false author:@me sort:updated-desc",
+    merged: `is:pr is:merged author:@me merged:>=${since} sort:updated-desc`,
   };
+  const scope = [...new Set(repos.map((r) => r.toLowerCase()))].sort().map((r) => `repo:${r}`).join(" ");
+  const longest = Math.max(...Object.values(bare).map((q) => q.length));
+  if (!scope || longest + 1 + scope.length > GITHUB_SEARCH_MAX_CHARS) return bare;
+  return { requested: `${bare.requested} ${scope}`, authored: `${bare.authored} ${scope}`, merged: `${bare.merged} ${scope}` };
 }
 
 // --- reading the answers ---
@@ -264,6 +276,8 @@ interface HostAnswer {
   at: number;
   login: string | null;
   pulls: InboxPull[];
+  /** The repositories the searches were scoped to (lowercased, sorted, space-separated). */
+  repos: string;
 }
 
 interface HostState {
@@ -276,7 +290,7 @@ interface HostState {
 
 export class InboxPullsError extends Error {
   constructor(
-    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "validation_error",
+    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
     message: string,
   ) {
     super(message);
@@ -293,10 +307,70 @@ export interface InboxPulls {
 }
 
 const BRANCH = /^[A-Za-z0-9._\/-]{1,250}$/;
-const safeBranch = (name: string) => BRANCH.test(name) && !name.includes("..") && !name.startsWith("-") && !name.startsWith("/");
+/** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
+const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+export const safeBranch = (name: string) => BRANCH.test(name) && !name.includes("..") && !name.startsWith("-") && !name.startsWith("/");
 
-export function createInboxPulls(options: { run?: RefRunner; now?: () => number } = {}): InboxPulls {
+/** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
+export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number) => Promise<RefCommandResult & { tooLarge?: boolean }>;
+
+/** A diff can take longer than a card's query. */
+export const INBOX_PULL_DIFF_TIMEOUT_MS = 30_000;
+
+/**
+ * gh / glab for a diff, read as a stream: the bytes are counted as they come and the CLI is stopped past
+ * `maxBytes`, so a huge diff is never held whole in memory.
+ */
+export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes) => {
+  let proc: ReturnType<typeof Bun.spawn>;
+  try {
+    proc = Bun.spawn([cli, ...args], {
+      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1" },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch {
+    return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
+  }
+  const timer = setTimeout(() => proc.kill(), INBOX_PULL_DIFF_TIMEOUT_MS);
+  try {
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    let tooLarge = false;
+    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+    const stderr = new Response(proc.stderr as ReadableStream).text();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        tooLarge = true;
+        proc.kill();
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      chunks.push(value);
+    }
+    const exitCode = await proc.exited;
+    if (tooLarge) return { stdout: "", stderr: "", exitCode: 1, tooLarge: true };
+    return { stdout: Buffer.concat(chunks).toString("utf8"), stderr: await stderr, exitCode };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** A runner that buffers (the tests' scripted one) under the same byte cap. */
+function cappedDiffRunner(run: RefRunner): PullDiffRunner {
+  return async (cli, args, maxBytes) => {
+    const result = await run(cli, args);
+    return Buffer.byteLength(result.stdout, "utf8") > maxBytes ? { stdout: "", stderr: "", exitCode: 1, tooLarge: true } : result;
+  };
+}
+
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; now?: () => number } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
+  const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
   const holdUntil = new Map<string, number>();
@@ -324,8 +398,9 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
     return null;
   };
 
-  const read = (host: string, state: HostState): Promise<void> => {
+  const read = (host: string, state: HostState, repos: readonly string[]): Promise<void> => {
     if (state.pending) return state.pending;
+    const reposKey = [...repos].map((r) => r.toLowerCase()).sort().join(" ");
     const job = (async () => {
       if (now() < (holdUntil.get(host) ?? 0)) {
         state.error = "rate_limited";
@@ -335,7 +410,7 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
       const args =
         state.cli === "gh"
           ? (() => {
-              const s = githubPullSearches(now());
+              const s = githubPullSearches(now(), repos);
               return ["api", "graphql", "--hostname", host, "-f", `query=${GITHUB_PULLS_QUERY}`, "-f", `requested=${s.requested}`, "-f", `authored=${s.authored}`, "-f", `merged=${s.merged}`];
             })()
           : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
@@ -348,7 +423,7 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
         state.failedAt = now();
         return;
       }
-      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls };
+      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, repos: reposKey };
       state.error = null;
     })()
       .catch(() => {
@@ -386,7 +461,10 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
             state = { cli, answer: null, failedAt: 0, error: null, pending: null };
             hosts.set(host, state);
           }
-          if (due(state, refresh)) await read(host, state);
+          const repoNames = byHost.get(host)!.map((r) => r.repo);
+          // The searches are scoped to the projects' repositories: a new set of them reads again.
+          const reposKey = [...repoNames].map((r) => r.toLowerCase()).sort().join(" ");
+          if (due(state, refresh) || (state.answer && state.answer.repos !== reposKey && !(state.error && now() - state.failedAt < REF_FAILURE_MS))) await read(host, state, repoNames);
           asked.push({ host, state });
         }),
       );
@@ -408,32 +486,50 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
-      let base = pull.base;
+      // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
+      // the stack's own base when that branch is gone (a merged layer's branch, deleted).
+      let bases = [pull.base];
       if (scope === "stack") {
         const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
-        base = stack?.base ?? pull.base;
+        bases = [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
       }
-      const cacheKey = `${key}\u0000${scope}\u0000${base}\u0000${pull.updated_at}`;
+      // A layer from a fork: its branch lives in the fork, never under the same name upstream.
+      const fork = !!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase();
+      let head = pull.head;
+      if (scope === "stack" && fork) {
+        const owner = splitPath(pull.head_repo!)?.owner ?? "";
+        if (pull.platform !== "github" || !FORK_OWNER.test(owner)) {
+          throw new InboxPullsError("pull_diff_fork", `This layer comes from a fork, which ${pull.platform === "gitlab" ? "GitLab" : "the forge"} can't compare with the stack here. Review it layer by layer, or open it on the forge.`);
+        }
+        head = `${owner}:${pull.head}`;
+      }
+      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.updated_at}`;
       const hit = diffs.get(cacheKey);
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
-      if (scope === "stack" && (!safeBranch(base) || !safeBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+      if (scope === "stack" && (!bases.every(safeBranch) || !safeBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
       const parts = splitPath(pull.repo)!;
-      let args: string[];
-      if (pull.platform === "github") {
-        const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${base}...${pull.head}`;
-        args = ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
-      } else {
+      const argsFor = (base: string): string[] => {
+        if (pull.platform === "github") {
+          const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${base}...${head}`;
+          return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
+        }
         const project = encodeURIComponent(pull.repo);
         const endpoint =
           scope === "layer"
             ? `projects/${project}/merge_requests/${pull.number}/raw_diffs`
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
-        args = ["api", "--hostname", pull.host, endpoint];
+        return ["api", "--hostname", pull.host, endpoint];
+      };
+      let base = bases[0]!;
+      let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
+      if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
+        base = bases[1]!;
+        result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       }
-      const result = await run(cli, args);
+      if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
       if (result.exitCode !== 0) {
         const error = refErrorOf(cli, result);
         if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
@@ -451,8 +547,7 @@ export function createInboxPulls(options: { run?: RefRunner; now?: () => number 
           throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
         }
       }
-      if (patch.length > INBOX_PULL_DIFF_MAX_BYTES) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
-      const answer: InboxPullDiffAnswer = { key, scope, base, head: pull.head, patch };
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
@@ -506,23 +601,33 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
   return { last, guide };
 }
 
+/** Branch names a person's folder sits on between pieces of work: never taken as a PR's head for a branch link. */
+const RESTING_BRANCH = /^(main|master|trunk|develop|dev)$/;
+
 /**
  * Which agent thread each PR is tied to, in order of trust: a Board card
  * that links the PR (its first thread), the PR's URL in an agent's message
- * (the latest), or, for the person's own PRs, the PR's head branch checked
- * out in the folder an agent thread works in (the latest thread per folder).
- * `branchOf` reads a folder's branch (null when it can't).
+ * (the latest, and only in a project of the PR's own repository: another
+ * project quoting it is not working on it), or, for the person's own PRs from
+ * the repository itself (never a fork, whose branch is not in the folder),
+ * the PR's head branch checked out in the folder an agent thread works in
+ * (the latest thread per folder; never a resting branch such as `main`).
+ * `projectsByRepo`: every Inbox project whose origin is that repository (two
+ * clones of one repository are two projects). `branchOf` reads a folder's
+ * branch (null when it can't).
  */
 export async function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
-  projectsByRepo: ReadonlyMap<string, string>,
+  projectsByRepo: ReadonlyMap<string, readonly string[]>,
   branchOf: (folder: string) => Promise<string | null>,
   now: number = Date.now(),
 ): Promise<Record<string, InboxPullLink>> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
   const wanted = new Set(pulls.map((p) => p.key));
+  const projectsOf = (pull: InboxPull) => projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo)) ?? [];
+  const byKey = new Map(pulls.map((p) => [p.key, p]));
   const keyOfUrl = (url: string) => {
     const ref = parseForgeRefUrl(url);
     return ref && ref.kind === "pull" ? forgeRefKey(ref) : null;
@@ -541,7 +646,7 @@ export async function linkInboxPulls(
   }
 
   // 2. URLs in agents' messages, and 3. the threads whose folders may hold the branch.
-  const projectIds = [...new Set(projectsByRepo.values())];
+  const projectIds = [...new Set([...projectsByRepo.values()].flat())];
   const urlThread = new Map<string, { thread: string; project: string; at: string }>();
   const folders = new Map<string, { thread: string; project: string; at: string }>();
   for (const projectId of projectIds) {
@@ -556,6 +661,8 @@ export async function linkInboxPulls(
         for (const url of inboxPullUrlsIn(message.body)) {
           const key = keyOfUrl(url);
           if (!key || !wanted.has(key)) continue;
+          // Only a thread of a project on the PR's own repository: "depends on org/a#7" in project B is not B's PR.
+          if (!projectsOf(byKey.get(key)!).includes(projectId)) continue;
           const seen = urlThread.get(key);
           if (!seen || seen.at <= message.created_at) urlThread.set(key, { thread: summary.thread_id, project: projectId, at: message.created_at });
         }
@@ -567,8 +674,13 @@ export async function linkInboxPulls(
     }
   }
 
-  const branchThread = new Map<string, { thread: string; project: string }>();
-  const needBranch = pulls.some((p) => p.mine && !cardOf.has(p.key) && !urlThread.has(p.key));
+  const branchThread = new Map<string, { thread: string; project: string; at: string }>();
+  const branchable = (pull: InboxPull) =>
+    pull.mine &&
+    (pull.state === "open" || pull.state === "draft") &&
+    (pull.head_repo === null || pull.head_repo.toLowerCase() === pull.repo.toLowerCase()) &&
+    !RESTING_BRANCH.test(pull.head);
+  const needBranch = pulls.some((p) => branchable(p) && !cardOf.has(p.key) && !urlThread.has(p.key));
   if (needBranch) {
     const newest = [...folders.entries()].sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, INBOX_PULL_BRANCH_FOLDERS);
     const branches = await Promise.all(newest.map(async ([folder, at]) => ({ at, branch: await branchOf(folder).catch(() => null) })));
@@ -595,7 +707,6 @@ export async function linkInboxPulls(
   };
 
   for (const pull of pulls) {
-    const project = projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo));
     const card = cardOf.get(pull.key);
     if (card && card.threads[0]) {
       links[pull.key] = linkOf("card", card.threads[0], card.project_id, card);
@@ -606,8 +717,12 @@ export async function linkInboxPulls(
       links[pull.key] = linkOf("url", url.thread, url.project, null);
       continue;
     }
-    if (pull.mine && project && (pull.state === "open" || pull.state === "draft")) {
-      const branch = branchThread.get(`${project}\u0000${pull.head}`);
+    if (branchable(pull)) {
+      // The newest thread on that branch among the projects of the PR's repository.
+      const branch = projectsOf(pull)
+        .map((project) => branchThread.get(`${project}\u0000${pull.head}`))
+        .filter((b): b is { thread: string; project: string; at: string } => !!b)
+        .sort((a, b) => b.at.localeCompare(a.at))[0];
       if (branch) links[pull.key] = linkOf("branch", branch.thread, branch.project, null);
     }
   }

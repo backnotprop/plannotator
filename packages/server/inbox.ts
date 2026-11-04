@@ -3323,11 +3323,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           try {
             return json({ serverSession, ...(await pulls.diff(key, scope)) });
           } catch (cause) {
-            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : 502);
+            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
           }
         }
-        const projectsByRepo = new Map<string, string>();
+        // Every project on a repository (two clones are two projects); the window's filter takes the first.
+        const projectsByRepo = new Map<string, string[]>();
         const wanted: InboxPullRepo[] = [];
         // A project's origin is read once before its first list (the cache is read-behind), so the
         // first open after a start is not empty; after that the cache's own refresh keeps it.
@@ -3344,13 +3345,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const repo = reposNow[i];
           if (!repo?.host) continue;
           const key = `${repo.host}/${repo.display}`.toLowerCase();
-          if (projectsByRepo.has(key)) continue;
-          projectsByRepo.set(key, store.canonicalProjectId(project.id));
-          wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: store.canonicalProjectId(project.id) });
+          const id = store.canonicalProjectId(project.id);
+          const ids = projectsByRepo.get(key);
+          if (ids) {
+            if (!ids.includes(id)) ids.push(id);
+            continue;
+          }
+          projectsByRepo.set(key, [id]);
+          wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: id });
         }
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
         const links = await linkInboxPulls(listed.pulls, { listCards: () => store.listCards(), threadsOf: (id) => store.threadsOf(id), threadMessageIds: (id) => store.threadMessageIds(id), message: (id) => store.message(id), threadSubject: (id) => store.threadSubject(id), project: (id) => store.project(id), cursor: () => store.cursor() }, projectsByRepo, pullBranch);
-        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo) });
+        return json({ serverSession, ...listed, links, projects: Object.fromEntries([...projectsByRepo].map(([key, ids]) => [key, ids[0]!])) });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:

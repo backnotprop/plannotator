@@ -43,6 +43,20 @@ export function stackLink(stack: InboxPullStack, links: Readonly<Record<string, 
   return stack.layers.map((l) => links[l.key]).find((l): l is InboxPullLink => !!l) ?? null;
 }
 
+/**
+ * Where a verdict on one layer goes: that layer's own agent thread, else the stack's (among the person's own
+ * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge).
+ */
+export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
+  if (!layer.mine) return null;
+  if (links[layer.key]) return links[layer.key]!;
+  for (let i = stack.layers.length - 1; i >= 0; i--) {
+    const other = stack.layers[i]!;
+    if (other.mine && (other.state === 'open' || other.state === 'draft') && links[other.key]) return links[other.key]!;
+  }
+  return null;
+}
+
 /** The agent's name as the Inbox writes it ("Claude Code", "Codex"), or the name it gave itself. */
 export function linkAgentName(link: InboxPullLink | null): string | null {
   if (!link?.agent) return null;

@@ -16,9 +16,10 @@
  *     the folded "1 waiting on others"); the stack is one row with its chain.
  *  3. The stack view: layers from main up, "Lands next" on the lowest open
  *     one, the agent's thread and Board card, no merge button.
- *  4. Review layer by layer opens the layer's own diff; Whole stack the
- *     compare from main; Next layer moves up; Approve goes into the agent's
- *     thread as the person's reply.
+ *  4. Review layer by layer opens the layer's own diff; Next layer moves up;
+ *     Whole stack is the compare from the lowest open layer's base (not the
+ *     merged layer under it); Approve goes into the agent's thread as the
+ *     person's reply.
  *  5. Reply at the stack's foot goes into the agent's thread.
  *  6. The same at 390 px (a phone).
  *
@@ -321,7 +322,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   forge.gh('repos/northwind/billing-svc/pulls/412', layer412);
   forge.gh('repos/northwind/billing-svc/pulls/413', layer413);
   forge.gh('repos/northwind/billing-svc/pulls/414', layer414);
-  for (const head of ['retry/schedule', 'retry/backoff', 'retry/dunning']) forge.gh(`repos/northwind/billing-svc/compare/main...${head}`, billing.diff('main', head));
+  // Whole stack runs from the lowest open layer's base (#412's, the merged charge client's branch).
+  for (const head of ['retry/schedule', 'retry/backoff', 'retry/dunning']) forge.gh(`repos/northwind/billing-svc/compare/retry/charge-client...${head}`, billing.diff('retry/charge-client', head));
   const rtl = web.diff('main', 'tomas/rtl-settings');
   const vite = web.diff('main', 'codex/vite-8');
   const locale = web.diff('main', 'locale-fallback');
@@ -556,7 +558,7 @@ test('the stack view: layers from main up, Lands next, the agent, its thread and
   await shot(page, '3-stack-open');
 });
 
-test('Review layer by layer: the layer\'s own diff, Whole stack from main, Next layer, and Approve into the agent\'s thread', async () => {
+test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from the lowest open layer, and Approve into the agent\'s thread', async () => {
   const { page, claude } = world;
   const asked: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
@@ -582,19 +584,22 @@ test('Review layer by layer: the layer\'s own diff, Whole stack from main, Next 
   }
   await shot(page, '4-layer-review');
 
-  await review.locator('[data-pull-scope-choice="stack"]').click();
-  await expect(review).toHaveAttribute('data-pull-scope', 'stack');
-  await expect(review.locator('[data-guide-file-shell="src/charges/client.ts"]')).toBeVisible({ timeout: 30_000 });
-  expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/main...retry/schedule');
-  await shot(page, '5-whole-stack', ['light']);
-  await review.locator('[data-pull-scope-choice="layer"]').click();
-  await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible();
-
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
   await expect(review.locator('[data-review-files] li')).toHaveCount(1);
   await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 2 of 3');
-  expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_412} stack`, `${LAYER_413} layer`]);
+
+  // Whole stack up to #413: from the lowest open layer's base, so #412's files and #413's, not the merged #411's.
+  await review.locator('[data-pull-scope-choice="stack"]').click();
+  await expect(review).toHaveAttribute('data-pull-scope', 'stack');
+  await expect(review.locator('[data-review-files] li')).toHaveCount(3);
+  await expect(review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]')).toBeVisible({ timeout: 30_000 });
+  await expect(review.locator('[data-guide-file-shell="src/charges/client.ts"]')).toHaveCount(0);
+  expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/retry/charge-client...retry/backoff');
+  await shot(page, '5-whole-stack', ['light']);
+  await review.locator('[data-pull-scope-choice="layer"]').click();
+  await expect(review.locator('[data-review-files] li')).toHaveCount(1);
+  expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_413} layer`, `${LAYER_413} stack`]);
   page.off('request', watch);
 
   // Approve: the person's reply in the agent's thread, naming the layer.
