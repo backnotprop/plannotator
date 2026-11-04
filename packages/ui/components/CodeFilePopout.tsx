@@ -669,6 +669,8 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           isGlobal={false}
           skillReferences
           allowImages={allowImages}
+          // The words typed for these lines survive a close (Escape, X) and come back when they are chosen again.
+          draftKey={`code-file:${filepath}:${pendingComment.range.start}-${pendingComment.range.end}`}
           onSubmit={(text, images) => {
             onAddAnnotation({
               filePath: filepath,

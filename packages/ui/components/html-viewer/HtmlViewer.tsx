@@ -194,6 +194,16 @@ export function formatBridgeUnavailableMessage(info: BridgeUnavailableInfo): str
   return `Annotation tools may not work: this viewer expects bridge protocol version ${info.expectedVersion}, but the script at ${info.url} reported ${reported}. Serve the bridge-script asset from the same @plannotator/ui version as the viewer.`;
 }
 
+/** FNV-1a over the document's text, with its length: a short, stable draft scope for a page. */
+function hashDraftScope(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${(hash >>> 0).toString(36)}.${text.length.toString(36)}`;
+}
+
 function parseVimBridgeCopy(value: unknown): string | null {
   return isRecord(value)
     && value.type === `${PREFIX}vim-copy`
@@ -496,6 +506,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Live proxied-app mode: the iframe navigates a real origin, so the
     // srcdoc pipeline is skipped entirely and its messages carry credentials.
     const liveMode = !!src;
+    // One kept global-comment draft per page: the live app's URL, else the
+    // document's own text (a hash, so two documents never share a draft).
+    const globalCommentDraftKey = useMemo(
+      () => `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`,
+      [src, rawHtml],
+    );
     const liveSessionRef = useRef<HtmlLiveSession | null>(liveSession ?? null);
     liveSessionRef.current = liveSession ?? null;
     const onPageChangeRef = useRef(onPageChange);
@@ -1472,6 +1488,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
+              // The words typed survive a close (Escape, X) and come back on reopen, per page.
+              draftKey={globalCommentDraftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}

@@ -904,6 +904,8 @@ export const ImageLightbox: React.FC<{
           placement="side"
           zIndex={210}
           allowImages={false}
+          // The words typed for this box survive a close (Escape, X) and come back when the same box is drawn again.
+          draftKey={`image-region:${current.writtenSrc}:${pending.x},${pending.y},${pending.w},${pending.h}`}
           mentionSource={regions!.mentionSource}
           onAskAI={askAI}
           askAIContext={askAI ? {
