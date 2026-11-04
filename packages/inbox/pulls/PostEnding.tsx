@@ -15,6 +15,7 @@ import type { InboxPull } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
+import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { inboxApi } from '../api';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -203,34 +204,37 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
           )}
         </span>
       )}
+      {/* The dialog is a chunk the Inbox serves: one that cannot arrive leaves it closed, never the window unmounted. */}
       {mounted && (
-        <Suspense fallback={null}>
-          <PlatformPost
-            pull={target}
-            open={open}
-            comments={comments}
-            anchor={anchor}
-            post={async (request) => {
-              const response = await inboxApi.pullReviewPost(request);
-              if (response.status === 409 && onMoved) {
-                const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
-                if (answer?.code === 'pull_moved') {
-                  setOpen(null);
-                  onMoved();
+        <LazyBlockBoundary fallback={() => null}>
+          <Suspense fallback={null}>
+            <PlatformPost
+              pull={target}
+              open={open}
+              comments={comments}
+              anchor={anchor}
+              post={async (request) => {
+                const response = await inboxApi.pullReviewPost(request);
+                if (response.status === 409 && onMoved) {
+                  const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+                  if (answer?.code === 'pull_moved') {
+                    setOpen(null);
+                    onMoved();
+                  }
                 }
-              }
-              return response;
-            }}
-            onClose={() => setOpen(null)}
-            onPosted={(result) => {
-              setOpen(null);
-              // A follow-up comment after an approval still reads as the approval.
-              const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map(postedSignature)]) });
-              onPosted({ ...result, action, label: rules.label });
-            }}
-          />
-        </Suspense>
+                return response;
+              }}
+              onClose={() => setOpen(null)}
+              onPosted={(result) => {
+                setOpen(null);
+                // A follow-up comment after an approval still reads as the approval.
+                const action = sameHead && result.action === 'comment' ? done!.action : result.action;
+                setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map(postedSignature)]) });
+                onPosted({ ...result, action, label: rules.label });
+              }}
+            />
+          </Suspense>
+        </LazyBlockBoundary>
       )}
     </>
   );
