@@ -437,7 +437,71 @@ export function shapePaintAllowed(value: string): boolean {
 /** Attributes that only ever hold words. */
 const TEXT_ATTRS = new Set(['title', 'alt', 'class', 'id', 'role', 'lang', 'dir']);
 
-const TAG_RE = /<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+/**
+ * The tags in HTML as `/<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g`
+ * finds them, in order: each tag's name and the text between the name and
+ * its `>`. A quote opens a value that runs to the same quote, so a `>` in it
+ * does not close the tag; a tag whose quote or `>` never comes is no tag.
+ *
+ * That regex scans to the end of the input from every `<` that is never
+ * closed, which is quadratic. This reads it in one pass instead: one
+ * backward pass finds, for every place a tag's text could go on from, where
+ * that tag would close (or that it never does).
+ */
+export function shapeHtmlTags(html: string): { name: string; attrs: string }[] {
+  const n = html.length;
+  // close[i]: the `>` a tag's text, read from i outside any quote, ends at; -1 for none.
+  const close = new Int32Array(n + 1);
+  close[n] = -1;
+  let nextDouble = -1;
+  let nextSingle = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    const c = html.charCodeAt(i);
+    if (c === 62 /* > */) close[i] = i;
+    else if (c === 34 /* " */) {
+      close[i] = nextDouble < 0 ? -1 : close[nextDouble + 1]!;
+      nextDouble = i;
+    } else if (c === 39 /* ' */) {
+      close[i] = nextSingle < 0 ? -1 : close[nextSingle + 1]!;
+      nextSingle = i;
+    } else close[i] = close[i + 1]!;
+  }
+  const tags: { name: string; attrs: string }[] = [];
+  for (let lt = html.indexOf('<'); lt >= 0; ) {
+    if (!/[a-zA-Z]/.test(html[lt + 1] ?? '')) {
+      lt = html.indexOf('<', lt + 1);
+      continue;
+    }
+    let end = lt + 2;
+    while (end < n && /[\w:-]/.test(html[end]!)) end++;
+    const gt = close[end]!;
+    if (gt < 0) {
+      // Not a tag; a later `<` inside it still may be one, as the regex finds.
+      lt = html.indexOf('<', lt + 1);
+      continue;
+    }
+    tags.push({ name: html.slice(lt + 1, end), attrs: html.slice(end, gt) });
+    lt = html.indexOf('<', gt + 1);
+  }
+  return tags;
+}
+
+/**
+ * Whether some tag in HTML holds an event handler, as
+ * `/<[^>]*\son[a-z]+\s*=/i` finds one: from a `<` up to the next `>` (or the
+ * end), with no regard for quotes. Each stretch is read once, from its first
+ * `<`, where that regex reads it again from every `<`.
+ */
+export function shapeHtmlHasEventHandler(html: string): boolean {
+  for (let lt = html.indexOf('<'); lt >= 0; ) {
+    const gt = html.indexOf('>', lt + 1);
+    if (/\son[a-z]+\s*=/i.test(html.slice(lt + 1, gt < 0 ? html.length : gt))) return true;
+    if (gt < 0) return false;
+    lt = html.indexOf('<', gt + 1);
+  }
+  return false;
+}
+
 const ATTR_RE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 
 /**
@@ -462,11 +526,11 @@ export function shapeHtmlProblems(html: string): string[] {
       );
     }
   }
-  if (/<[^>]*\son[a-z]+\s*=/i.test(html)) add('event handler attributes (on…=) are not allowed');
+  if (shapeHtmlHasEventHandler(html)) add('event handler attributes (on…=) are not allowed');
   if (/javascript\s*:/i.test(html)) add('javascript: URLs are not allowed');
-  for (const t of html.matchAll(TAG_RE)) {
-    const tag = t[1]!.toLowerCase();
-    const attrs = [...(t[2] ?? '').matchAll(ATTR_RE)].map((a) => ({ name: a[1]!.toLowerCase(), raw: a[2] ?? a[3] ?? a[4] ?? '' }));
+  for (const t of shapeHtmlTags(html)) {
+    const tag = t.name.toLowerCase();
+    const attrs = [...t.attrs.matchAll(ATTR_RE)].map((a) => ({ name: a[1]!.toLowerCase(), raw: a[2] ?? a[3] ?? a[4] ?? '' }));
     if (tag === 'input' && attrs.some((a) => a.name === 'type' && decodeEntities(a.raw).trim().toLowerCase() === 'image')) add('<input type="image"> is not allowed');
     for (const { name, raw } of attrs) {
       if (name.startsWith('data-') || name.startsWith('aria-') || name.startsWith('on') || TEXT_ATTRS.has(name)) continue;
