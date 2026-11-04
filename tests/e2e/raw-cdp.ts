@@ -38,6 +38,9 @@ export interface RawPage {
   close(): Promise<void>;
 }
 
+/** How many of Chromium's last stderr lines an error carries. */
+const STDERR_LINES = 30;
+
 const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
@@ -66,6 +69,10 @@ export async function launchRawChromium(options: { width?: number; height?: numb
       '--disable-sync',
       '--disable-default-apps',
       '--disable-extensions',
+      // As Playwright launches it: no field-trial experiments (a heap that depends on the build's trials is no baseline),
+      // and no /dev/shm, which is small in some CI containers.
+      '--disable-field-trial-config',
+      '--disable-dev-shm-usage',
       // A page the runner's scheduler briefly hides must not have its timers throttled into fake long gaps.
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
@@ -76,19 +83,37 @@ export async function launchRawChromium(options: { width?: number; height?: numb
       `--window-size=${width},${height}`,
       'about:blank',
     ],
-    { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] },
+    { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] },
   );
   const toBrowser = proc.stdio[3] as Writable;
   const fromBrowser = proc.stdio[4] as Readable;
+  // The last lines Chromium wrote to stderr, for the error when it fails to start or dies.
+  const stderrTail: string[] = [];
+  proc.stderr!.setEncoding('utf8');
+  proc.stderr!.on('data', (chunk: string) => {
+    stderrTail.push(...chunk.split('\n').filter((line) => line.trim()));
+    stderrTail.splice(0, Math.max(0, stderrTail.length - STDERR_LINES));
+  });
+  const withStderr = (message: string) => (stderrTail.length ? `${message}\nchromium stderr (last ${stderrTail.length} lines):\n${stderrTail.join('\n')}` : message);
   let next = 1;
   const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; method: string }>();
   const listeners = new Set<(m: Message) => void>();
   let exited = false;
-  proc.on('exit', () => {
+  const gone = (why: string) => {
     exited = true;
-    for (const p of pending.values()) p.reject(new Error(`chromium exited during ${p.method}`));
+    for (const p of pending.values()) p.reject(new Error(withStderr(`chromium ${why} during ${p.method}`)));
     pending.clear();
-  });
+  };
+  proc.on('exit', (code, signal) => gone(`exited (${signal ?? code})`));
+  // A missing or unrunnable binary: an 'error' event with no handler would throw out of the test runner.
+  proc.on('error', (error) => gone(`failed to start (${error.message})`));
+  // A write to a pipe Chromium closed (EPIPE) is the same death, already reported by 'exit'.
+  toBrowser.on('error', () => {});
+  fromBrowser.on('error', () => {});
+  const stop = () => {
+    if (!exited) proc.kill('SIGKILL');
+    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  };
   let buffer = '';
   fromBrowser.setEncoding('utf8');
   fromBrowser.on('data', (chunk: string) => {
@@ -107,22 +132,33 @@ export async function launchRawChromium(options: { width?: number; height?: numb
   });
   const send = <T = any>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> =>
     new Promise((resolve, reject) => {
-      if (exited) return reject(new Error(`chromium is gone (${method})`));
+      if (exited) return reject(new Error(withStderr(`chromium is gone (${method})`)));
       const id = next++;
       pending.set(id, { resolve, reject, method });
       toBrowser.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
     });
 
-  const { targetInfos } = await withTimeout(send<{ targetInfos: { type: string; targetId: string }[] }>('Target.getTargets'), 30_000, 'Target.getTargets');
-  const target = targetInfos.find((t) => t.type === 'page');
-  if (!target) throw new Error('chromium opened no page');
-  const { sessionId } = await send<{ sessionId: string }>('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+  let sessionId: string;
+  try {
+    const { targetInfos } = await withTimeout(send<{ targetInfos: { type: string; targetId: string }[] }>('Target.getTargets'), 30_000, 'Target.getTargets');
+    const target = targetInfos.find((t) => t.type === 'page');
+    if (!target) throw new Error('chromium opened no page');
+    ({ sessionId } = await send<{ sessionId: string }>('Target.attachToTarget', { targetId: target.targetId, flatten: true }));
+    for (const [method, params] of [
+      ['Page.enable', {}],
+      ['Runtime.enable', {}],
+      ['Performance.enable', {}],
+      ['Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }],
+      ['Emulation.setFocusEmulationEnabled', { enabled: true }],
+    ] as const) {
+      await send(method, params, sessionId);
+    }
+  } catch (error) {
+    // A launch that fails half way leaves neither the browser nor its profile behind.
+    stop();
+    throw new Error(withStderr(`could not start Chromium for raw CDP: ${error instanceof Error ? error.message : String(error)}`));
+  }
   const call = <T = any>(method: string, params: Record<string, unknown> = {}) => send<T>(method, params, sessionId);
-  await call('Page.enable');
-  await call('Runtime.enable');
-  await call('Performance.enable');
-  await call('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  await call('Emulation.setFocusEmulationEnabled', { enabled: true });
 
   const evaluate = async <T = any>(expression: string, timeoutMs = 30_000): Promise<T> => {
     const r = await withTimeout(call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }), timeoutMs, `evaluate ${expression.slice(0, 60)}`);
@@ -173,9 +209,7 @@ export async function launchRawChromium(options: { width?: number; height?: numb
         // Already gone, or hung: the kill below ends it.
       }
       await wait(300);
-      // inbox-guard: own child (this driver's own Chromium, never an Inbox)
-      if (!exited) proc.kill('SIGKILL');
-      rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      stop();
     },
   };
 }
