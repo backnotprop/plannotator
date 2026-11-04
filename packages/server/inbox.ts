@@ -2026,6 +2026,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the person's (or an earlier reveal's), and a test's `board` option decides it too.
    */
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
+  /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
+  const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   const revealState = (now: Date): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -2044,6 +2046,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
         // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
         board: boardUndecided() && !reveals?.board?.shownAt,
+        // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
+        // need not be on.
+        steps: stepsUndecided() && !reveals?.steps?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
     };
@@ -2073,6 +2078,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimReveal = (id: RevealId, owner: boolean): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
+    if (id === "steps") return claimStepsReveal(owner);
     if (id !== "board" || !owner || !snoozeIntroRelease) return false;
     const now = new Date();
     if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
@@ -2087,6 +2093,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     const saved = loadConfig();
     return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
+  };
+  /**
+   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim turns the Checklist on (unset ->
+   * true, its one automatic write; never false) and stamps the spacing clock, in one save, as the Board's does. Every
+   * window hears the switch at once (`event: capabilities`); agents get the steps field from their next session.
+   */
+  const claimStepsReveal = (owner: boolean): boolean => {
+    if (!owner || !snoozeIntroRelease) return false;
+    const now = new Date();
+    if (!revealMayClaim("steps", revealState(now), now) || !stepsUndecided()) return false;
+    const at = now.toISOString();
+    const config = loadConfig();
+    saveConfig({ inboxSteps: true, inboxReveals: { ...config.inboxReveals, lastShownAt: at, steps: { shownAt: at } } });
+    const saved = loadConfig();
+    const on = saved.inboxSteps === true && saved.inboxReveals?.steps?.shownAt === at;
+    if (on) for (const listener of capabilityListeners) listener();
+    return on;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -3572,7 +3595,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
         const owner = ownerOrLocal(req, via);
         const show = claimReveal(id, owner);
-        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() } });
+        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
