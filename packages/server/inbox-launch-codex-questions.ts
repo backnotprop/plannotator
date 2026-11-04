@@ -80,13 +80,13 @@ const ADOPT_MS = 5_000;
 /** A request Codex settled without our answer: what settled it is read this long after (a turn that ended says so). */
 const RESOLVED_SETTLE_MS = 1_000;
 
-// ── Words waiting on the owner's OK (/tmp/codex-questions/WORDS.md). Placeholders: they do not ship as they are. ──
+// ── The owner's words (q-7a371976). ──
 
-/** WORDS.md W1, PENDING the owner's OK: the note when an answer the person sent never reached Codex. */
-export const CODEX_ASK_NOT_TAKEN = "[WORDS.md W1: pending the owner's OK]";
-/** WORDS.md W2, PENDING the owner's OK: a boolean form field's two choices (Codex's TUI says "True" / "False"). */
-export const CODEX_BOOLEAN_TRUE = "[WORDS.md W2: true]";
-export const CODEX_BOOLEAN_FALSE = "[WORDS.md W2: false]";
+/** The note when an answer the person sent never reached Codex. */
+export const CODEX_ASK_NOT_TAKEN = "Codex stopped waiting before your answer reached it.";
+/** A boolean form field's two choices (Codex's TUI says "True" / "False"). */
+export const CODEX_BOOLEAN_TRUE = "Yes";
+export const CODEX_BOOLEAN_FALSE = "No";
 
 // ── The mapping (pure) ──
 

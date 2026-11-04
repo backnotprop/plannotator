@@ -642,6 +642,37 @@ describe("the transport", () => {
     expect(reply.delivery ?? null).toBeNull();
   });
 
+  // The owner's words (q-7a371976), spelled out here and not through the constants: a test that compares with the
+  // constant passes whatever the constant says, which is how a placeholder would ship.
+  test("a boolean form field's card shows Yes and No, and each sends Codex its value", () => {
+    const publish = form({ type: "object", properties: { publish: { type: "boolean", title: "Publish now?" } }, required: ["publish"] });
+    for (const [label, value] of [
+      ["Yes", true],
+      ["No", false],
+    ] as const) {
+      const t = transport();
+      const q = t.make();
+      expect(q.asked(1, CODEX_ELICITATION, publish)).toBe(true);
+      const card = t.cards()[0]!;
+      expect(parseInboxQuestionBlocks(card.body)[0]!.parsed.choices.map((c) => c.label)).toEqual(["Yes", "No"]);
+      t.answer(card.id, [{ label }]);
+      q.sweep();
+      expect(t.answers).toEqual([[1, { action: "accept", content: { publish: value }, _meta: null }]]);
+    }
+  });
+
+  test("an answer that never reached Codex: the note under the card is the owner's sentence", () => {
+    const t = transport();
+    const q = t.make();
+    q.asked(1, CODEX_USER_INPUT, choice);
+    const lost = t.cards()[0]!;
+    t.link.up = false;
+    t.answer(lost.id, [{ label: "Banker's" }]);
+    q.sweep();
+    q.turnEnded(THREAD);
+    expect(t.followUps(lost.id)).toEqual(["Codex stopped waiting before your answer reached it."]);
+  });
+
   test("after an Inbox restart: an open card whose request Codex sends again is answerable; one no request is behind is withdrawn once the thread is no longer waiting on the person", () => {
     const t = transport();
     const before = t.make();
