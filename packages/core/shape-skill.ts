@@ -142,7 +142,7 @@ export const SHAPE_HELP_INTRO = [
   "         no answer: draw the change as a new version.",
   "done     Finishes the shape. Do this only when the person says so.",
   "list     Lists the active shapes, newest change first (--all: finished ones too).",
-  "open     Opens the Shape page in the person's browser: every board, or <shp_id>.",
+  "open     Opens the Shape page in the person's browser: every board, or one board.",
   "         It prints the page's address.",
   "on, off  Turns Shape on or off: the same switch as the Plannotator Inbox's Settings →",
   "         Capabilities → Shape. Run them only when the person asks.",

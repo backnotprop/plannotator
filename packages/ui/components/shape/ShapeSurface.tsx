@@ -107,10 +107,9 @@ interface Target {
 
 /**
  * A Change it the host refused or never got (a server that restarted, Shape turned off, a server that is gone):
- * the composer opens again with the person's words and says so. The Inbox's words for a message that was not sent
- * (packages/inbox: NewMessage, ComposeDialog), reused until the owner approves words of Shape's own.
+ * the composer opens again with the person's words and says so (approved: shape-skill, q-f1ff983a A).
  */
-export const SHAPE_CHANGE_NOT_SENT = 'The message was not sent. Send again to retry.';
+export const SHAPE_CHANGE_NOT_SENT = "Your change wasn't saved. Press Change it to try again.";
 
 const key = (view: string, id: string) => `${view}/${id}`;
 
