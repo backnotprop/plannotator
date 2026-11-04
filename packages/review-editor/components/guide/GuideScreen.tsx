@@ -13,7 +13,7 @@ import { GuideGenerating } from './GuideGenerating';
 import { GuideSectionSkeleton } from '@plannotator/guide-viewer/GuideSkeleton';
 import { GuideView } from '@plannotator/guide-viewer/GuideView';
 import { ReviewGuideHost } from './ReviewGuideHost';
-import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
+import { GuideGlobalCommentPopover } from './GuideGlobalCommentPopover';
 import type { GuideGlobalComments } from '@plannotator/guide-viewer/host';
 import { GuideExportButton } from './GuideExportButton';
 import { filesViewedByTickingSection } from '../../utils/guideReviewedViewed';
@@ -42,7 +42,7 @@ interface GuideScreenProps {
   /** Commit a global comment (the review's `scope: 'general'` comment, the
    *  sidebar's "+ Global comment" handler). Absent: the guide shows its global
    *  comments without the button (a decision is in flight or went). */
-  onAddGlobalComment?: (text: string) => void;
+  onAddGlobalComment?: (text: string) => boolean | void;
   /** A global comment chosen in the guide's list: the sidebar shows it. */
   onShowGlobalComment?: (id: string) => void;
 }
@@ -240,7 +240,7 @@ function ActiveGuide({
   onOpenFixedGuide?: (jobId: string) => void;
   onOpenSavedGuide?: (jobId: string) => void;
   onMarkFilesViewed?: (paths: string[]) => void;
-  onAddGlobalComment?: (text: string) => void;
+  onAddGlobalComment?: (text: string) => boolean | void;
   onShowGlobalComment?: (id: string) => void;
 }) {
   const { guide, loading, error, reviewed, toggleReviewed, retry } = useGuideData(jobId);
@@ -441,18 +441,10 @@ function ActiveGuide({
         />
       </ReviewGuideHost>
       {globalAnchor && onAddGlobalComment && (
-        <CommentPopover
+        <GuideGlobalCommentPopover
           anchorEl={globalAnchor}
-          contextText=""
-          isGlobal
-          // The export prints a global comment's words only.
-          allowImages={false}
-          // The words typed survive a close (Escape, a click outside) until they are saved.
-          draftKey={`review-guide-global:${jobId}`}
-          onSubmit={(text) => {
-            setGlobalAnchor(null);
-            if (text.trim()) onAddGlobalComment(text.trim());
-          }}
+          jobId={jobId}
+          onAdd={onAddGlobalComment}
           onClose={() => setGlobalAnchor(null)}
         />
       )}
