@@ -23,19 +23,18 @@ const { TaterMark } = (hasDom ? await import('./components/TaterMark') : {}) as 
 
 const CSS = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
 
-/** The declarations inside `@keyframes <name> { ... }`, by property. */
-function keyframeProps(css: string, name: string): string[] {
-  const start = css.indexOf(`@keyframes ${name}`);
-  expect(start).toBeGreaterThan(-1);
-  let depth = 0;
-  let i = css.indexOf('{', start);
-  const from = i;
-  for (; i < css.length; i++) {
-    if (css[i] === '{') depth++;
-    if (css[i] === '}' && --depth === 0) break;
+/** The body of the `@media (prefers-reduced-motion: reduce)` block that mentions the Tater mark. The cascade
+ *  never applies `@media`, so the test applies this one by appending its body unwrapped. */
+function reducedMotionBody(css: string): string {
+  const re = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/g;
+  for (let m = re.exec(css); m; m = re.exec(css)) {
+    let depth = 1;
+    let i = re.lastIndex;
+    for (; i < css.length && depth > 0; i++) depth += css[i] === '{' ? 1 : css[i] === '}' ? -1 : 0;
+    const body = css.slice(re.lastIndex, i - 1);
+    if (body.includes('ib-tater')) return body;
   }
-  const body = css.slice(from + 1, i);
-  return [...body.matchAll(/([a-z-]+)\s*:/g)].map((m) => m[1]!);
+  throw new Error('no reduced-motion block for the Tater mark');
 }
 
 let root: Root | null = null;
@@ -63,7 +62,6 @@ describe.skipIf(!hasDom)('the Tater mark', () => {
     const value = (el: Element, prop: string) => css.winner(el, prop)?.value;
     // The loop moves only transform: composited, no style work on the page per frame.
     expect(value(strip, 'animation')).toBe('ib-tater-sidebar 3.5s steps(24) infinite');
-    expect(keyframeProps(CSS, 'ib-tater-sidebar')).toEqual(['transform']);
     expect(CSS).toMatch(/@keyframes ib-tater-sidebar\s*\{\s*to\s*\{\s*transform:\s*translateX\(-924px\);\s*\}\s*\}/);
     // One frame shows: 24 × 38.5 = 924, the window clips the rest, mirrored as before.
     expect(value(win, 'width')).toBe('38.5px');
@@ -73,6 +71,19 @@ describe.skipIf(!hasDom)('the Tater mark', () => {
     expect(value(strip, 'background-size')).toBe('924px 44px');
     // The brand's words' -4 px margin stays off the strip.
     expect(value(strip, 'margin-left')).toBe('0');
+  });
+
+  // The loop stops under reduced motion on the element that carries it (the strip). The failure: the rule
+  // moving to the window (`.ib-tater`), which has no animation of its own, so the strip keeps looping.
+  test("reduced motion switches the strip's loop off, not the window's", () => {
+    host = document.createElement('div');
+    host.className = 'ib-brand';
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => root!.render(<TaterMark />));
+    const strip = host.querySelector<HTMLElement>('[data-sprite="tater-sidebar"]')!;
+    const css = loadCascade(`${CSS}\n${reducedMotionBody(CSS)}`);
+    expect(css.winner(strip, 'animation')?.value).toBe('none');
   });
 
   // Nothing runs while the mark cannot be seen: the docked sidebar collapsed (clipped to no width) and its
