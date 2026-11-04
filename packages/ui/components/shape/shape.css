@@ -46,6 +46,8 @@
 .shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
 .shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
 .shp-head-side:empty { display: none; }
+/* A host's control before the title (the Inbox's Shape page: its sidebar toggle), centred on the title's first line. */
+.shp-head-start { flex: none; display: flex; align-items: center; min-height: 32px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 32px) / 2); }
 /* The agent is drawing the next version: the reshaping Pebble (fill only under reduced motion: Pebble.tsx) and its words. */
 .shp-drawing { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
 .shp-drawing .shp-pebble path { stroke: var(--primary); }
@@ -224,6 +226,7 @@
 .shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
 .shp-root.phone .shp-title-row .shp-quiet-btn { display: none; }
 .shp-root.phone .shp-head-side { margin-top: 1px; gap: 4px; }
+.shp-root.phone .shp-head-start { margin-top: calc((27px * 1.1 - 32px) / 2); }
 .shp-root.phone .shp-head h1, .shp-root.phone .shp-claim { padding-left: 6px; }
 .shp-root.phone .shp-head h1 { font-size: 27px; }
 .shp-root.phone .shp-claim { font-size: 15px; }

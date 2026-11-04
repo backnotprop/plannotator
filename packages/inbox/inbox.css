@@ -7769,6 +7769,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
 .ib-shape-loading { flex: 1; }
+/* The Shape page's sidebar toggle sits 22px from the pane's edge, where every full page's head has it. */
+.ib-shape-layer .shp-root:not(.phone) .shp-head-start { margin-left: -18px; }
 .ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
 .ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
 .ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
