@@ -71,11 +71,14 @@ export function inboxCardInitiativeOf(card: { initiative?: string | null }, live
   return id !== null && live.has(id) ? id : null;
 }
 
-// ─────────────── Hashtags (prototype "board-hashtags") ───────────────
+// ─────────────── Hashtags (approval "board-hashtags") ───────────────
 // `#Shape` in what the person writes names an initiative. A tag is `#`, then
 // a letter or digit, then letters, digits, `_` or `-`; never all digits
 // (`#123` is an issue), never after a letter, digit, `/`, `&` or `#` (a URL's
 // fragment, `owner/repo#1`, `##`). Code (fenced or `inline`) holds no tag.
+
+/** Threads an initiative's preview lists (the window's `initiativePeek`); the rest read "+N more". */
+export const INBOX_INITIATIVE_PEEK_THREADS = 3;
 
 /** A hashtag's key: letters and digits only, lowercased, so `#CodeReview`, `#code-review` and "Code review" are one. */
 export function inboxInitiativeTagKey(name: string): string {

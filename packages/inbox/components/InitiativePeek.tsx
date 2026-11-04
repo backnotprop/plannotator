@@ -1,7 +1,7 @@
 /**
- * The preview of a sent `#Shape` (prototype "board-hashtags"): the
- * initiative's name, its few most relevant cards, its threads and "Open on
- * Board". The controller follows ui's RefHoverCard (the issue and PR hover
+ * The preview of a sent `#Shape` (approval "board-hashtags", round 8): the
+ * initiative's name, its cards, its other threads and "Open on Board". The
+ * controller follows ui's RefHoverCard (the issue and PR hover
  * cards in the same body; that one is wired to forge links, so it cannot draw
  * this): it opens after a hover or keyboard focus rests REF_CARD_DELAY_MS on
  * the tag, stays while the pointer moves into it, and closes REF_CARD_CLOSE_MS
@@ -16,8 +16,8 @@ import { createPortal } from 'react-dom';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS } from '@plannotator/ui/components/RefHoverCard';
 import { AuthorMark } from '../icons';
 import { cardAge } from '../board/model';
-import { useInitiativeTags } from '../hashtags';
 import { initiativePeekModel, type InitiativePeekModel, type PeekItem } from '../initiativePeek';
+import { initiativeHref, useInitiativeTags } from '../hashtags';
 
 const TAG = 'a[href^="#board&initiative="]';
 /** RefHoverCard's width. */
@@ -207,6 +207,14 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
   }, [open]);
 
   const tags = useInitiativeTags();
+  // An opened preview reads the cards again: a tag written meanwhile in a thread no card links moves no card,
+  // so nothing else would bring its thread into the list.
+  const refresh = useRef(tags.refresh);
+  refresh.current = tags.refresh;
+  const openId = open?.id ?? null;
+  useEffect(() => {
+    if (openId) refresh.current?.();
+  }, [openId]);
   if (!open || typeof document === 'undefined') return { node: null, tapOpens };
   const initiative = tags.initiatives.find((i) => i.id === open.id);
   if (!initiative) return { node: null, tapOpens };
@@ -214,7 +222,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
   const here = new URLSearchParams(window.location.hash.slice(1)).get('thread');
   const model = initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id) ?? [], here);
   const container = open.anchor.closest<HTMLElement>('dialog[open], .pn-inbox') ?? document.body;
-  const board = `#board&initiative=${encodeURIComponent(initiative.id)}`;
+  const board = initiativeHref(initiative.id);
   const go = () => close();
   const node = createPortal(
     <div
@@ -247,14 +255,12 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
 }
 
 /**
- * Round 8 (prototype): nothing leans on colour. The header is the name and
- * the meta line; under it one small labelled badge per column that has cards,
- * in the Board's order ("In review 2", "In progress 2", "Todo 1", "Done 1"),
- * in the Inbox's own neutral badge (`.ib-badge.ib-b-mut`, the action
- * checklist's "Done" / "Closed"). The cards: one plain list in the Board's
- * column order, each its title and its column in the same badge; a row opens
- * the card on the Board. The agent's mark left the card rows (the badge took
- * its place; the Board shows who has a card). "Threads" as in round 7: the
+ * Nothing leans on colour (the owner: "little labeled badges"). The header is
+ * the name and the meta line; under it one small labelled badge per column
+ * that has cards, in the Board's order ("In review 2", "In progress 2",
+ * "Todo 1", "Done 1"), in the Inbox's own neutral badge (`.ib-badge.ib-b-mut`).
+ * The cards: one plain list in the Board's order, each its title and its
+ * column in the same badge; a row opens the card on the Board. "Threads": the
  * threads a message tags it in that no card of it links, the one the tag sits
  * in left out; each the agent's mark and the subject, quiet.
  */
@@ -278,20 +284,13 @@ function ArrowIcon() {
 
 const ROW = 'ib-tagpeek-row -mx-2 flex items-center gap-2.5 rounded-md px-2 py-1.5 [@media(pointer:coarse)]:py-2.5 text-foreground no-underline hover:bg-muted focus-visible:bg-muted focus-visible:outline-none';
 const GROUP = 'mb-1 text-[12px] font-medium leading-4';
-/** The badges' order: the Board's lanes from the furthest along that is still open, Done last. */
-const BADGE_ORDER = ['in_review', 'in_progress', 'todo', 'backlog', 'done'] as const;
 /** The Inbox's neutral badge, a size down for the preview. */
 const BADGE = 'ib-badge ib-b-mut ib-tagpeek-badge';
 
 function PeekView({ name, board, model, onGo }: { name: string; board: string; model: InitiativePeekModel; onGo: () => void }) {
-  // Prototype only: `?peekcap=3` draws the "+N more" case with fewer rows than the real cap.
-  const cap = typeof location === 'undefined' ? NaN : Number(new URLSearchParams(location.search).get('peekcap') ?? NaN);
-  if (cap > 0 && model.items.length > cap) model = { ...model, items: model.items.slice(0, cap), moreItems: model.moreItems + model.items.length - cap };
   const cardHref = (item: PeekItem) => `${board}&card=${encodeURIComponent(item.id)}`;
-  const total = model.totals.cards;
-  const empty = total === 0;
+  const empty = model.cards === 0;
   const updated = model.updated ? cardAge(model.updated).short : null;
-  const columns = BADGE_ORDER.map((col) => model.byColumn.find((c) => c.col === col)).filter((c): c is InitiativePeekModel['byColumn'][number] => !!c);
   const meta = ['Initiative', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -305,9 +304,9 @@ function PeekView({ name, board, model, onGo }: { name: string; board: string; m
         <div className="mt-0.5 truncate pl-[22px] text-[12px] leading-4 text-muted-foreground" data-tag-peek-meta="">
           {meta.join(' · ')}
         </div>
-        {columns.length > 0 ? (
+        {model.byColumn.length > 0 ? (
           <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Cards by column" data-tag-peek-columns="">
-            {columns.map((c) => (
+            {model.byColumn.map((c) => (
               <li key={c.col} className={BADGE}>
                 {c.column}
                 <span className="ib-tagpeek-n">{c.count}</span>

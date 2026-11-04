@@ -7789,7 +7789,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 
 /*
- * Hashtags (prototype "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
+ * Hashtags (approval "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
  * for `#` only. A light popover as wide as its names, hung under the `#` (`--ib-hash-x`, hashtags.ts), not a slab
  * across the box. No icon per row (the `#` typed is the context), the count a quiet number, and the row Enter picks
  * shows itself: an accent wash with a hairline and an Enter keycap. Nothing is active until arrowed onto (the skill
@@ -7837,13 +7837,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Sent: `#Shape` in the app's accent, as the composer painted it; no underline until hover (no pill, no chip). */
 .pn-inbox .ib-body a[href^="#board&initiative="] { color: var(--primary); text-decoration-line: none; font-weight: 500; }
 .pn-inbox .ib-body a[href^="#board&initiative="]:hover { text-decoration-line: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: color-mix(in oklch, var(--primary) 45%, transparent); }
-/* A sent tag's preview (prototype "board-hashtags", InitiativePeek): RefHoverCard's surface and type, drawn in Tailwind
-   in the component. Here only what the Inbox's own marks need inside it. */
+/* A sent tag's preview (approval "board-hashtags", InitiativePeek): RefHoverCard's surface and type, drawn in Tailwind
+   in the component. Here only what the Inbox's own marks need inside it: a thread's agent mark, quiet. */
 .ib-tagpeek a { text-decoration: none; }
-.ib-tagpeek .ib-mk { opacity: 0.9; }
-/* Round 6: the agent's mark trails the row, quiet (one size only: .ib-mk). */
 .ib-tagpeek .ib-tagpeek-agent .ib-mk { opacity: 0.7; }
 .ib-tagpeek-row:hover .ib-tagpeek-agent .ib-mk, .ib-tagpeek-row:focus-visible .ib-tagpeek-agent .ib-mk { opacity: 0.9; }
-/* Round 8: the Inbox's own badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
+/* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
 .pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 5px; font-size: 12px; font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
 .ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; }

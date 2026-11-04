@@ -379,3 +379,23 @@ describe("the Board's initiatives over the routes (approval \"board-initiatives\
     expect((await fetch(`${base}/api/inbox/initiatives`)).status).toBe(405);
   });
 });
+
+describe("# tags in the cards read (approval \"board-hashtags\")", () => {
+  test("`initiative_threads`: every tagged thread latest first, with rows only for the few the preview lists that no card of it links", async () => {
+    const { server, base, project } = await world();
+    const store = server.store;
+    const shape = store.createInitiative({ name: "Shape", by: { kind: "person" } });
+    const agent = { kind: "agent", host: "codex", session: "s", name: "Codex" } as const;
+    const linked = store.sendMessage({ project_id: project.id, author: agent, body: "Card work #Shape", thread: "linked" }).message;
+    const { card } = store.createCard({ project_id: project.id, by: agent, title: "Linked", threads: [linked.thread_id] });
+    store.setCardInitiative(card.id, shape.id, { kind: "person" });
+    const tagged = Array.from({ length: 7 }, (_, i) => store.sendMessage({ project_id: project.id, author: agent, body: `Note ${i} for #shape`, thread: `t${i}` }).message.thread_id);
+    store.sendMessage({ project_id: project.id, author: agent, body: "Only `#Shape` in code", thread: "code" });
+    type Read = { initiative_threads?: Record<string, string[]>; threads: Record<string, unknown> };
+    const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as Read;
+    expect(model.initiative_threads).toEqual({ [shape.id]: [...[...tagged].reverse(), linked.thread_id] });
+    // Rows: the linked card's own thread, and the 4 latest unlinked tagged threads (3 shown + the one being read).
+    const latest = [...tagged].reverse();
+    expect(Object.keys(model.threads).sort()).toEqual([linked.thread_id, ...latest.slice(0, 4)].sort());
+  });
+});

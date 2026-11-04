@@ -490,7 +490,7 @@ export function MessageBody({
   const ownReply = message.author.kind === 'person';
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
-  // `#Shape` naming a live initiative links to the Board filtered to it (prototype "board-hashtags"; display only).
+  // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
   const { initiatives: tagInitiatives } = useInitiativeTags();
   const linkFiles = useCallback(
     (text: string) =>

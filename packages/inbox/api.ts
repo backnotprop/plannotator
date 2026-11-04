@@ -122,7 +122,10 @@ export interface CardsModel {
   steps?: Record<string, InboxStepsWire[]>;
   /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
   initiatives?: InboxInitiative[];
-  /** Prototype "board-hashtags": per live initiative, the threads a message tags it in, latest first (their rows are in `threads`). Absent from an older Inbox. */
+  /**
+   * Approval "board-hashtags": per live initiative, every thread a message tags it in, latest first; the few the
+   * preview lists have their rows in `threads`. Absent from an older Inbox: the preview lists no threads.
+   */
   initiative_threads?: Record<string, string[]>;
 }
 

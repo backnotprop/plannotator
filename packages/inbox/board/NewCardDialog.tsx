@@ -92,9 +92,10 @@ export function NewCardDialog({
   const notesRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
-  // `#` in the title or notes picks the card's initiative (prototype "board-hashtags"): the token below says it, the text drops the tag.
+  // `#` in the title or notes picks the card's initiative (approval "board-hashtags"): the token below says it, and
+  // the tag leaves the text (cards show no mark, so a title carries none). A card sent as it is (`fixed`) has none.
   const known = useInitiativeTags();
-  const tags = useMemo(() => (fixed ? { ...known, initiatives: [] } : { ...known, initiatives: initiatives.length > 0 ? initiatives : known.initiatives }), [fixed, initiatives, known]);
+  const tags = useMemo(() => ({ ...known, initiatives: fixed ? [] : initiatives }), [fixed, initiatives, known]);
   const pickInitiative = (picked: InboxInitiative) => setInitiative(picked.id);
   const titleHash = useHashtagPicker({ text: title, setText: setTitle, fieldRef: titleRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });
   const notesHash = useHashtagPicker({ text: notes, setText: setNotes, fieldRef: notesRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });

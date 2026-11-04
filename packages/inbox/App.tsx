@@ -1628,7 +1628,7 @@ function Inbox() {
    * "board-initiatives"). One the Inbox does not hold (deleted, a stale link) is no filter once the
    * cards have loaded; before that the id filters as it stands.
    */
-  // `#` in a composer names these (prototype "board-hashtags"): the Board's live initiatives, with their cards counted.
+  // `#` in a composer names these (approval "board-hashtags"): the Board's live initiatives, with their cards counted.
   const initiativeTags = useMemo<InitiativeTags>(() => {
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
@@ -1639,8 +1639,9 @@ function Inbox() {
     for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rows.has(id)) rows.set(id, row);
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
-    return { initiatives: liveInitiatives(cards?.initiatives), counts, cards: live, rows, projects, mentions };
-  }, [cards, latest]);
+    const refresh = () => void refreshCards();
+    return { initiatives: liveInitiatives(cards?.initiatives), counts, cards: live, rows, projects, mentions, refresh };
+  }, [cards, latest, refreshCards]);
   const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {

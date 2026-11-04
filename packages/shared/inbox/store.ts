@@ -730,9 +730,10 @@ export class InboxStore {
   /** The Board's initiatives, by id, deleted ones too (approval "board-initiatives"). Read by the Board only. */
   private readonly initiativesById = new Map<string, InboxInitiative>();
   /**
-   * Hashtags (prototype "board-hashtags"): every thread a message (an agent's or the person's) tags, by the
-   * tag's key (`inboxInitiativeTagKey`), with the seq of the latest such message. Filled from each message's
-   * first line, on load and on write; never written to disk. Read by `initiativeThreads` only.
+   * Hashtags (approval "board-hashtags"): every thread a message (an agent's or the person's) tags, by the
+   * tag's key (`inboxInitiativeTagKey`, so a rename needs no rebuild), with the seq of the latest such message.
+   * Filled as each message is first applied (load and write alike, `indexTags`), never rescanned and never
+   * written to disk; a delete's reload builds it again. Read by `initiativeThreads` only.
    */
   private readonly tagThreads = new Map<string, Map<string, number>>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
@@ -6519,7 +6520,7 @@ export class InboxStore {
       initiative,
     };
     this.appendCard(card, at);
-    // Made for a thread the person tagged (`#Shape`, prototype "board-hashtags"): it starts in that initiative.
+    // Made for a thread the person tagged (`#Shape`, approval "board-hashtags"): it starts in that initiative.
     const tagged = initiative === null ? this.threadTaggedInitiative(threads) : null;
     if (tagged) return { card: this.setCardInitiative(card.id, tagged, { kind: "person" }), replayed: false };
     return { card, replayed: false };
@@ -6670,7 +6671,8 @@ export class InboxStore {
 
   /**
    * Hashtags: for each live initiative, the threads a message tags it in, the latest tag first (thread ids;
-   * a deleted thread left out). The window's initiative preview lists the ones no card of it links.
+   * a deleted thread left out). The window's initiative preview lists the ones no card of it links. Reads
+   * the index only: no message is parsed here.
    */
   initiativeThreads(): Record<string, string[]> {
     const out: Record<string, string[]> = {};
@@ -6678,14 +6680,14 @@ export class InboxStore {
       if (initiative.deleted_at !== null) continue;
       const threads = this.tagThreads.get(inboxInitiativeTagKey(initiative.name));
       if (!threads || threads.size === 0) continue;
-      const ids = [...threads.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id).filter((id) => this.listRow(id) !== null);
+      const ids = [...threads.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id).filter((id) => this.isThreadRoot(id));
       if (ids.length > 0) out[initiative.id] = ids;
     }
     return out;
   }
 
   /**
-   * Hashtags (prototype "board-hashtags"): the person's message in a thread
+   * Hashtags (approval "board-hashtags"): the person's message in a thread
    * that tags a live initiative (`#Shape`; the last one wins) puts the
    * thread's cards in it, as if the person set it on each (a history line
    * each). A cancelled card stays as it is.

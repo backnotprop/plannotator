@@ -1,5 +1,5 @@
 /**
- * Hashtags (prototype "board-hashtags"): `#` at the start of a word in a
+ * Hashtags (approval "board-hashtags"): `#` at the start of a word in a
  * composer opens the initiatives, drawn by the skill list's own menu
  * (SkillReferenceMenu) and kept by its rules (useSkillReferenceAutocomplete):
  * nothing is active until arrowed onto, so Enter and Tab keep their meaning;
@@ -31,10 +31,12 @@ export interface InitiativeTags {
   projects: ReadonlyMap<string, string>;
   /** The threads a message tags each initiative in, latest first (the cards payload's `initiative_threads`). */
   mentions: ReadonlyMap<string, readonly string[]>;
+  /** Read the cards again (an opened preview does, so the threads tagged since are in it). */
+  refresh?: () => void;
 }
 
 const NONE: InitiativeTags = { initiatives: [], counts: new Map(), cards: [], rows: new Map(), projects: new Map(), mentions: new Map() };
-/** App provides the Board's initiatives (read with the cards while the Board is on). */
+/** App provides the Board's initiatives (read with the cards while the Board is on; off, `#` is plain text). */
 export const InitiativeTagsContext = createContext<InitiativeTags>(NONE);
 export const useInitiativeTags = () => useContext(InitiativeTagsContext);
 

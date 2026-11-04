@@ -162,7 +162,7 @@ export function InboxComposerField({
     [options, people, onTagsChange],
   );
   const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
-  // `#` names an initiative (prototype "board-hashtags"): the skill list's menu, the skill list's keys.
+  // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
   const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
   const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
