@@ -5,7 +5,7 @@
  * (React.lazy): its code is a chunk the Inbox serves (build/pack-inbox.ts),
  * loaded on the first Open; when it cannot arrive (the Inbox stopped, or
  * restarted onto a new release under this page) the pane says so with Reload
- * (LazyBlockBoundary) and the window stays as it is. Reviewed
+ * (ReaderPart) and the window stays as it is. Reviewed
  * ticks are kept with the thread, on the message in the store, so they
  * survive a reload, another browser and the Inbox moving to another port.
  *
@@ -17,12 +17,11 @@
  * shows the guide read-only.
  */
 
-import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { GuideReaderPart } from '../lazyParts';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { InboxApiError, inboxApi } from '../api';
 import { guideCommentOf } from '../attachments';
@@ -249,11 +248,9 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
               {error}
             </div>
           ) : snapshot ? (
-            <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
-              <Suspense fallback={null}>
-                <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
-              </Suspense>
-            </LazyBlockBoundary>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
+            </ReaderPart>
           ) : null}
         </div>
         <div

@@ -13,21 +13,26 @@
  * nothing.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useFenceTheme } from '@plannotator/ui/hooks/useFenceTheme';
 import { ensureHighlight } from '@plannotator/ui/utils/codeHighlight';
-import { resolveFenceTheme } from '@plannotator/ui/utils/syntaxTheme';
-import { setThreadFenceTheme } from '../threadDrawReady';
+import { resolveFenceTheme, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
+import { setDiffThemes, setThreadFenceTheme } from '../threadDrawReady';
 
 /** The grammar attached with the themes: small, and common in agents' messages. */
 const WARM_LANG = 'json';
 
 export function WarmCodeHighlight() {
   const theme = useFenceTheme();
-  const { colorTheme } = useTheme();
-  // In render, not an effect: a thread read landing before this commit already waits in this theme.
-  setThreadFenceTheme(theme);
+  const { colorTheme, resolvedMode } = useTheme();
+  const mode = resolvedMode ?? 'dark';
+  // On commit, before any read can land (a read is a fetch away): the themes the next read waits in. A render
+  // React drops never reaches here, so it cannot leave a theme that was never on screen.
+  useLayoutEffect(() => {
+    setThreadFenceTheme(theme);
+    setDiffThemes(resolveSyntaxTheme(colorTheme, mode));
+  }, [theme, colorTheme, mode]);
   useEffect(() => {
     const warm = () => {
       // The theme on screen first: the one the next thread draws in.

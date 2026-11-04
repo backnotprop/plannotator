@@ -21,13 +21,12 @@
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { GuideReaderPart } from '../lazyParts';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
@@ -539,19 +538,17 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
             </div>
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
-            <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
-              <Suspense fallback={null}>
-                <GuideReader
-                  snapshot={snapshot}
-                  reviewed={reviewed}
-                  onReviewedChange={changeReviewed}
-                  comments={readerComments}
-                  mode={mode}
-                  reveal={reveal}
-                  viewed={viewedProp}
-                />
-              </Suspense>
-            </LazyBlockBoundary>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <GuideReader
+                snapshot={snapshot}
+                reviewed={reviewed}
+                onReviewedChange={changeReviewed}
+                comments={readerComments}
+                mode={mode}
+                reveal={reveal}
+                viewed={viewedProp}
+              />
+            </ReaderPart>
           ) : null}
         </div>
         <div

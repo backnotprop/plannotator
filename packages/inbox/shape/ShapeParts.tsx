@@ -4,13 +4,12 @@
  * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
  * are the window's.
  */
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ShapeBoardPart } from '../lazyParts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
-import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapeSummary } from '../api';
@@ -68,11 +67,9 @@ export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id:
   return (
     <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape">
       {/* The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload. */}
-      <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
-        <Suspense fallback={<div className="ib-shape-loading" aria-busy="true" />}>
+      <PanePart loading={<div className="ib-shape-loading" aria-busy="true" />}>
           <ShapeBoard host={host} id={id} onClose={onClose} renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined} />
-        </Suspense>
-      </LazyBlockBoundary>
+      </PanePart>
     </section>
   );
 }

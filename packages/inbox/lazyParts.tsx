@@ -12,18 +12,24 @@
  * loaded renders at once, never through Suspense.
  */
 
-import { lazy, useEffect, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
+import { diffDrawReady, diffLanguages, diffReadyNow } from './threadDrawReady';
 
 type Loaded<P> = { default: ComponentType<P> };
 
 /**
  * A lazy component that renders synchronously once its module is in, and the
- * `preload` that brings it in. A failed load is forgotten, so the next render
- * (or Reload) tries again; it reaches the caller's LazyBlockBoundary.
+ * `preload` that brings it in. A failed load reaches the caller's
+ * LazyBlockBoundary and is forgotten by `preload`. React.lazy keeps its
+ * rejection for good, so a host that offers the part again after a failure
+ * (the next ⌘K, the next Post) calls `retry()` first: the next mount then asks
+ * for the chunk again. Without it the part stays failed until Reload.
  */
 export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
   let loaded: ComponentType<P> | null = null;
   let pending: Promise<Loaded<P>> | null = null;
+  let failed = false;
   const preload = (): Promise<Loaded<P>> =>
     (pending ??= load().then(
       (mod) => {
@@ -32,15 +38,57 @@ export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
       },
       (cause: unknown) => {
         pending = null;
+        failed = true;
         throw cause;
       },
     ));
-  const Lazy = lazy(preload);
+  let Lazy = lazy(preload);
+  const retry = () => {
+    if (!failed) return;
+    failed = false;
+    Lazy = lazy(preload);
+  };
   function Part(props: P) {
     const Ready = loaded;
-    return Ready ? <Ready {...props} /> : <Lazy {...props} />;
+    const Pending = Lazy;
+    return Ready ? <Ready {...props} /> : <Pending {...props} />;
   }
-  return { Part, preload };
+  return { Part, preload, retry, isLoaded: () => loaded !== null };
+}
+
+/**
+ * A part drawn in a pane (the review reader, the Shape board): one whose chunk cannot arrive says so in the
+ * pane with ui's notice and Reload, and the window stays as it is. `loading`: what shows while it arrives.
+ */
+export function PanePart({ children, loading = null }: { children: ReactNode; loading?: ReactNode }) {
+  return (
+    <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
+      <Suspense fallback={loading}>{children}</Suspense>
+    </LazyBlockBoundary>
+  );
+}
+
+/**
+ * The review reader in a pane (GuidePane, ReviewPane, PullReview): drawn once its chunk is in and its diff's
+ * grammars are attached in the diff themes (threadDrawReady.ts), so no diff line paints plain first. Both
+ * already in (the usual case once the window has been idle): it draws in the same commit.
+ */
+export function ReaderPart({ diff, children }: { diff: string; children: ReactNode }) {
+  const langs = useMemo(() => diffLanguages(diff), [diff]);
+  const [waited, setWaited] = useState<readonly string[] | null>(null);
+  const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs));
+  useEffect(() => {
+    if (show) return;
+    let live = true;
+    // A reader that cannot load still draws: its boundary then says so.
+    void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined)]).then(() => {
+      if (live) setWaited(langs);
+    });
+    return () => {
+      live = false;
+    };
+  }, [langs, show]);
+  return <PanePart>{show ? children : null}</PanePart>;
 }
 
 export const GuideReaderPart = lazyPart(() => import('#guide-reader'));

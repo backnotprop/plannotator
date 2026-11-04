@@ -10,7 +10,7 @@
  * The choice shows only when both can happen: with no agent (or a teammate's PR, whose agent path takes no
  * verdict), posting is the only ending; with no PR to post to, the agent's is.
  */
-import { Suspense, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { PlatformPostPart } from '../lazyParts';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -27,6 +27,12 @@ import { platformRules, postablePull, postedWords, resolvePlatformDecisionAction
 
 // `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
 const PlatformPost = PlatformPostPart.Part;
+
+/** Draws nothing: hands the boundary's notice to the host once it commits. */
+function LoadFailed({ notice, onFailed }: { notice: ReactNode; onFailed: (notice: ReactNode) => void }) {
+  useEffect(() => onFailed(notice), [notice, onFailed]);
+  return null;
+}
 
 export type ReviewDestination = 'forge' | 'agent';
 
@@ -106,6 +112,20 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
+  // The dialog's chunk could not arrive: ui's notice (with Reload) beside the control, which stays usable. The
+  // next Post or Comment… asks for the chunk again.
+  const [loadFailure, setLoadFailure] = useState<ReactNode>(null);
+  const loadFailed = useCallback((notice: ReactNode) => {
+    PlatformPostPart.retry();
+    setOpen(null);
+    setMounted(false);
+    setLoadFailure(notice);
+  }, []);
+  const openDialog = useCallback((mode: { action: PlatformAction; chooseEvent: boolean }) => {
+    setLoadFailure(null);
+    setMounted(true);
+    setOpen(mode);
+  }, []);
   // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
   // comment already posted on this PR is never posted again, at any head (Start review keeps its comments after a
   // post); a follow-up carries only what is new (or a main comment).
@@ -139,10 +159,9 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
       if (spec.items.some((item) => item.id === id && item.muted)) return;
       const mode = resolvePlatformDecisionAction(id, comments.length > 0, rules.requestChangesSupported);
       if (!mode) return;
-      setMounted(true);
-      setOpen(mode);
+      openDialog(mode);
     },
-    [spec, rules, busy, open, comments.length],
+    [spec, rules, busy, open, comments.length, openDialog],
   );
   const handlers = useMemo<Record<DecisionActionId, DecisionHandler>>(
     () => ({
@@ -180,6 +199,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
         agent.control
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
+          {loadFailure}
           {isDone ? (
             <>
               <button type="button" className="ib-btn ib-sm ib-rv-posted-done" disabled data-review-posted-done={done!.action}>
@@ -191,10 +211,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
                 type="button"
                 className="ib-btn ib-sm"
                 disabled={busy || !!open}
-                onClick={() => {
-                  setMounted(true);
-                  setOpen({ action: 'comment', chooseEvent: false });
-                }}
+                onClick={() => openDialog({ action: 'comment', chooseEvent: false })}
                 data-review-post-followup=""
               >
                 Comment…
@@ -205,9 +222,9 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
           )}
         </span>
       )}
-      {/* The dialog is a chunk the Inbox serves: one that cannot arrive leaves it closed, never the window unmounted. */}
+      {/* The dialog is a chunk the Inbox serves: one that cannot arrive says so beside the control, never the window unmounted. */}
       {mounted && (
-        <LazyBlockBoundary fallback={() => null}>
+        <LazyBlockBoundary fallback={(notice) => <LoadFailed notice={notice} onFailed={loadFailed} />}>
           <Suspense fallback={null}>
             <PlatformPost
               pull={target}

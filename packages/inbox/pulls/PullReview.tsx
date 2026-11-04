@@ -18,15 +18,14 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { GuideReaderPart } from '../lazyParts';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
-import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
@@ -477,11 +476,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
-            <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
-              <Suspense fallback={null}>
-                <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
-              </Suspense>
-            </LazyBlockBoundary>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+            </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
               Reading the diff…

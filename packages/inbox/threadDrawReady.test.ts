@@ -11,9 +11,9 @@
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
-import { __resetCodeHighlightCacheForTests, __setCodeHighlightModuleForTests, highlightToHtml } from '@plannotator/ui/utils/codeHighlight';
+import { __resetCodeHighlightCacheForTests, __setCodeHighlightModuleForTests, ensureHighlight, highlightToHtml } from '@plannotator/ui/utils/codeHighlight';
 import { getMathRenderer, resetMathRenderer, setMathRendererLoader, type MathRenderer } from '@plannotator/ui/utils/math';
-import { setThreadFenceTheme, threadDrawReady } from './threadDrawReady';
+import { __setDrawReadyCapForTests, setThreadFenceTheme, threadDrawReady } from './threadDrawReady';
 
 const THEME = 'pierre-light';
 const TS = "export const x: number = 1;";
@@ -106,6 +106,51 @@ test('a thread with math draws once KaTeX is in, so the math paints typeset, nev
   land({ renderToString: (tex) => `<span class="katex">${tex}</span>` });
   expect(await settled(ready)).toBe(true);
   expect(getMathRenderer()).not.toBeNull();
+});
+
+test('a grammar whose chunk failed is asked for again on the next read, and then paints highlighted', async () => {
+  const asked: string[] = [];
+  let up = false;
+  __setCodeHighlightModuleForTests({
+    // The Inbox was away for the first fetch, back for the second.
+    getSharedHighlighter: ({ langs }: { langs: string[] }) => {
+      asked.push(...langs);
+      return up ? Promise.resolve(undefined) : Promise.reject(new TypeError('Failed to fetch dynamically imported module'));
+    },
+    getHighlighterIfLoaded: () => ({
+      codeToTokens: (code: string) => ({ tokens: code.split('\n').map((line) => [{ content: line, color: '#d73a49' }]) }),
+    }),
+  } as unknown as typeof import('@pierre/diffs'));
+  await threadDrawReady(thread('```go\nfunc main() {}\n```'));
+  expect(highlightToHtml('func main() {}', 'go', THEME)).toBeNull();
+  up = true;
+  await threadDrawReady(thread('```go\nfunc main() {}\n```'));
+  expect(asked).toEqual(['go', 'go']);
+  expect(highlightToHtml('func main() {}', 'go', THEME)).toContain('<span style="color:#d73a49">');
+});
+
+test('a chunk that stalled past the cap holds one read only: the next draws at once, and the code upgrades when it lands', async () => {
+  __setDrawReadyCapForTests(40);
+  try {
+    const pierre = heldPierre();
+    const started = Date.now();
+    await threadDrawReady(thread('```go\nfunc main() {}\n```'));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(35);
+    // Still on its way: a reopen (or another thread in Go) is not held again.
+    expect(await settled(threadDrawReady(thread('```go\nfunc other() {}\n```')))).toBe(true);
+    // ui's fence on screen swaps in the highlighted markup when the grammar lands, as after the cap today.
+    let swapped = false;
+    void ensureHighlight('go', THEME).then((ok) => (swapped = ok));
+    pierre.release();
+    await settled(Promise.resolve());
+    expect(swapped).toBe(true);
+    expect(highlightToHtml('func main() {}', 'go', THEME)).not.toBeNull();
+    // Landed: a stall no longer counts, and a new language waits as before.
+    expect(await settled(threadDrawReady(thread('```rust\nfn main() {}\n```')))).toBe(false);
+    pierre.release();
+  } finally {
+    __setDrawReadyCapForTests(undefined);
+  }
 });
 
 test('a grammar already in costs nothing: the next thread with that language draws at once', async () => {

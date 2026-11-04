@@ -511,3 +511,5 @@ packages/inbox/shapeEndedLabel.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/review-editor/components/MarkdownBody.prImages.test.tsx
+packages/inbox/attachmentDrawReady.test.tsx
+packages/inbox/lazyRecovery.test.tsx
