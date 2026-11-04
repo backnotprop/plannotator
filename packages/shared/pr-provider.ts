@@ -26,6 +26,8 @@ import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, 
 // pr-provider as a single facade. Browser code imports from pr-types
 // directly to avoid pulling pr-github / pr-gitlab into the client bundle.
 export * from "./pr-types";
+// GitLab's JSON diff entries as one unified patch (the Inbox's stack diff reads a compare through it).
+export { reconstructPatch as reconstructGitlabPatch, type GitLabDiffEntry } from "./pr-gitlab";
 
 // --- Provider contract ---
 
