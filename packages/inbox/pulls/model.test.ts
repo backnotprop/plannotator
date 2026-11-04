@@ -182,6 +182,17 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     expect(notice).toMatchObject({ head: 'Showing 100 of 133', link: { href: 'https://github.com/pulls' } });
   });
 
+  test("Others failing alone is said of Others only: its last read shown, else pull requests by others aren't; never \"Nothing open\"", () => {
+    const none = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'unavailable' }] });
+    expect(pullsNotices(none).map((n) => n.line)).toEqual(["GitHub didn't answer; pull requests by others aren't shown."]);
+    expect(pullsEmptyWords(none).kind).toBe('unread');
+    const kept = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'rate_limited', others_last_read: '2026-11-03T09:00:00.000Z' }] });
+    expect(pullsNotices(kept).map((n) => n.line)).toEqual(['GitHub asked to slow down; showing its last read.']);
+    // The host's own read failed too: said once, as the host's.
+    const both = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable', others_error: 'unavailable' }] });
+    expect(pullsNotices(both).map((n) => n.key)).toEqual(['unavailable:false']);
+  });
+
   test('a read not limited to the projects never counts what it shows against the forge total, and is never "Nothing open"', () => {
     const model = answer({ hosts: [{ cli: 'glab', host: 'gitlab.com', login: 'dana', capped: { shown: 3, total: null } }], projects: { 'gitlab.com/a/b': ['prj_1'] } });
     const [notice] = pullsNotices(model);

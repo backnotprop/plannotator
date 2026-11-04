@@ -26,14 +26,17 @@ export interface PullsState {
  * again on focus after `PULLS_FOCUS_MS` (the server answers from its cache
  * while that is fresh). Leaving the page keeps a read in flight while the
  * count still wants it (its answer is the count's). Neither: nothing is asked
- * and a read in flight is dropped.
+ * and a read in flight is dropped. `othersView`: the page shows the Others view, so the server reads Others as often
+ * as the list (else every 5 min at most); opening it reads at once.
  */
-export function usePulls(enabled: boolean, counted = false): PullsState {
+export function usePulls(enabled: boolean, counted = false, othersView = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
   const lastAt = useRef(0);
+  const others = useRef(othersView);
+  others.current = othersView;
 
   const read = useCallback(
     (refresh: boolean) => {
@@ -44,7 +47,7 @@ export function usePulls(enabled: boolean, counted = false): PullsState {
       lastAt.current = Date.now();
       setLoading(true);
       inboxApi
-        .pulls(refresh, controller.signal)
+        .pulls(refresh, controller.signal, enabled && others.current)
         .then((answer) => {
           if (controller.signal.aborted) return;
           setModel(answer);
@@ -95,6 +98,13 @@ export function usePulls(enabled: boolean, counted = false): PullsState {
       // Not aborted here: the page closing while the count is kept lets the read land (the next state decides).
     };
   }, [enabled, counted, read]);
+
+  // The Others view opened: read now, so its PRs are as fresh as the list's (the server reads Others then).
+  const wasOthers = useRef(othersView);
+  useEffect(() => {
+    if (othersView && !wasOthers.current && enabled) read(false);
+    wasOthers.current = othersView;
+  }, [othersView, enabled, read]);
 
   // Gone from the window: whatever is in flight is dropped.
   useEffect(

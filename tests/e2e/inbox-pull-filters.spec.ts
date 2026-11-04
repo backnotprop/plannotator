@@ -62,6 +62,7 @@ function writeForge(dir: string) {
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-others.json"; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -76,6 +77,7 @@ function writeForge(dir: string) {
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-others.json"; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls $*" | tr "\\n" " " >> "$calls"; echo >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -156,10 +158,10 @@ const GH_ANSWER = {
     assigned: { issueCount: ASSIGNED.length, nodes: ASSIGNED },
     authored: { issueCount: MINE.length, nodes: MINE },
     merged: { nodes: MERGED },
-    // Every open PR in the projects' repositories, the person's own and the asked ones among them.
-    others0: { issueCount: OPEN.length, nodes: OPEN },
   },
 };
+// Others, a read of its own: every open PR in the projects' repositories, the person's own and the asked ones among them.
+const GH_OTHERS = { data: { viewer: { login: 'dana' }, rateLimit: { cost: 3, remaining: 4977, resetAt: ago(-40) }, others0: { issueCount: OPEN.length, nodes: OPEN } } };
 
 const mr = (iid: number, fields: Record<string, unknown>) => ({
   iid: String(iid),
@@ -191,9 +193,9 @@ const GL_TEAM = [
 const GL_ANSWER = {
   data: {
     currentUser: { username: 'dana', requested: { count: 0, nodes: [] }, assigned: { count: 0, nodes: [] }, authored: { count: 1, nodes: [CSV] }, merged: { nodes: [] } },
-    p0: { mergeRequests: { count: 3, nodes: [CSV, ...GL_TEAM] } },
   },
 };
+const GL_OTHERS = { data: { currentUser: { username: 'dana' }, p0: { mergeRequests: { count: 3, nodes: [CSV, ...GL_TEAM] } } } };
 
 interface World {
   url: string;
@@ -223,6 +225,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeForge(forge);
   writeFileSync(join(forge, 'gh-pulls.json'), JSON.stringify(GH_ANSWER));
   writeFileSync(join(forge, 'glab-pulls.json'), JSON.stringify(GL_ANSWER));
+  writeFileSync(join(forge, 'gh-others.json'), JSON.stringify(GH_OTHERS));
+  writeFileSync(join(forge, 'glab-others.json'), JSON.stringify(GL_OTHERS));
   const src = join(root, 'src');
   const billing = project(src, 'billing-svc', 'https://github.com/northwind/billing-svc.git');
   const web = project(src, 'web-app', 'https://github.com/northwind/web-app.git');
@@ -355,21 +359,29 @@ function fits(h: Awaited<ReturnType<typeof head>>, phone: boolean): void {
   }
 }
 
-test('the read: the assigned search and one Others search scoped to the projects; GitLab the assigned list and the project', async () => {
+test('the read: the person\'s own lists, then Others as a call of its own scoped to the projects; GitLab the same', async () => {
   const { page } = world;
   await page.goto(`${world.url}#pulls`);
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
   const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
   const glab = calls.filter((c) => c.startsWith('glab pulls'));
+  const ghOthers = calls.filter((c) => c.startsWith('gh others'));
+  const glabOthers = calls.filter((c) => c.startsWith('glab others'));
   expect(gh).toHaveLength(1);
   expect(glab).toHaveLength(1);
+  expect(ghOthers).toHaveLength(1);
+  expect(glabOthers).toHaveLength(1);
   expect(gh[0]).toContain('assigned=is:pr is:open archived:false assignee:@me');
-  expect(gh[0]).toContain('others0=is:pr is:open archived:false sort:updated-desc repo:northwind/billing-svc repo:northwind/customer-billing-portal-v2 repo:northwind/web-app');
-  expect(gh[0]).not.toContain('others1=');
+  expect(gh[0]).not.toContain('others0');
   expect(gh[0]).toContain('rateLimit { cost remaining resetAt }');
+  expect(ghOthers[0]).toMatch(/others0=is:pr is:open archived:false sort:updated-desc repo:/);
+  for (const repo of ['northwind/billing-svc', 'northwind/customer-billing-portal-v2', 'northwind/web-app']) expect(ghOthers[0]).toContain(`repo:${repo}`);
+  expect(ghOthers[0]).not.toContain('others1=');
   expect(glab[0]).toContain('assignedMergeRequests(state: opened');
-  expect(glab[0]).toContain('p0: project(fullPath: "northwind/ledger")');
+  expect(glab[0]).not.toContain('p0: project');
+  expect(glabOthers[0]).toContain('p0: project(fullPath: "northwind/ledger")');
+  expect(calls.filter((c) => c.includes('graphql-other'))).toEqual([]);
 });
 
 test('1440: the count and the filter in one control; the menu; a view and a project narrow the list and stay in the address', async () => {

@@ -4292,7 +4292,7 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown, route.page === 'pulls' && route.view === 'others');
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });

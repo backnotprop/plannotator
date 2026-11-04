@@ -1390,7 +1390,11 @@ export const inboxApi = {
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
-  pulls: (refresh = false, signal?: AbortSignal) => get<InboxPullsAnswer>(inboxUrl(`/pulls${refresh ? '?refresh=1' : ''}`), signal),
+  /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
+  pulls: (refresh = false, signal?: AbortSignal, others = false) => {
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
+    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
+  },
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */

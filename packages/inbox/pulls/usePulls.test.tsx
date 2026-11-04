@@ -3,7 +3,8 @@
  *  - the count read on every focus (a GraphQL call per host each time) instead of at most every 20 s;
  *  - the count never read until the page is opened;
  *  - leaving the page dropping a read already on its way, so the count stays stale until the next focus;
- *  - a read kept going (and the forges asked on focus) once Code review is off.
+ *  - a read kept going (and the forges asked on focus) once Code review is off;
+ *  - Others asked as often as the list while its view is closed, or not read at once when the Others view opens.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -23,7 +24,7 @@ let savedFetch: typeof fetch;
 let now = 1_800_000_000_000;
 let clock: { mockRestore: () => void } | null = null;
 /** Each read of the list, with its signal, answered when the test says. */
-let reads: { signal: AbortSignal | undefined; answer: () => void }[] = [];
+let reads: { url: URL; signal: AbortSignal | undefined; answer: () => void }[] = [];
 let seen: ReturnType<typeof usePulls> | null = null;
 
 beforeEach(() => {
@@ -37,7 +38,7 @@ beforeEach(() => {
     if (!url.pathname.endsWith('/api/inbox/pulls')) return Promise.resolve(Response.json({}));
     return new Promise<Response>((resolve, reject) => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
-      reads.push({ signal: init?.signal ?? undefined, answer: () => resolve(Response.json({ serverSession: 's', ...ANSWER })) });
+      reads.push({ url, signal: init?.signal ?? undefined, answer: () => resolve(Response.json({ serverSession: 's', ...ANSWER })) });
     });
   }) as typeof fetch;
 });
@@ -52,19 +53,19 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-function Probe({ enabled, counted }: { enabled: boolean; counted: boolean }) {
-  seen = usePulls(enabled, counted);
+function Probe({ enabled, counted, others }: { enabled: boolean; counted: boolean; others: boolean }) {
+  seen = usePulls(enabled, counted, others);
   return null;
 }
 
-function render(enabled: boolean, counted: boolean) {
+function render(enabled: boolean, counted: boolean, others = false) {
   act(() => {
     if (!root) {
       host = document.createElement('div');
       document.body.appendChild(host);
       root = createRoot(host);
     }
-    root.render(<Probe enabled={enabled} counted={counted} />);
+    root.render(<Probe enabled={enabled} counted={counted} others={others} />);
   });
 }
 
@@ -114,4 +115,22 @@ test.skipIf(!hasDom)('Code review off: a read on its way is dropped, and focus a
   focus();
   expect(reads).toHaveLength(1);
   expect(seen!.loading).toBe(false);
+});
+
+test.skipIf(!hasDom)('the Others view: opening it reads at once, asking for Others; closed, Others is not asked', async () => {
+  render(true, true);
+  expect(reads[0]!.url.searchParams.get('others')).toBeNull();
+  reads[0]!.answer();
+  await settle();
+  render(true, true, true);
+  expect(reads).toHaveLength(2);
+  expect(reads[1]!.url.searchParams.get('others')).toBe('1');
+  reads[1]!.answer();
+  await settle();
+  // The sidebar's count alone (the page closed) never asks for Others.
+  render(false, true, false);
+  now += PULLS_FOCUS_MS;
+  focus();
+  expect(reads).toHaveLength(3);
+  expect(reads[2]!.url.searchParams.get('others')).toBeNull();
 });

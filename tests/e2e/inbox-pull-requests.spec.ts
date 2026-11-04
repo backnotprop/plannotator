@@ -158,6 +158,8 @@ function writeForge(dir: string) {
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    // Others (a read of its own): nothing open past the person's own lists.
+    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others" >> "$calls"; echo \'{"data":{"viewer":{"login":"dana"},"others0":{"issueCount":0,"nodes":[]}}}\'; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -189,6 +191,7 @@ function writeForge(dir: string) {
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',

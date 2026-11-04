@@ -113,6 +113,13 @@ export interface InboxPullHost {
   /** With `error`: when the answer still shown for this host was read; absent when there is none (its PRs are not shown). */
   last_read?: string;
   /**
+   * Why the Others read (every open PR of the projects' repositories, a read of its own) gave nothing this time; the
+   * person's own lists are unaffected. Absent when it answered.
+   */
+  others_error?: "rate_limited" | "unavailable";
+  /** With `others_error`: when the Others answer still shown was read; absent when there is none (Others is not shown). */
+  others_last_read?: string;
+  /**
    * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
    * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
    * to the projects' repositories, so how many of the ones left out are the projects' is not known.

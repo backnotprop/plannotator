@@ -38,7 +38,8 @@ function clisFor(host: string): Cli[] {
  * (its last read shown when there is one, else its PRs are not), a host whose searches found more than one read takes
  * ("Showing 100 of 133" when the searches were limited to the projects' repositories, else that not every one was
  * read), and a project's host no CLI here is signed in to (the CLIs that could read it not installed, or not signed
- * in there).
+ * in there). Others (every open PR of the projects' repositories) is a read of its own: when it alone failed, the
+ * notice says its last read is shown, or that pull requests by others are not.
  */
 export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'unsigned'>): PullsNotice[] {
   const out: PullsNotice[] = [];
@@ -51,6 +52,18 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
       const tail = shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`;
       out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+    }
+  }
+  // Others (every open PR of the projects' repositories) is a read of its own: it failed while the person's own lists
+  // answered. Said of Others only; a host whose own read failed already says so above.
+  for (const error of ['unavailable', 'rate_limited'] as const) {
+    for (const shown of [false, true]) {
+      const hosts = model.hosts.filter((h) => !h.error && h.others_error === error && !!h.others_last_read === shown);
+      if (hosts.length === 0) continue;
+      const names = joinAnd([...new Set(hosts.map((h) => hostName(h.host)))]);
+      const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
+      const tail = shown ? `showing ${hosts.length > 1 ? 'their' : 'its'} last read.` : "pull requests by others aren't shown.";
+      out.push({ key: `${error}:others:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
     }
   }
   for (const h of model.hosts) {

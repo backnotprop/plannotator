@@ -10,19 +10,24 @@
  *   those the person's own `gh` or `glab` reports as signed in
  *   (`readSignedInHosts`), github.com and gitlab.com included. `--hostname`
  *   is always named, so neither GH_HOST nor a folder's remote picks it.
- * - GraphQL `query`s only (refused to load otherwise), one per host on GitHub
- *   (GitLab: one per `GITLAB_PROJECTS_PER_QUERY` projects): the PRs whose
- *   review was requested from the person, the ones assigned to them, the ones
- *   they opened, the ones they merged in the last `INBOX_PULLS_MERGED_DAYS`
- *   (to put a stack's merged layers under it), and every open PR of the
- *   projects' repositories (the list's Others; never an unscoped search).
- *   Only PRs of the projects' repositories are kept. An answer with any
- *   GraphQL error is a failed read.
+ * - GraphQL `query`s only (refused to load otherwise). The person's own lists,
+ *   one query per host: the PRs whose review was requested from the person,
+ *   the ones assigned to them, the ones they opened, the ones they merged in
+ *   the last `INBOX_PULLS_MERGED_DAYS` (to put a stack's merged layers under
+ *   it). Others, a separate optional read that never fails them: every open PR
+ *   of the projects' repositories, the most active first, at most
+ *   `INBOX_PULLS_OTHERS_CALLS_MAX` searches (GitHub, one request) or queries
+ *   (GitLab), within `INBOX_PULLS_OTHERS_DEADLINE_MS`, every
+ *   `INBOX_PULLS_OTHERS_FRESH_MS` unless the Others view is open; never an
+ *   unscoped search. Only PRs of the projects' repositories are kept. An
+ *   answer with any GraphQL error is a failed read.
  * - Cache per host: fresh for `INBOX_PULLS_FRESH_MS`; a `refresh` (the window
  *   got its focus back, or the person asked) reads again what is older than
  *   `INBOX_PULLS_REFRESH_MS`; a failure is held `REF_FAILURE_MS` and the last
  *   answer stays on screen; a rate-limit answer holds the host for
- *   `REF_RATE_LIMIT_MS`. One read per host at a time.
+ *   `REF_RATE_LIMIT_MS`; GitHub's GraphQL budget under
+ *   `INBOX_PULLS_RATE_FLOOR` holds list reads (not diffs) until it fills. One
+ *   read per host at a time.
  * - A layer's diff (`diff`) is read only for a PR the last list named: the
  *   PR's own diff, or the compare from the stack's base to that layer's head.
  *
@@ -84,27 +89,40 @@ const GH_PULL = `number title url state isDraft updatedAt mergedAt baseRefName h
       latestReviews(first: 5) { nodes { state author { login } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`;
 
-/** The Others searches (every open PR of the projects' repositories) answer this many PRs each at most. */
-export const INBOX_PULLS_OTHERS_MAX = 100;
-
-/**
- * One query per GitHub host: the viewer, the rate limit, and the searches (the open ones with their full count: more
- * than a read takes is said). `others` Others searches (`others0`, `others1`, …), each a share of the projects'
- * repositories: every open PR there, whoever wrote it.
- */
-export function githubPullsQuery(others: number): string {
-  const vars = Array.from({ length: others }, (_, i) => `, $others${i}: String!`).join("");
-  const searches = Array.from(
-    { length: others },
-    (_, i) => `\n  others${i}: search(type: ISSUE, query: $others${i}, first: ${INBOX_PULLS_OTHERS_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }`,
-  ).join("");
-  return `query InboxPulls($requested: String!, $authored: String!, $merged: String!, $assigned: String!${vars}) {
+/** One query per GitHub host: the viewer, the rate limit, and the person's own searches (the open ones with their full count). */
+export const GITHUB_PULLS_QUERY = `query InboxPulls($requested: String!, $authored: String!, $merged: String!, $assigned: String!) {
   viewer { login }
   rateLimit { cost remaining resetAt }
   requested: search(type: ISSUE, query: $requested, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
   authored: search(type: ISSUE, query: $authored, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
   assigned: search(type: ISSUE, query: $assigned, first: ${INBOX_PULLS_SEARCH_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }
-  merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }${searches}
+  merged: search(type: ISSUE, query: $merged, first: 30) { nodes { ... on PullRequest { ${GH_PULL} } } }
+}`;
+
+// --- Others: every open PR of the projects' repositories, a separate, optional, bounded read ---
+
+/** An Others search answers this many PRs at most. */
+export const INBOX_PULLS_OTHERS_MAX = 100;
+/** At most this many Others searches (GitHub) or queries (GitLab) per host per read: the most active repositories first. */
+export const INBOX_PULLS_OTHERS_CALLS_MAX = 3;
+/** Others is read again this often at most, unless the person has the Others view open (then as the list is). */
+export const INBOX_PULLS_OTHERS_FRESH_MS = 5 * 60_000;
+/** The whole Others read of one host gives up after this long (its last answer stays). */
+export const INBOX_PULLS_OTHERS_DEADLINE_MS = 12_000;
+
+/**
+ * The Others query for one GitHub host: the viewer (whose PRs are the person's own), the rate limit, and `n` searches
+ * (`others0`, …), each a share of the projects' repositories.
+ */
+export function githubOthersQuery(n: number): string {
+  const vars = Array.from({ length: n }, (_, i) => `$others${i}: String!`).join(", ");
+  const searches = Array.from(
+    { length: n },
+    (_, i) => `\n  others${i}: search(type: ISSUE, query: $others${i}, first: ${INBOX_PULLS_OTHERS_MAX}) { issueCount nodes { ... on PullRequest { ${GH_PULL} } } }`,
+  ).join("");
+  return `query InboxPullsOthers(${vars}) {
+  viewer { login }
+  rateLimit { cost remaining resetAt }${searches}
 }`;
 }
 
@@ -121,32 +139,53 @@ function gqlPath(path: string): string {
   return JSON.stringify(path.replace(/[^A-Za-z0-9._/-]/g, ""));
 }
 
-/**
- * The queries for one GitLab host: the first holds the current user's requested, opened, assigned and merged MRs;
- * every query holds up to `GITLAB_PROJECTS_PER_QUERY` projects' open MRs (`p0`, `p1`, … numbered across them, so
- * the answers merge into one), whoever wrote them.
- */
-export function gitlabPullsQueries(projects: readonly string[] = []): string[] {
-  const user = `
+/** One query per GitLab host: the current user's requested, opened, assigned and merged MRs. */
+export const GITLAB_PULLS_QUERY = `query InboxPulls {
   currentUser {
     username
     requested: reviewRequestedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     authored: authoredMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     assigned: assignedMergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}) { count nodes { ${GL_MR} } }
     merged: authoredMergeRequests(state: merged, first: 20, sort: MERGED_AT_DESC) { nodes { ${GL_MR} } }
-  }`;
-  const paths = [...new Set(projects.map((p) => p.toLowerCase()))].sort();
+  }
+}`;
+
+/**
+ * The Others queries for one GitLab host: the projects (full paths, the most active first) `GITLAB_PROJECTS_PER_QUERY`
+ * to a query, at most `INBOX_PULLS_OTHERS_CALLS_MAX` queries; each asks the user's name and its projects' open MRs
+ * (`p0`, `p1`, … numbered across them, so the answers merge into one). `covered`: the projects asked.
+ */
+export function gitlabOthersQueries(projects: readonly string[]): { queries: string[]; covered: string[] } {
+  const paths = [...new Set(projects.map((p) => p.toLowerCase()))];
+  const covered = paths.slice(0, GITLAB_PROJECTS_PER_QUERY * INBOX_PULLS_OTHERS_CALLS_MAX);
   const alias = (path: string, i: number) => `\n  p${i}: project(fullPath: ${gqlPath(path)}) { mergeRequests(state: opened, first: ${INBOX_PULLS_SEARCH_MAX}, sort: UPDATED_DESC) { count nodes { ${GL_MR} } } }`;
   const queries: string[] = [];
-  for (let at = 0; at === 0 || at < paths.length; at += GITLAB_PROJECTS_PER_QUERY) {
-    const chunk = paths.slice(at, at + GITLAB_PROJECTS_PER_QUERY).map((p, i) => alias(p, at + i)).join("");
-    queries.push(`query InboxPulls {${at === 0 ? user : ""}${chunk}\n}`);
+  for (let at = 0; at < covered.length; at += GITLAB_PROJECTS_PER_QUERY) {
+    const chunk = covered.slice(at, at + GITLAB_PROJECTS_PER_QUERY).map((p, i) => alias(p, at + i)).join("");
+    queries.push(`query InboxPullsOthers {\n  currentUser { username }${chunk}\n}`);
   }
-  return queries;
+  return { queries, covered };
 }
 
-for (const q of [githubPullsQuery(2), ...gitlabPullsQueries(["a/b"])]) {
+for (const q of [GITHUB_PULLS_QUERY, GITLAB_PULLS_QUERY, githubOthersQuery(2), ...gitlabOthersQueries(["a/b"]).queries]) {
   if (!/^query\b/.test(q)) throw new Error("inbox-pulls: every query must be a query");
+}
+
+/**
+ * The repositories, the most recently active first (the latest update of any PR the Inbox has read of each), then
+ * those it knows nothing of, by name: the Others read spends its few searches on where work is happening.
+ */
+export function byActivity(repos: readonly string[], pulls: readonly Pick<InboxPull, "repo" | "updated_at">[]): string[] {
+  const latest = new Map<string, string>();
+  for (const p of pulls) {
+    const key = p.repo.toLowerCase();
+    if ((latest.get(key) ?? "") < p.updated_at) latest.set(key, p.updated_at);
+  }
+  return [...new Set(repos.map((r) => r.toLowerCase()))].sort((a, b) => {
+    const at = latest.get(a) ?? "";
+    const bt = latest.get(b) ?? "";
+    return at !== bt ? (at < bt ? 1 : -1) : a < b ? -1 : a > b ? 1 : 0;
+  });
 }
 
 /** GitHub's search refuses a query past this many characters. */
@@ -161,15 +200,12 @@ export interface GithubPersonalSearches {
 }
 
 /**
- * The GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`), newest first.
- * - The person's own (`requested`, `authored`, `assigned`, `merged`): with the projects' repositories (`owner/repo`)
- *   they are scoped to them (`repo:` qualifiers, as many as fit GitHub's length limit in the longest search), so the
- *   50-a-search cap is spent on the projects' PRs; past that the search covers everything and the list keeps the
- *   projects' PRs.
- * - `others`: every open PR of the projects' repositories, the repositories shared over as many searches as GitHub's
- *   length limit needs. Never unscoped (that would search all of GitHub): no repositories, no Others search.
+ * The person's own GitHub searches (the merged one goes back `INBOX_PULLS_MERGED_DAYS` from `now`), newest first. With
+ * the projects' repositories (`owner/repo`) they are scoped to them (`repo:` qualifiers, as many as fit GitHub's
+ * length limit in the longest search), so the 50-a-search cap is spent on the projects' PRs; past that the search
+ * covers everything and the list keeps the projects' PRs.
  */
-export function githubPullSearches(now: number, repos: readonly string[] = []): GithubPersonalSearches & { others: string[] } {
+export function githubPullSearches(now: number, repos: readonly string[] = []): GithubPersonalSearches {
   const since = new Date(now - INBOX_PULLS_MERGED_DAYS * 86_400_000).toISOString().slice(0, 10);
   const bare: GithubPersonalSearches = {
     requested: "is:pr is:open archived:false review-requested:@me sort:updated-desc",
@@ -177,24 +213,35 @@ export function githubPullSearches(now: number, repos: readonly string[] = []): 
     assigned: "is:pr is:open archived:false assignee:@me sort:updated-desc",
     merged: `is:pr is:merged author:@me merged:>=${since} sort:updated-desc`,
   };
-  const qualifiers = [...new Set(repos.map((r) => r.toLowerCase()))].sort().map((r) => `repo:${r}`);
-  const othersBare = "is:pr is:open archived:false sort:updated-desc";
-  const others: string[] = [];
-  for (const q of qualifiers) {
-    const last = others.at(-1);
-    if (last && last.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS) others[others.length - 1] = `${last} ${q}`;
-    else if (othersBare.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS) others.push(`${othersBare} ${q}`);
-  }
-  const scope = qualifiers.join(" ");
+  const scope = [...new Set(repos.map((r) => r.toLowerCase()))].sort().map((r) => `repo:${r}`).join(" ");
   const longest = Math.max(...Object.values(bare).map((q) => q.length));
-  if (!scope || longest + 1 + scope.length > GITHUB_SEARCH_MAX_CHARS) return { ...bare, others };
+  if (!scope || longest + 1 + scope.length > GITHUB_SEARCH_MAX_CHARS) return bare;
   return {
     requested: `${bare.requested} ${scope}`,
     authored: `${bare.authored} ${scope}`,
     assigned: `${bare.assigned} ${scope}`,
     merged: `${bare.merged} ${scope}`,
-    others,
   };
+}
+
+/**
+ * The Others searches for one GitHub host: every open PR of the repositories (`owner/repo`, the most active first),
+ * packed into at most `INBOX_PULLS_OTHERS_CALLS_MAX` searches under GitHub's length limit. Never unscoped (that would
+ * search all of GitHub): no repositories, no search. `covered`: the repositories searched; the rest are not read.
+ */
+export function githubOthersSearches(repos: readonly string[]): { searches: string[]; covered: string[] } {
+  const bare = "is:pr is:open archived:false sort:updated-desc";
+  const searches: string[] = [];
+  const covered: string[] = [];
+  for (const repo of [...new Set(repos.map((r) => r.toLowerCase()))]) {
+    const q = `repo:${repo}`;
+    const fits = searches.findIndex((s) => s.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS);
+    if (fits >= 0) searches[fits] = `${searches[fits]} ${q}`;
+    else if (searches.length < INBOX_PULLS_OTHERS_CALLS_MAX && bare.length + 1 + q.length <= GITHUB_SEARCH_MAX_CHARS) searches.push(`${bare} ${q}`);
+    else continue;
+    covered.push(repo);
+  }
+  return { searches, covered };
 }
 
 // --- reading the answers ---
@@ -218,8 +265,8 @@ export interface ParsedPulls {
   /** The person's open searches (requested, authored, assigned) found more than they answered: how many came back, of how many. */
   capped?: { shown: number; total: number };
   /**
-   * Every open PR of the projects' repositories, as the Others reads counted them (GitHub `issueCount`, GitLab
-   * `count`); absent when there were none (no repositories, an older answer).
+   * An Others answer (`part: "others"`): every open PR of the repositories it searched, as it counted them (GitHub
+   * `issueCount`, GitLab `count`).
    */
   open_total?: number;
   /** GitHub's GraphQL budget after this read: what is left, and when it fills again (ISO). */
@@ -255,11 +302,13 @@ function cappedOf(lists: unknown[], countKey: "issueCount" | "count"): ParsedPul
   return total > shown ? { shown, total } : undefined;
 }
 
-/** The Others reads' total count (GitHub `issueCount`, GitLab `count`), or undefined when there were none. */
-function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number | undefined {
-  if (lists.length === 0) return undefined;
+/** The Others reads' total count (GitHub `issueCount`, GitLab `count`). */
+function totalOf(lists: unknown[], countKey: "issueCount" | "count"): number {
   return lists.reduce<number>((sum, list) => sum + Math.max(num(obj(list)[countKey]), nodes(list).length), 0);
 }
+
+/** Which lists an answer is read for: the person's own (requested, authored, assigned, merged), or Others. */
+export type PullsPart = "own" | "others";
 
 /** A GraphQL answer that reports any error is a failed read: a part left out would read as "nothing there". */
 function hasErrors(parsed: unknown): boolean {
@@ -267,8 +316,8 @@ function hasErrors(parsed: unknown): boolean {
   return Array.isArray(errors) && errors.length > 0;
 }
 
-/** A GitHub answer as the viewer's login and PRs; null when it is not one. */
-export function parseGithubPulls(stdout: string, host: string): ParsedPulls | null {
+/** A GitHub answer (the person's own lists, or Others) as the viewer's login and PRs; null when it is not one. */
+export function parseGithubPulls(stdout: string, host: string, part: PullsPart = "own"): ParsedPulls | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -335,37 +384,32 @@ export function parseGithubPulls(stdout: string, host: string): ParsedPulls | nu
       });
     }
   };
-  // Others first: the person's own searches say what a PR is to them, over it.
-  const others = Object.keys(data)
-    .filter((k) => /^others\d+$/.test(k))
-    .map((k) => data[k]);
-  for (const list of others) read(list, null);
+  const rate = obj(data.rateLimit);
+  const reset = str(rate.resetAt);
+  const budget = typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {};
+  if (part === "others") {
+    const others = Object.keys(data)
+      .filter((k) => /^others\d+$/.test(k))
+      .map((k) => data[k]);
+    for (const list of others) read(list, null);
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(others, "issueCount"), ...budget };
+  }
   read(data.authored, null);
   read(data.merged, null);
   read(data.assigned, "assigned");
   read(data.requested, "requested");
   const capped = cappedOf([data.requested, data.authored, data.assigned], "issueCount");
-  const open_total = totalOf(others, "issueCount");
-  const rate = obj(data.rateLimit);
-  const reset = str(rate.resetAt);
-  return {
-    login,
-    pulls: [...out.values()],
-    avatars,
-    ...(capped ? { capped } : {}),
-    ...(open_total !== undefined ? { open_total } : {}),
-    ...(typeof rate.remaining === "number" && reset ? { rate: { remaining: rate.remaining, reset_at: reset } } : {}),
-  };
+  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}), ...budget };
 }
 
 const GL_FAIL = new Set(["FAILED", "CANCELED"]);
 const GL_QUIET = new Set(["SKIPPED", "MANUAL"]);
 
 /**
- * A GitLab answer (the answers of one host's queries, `gitlabPullsQueries`) as the current user's name and MRs; null
- * when it is not one, or when any of them is not.
+ * A GitLab answer (the person's own lists, or the answers of one host's Others queries, `gitlabOthersQueries`) as the
+ * current user's name and MRs; null when it is not one, or when any of them is not.
  */
-export function parseGitlabPulls(stdout: string | readonly string[], host: string): ParsedPulls | null {
+export function parseGitlabPulls(stdout: string | readonly string[], host: string, part: PullsPart = "own"): ParsedPulls | null {
   const data: Json = {};
   for (const one of typeof stdout === "string" ? [stdout] : stdout) {
     let parsed: unknown;
@@ -434,18 +478,19 @@ export function parseGitlabPulls(stdout: string | readonly string[], host: strin
       });
     }
   };
-  // The projects' open MRs first: the person's own lists say what an MR is to them, over it.
-  const projects = Object.keys(data)
-    .filter((k) => /^p\d+$/.test(k))
-    .map((k) => obj(data[k]).mergeRequests);
-  for (const list of projects) read(list, null);
+  if (part === "others") {
+    const projects = Object.keys(data)
+      .filter((k) => /^p\d+$/.test(k))
+      .map((k) => obj(data[k]).mergeRequests);
+    for (const list of projects) read(list, null);
+    return { login, pulls: [...out.values()], avatars, open_total: totalOf(projects, "count") };
+  }
   read(user.authored, null);
   read(user.merged, null);
   read(user.assigned, "assigned");
   read(user.requested, "requested");
   const capped = cappedOf([user.requested, user.authored, user.assigned], "count");
-  const open_total = totalOf(projects, "count");
-  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}), ...(open_total !== undefined ? { open_total } : {}) };
+  return { login, pulls: [...out.values()], avatars, ...(capped ? { capped } : {}) };
 }
 
 // --- the reader ---
@@ -464,13 +509,30 @@ interface HostAnswer {
   pulls: InboxPull[];
   /** The open searches' raw counts: how many nodes came back, of how many they found. */
   capped?: { shown: number; total: number };
-  /** Every open PR of the projects' repositories, as the Others reads counted them; absent without them. */
-  open_total?: number;
   /** Whether the searches were limited to the projects' repositories (GitHub `repo:` qualifiers that fit). */
   scoped: boolean;
   avatars: Record<string, string>;
   /** The repositories the searches were scoped to (lowercased, sorted, space-separated). */
   repos: string;
+}
+
+/** A host's last good Others answer: every open PR of the repositories it searched. */
+interface OthersAnswer {
+  at: number;
+  pulls: InboxPull[];
+  avatars: Record<string, string>;
+  /** How many open PRs the searched repositories have; null when not every repository was searched (capped). */
+  total: number | null;
+  /** The projects' repositories when it was read (as `HostAnswer.repos`). */
+  repos: string;
+}
+
+/** The Others read of a host: separate from the person's own lists, which never fail with it. */
+interface OthersState {
+  answer: OthersAnswer | null;
+  failedAt: number;
+  error: InboxPullHost["error"] | null;
+  pending: Promise<void> | null;
 }
 
 interface HostState {
@@ -479,6 +541,7 @@ interface HostState {
   failedAt: number;
   error: InboxPullHost["error"] | null;
   pending: Promise<void> | null;
+  others: OthersState;
 }
 
 export class InboxPullsError extends Error {
@@ -497,7 +560,8 @@ export interface InboxPulls {
    */
   list(
     repos: readonly InboxPullRepo[],
-    options?: { refresh?: boolean },
+    /** `others`: the person has the Others view open, so Others is read as often as the list (else every 5 min at most). */
+    options?: { refresh?: boolean; others?: boolean },
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
@@ -584,7 +648,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
   const holdUntil = new Map<string, number>();
-  const signed = new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
+  /** GitHub's GraphQL budget nearly spent: list reads of the host wait until `resetAt` (diffs do not). */
+  const budgetHold = new Map<string, number>();
+  const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
   let known = new Map<string, InboxPull>();
@@ -628,7 +694,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     if (state.pending) return state.pending;
     const reposKey = [...repos].map((r) => r.toLowerCase()).sort().join(" ");
     const job = (async () => {
-      if (now() < (holdUntil.get(host) ?? 0)) {
+      if (listHeld(host)) {
         state.error = "rate_limited";
         state.failedAt = now();
         return;
@@ -636,62 +702,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const searches = state.cli === "gh" ? githubPullSearches(now(), repos) : null;
       // GitLab's own lists are the user's, never limited to the projects; GitHub's are while the repositories fit.
       const scoped = !!searches && searches.authored.includes(" repo:");
-      const calls: string[][] = searches
+      const args = searches
         ? [
-            [
-              "api",
-              "graphql",
-              "--hostname",
-              host,
-              "-f",
-              `query=${githubPullsQuery(searches.others.length)}`,
-              "-f",
-              `requested=${searches.requested}`,
-              "-f",
-              `authored=${searches.authored}`,
-              "-f",
-              `assigned=${searches.assigned}`,
-              "-f",
-              `merged=${searches.merged}`,
-              ...searches.others.flatMap((q, i) => ["-f", `others${i}=${q}`]),
-            ],
+            "api",
+            "graphql",
+            "--hostname",
+            host,
+            "-f",
+            `query=${GITHUB_PULLS_QUERY}`,
+            "-f",
+            `requested=${searches.requested}`,
+            "-f",
+            `authored=${searches.authored}`,
+            "-f",
+            `assigned=${searches.assigned}`,
+            "-f",
+            `merged=${searches.merged}`,
           ]
-        : gitlabPullsQueries(repos).map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
-      // One host's queries one after the other; the first that fails ends the read (the last answer stays).
-      const outputs: string[] = [];
-      let failed: RefCommandResult | null = null;
-      for (const args of calls) {
-        const result = await run(state.cli, args);
-        if (result.exitCode !== 0) {
-          failed = result;
-          break;
-        }
-        outputs.push(result.stdout);
-      }
-      const parsed = failed ? null : state.cli === "gh" ? parseGithubPulls(outputs[0]!, host) : parseGitlabPulls(outputs, host);
+        : ["api", "--hostname", host, "graphql", "-f", `query=${GITLAB_PULLS_QUERY}`];
+      const result = await run(state.cli, args);
+      const parsed = result.exitCode === 0 ? (state.cli === "gh" ? parseGithubPulls(result.stdout, host) : parseGitlabPulls(result.stdout, host)) : null;
       if (!parsed) {
-        const result = failed ?? { stdout: outputs.join("\n"), stderr: "", exitCode: 1 };
-        const error = refErrorOf(state.cli, { ...result, exitCode: result.exitCode || 1 });
-        if (error === "rate_limited") holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
-        state.error = error === "rate_limited" ? "rate_limited" : "unavailable";
-        state.failedAt = now();
+        fail(host, state, state.cli, result);
         return;
       }
-      // GitHub's budget nearly spent: no read of this host until it fills again (the list keeps this answer).
-      if (parsed.rate && parsed.rate.remaining < INBOX_PULLS_RATE_FLOOR) {
-        const reset = Date.parse(parsed.rate.reset_at);
-        if (Number.isFinite(reset) && reset > now()) holdUntil.set(host, reset);
-      }
-      state.answer = {
-        at: now(),
-        login: parsed.login,
-        pulls: parsed.pulls,
-        avatars: parsed.avatars,
-        scoped,
-        repos: reposKey,
-        ...(parsed.capped ? { capped: parsed.capped } : {}),
-        ...(parsed.open_total !== undefined ? { open_total: parsed.open_total } : {}),
-      };
+      spent(host, parsed);
+      state.answer = { at: now(), login: parsed.login, pulls: parsed.pulls, avatars: parsed.avatars, scoped, repos: reposKey, ...(parsed.capped ? { capped: parsed.capped } : {}) };
       state.error = null;
     })()
       .catch(() => {
@@ -705,14 +741,120 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     return job;
   };
 
+  /** A list read (own or Others) is held: the forge asked to slow down, or GitHub's GraphQL budget is nearly spent. */
+  const listHeld = (host: string): boolean => now() < Math.max(holdUntil.get(host) ?? 0, budgetHold.get(host) ?? 0);
+
+  /** A failed list read: a rate-limit answer holds the host (diffs too); anything else is "unavailable". */
+  const fail = (host: string, state: { error: InboxPullHost["error"] | null; failedAt: number }, cli: RefCli, result: RefCommandResult) => {
+    const error = refErrorOf(cli, { ...result, exitCode: result.exitCode || 1 });
+    if (error === "rate_limited") holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
+    state.error = error === "rate_limited" ? "rate_limited" : "unavailable";
+    state.failedAt = now();
+  };
+
+  /** GitHub's GraphQL budget nearly spent: no list read of this host until it fills again (diffs are REST: not held). */
+  const spent = (host: string, parsed: ParsedPulls) => {
+    if (!parsed.rate || parsed.rate.remaining >= INBOX_PULLS_RATE_FLOOR) return;
+    const reset = Date.parse(parsed.rate.reset_at);
+    if (Number.isFinite(reset) && reset > now()) budgetHold.set(host, reset);
+  };
+
+  /**
+   * Others for one host: every open PR of its repositories, the most active first, at most
+   * `INBOX_PULLS_OTHERS_CALLS_MAX` searches (GitHub, one request) or queries (GitLab, one after the other), all within
+   * `INBOX_PULLS_OTHERS_DEADLINE_MS`. Apart from the person's own lists: a failure here keeps the last Others answer
+   * and never touches them.
+   */
+  const readOthers = (host: string, state: HostState, repos: readonly string[]): Promise<void> => {
+    const others = state.others;
+    if (others.pending) return others.pending;
+    const reposKey = [...repos].map((r) => r.toLowerCase()).sort().join(" ");
+    const job = (async () => {
+      if (listHeld(host)) {
+        others.error = "rate_limited";
+        others.failedAt = now();
+        return;
+      }
+      const ordered = byActivity(repos, [...(state.answer?.pulls ?? []), ...(others.answer?.pulls ?? [])]);
+      const cli = state.cli;
+      let calls: string[][];
+      let covered: string[];
+      if (cli === "gh") {
+        const plan = githubOthersSearches(ordered);
+        covered = plan.covered;
+        calls = plan.searches.length ? [["api", "graphql", "--hostname", host, "-f", `query=${githubOthersQuery(plan.searches.length)}`, ...plan.searches.flatMap((q, i) => ["-f", `others${i}=${q}`])]] : [];
+      } else {
+        const plan = gitlabOthersQueries(ordered);
+        covered = plan.covered;
+        calls = plan.queries.map((query) => ["api", "--hostname", host, "graphql", "-f", `query=${query}`]);
+      }
+      if (calls.length === 0) {
+        others.answer = { at: now(), pulls: [], avatars: {}, total: 0, repos: reposKey };
+        others.error = null;
+        return;
+      }
+      // One deadline for the whole read; no call starts past it.
+      let late = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<"late">((done) => {
+        timer = setTimeout(() => {
+          late = true;
+          done("late");
+        }, INBOX_PULLS_OTHERS_DEADLINE_MS);
+      });
+      const work = (async (): Promise<{ outputs: string[] } | { failed: RefCommandResult }> => {
+        const outputs: string[] = [];
+        for (const args of calls) {
+          if (late) return { failed: { stdout: "", stderr: "timed out", exitCode: 1 } };
+          const result = await run(cli, args);
+          if (result.exitCode !== 0) return { failed: result };
+          outputs.push(result.stdout);
+        }
+        return { outputs };
+      })();
+      const done = await Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+      if (done === "late" || "failed" in done) {
+        fail(host, others, cli, done === "late" ? { stdout: "", stderr: "timed out", exitCode: 1 } : done.failed);
+        return;
+      }
+      const parsed = cli === "gh" ? parseGithubPulls(done.outputs[0]!, host, "others") : parseGitlabPulls(done.outputs, host, "others");
+      if (!parsed) {
+        fail(host, others, cli, { stdout: done.outputs.join("\n"), stderr: "", exitCode: 1 });
+        return;
+      }
+      spent(host, parsed);
+      const all = covered.length >= new Set(repos.map((r) => r.toLowerCase())).size;
+      others.answer = { at: now(), pulls: parsed.pulls, avatars: parsed.avatars, total: all ? (parsed.open_total ?? 0) : null, repos: reposKey };
+      others.error = null;
+    })()
+      .catch(() => {
+        others.error = "unavailable";
+        others.failedAt = now();
+      })
+      .finally(() => {
+        others.pending = null;
+      });
+    others.pending = job;
+    return job;
+  };
+
   const due = (state: HostState, refresh: boolean): boolean => {
     if (state.error && now() - state.failedAt < REF_FAILURE_MS) return false;
     if (!state.answer) return true;
     return now() - state.answer.at >= (refresh ? INBOX_PULLS_REFRESH_MS : INBOX_PULLS_FRESH_MS);
   };
 
+  /** Others is read every `INBOX_PULLS_OTHERS_FRESH_MS` at most, or as the list is while the Others view is open (`eager`). */
+  const othersDue = (others: OthersState, reposKey: string, refresh: boolean, eager: boolean): boolean => {
+    if (others.error && now() - others.failedAt < REF_FAILURE_MS) return false;
+    if (!others.answer || others.answer.repos !== reposKey) return true;
+    const age = now() - others.answer.at;
+    if (eager) return age >= (refresh ? INBOX_PULLS_REFRESH_MS : INBOX_PULLS_FRESH_MS);
+    return age >= INBOX_PULLS_OTHERS_FRESH_MS;
+  };
+
   return {
-    async list(repos, { refresh = false } = {}) {
+    async list(repos, { refresh = false, others: eager = false } = {}) {
       const wanted = new Set(repos.map((r) => inboxPullRepoKey(r.host, r.repo)));
       const byHost = new Map<string, InboxPullRepo[]>();
       for (const repo of repos) {
@@ -731,19 +873,27 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           }
           let state = hosts.get(host);
           if (!state || state.cli !== cli) {
-            state = { cli, answer: null, failedAt: 0, error: null, pending: null };
+            state = { cli, answer: null, failedAt: 0, error: null, pending: null, others: { answer: null, failedAt: 0, error: null, pending: null } };
             hosts.set(host, state);
           }
           const repoNames = byHost.get(host)!.map((r) => r.repo);
           // The searches are scoped to the projects' repositories: a new set of them reads again.
           const reposKey = [...repoNames].map((r) => r.toLowerCase()).sort().join(" ");
           if (due(state, refresh) || (state.answer && state.answer.repos !== reposKey && !(state.error && now() - state.failedAt < REF_FAILURE_MS))) await read(host, state, repoNames);
+          // Others after the person's own lists (its order follows their activity), on its own path and clock.
+          if (othersDue(state.others, reposKey, refresh, eager)) await readOthers(host, state, repoNames);
           asked.push({ host, state });
         }),
       );
       asked.sort((a, b) => a.host.localeCompare(b.host));
       const pulls: InboxPull[] = [];
-      for (const { state } of asked) for (const pull of state.answer?.pulls ?? []) if (wanted.has(inboxPullRepoKey(pull.host, pull.repo))) pulls.push(pull);
+      for (const { state } of asked) {
+        // The person's own lists say what a PR is to them; Others adds the PRs they do not have.
+        const own = new Set((state.answer?.pulls ?? []).map((p) => p.key));
+        for (const pull of [...(state.answer?.pulls ?? []), ...(state.others.answer?.pulls ?? []).filter((p) => !own.has(p.key))]) {
+          if (wanted.has(inboxPullRepoKey(pull.host, pull.repo))) pulls.push(pull);
+        }
+      }
       known = new Map(pulls.map((p) => [p.key, p]));
       lastRepos = wanted;
       // Only the authors of PRs this list shows: the window may ask for their pictures, no one else's.
@@ -752,36 +902,45 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         const urls: Record<string, string> = {};
         for (const pull of pulls) {
           if (pull.host.toLowerCase() !== host || !pull.author) continue;
-          const url = state.answer?.avatars[pull.author];
+          const url = state.answer?.avatars[pull.author] ?? state.others.answer?.avatars[pull.author];
           if (url) urls[pull.author] = url;
         }
         nextAvatars.set(host, urls);
       }
       avatars = nextAvatars;
       /**
-       * What the list shows of a host whose searches left PRs out: its open PRs in this list, and (searches limited
-       * to the projects' repositories) those plus the ones left out; else how many of those are the projects' is not
-       * known (null).
+       * What the list shows of a host whose reads left PRs out: its open PRs in this list (`shown`), and how many there
+       * are (`total`): Others' count when it searched every repository, or the person's own searches' count when they
+       * were limited to the projects' repositories (the larger); null when that is not known (Others searched only
+       * the most active repositories, or the own searches were not limited and Others has no answer).
        */
-      const cappedOfHost = (host: string, answer: HostAnswer | null): InboxPullHost["capped"] | undefined => {
-        if (!answer) return undefined;
+      const cappedOfHost = (host: string, state: HostState): InboxPullHost["capped"] | undefined => {
+        const { answer } = state;
+        const others = state.others.answer;
+        if (!answer && !others) return undefined;
         const shown = pulls.filter((p) => p.host.toLowerCase() === host && (p.state === "open" || p.state === "draft")).length;
-        // The Others reads counted every open PR of the projects' repositories: that is the whole.
-        if (answer.open_total !== undefined) return answer.open_total > shown ? { shown, total: answer.open_total } : undefined;
-        if (!answer.capped || answer.capped.total <= answer.capped.shown) return undefined;
-        return { shown, total: answer.scoped ? shown + (answer.capped.total - answer.capped.shown) : null };
+        if (others && others.total === null) return { shown, total: null };
+        let total = others?.total ?? shown;
+        if (answer?.capped && answer.capped.total > answer.capped.shown) {
+          if (answer.scoped) total = Math.max(total, shown + (answer.capped.total - answer.capped.shown));
+          else if (!others) return { shown, total: null };
+        }
+        return total > shown ? { shown, total } : undefined;
       };
       const times = asked.map((a) => a.state.answer?.at).filter((t): t is number => typeof t === "number");
       return {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
         hosts: asked.map(({ host, state }): InboxPullHost => {
-          const capped = cappedOfHost(host, state.answer);
+          const capped = cappedOfHost(host, state);
+          const others = state.others;
           return {
             cli: state.cli,
             host,
             login: state.answer?.login ?? null,
             // A host that failed this time still shows its last answer, when there is one: the window says so.
             ...(state.error ? { error: state.error, ...(state.answer ? { last_read: new Date(state.answer.at).toISOString() } : {}) } : {}),
+            // Others failed on its own: the person's own lists stand; the window says Others is the last read, or missing.
+            ...(others.error ? { others_error: others.error, ...(others.answer ? { others_last_read: new Date(others.answer.at).toISOString() } : {}) } : {}),
             ...(capped ? { capped } : {}),
           };
         }),

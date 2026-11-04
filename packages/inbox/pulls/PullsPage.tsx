@@ -63,7 +63,7 @@ import {
 } from './model';
 import { PullFilterControl } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
-import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
+import { answeredClis, pullsEmptyWords, pullsNotices, type PullsNotice } from './notices';
 import { ReviewPicker } from './ReviewPicker';
 import { chainMarks, isOpen, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
@@ -186,8 +186,10 @@ function PullList({
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
   const notices = pullsNotices(model);
-  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
-  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
+  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut
+  // (Others failing alone leaves Mine and To review whole: the person's own lists answered).
+  const whole = (n: PullsNotice) => n.key.startsWith('unsigned:') || (filter !== 'others' && n.key.includes(':others:'));
+  if (total === 0 && filter !== 'all' && notices.every(whole)) {
     const empty = pullFilterEmptyWords(filter);
     return (
       <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>

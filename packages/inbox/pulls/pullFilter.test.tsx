@@ -93,7 +93,7 @@ let savedFetch: typeof fetch;
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
-  globalThis.fetch = (async () => Response.json({})) as typeof fetch;
+  globalThis.fetch = (async () => Response.json({})) as unknown as typeof fetch;
 });
 
 afterEach(() => {
