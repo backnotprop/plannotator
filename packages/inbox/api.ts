@@ -1668,8 +1668,11 @@ export interface InboxEventHandlers {
    * stream serves this one changes, so the report names it (`served_by`).
    */
   onConnect?: () => void;
-  /** A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"); never called by an older Inbox. */
-  onDrafts?: (threadId: string) => void;
+  /**
+   * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
+   * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
+   */
+  onDrafts?: (threadId: string | null) => void;
   /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
@@ -1769,8 +1772,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'drafts':
       try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown };
+        const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
         if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
+        else if (data.compose === true) handlers.onDrafts?.(null);
       } catch {
         // A malformed frame changes nothing.
       }

@@ -7,7 +7,11 @@
  * change them; the drafts NOT read after a message in a thread holding unsent
  * work, or Tidy not read when its menu opens; and a list put together from
  * changes drawn any differently from a fresh window's (rows, order, bold,
- * sections, the sidebar's counts).
+ * sections, the sidebar's counts). And the sidebar's Drafts count left
+ * behind (#2604 review): a thread holding unsent work deleted, which no
+ * record says; compose drafts saved or deleted in another window (the
+ * Inbox's real `drafts` frames, relayed from its stream); and Tidy's old
+ * count shown while a touch opens ⋮ before the plan read lands.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -19,6 +23,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../../tests/helpers/no-browser';
+import { inboxId } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -81,7 +86,44 @@ async function agentWrites(threadId: string): Promise<void> {
 const count = (path: string) => reads.filter((p) => p.split('?')[0] === path).length;
 const listReads = () => reads.filter((p) => p.startsWith('/api/inbox/threads?'));
 
-const TESTS = 2;
+/**
+ * The window's REAL event stream from the Inbox, for its `drafts` frames only (records stay the test's own, through
+ * `sendRecord`): what a save, a delete or a Send in another window tells this one. Answers the close.
+ */
+function relayDrafts(path: string, listener: (event: MessageEvent<string>) => void): () => void {
+  let buffer = '';
+  let closed = false;
+  const req = request({ host: '127.0.0.1', port, path, method: 'GET', headers: { Host: `127.0.0.1:${port}` } }, (res) => {
+    res.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) {
+        if (closed || !/^event: drafts$/m.test(frame)) continue;
+        const data = /^data: (.*)$/m.exec(frame)?.[1] ?? '';
+        act(() => listener({ data } as MessageEvent<string>));
+      }
+    });
+  });
+  req.on('error', () => {});
+  req.end();
+  return () => {
+    closed = true;
+    req.destroy();
+  };
+}
+
+/** The sidebar's Drafts count as drawn, or null with no Drafts row. */
+const draftsBadge = (el: HTMLElement) => el.querySelector('[data-drafts-nav] .ib-n')?.textContent ?? null;
+/** What the Inbox's drafts read says the count is now (read past the window's fetch, so it is not one of its reads). */
+async function draftsOnServer(): Promise<string | null> {
+  const answer = JSON.parse((await loopback('/api/inbox/drafts')).text) as { drafts: unknown[]; replies?: unknown[] };
+  const n = answer.drafts.length + (answer.replies?.length ?? 0);
+  return n > 0 ? String(n) : null;
+}
+const post = async (path: string, body: Record<string, unknown> = {}) => expect((await loopback(path, 'POST', JSON.stringify(body))).status).toBe(200);
+
+const TESTS = 5;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -140,10 +182,18 @@ beforeEach(() => {
   // The event stream is a stand-in: only the records a test sends reach the window.
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
+    private readonly path: string;
+    private stops: (() => void)[] = [];
+    constructor(url: string | URL) {
+      this.path = String(url);
+    }
     addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
       if (type === 'record') sendRecord = (record) => listener({ data: JSON.stringify(record) } as MessageEvent<string>);
+      if (type === 'drafts') this.stops.push(relayDrafts(this.path, listener));
     }
-    close() {}
+    close() {
+      for (const stop of this.stops.splice(0)) stop();
+    }
   };
   savedMatchMedia = window.matchMedia;
   window.matchMedia = ((query: string) => ({
@@ -265,4 +315,90 @@ test('a message in a thread holding unsent work reads the drafts; Tidy is read w
   expect(trigger).not.toBeNull();
   act(() => trigger!.click());
   await until(() => count('/api/inbox/tidy') > tidy, 'the Tidy read as its menu opens');
+}, 30_000);
+
+test('a thread holding unsent work deleted (no record or drafts frame says it): the next agent message elsewhere brings the Drafts count to a fresh read\'s', async () => {
+  if (!hasDom) return;
+  const el = mount();
+  await until(() => listShown(el) && sendRecord !== null, 'the list and the stream');
+  // A reply draft in a second thread: its save tells the window (the Inbox's own drafts frame).
+  await post(`/api/inbox/threads/${world.waiting}/draft`, { body: 'Half a reply', base: null, files_add: [], files_remove: [], files_place: [] });
+  const before = await draftsOnServer();
+  expect(Number(before)).toBeGreaterThanOrEqual(2);
+  await until(() => draftsBadge(el) === before, 'the Drafts count with the reply draft');
+
+  // Settings → Storage deletes both threads (the picks and the reply draft): nothing on the stream says so.
+  await post(`/api/inbox/threads/${world.picked}/delete`);
+  await post(`/api/inbox/threads/${world.waiting}/delete`);
+  const after = await draftsOnServer();
+  expect(after).not.toBe(before);
+  await wait(300);
+  expect(draftsBadge(el)).toBe(before);
+
+  // An agent writes in a thread holding nothing unsent: as on main, the count follows.
+  await agentWrites(world.stopped);
+  await until(() => draftsBadge(el) === after, 'the Drafts count without the deleted threads');
+}, 30_000);
+
+test('compose drafts saved and deleted in another window, with no reply draft held: the Drafts count follows with no record', async () => {
+  if (!hasDom) return;
+  const el = mount();
+  await until(() => listShown(el) && sendRecord !== null, 'the list and the stream');
+  // No unsent work anywhere: the window holds no reply draft (what a person who never leaves one sees).
+  const held = JSON.parse((await loopback('/api/inbox/drafts')).text) as { replies: { thread_id: string }[] };
+  expect(held.replies.length).toBeGreaterThan(0);
+  for (const row of held.replies) await post(`/api/inbox/threads/${row.thread_id}/delete`);
+  expect(await draftsOnServer()).toBeNull();
+  await agentWrites(world.stopped);
+  await until(() => draftsBadge(el) === null, 'no Drafts row');
+  const records = seq;
+
+  const first = inboxId('drf');
+  const second = inboxId('drf');
+  await post(`/api/inbox/drafts/${first}`, { body: 'A new message', to: null, base: null });
+  await until(() => draftsBadge(el) === '1', 'one draft');
+  await post(`/api/inbox/drafts/${second}`, { body: 'Another', to: null, base: null });
+  await until(() => draftsBadge(el) === '2', 'two drafts');
+  await post(`/api/inbox/drafts/${first}/delete`);
+  await until(() => draftsBadge(el) === '1', 'one draft again');
+  expect(draftsBadge(el)).toBe(await draftsOnServer());
+  // None of it came by a record.
+  expect(seq).toBe(records);
+}, 30_000);
+
+test('Tidy after a message elsewhere, on a touch: until the plan read lands the menu shows Tidy as while first read (no old count), then the plan\'s', async () => {
+  if (!hasDom) return;
+  const el = mount();
+  await until(() => listShown(el) && sendRecord !== null, 'the list and the stream');
+  await wait(500);
+  // The plan is read once the window opens, as before: the list reads around it put it off, never drop it.
+  expect(count('/api/inbox/tidy')).toBeGreaterThan(0);
+  const trigger = el.querySelector<HTMLButtonElement>('.ib-lhead [data-tidy-menu]')!;
+  const look = () => {
+    const item = document.querySelector<HTMLElement>('[data-tidy-item]');
+    return item ? { text: item.textContent, disabled: item.getAttribute('aria-disabled') === 'true' || item.hasAttribute('data-disabled') } : null;
+  };
+  await agentWrites(world.stopped);
+  await wait(400);
+  // The plan read is held until the test lets it go (a phone's round trip).
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  const through = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith('/api/inbox/tidy')) await held;
+    return through(input, init);
+  }) as typeof fetch;
+  const tidy = count('/api/inbox/tidy');
+  // A touch: no hover first; pointerdown and the click come together, and the menu opens at once.
+  act(() => {
+    trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    trigger.click();
+  });
+  await wait(50);
+  expect(look()).toEqual({ text: 'Tidy', disabled: false });
+  release();
+  await until(() => count('/api/inbox/tidy') > tidy, 'the plan read');
+  const plan = JSON.parse((await loopback('/api/inbox/tidy')).text) as { count: number; run: { done: number; agents: unknown[] } | null };
+  const expected = plan.count > 0 ? `Tidy${plan.count}` : plan.run ? `Tidy · ${plan.run.done}/${plan.run.agents.length}` : 'Tidy';
+  await until(() => look()?.text === expected && look()?.disabled === !(plan.count > 0 || plan.run !== null), 'the plan as read');
 }, 30_000);

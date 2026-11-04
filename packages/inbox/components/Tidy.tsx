@@ -35,6 +35,8 @@ export interface TidyController {
   shown?: (open: boolean) => void;
   /** The person is about to open the menu (a pointer on ⋮, or focus): a list or Board read meanwhile is read now. */
   warm?: () => void;
+  /** That read (`warm`) is still out: the plan may be stale, so the menu shows Tidy as while it is first read. */
+  pending?: boolean;
 }
 
 /** How long the window polls a run's progress. */
@@ -54,6 +56,8 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
   const stale = useRef(false);
   /** The menu or the popover is open. */
   const open = useRef(false);
+  /** A stale plan is being read again (`warm`): until it lands the menu shows no count (a touch opens ⋮ at once). */
+  const [pending, setPending] = useState(false);
   const refresh = useCallback(() => {
     const mine = ++seq.current;
     stale.current = false;
@@ -62,7 +66,10 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
       .then((next) => {
         if (mine === seq.current) setPlan(next);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (mine === seq.current) setPending(false);
+      });
   }, [scope, surface]);
   /** The scope (its `refresh`) the plan was last read for while enabled; null after a disable, so a return reads it again. */
   const readFor = useRef<typeof refresh | null>(null);
@@ -76,12 +83,17 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
       stale.current = true;
       return;
     }
-    readFor.current = refresh;
-    const timer = setTimeout(refresh, 250);
+    // Counted as read only once the read starts: a list read within these 250 ms puts it off, never drops it.
+    const timer = setTimeout(() => {
+      readFor.current = refresh;
+      refresh();
+    }, 250);
     return () => clearTimeout(timer);
   }, [refresh, version, enabled]);
   const warm = useCallback(() => {
-    if (enabled && stale.current) refresh();
+    if (!enabled || !stale.current) return;
+    setPending(true);
+    refresh();
   }, [enabled, refresh]);
   const shown = useCallback(
     (now: boolean) => {
@@ -120,7 +132,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [scope, surface, refresh],
   );
-  return { surface, scope, plan, run, start, refresh, shown, warm };
+  return { surface, scope, plan, run, start, refresh, shown, warm, pending };
 }
 
 
@@ -189,7 +201,9 @@ export function TidyMenu({
   const [popOpen, setPopOpen] = useState(false);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
-  const { plan, run } = tidy;
+  // A stale plan read again as ⋮ is reached for (touch opens it at once): drawn as while it is first read, never its old count.
+  const plan = tidy.pending ? null : tidy.plan;
+  const run = tidy.pending ? null : tidy.run;
   const count = plan?.count ?? 0;
   // Still reading (plan null): enabled, so the menu does not flash disabled on load.
   const canOpen = plan === null || run !== null || count > 0;

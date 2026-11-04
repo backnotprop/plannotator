@@ -45,7 +45,7 @@ import {
   type WhatsNewModel,
 } from './api';
 import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openThreadReads';
-import { draftsReadOwed, unsentThreads } from './draftsReads';
+import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
@@ -1788,10 +1788,14 @@ function Inbox() {
         if (heard !== null) void Promise.allSettled([listRead, threadRead]).then(() => perfUntilNextFrame('record-refresh', heard));
         // Picks and comments are unsent work too: the Drafts row follows them. Read only when these records can change
         // the drafts (draftsReads.ts): of a thread holding unsent work now, or after them (the list read says), or not
-        // placed. The Drafts page, which shows each draft's session too, reads after every record, as before.
+        // placed, or when the list read's rows holding unsent work are not the reply drafts shown (a deleted thread or
+        // project, which no record says). The Drafts page, which shows each draft's session too, reads after every record, as before.
         const holding = new Set([...replyDraftsRef.current.map((row) => row.thread_id), ...unsentThreads(latestRef.current)]);
         if (routeRef.current.page === 'drafts' || draftsReadOwed(records, holding)) void refreshDrafts();
-        else void listRead.then((next) => next && draftsReadOwed(records, unsentThreads(next)) && void refreshDrafts());
+        else
+          void listRead.then((next) => {
+            if (next && (draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next))) void refreshDrafts();
+          });
       }, 80);
     };
     // The window's own pick saves owe a read with no record of their own: everything is read, the open thread too.
@@ -1842,12 +1846,14 @@ function Inbox() {
         },
         // A reply draft was saved or discarded (here or in another window): the rows' `unsent` and the Drafts row.
         // Its own timer: sharing the record timer let a draft save cancel a record's pending reads (the open thread's).
+        // A compose draft (null) was saved, deleted or sent: only the drafts read; it changes no list row (a Send's
+        // new thread comes with its own record).
         onDrafts: (threadId) => {
           // The open thread's own copy of its draft follows at once (the foot's Send carries those words).
-          if (threadId === routeRef.current.thread) setDraftChanged((n) => n + 1);
+          if (threadId !== null && threadId === routeRef.current.thread) setDraftChanged((n) => n + 1);
           if (draftsTimer) clearTimeout(draftsTimer);
           draftsTimer = setTimeout(() => void refreshDrafts(), 80);
-          listAfterEvents(80);
+          if (threadId !== null) listAfterEvents(80);
         },
         // An Ask AI chat changed; the window reads it, and nothing else on the page depends on it.
         onAsk: emitAskChange,

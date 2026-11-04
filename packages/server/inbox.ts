@@ -938,8 +938,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let baseUrl = "";
   let portChanged = false;
   const statusListeners = new Set<() => void>();
-  /** A reply draft was saved or deleted (inbox-reply-drafts.ts): the windows' streams say `event: drafts`. */
-  const draftListeners = new Set<(threadId: string) => void>();
+  /**
+   * A reply draft was saved or deleted (inbox-reply-drafts.ts), or a compose draft saved, deleted or sent
+   * (inbox-compose.ts, no thread: null): the windows' streams say `event: drafts`.
+   */
+  const draftListeners = new Set<(threadId: string | null) => void>();
   /** An Ask AI conversation changed (inbox-ask.ts): the owner's windows' streams say `event: ask`. */
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
@@ -2483,7 +2486,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
         // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
-        const onDraft = (threadId: string) => send(`event: drafts\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
+        // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
+        const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
         if (windowId) draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
@@ -3080,6 +3084,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     boardOn,
     machine: () => machines.selfId,
+    onDraftsChange: () => {
+      for (const listener of draftListeners) listener(null);
+    },
   });
   compose.sweep();
   // Reply drafts: the words typed in a thread's reply box, kept per thread (packages/server/inbox-reply-drafts.ts).
