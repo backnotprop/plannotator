@@ -170,6 +170,7 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
@@ -334,6 +335,14 @@ export interface InboxReplyInput {
    * Held for the Undo window (`settleHandoffs`, `undoHandoff`).
    */
   handoff?: { to: InboxAddressee; label?: string | null; from: { host: string | null; session: string; wakes: boolean; label?: string | null } | null };
+  /**
+   * The person's verdict on the review this reply answers (code review in the
+   * Inbox: Approve or Send feedback in the review's header). Only on a reply
+   * to a message whose guide is a review; the server passes it only while the
+   * person has Code review on. Stored on the reply as `review_verdict`, with
+   * how many of the review's comments the reply carries.
+   */
+  review_verdict?: unknown;
 }
 
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
@@ -4038,6 +4047,11 @@ export class InboxStore {
     const listed = this.planSkips(message, input.skip);
     const skips = listed.filter((r) => !planned.has(r.id) && inboxQuestionState(r, false) === "open");
     const attachments = input.attachments ?? [];
+    const verdict = this.planReviewVerdict(message, input.review_verdict, carried);
+    // The reviews whose comments this reply carries (code review in the Inbox): marked on the reply, whichever
+    // message it answers (a Send puts guide comments on the thread's newest agent message), so the window can
+    // tell a review happened in this thread (`inboxThreadHadReview`).
+    const reviewCommentsOf = [...new Set(carried.filter((record) => !!record.guide && this.messages.get(record.message_id)?.guide?.review).map((record) => record.message_id))];
     // The action items whose Done or Can't do it waits in the draft go with this Send (approval "inbox-action-items-in-reply").
     const stagedActions = this.planStagedActions(message, input.actions);
     if (plan.length === 0 && skips.length === 0 && stagedActions.length === 0 && words.trim() === "" && feedback === "" && attachments.length === 0) {
@@ -4169,6 +4183,8 @@ export class InboxStore {
       ...(handoff
         ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
         : {}),
+      ...(verdict ? { review_verdict: verdict } : {}),
+      ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -4187,6 +4203,21 @@ export class InboxStore {
     }
     this.endSnooze(message.thread_id);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * A reply's verdict on a review (`review_verdict`), checked: only on a reply
+   * to a message whose guide is a review, `approved` or `changes_requested`.
+   * Counts the review's comments the reply carries. Undefined without one.
+   */
+  private planReviewVerdict(message: InboxMessage, raw: unknown, carried: readonly InboxAnnotationRecord[]): InboxReviewVerdictRecord | undefined {
+    if (raw === undefined || raw === null) return undefined;
+    if (!message.guide?.review) throw new InboxError("validation_error", "review_verdict: this message carries no review.", { field: "review_verdict" });
+    if (raw !== "approved" && raw !== "changes_requested") {
+      throw new InboxError("validation_error", 'review_verdict: "approved" or "changes_requested".', { field: "review_verdict" });
+    }
+    const comments = carried.filter((record) => record.message_id === message.id && !!record.guide).length;
+    return { of: message.id, verdict: raw, comments };
   }
 
   /** The action items a Send names (`actions`) that wait in the person's draft: each of this thread and session, else refused. */
@@ -4447,6 +4478,29 @@ export class InboxStore {
     if (JSON.stringify(next) !== JSON.stringify(message.guide_reviewed ?? null)) {
       const at = this.stamp();
       this.appendMessage({ ...message, guide_reviewed: next }, at);
+    }
+    return next;
+  }
+
+  /**
+   * The files the person ticked Viewed in a review (code review in the Inbox):
+   * each a file of the review's patch, once, in the order given. No write
+   * when nothing changed. Only on a message whose guide is a review.
+   */
+  saveGuideViewed(messageId: string, viewed: unknown, files: readonly string[]): string[] {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (!message.guide?.review) throw new InboxError("guide_not_found", "This message carries no review.");
+    if (!Array.isArray(viewed) || viewed.some((value) => typeof value !== "string")) {
+      throw new InboxError("validation_error", "viewed: a list of the review's file paths.", { field: "viewed" });
+    }
+    const known = new Set(files);
+    const unknown = (viewed as string[]).find((path) => !known.has(path));
+    if (unknown !== undefined) throw new InboxError("validation_error", `viewed: ${JSON.stringify(unknown)} is not a file of this review.`, { field: "viewed" });
+    const next = [...new Set(viewed as string[])];
+    if (JSON.stringify(next) !== JSON.stringify(message.guide_viewed ?? [])) {
+      const at = this.stamp();
+      this.appendMessage({ ...message, guide_viewed: next }, at);
     }
     return next;
   }

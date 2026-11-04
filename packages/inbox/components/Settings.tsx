@@ -73,6 +73,8 @@ export interface SettingsPageProps {
   landOnExperimental?: boolean;
   /** Settings → Capabilities → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
   onToggleBoard?: (next: boolean) => void;
+  /** Settings → Capabilities → Code review (approval "inbox-code-review-direction"). Absent (or an Inbox without it): no row. */
+  onToggleCodeReview?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
@@ -462,6 +464,8 @@ function CapabilitiesSection({
   onToggleBoard,
   steps,
   onToggleSteps,
+  codeReview,
+  onToggleCodeReview,
   experimental,
   onToggleExperimental,
   experimentalHeading,
@@ -471,6 +475,9 @@ function CapabilitiesSection({
   /** The checklist (thread steps, approval "inbox-thread-steps"), null on an Inbox without it. */
   steps: { on: boolean } | null;
   onToggleSteps?: (next: boolean) => void;
+  /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */
+  codeReview: { on: boolean } | null;
+  onToggleCodeReview?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
@@ -478,9 +485,10 @@ function CapabilitiesSection({
 }) {
   const boardRow = board && onToggleBoard;
   const stepsRow = steps && onToggleSteps;
+  const codeReviewRow = codeReview && onToggleCodeReview;
   return (
     <>
-      {(boardRow || stepsRow) && (
+      {(boardRow || stepsRow || codeReviewRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -510,6 +518,21 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={steps.on} labelledBy="ib-steps-label" onClick={() => onToggleSteps(!steps.on)} />
+                </span>
+              </div>
+            )}
+            {codeReviewRow && (
+              <div className="ib-prow" data-settings-code-review="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-code-review-label">
+                    Code review
+                  </span>
+                  <span className="ib-desc">
+                    Review your agents' code changes in the thread: type / in a reply to ask for a review, then approve it or send feedback from the review itself. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
                 </span>
               </div>
             )}
@@ -843,13 +866,14 @@ export function SettingsPage(props: SettingsPageProps) {
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
+  const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -918,7 +942,7 @@ export function SettingsPage(props: SettingsPageProps) {
         return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }
@@ -1024,12 +1048,14 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || experimental ? (
+          (board && props.onToggleBoard) || steps || codeReview || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
               steps={steps}
               onToggleSteps={props.onToggleSteps}
+              codeReview={codeReview}
+              onToggleCodeReview={props.onToggleCodeReview}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
