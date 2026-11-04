@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, INBOX_HOST_NAMES, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -201,7 +201,8 @@ export const INBOX_SESSION_LABEL_MAX = 60;
  * A poll's `label` as the window may draw it: control characters, line
  * separators and bidi controls stripped (the same characters a thread name
  * refuses), trimmed, at most INBOX_SESSION_LABEL_MAX characters. Null for
- * anything that is not a string, or that leaves nothing visible.
+ * anything that is not a string, that leaves nothing visible, or that reads
+ * as someone else (`impersonatesInboxAuthor`).
  */
 export function cleanInboxSessionLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -209,7 +210,18 @@ export function cleanInboxSessionLabel(value: unknown): string | null {
   const input = Array.from(value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join("");
   const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
   const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
-  return label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() ? label : null;
+  const visible = label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim();
+  return visible && !impersonatesInboxAuthor(visible) ? label : null;
+}
+
+/**
+ * A label that reads as the person ("You") or as an agent ("Claude Code", "pi"), ignoring case and spacing.
+ * A label is display only, but a message's author shows it, and Claude Code's comes from the session's
+ * transcript, which its own model can append to: so a session may never be named as the person or an agent.
+ */
+function impersonatesInboxAuthor(label: string): boolean {
+  const key = label.replace(/\s+/gu, " ").toLowerCase();
+  return key === "you" || Object.entries(INBOX_HOST_NAMES).some(([host, name]) => key === host.toLowerCase() || key === name.toLowerCase());
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -368,15 +380,15 @@ export function createInboxLiveSessions(options: {
     return !(typeof entry.idleAt === "number" && entry.idleAt >= marked);
   };
 
-  /** A poll arrived: the session is live, and says where it works. Returns the call to make when the poll answers. */
   /**
    * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
    * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
    * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
    * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
    */
   const labels = (): Record<string, string> => {
-    const out: Record<string, string> = {};
+    const out = Object.create(null) as Record<string, string>;
     for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
     return out;
   };
@@ -386,6 +398,7 @@ export function createInboxLiveSessions(options: {
   let labelChanges = 0;
   const labelVersion = () => labelChanges;
 
+  /** A poll arrived: the session is live, and says where it works. Returns the call to make when the poll answers. */
   const pollStarted = async (session: string, host: string, body: Record<string, unknown>): Promise<() => void> => {
     const at = now();
     const root = await rootOf(body.project_path);

@@ -1306,7 +1306,9 @@ Three inherited limitations are worth stating rather than fixing here:
   `survivingMentions` keeps reporting Ann, because it asks
   `text.includes('@Ann')`. So the id list can outlive the chip. That is
   0.43.x behavior in `survivingMentions`, unchanged here — the chips only
-  make it visible.
+  make it visible. *(Fixed later: `survivingMentions` now counts a token only
+  whole, not followed by a letter or digit and not the start of a longer
+  tagged token, so deleting `@Ann` untags Ann while `@Anna Lee` stays.)*
 
 ### The no-op guarantee, and how it is pinned
 

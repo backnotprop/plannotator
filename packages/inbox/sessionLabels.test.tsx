@@ -19,7 +19,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxParticipant, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import { dispatchInboxFrame, type LiveSessionsModel, type TaggableModel, type TaggableSession } from './api';
 import { rowAgentGroups, rowAgentWords } from './components/RowAgents';
-import { setSessionLabels, shortLabel } from './sessionLabels';
+import { labelledAgent, labelOf, setSessionLabels, shortLabel } from './sessionLabels';
 import { TAG_LABEL_MAX, tagOptions } from './tags';
 
 const hasDom = typeof document !== 'undefined';
@@ -250,5 +250,52 @@ describe('drawn', () => {
     expect(plain.querySelector('[data-session-label]')).toBeNull();
     expect(plain.querySelector('.ib-t')!.textContent).toStartWith('Claude Code · started');
     expect(el.querySelector('[data-readdress-send]')!.textContent).toBe('Send to Docs pass');
+  });
+
+  test.skipIf(!hasDom)('two sessions with one label each say their agent first, in the rows and on the button', async () => {
+    const { SendToAnotherSession } = await import('./compose/SendToAnotherSession');
+    const row = (session: string, host: string, label: string) => ({ session, host, started_at: '2026-11-03T09:00:00.000Z', last_seen_at: '2026-11-03T09:10:00.000Z', busy: false, idle_since: null, wrote_thread: false, label });
+    const sessions = [row('ses-a', 'claude-code', 'Review'), row('ses-b', 'pi', 'review '), row('ses-c', 'claude-code', 'Docs pass')];
+    const liveModel = { serverSession: 's', home: '/home/me', project: PROJECT, sessions } as LiveSessionsModel;
+    const el = await draw(<SendToAnotherSession messageId="msg_9" ended={{ host: 'claude-code', session: 'ses-login' }} project="ai-collab" live={liveModel} onReload={async () => {}} onMoved={async () => {}} />);
+    act(() => el.querySelector<HTMLButtonElement>('[data-readdress-open]')!.click());
+    const top = (session: string) => el.querySelector(`[data-readdress-session="${session}"] [data-session-label]`)!.textContent;
+    expect(top('ses-a')).toBe('Claude Code · Review');
+    expect(top('ses-b')).toBe('Pi · review ');
+    expect(top('ses-c')).toBe('Docs pass');
+    expect(el.querySelector('[data-readdress-send]')!.textContent).toBe('Send to Claude Code · Review');
+  });
+});
+
+describe('a session id that is a name Object has', () => {
+  test('lookups find nothing in the prototype', () => {
+    // A plain object, as a caller might pass: its prototype's names are no labels.
+    const labels: Record<string, string> = { 'ses-a': 'Fix login' };
+    for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) expect(labelOf(labels, id)).toBeNull();
+    expect(labelOf(labels, 'ses-a')).toBe('Fix login');
+    // A list whose map really carries "__proto__" (JSON.parse makes it an own key) reads it as a label.
+    expect(labelOf(JSON.parse('{"__proto__":"Proto named"}'), '__proto__')).toBe('Proto named');
+    expect(labelledAgent('X', 'constructor')).toBe('X (constructor)');
+  });
+
+  test.skipIf(!hasDom)('a "constructor" session with no labels renders exactly as it does with none at all', async () => {
+    const { ThreadPane } = await import('./components/Thread');
+    const { RowAgents } = await import('./components/RowAgents');
+    const thread: InboxThread = { ...THREAD, messages: [message('msg_1', claude('constructor'), 1, 'Hello.'), message('msg_2', claude('toString'), 2, 'Again.')] };
+    const participants: InboxParticipant[] = [{ host: 'claude-code', session: 'constructor' }, { host: 'claude-code', session: 'toString' }];
+    setSessionLabels({});
+    const el = await draw(
+      <>
+        <RowAgents participants={participants} agent={{ kind: 'agent', host: 'claude-code', session: 'constructor' }} tip={false} />
+        <RowAgents participants={undefined} agent={{ kind: 'agent', host: 'claude-code', session: 'constructor' }} tip={false} />
+        <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+      </>,
+    );
+    expect([...el.querySelectorAll('[role="img"][data-row-agents]')].map((node) => node.getAttribute('aria-label'))).toEqual(['2 Claude Code sessions', 'Claude Code']);
+    expect([...el.querySelectorAll('.ib-fl-nm')].map((node) => node.textContent)).toEqual(['Claude Code', 'Claude Code']);
+    expect(el.querySelector('[data-session-label]')).toBeNull();
+    expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(false);
+    expect(el.textContent).not.toContain('native code');
+    expect(el.querySelector('[data-message-article="msg_1"] [data-fold-head]')!.getAttribute('aria-label')).toStartWith('Claude Code, ');
   });
 });

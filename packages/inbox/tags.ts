@@ -15,10 +15,10 @@ import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type In
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
+import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
 export const TAG_LABEL_MAX = 40;
-import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The group heading of the agents that read the Inbox only (MCP): never woken. */
 export const TAG_READERS_GROUP = 'Reads the Inbox, not woken';
@@ -48,7 +48,8 @@ export interface TagOption {
 /** The person's name for an agent: an MCP agent's own name, else its host's, else "An agent". */
 export function agentName(host: string | null | undefined, name?: string | null): string {
   if (name) return name;
-  if (host) return INBOX_HOST_NAMES[host] ?? host;
+  // Own keys only: a host string like "constructor" is its own name, never Object's.
+  if (host) return Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host;
   return 'An agent';
 }
 

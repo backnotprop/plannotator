@@ -59,6 +59,15 @@ export function SendToAnotherSession({
   const others = (live?.sessions ?? []).filter((s) => s.session !== ended.session);
   // The selection stays on its session across re-reads; one that left falls back to the first.
   const chosen = others.find((s) => s.session === selected) ?? others[0] ?? null;
+  // Two sessions with one label (a label is display only, and a session can name itself like another): each of
+  // them says its agent before the label, so the rows and the button never read alike for two different targets.
+  const labelKey = (label: string | undefined) => (label ? label.trim().toLowerCase() : null);
+  const shared = new Set(
+    others
+      .map((s) => labelKey(s.label))
+      .filter((key, index, keys): key is string => key !== null && keys.indexOf(key) !== index),
+  );
+  const agentFirst = (label: string | undefined, host: string) => (shared.has(labelKey(label) ?? '') ? `${hostLabel(host)} · ` : '');
 
   useEffect(() => {
     if (!open) return;
@@ -146,7 +155,8 @@ export function SendToAnotherSession({
                 {session.label ? (
                   // A named session (issue #2450): its label on top, cut with "…" (the whole of it on hover), the agent under it.
                   <span className="ib-opt-txt">
-                    <span className="ib-t" data-session-label="" title={session.label}>
+                    <span className="ib-t" data-session-label="" title={`${agentFirst(session.label, session.host)}${session.label}`}>
+                      {agentFirst(session.label, session.host)}
                       <bdi>{session.label}</bdi>
                     </span>
                     <span className="ib-d">
@@ -176,7 +186,8 @@ export function SendToAnotherSession({
                 {chosen.label ? (
                   // One flex item, so the button's gap does not open between "Send to" and the label.
                   <span>
-                    Send to <bdi>{shortLabel(chosen.label, SEND_LABEL_MAX)}</bdi>
+                    Send to {agentFirst(chosen.label, chosen.host)}
+                    <bdi>{shortLabel(chosen.label, SEND_LABEL_MAX)}</bdi>
                   </span>
                 ) : (
                   <>Send to {hostLabel(chosen.host)}</>

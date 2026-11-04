@@ -104,4 +104,15 @@ describe('survivingMentions', () => {
     expect(survivingMentions('hi @Dana Ruiz', tagged).map((p) => p.id)).toEqual(['user_2']);
     expect(survivingMentions('nobody here', tagged)).toEqual([]);
   });
+
+  test('a token counts only whole: deleting @Fix untags it while @Fix login stays', () => {
+    const fix = person({ id: 'a', label: 'Fix' });
+    const fixLogin = person({ id: 'b', label: 'Fix login' });
+    const tagged = [fix, fixLogin];
+    expect(survivingMentions('@Fix and @Fix login', tagged).map((p) => p.id)).toEqual(['a', 'b']);
+    expect(survivingMentions('only @Fix login now', tagged).map((p) => p.id)).toEqual(['b']);
+    expect(survivingMentions('@Fixes landed', [fix])).toEqual([]);
+    expect(survivingMentions('@Fix, done', [fix]).map((p) => p.id)).toEqual(['a']);
+    expect(survivingMentions('@Fix login @Fix', tagged).map((p) => p.id)).toEqual(['a', 'b']);
+  });
 });

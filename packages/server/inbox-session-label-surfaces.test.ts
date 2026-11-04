@@ -256,12 +256,44 @@ describe("the windows are told", () => {
     const guest = await frames("guest");
     expect(await local.until(/event: hello/, 3_000)).toBe(true);
     expect(await guest.until(/event: hello/, 3_000)).toBe(true);
+    // The first compare after a window opens may say the sessions moved, to every window: let it pass.
+    await local.until(/event: deliveries/, 2_500);
+    await guest.until(/event: deliveries/, 500);
+    const guestBefore = guest.text().length;
     await poll(server, "ses-login", project, "Renamed now");
     expect(await local.until(/event: deliveries\ndata: \{"labels":true\}/, 5_000)).toBe(true);
-    // The guest's window hears that the sessions moved (it did before), never that a label did.
-    await guest.until(/event: deliveries/, 3_000);
-    expect(guest.text()).not.toContain('"labels"');
+    // Only a label changed: the guest's window gets no frame at all, not even an empty one.
+    await guest.until(/event: deliveries[\s\S]*event: deliveries/, 2_500);
+    expect(guest.text().slice(guestBefore)).not.toContain("event: deliveries");
     local.close();
     guest.close();
   }, 20_000);
+});
+
+describe("a label never reads as someone else", () => {
+  test('"You" or an agent\'s name, in any case or spacing, is no label; a label that only contains one is kept', async () => {
+    const { server, project } = await threeNamed();
+    const refused = ["You", "you", " YOU ", "Claude Code", "claude  code", "claude-code", "PI", "Codex", "opencode", "T3 Code"];
+    for (const label of refused) {
+      await poll(server, "ses-login", project, label);
+      const list = await read(server, "local", "/api/inbox/threads");
+      expect(list.session_labels["ses-login"], label).toBeUndefined();
+    }
+    await poll(server, "ses-login", project, "Pi config cleanup");
+    expect((await read(server, "local", "/api/inbox/threads")).session_labels["ses-login"]).toBe("Pi config cleanup");
+  });
+});
+
+describe("session ids that are Object's own names", () => {
+  test('"constructor" and "__proto__" are plain keys: labelled when they say one, absent when they do not', async () => {
+    const { server, project } = await threeNamed();
+    await poll(server, "constructor", project);
+    await poll(server, "toString", project, "Named toString");
+    await poll(server, "__proto__", project, "Named proto");
+    const list = await read(server, "local", "/api/inbox/threads");
+    expect(Object.keys(list.session_labels).sort()).toEqual(["__proto__", "ses-billing", "ses-docs", "ses-login", "toString"]);
+    expect(Object.hasOwn(list.session_labels, "constructor")).toBe(false);
+    expect(list.session_labels.toString).toBe("Named toString");
+    expect(list.session_labels["__proto__"]).toBe("Named proto");
+  });
 });

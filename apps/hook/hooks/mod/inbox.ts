@@ -396,29 +396,47 @@ export function sessionNamesAfterCommand(
  * writes one, and so do `claude --name`, a rename from a phone or the resume
  * picker, and a hook or tool that appends one (#2450). The engine gives a plugin
  * no transcript path, so it is worked out from Claude Code's own layout
- * (`claudeTranscriptPaths`).
+ * (`claudeTranscriptPaths`). Because the session's own model can append such a
+ * line too, the label it gives is display only; the server refuses one that
+ * reads as "You" or an agent's name.
  *
  * Cheap on purpose, since every poll asks: a stat, and nothing more while the
- * file has not grown. When it grew, one `/bin/sh` reads only the bytes added
- * since the last read (the first read: the file's last
- * TRANSCRIPT_TITLE_FIRST_READ_BYTES, where Claude Code keeps a resumed
- * session's title), and `grep` hands back only the title lines, so a long
- * transcript is never copied into the module. No `/bin/sh` (Windows), no file
- * found, or a read that fails: null, and the `/rename` store answers.
+ * file has not changed size. When it did, one `/bin/sh` reads only the bytes
+ * added since the last read (the first read, and any read past that many new
+ * bytes: the file's last TRANSCRIPT_TITLE_FIRST_READ_BYTES, where Claude Code
+ * keeps a resumed session's title), and `awk` hands back only the title lines,
+ * so a long transcript is never copied into the module. A last line with no
+ * newline yet is read again once the file grows, never on every poll. Another
+ * inode under the path is a rewrite: its end is read as new. A read that fails
+ * or times out waits longer each time, and a region that fails
+ * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No `/bin/sh` (Windows), no
+ * file found, or a read that fails: the last title, else null, and the
+ * `/rename` store answers.
  */
 export const TRANSCRIPT_TITLE_FIRST_READ_BYTES = 4 * 1024 * 1024
 /** How long a transcript that was not found waits before it is looked for again. */
 export const TRANSCRIPT_TITLE_LOCATE_RETRY_MS = 60_000
 /** The longest title line read: a real one is short, and anything longer is cut and refused. */
 const TRANSCRIPT_TITLE_LINE_MAX = 4_096
+/** After a failed or timed-out read, the first wait before the next try; it doubles up to the most. */
+export const TRANSCRIPT_TITLE_RETRY_MS = 5_000
+export const TRANSCRIPT_TITLE_RETRY_MAX_MS = 5 * 60_000
+/** Failed reads in a row of one region before it is skipped, so a region that always times out is not tried forever. */
+export const TRANSCRIPT_TITLE_FAILURES_MAX = 3
 /**
- * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes: each
- * title line (the last few), then `end:<bytes counted>:<last line's bytes>`.
- * `awk` in the C locale counts bytes on every platform. A title's quotes are
- * bare only in a real record: inside any other line's string they are escaped
+ * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes:
+ * `id:<inode>` (`ls -di`, on macOS and Linux alike), each title line (the
+ * last few), then `end:<bytes counted>:<last line's bytes>`. `awk` in the C
+ * locale counts bytes on every platform. A title's quotes are bare only in a
+ * real record: inside any other line's string they are escaped
  * (`\"type\":…`), so the pattern finds no message text.
  */
-export const TRANSCRIPT_TITLE_SCRIPT = `tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { print "end:" o ":" last }' | tail -n 20; exit 0`
+export const TRANSCRIPT_TITLE_SCRIPT = `ls -di -- "$2" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print "id:" $1 }'; tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { print "end:" o ":" last }' | tail -n 20; exit 0`
+
+/** The file's identity in TRANSCRIPT_TITLE_SCRIPT's output (its inode), or null when the output has none. */
+export function transcriptFileIdOf(output: string): string | null {
+  return /^id:(\d+)$/m.exec(output)?.[1] ?? null
+}
 
 /** Claude Code's folder name for a project: every character but a letter or digit is `-`. Null past 200 (Claude Code adds a hash there). */
 export function claudeProjectSlug(folder: string): string | null {
@@ -480,8 +498,13 @@ export class TranscriptTitle {
   private fresh = true
   /** Where the next read starts. */
   private offset = 0
-  /** The size read through whole; -1 when the next poll must read again. */
+  /** The size last read through (a partial last line included: it is read again once the file grows); -1: read. */
   private readThrough = -1
+  /** The file's inode at the last read: another one is a rewrite (a new file under the same name). */
+  private fileId: string | null = null
+  /** Failed reads in a row, and when the next may run. */
+  private failures = 0
+  private retryAt = Number.NEGATIVE_INFINITY
   private title: string | null = null
 
   constructor(
@@ -502,18 +525,53 @@ export class TranscriptTitle {
       return this.title
     }
     if (size === this.readThrough) return this.title
-    // A file that shrank was rewritten: read its end again, as if new.
-    if (size < this.offset) this.fresh = true
+    // A read failed (a timeout, no shell): wait before the next, longer each time.
+    if ((await this.host.now()) < this.retryAt) return this.title
+    return this.readFrom(path, size, true)
+  }
+
+  private async readFrom(path: string, size: number, again: boolean): Promise<string | null> {
+    // A file that shrank was rewritten: read its end again, as if new. One that grew past a first read's worth is
+    // read from its end too, so no read is ever longer than the first.
+    if (size < this.offset || size - this.offset > TRANSCRIPT_TITLE_FIRST_READ_BYTES) this.fresh = true
     const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
     const length = size - start
     const result = await this.host.run(['/bin/sh', '-c', TRANSCRIPT_TITLE_SCRIPT, 'sh', String(start + 1), path, String(length)], { timeoutMs: 5_000 }).catch(() => null)
-    if (!result || result.exitCode !== 0) return this.title
-    const found = transcriptTitleOf(result.stdout, this.sessionId, start, length)
-    if (!found) return this.title
+    const found = result && result.exitCode === 0 ? transcriptTitleOf(result.stdout, this.sessionId, start, length) : null
+    if (!found) return this.failed(size)
+    const id = transcriptFileIdOf(result!.stdout)
+    const rewritten = id !== null && this.fileId !== null && id !== this.fileId
+    if (id !== null) this.fileId = id
+    if (rewritten) {
+      // Another file under the same name (rewritten, at any size): the old file's title is not its title. Read its
+      // end as new, once, when this read was not that already.
+      this.title = null
+      if (!this.fresh) {
+        this.fresh = true
+        return again ? this.readFrom(path, size, false) : this.title
+      }
+    }
     if (found.title !== undefined) this.title = found.title
     this.fresh = false
     this.offset = found.next
-    this.readThrough = found.next === size ? size : -1
+    // Read through: a last line with no newline yet starts the next read (`offset`), but only once the file grows.
+    this.readThrough = size
+    this.failures = 0
+    this.retryAt = Number.NEGATIVE_INFINITY
+    return this.title
+  }
+
+  /** A read that failed keeps the last title. It waits longer each time, and a region that keeps failing is skipped. */
+  private async failed(size: number): Promise<string | null> {
+    this.failures += 1
+    if (this.failures >= TRANSCRIPT_TITLE_FAILURES_MAX) {
+      this.offset = size
+      this.fresh = false
+      this.readThrough = size
+      this.failures = 0
+    }
+    const wait = Math.min(TRANSCRIPT_TITLE_RETRY_MAX_MS, TRANSCRIPT_TITLE_RETRY_MS * 2 ** Math.max(0, this.failures - 1))
+    this.retryAt = (await this.host.now()) + wait
     return this.title
   }
 
@@ -527,6 +585,8 @@ export class TranscriptTitle {
       this.fresh = true
       this.offset = 0
       this.readThrough = -1
+      this.fileId = null
+      this.failures = 0
       this.path = path
       return path
     }

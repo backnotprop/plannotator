@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Host } from './host'
@@ -9,7 +9,9 @@ import {
   inboxRegistryPathOf,
   STORE_INBOX_SESSION_NAMES,
   TRANSCRIPT_TITLE_FIRST_READ_BYTES,
+  TRANSCRIPT_TITLE_FAILURES_MAX,
   TRANSCRIPT_TITLE_LOCATE_RETRY_MS,
+  TRANSCRIPT_TITLE_RETRY_MS,
   TranscriptTitle,
 } from './inbox'
 
@@ -158,16 +160,106 @@ describe('the title in the transcript', () => {
 
   test('a shell that cannot run keeps the last word', async () => {
     const path = transcript(title('Kept'))
-    const { host } = realHost()
+    const { host, clock } = realHost()
     let broken = false
     const titles = new TranscriptTitle({ ...host, run: async (argv, init) => (broken ? { exitCode: 127, stdout: '', stderr: 'sh: not found' } : host.run(argv, init)) }, SESSION, async () => [path])
     expect(await titles.read()).toBe('Kept')
     appendFileSync(path, title('Read once the shell is back'))
     broken = true
     expect(await titles.read()).toBe('Kept')
-    // The failed read moved nothing: the bytes are read when it works again.
+    // The failed read moved nothing: the bytes are read when it works again, after the wait.
     broken = false
+    clock.now += TRANSCRIPT_TITLE_RETRY_MS
     expect(await titles.read()).toBe('Read once the shell is back')
+  })
+
+  test('a last line with no newline is read once, and again only after the file grows', async () => {
+    const path = transcript(chatter('hello') + title('No newline yet').trimEnd())
+    const { host, reads } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBe('No newline yet')
+    for (let i = 0; i < 5; i++) expect(await titles.read()).toBe('No newline yet')
+    expect(reads).toHaveLength(1)
+    appendFileSync(path, `\n${title('After it')}`)
+    expect(await titles.read()).toBe('After it')
+    expect(reads).toHaveLength(2)
+    // The line that had no newline was read again from its start, whole.
+    expect(reads[1]!.start).toBe(Buffer.byteLength(chatter('hello')))
+  })
+
+  test('a transcript rewritten under the same name, larger, is read as new: the old title does not stay', async () => {
+    const path = transcript(chatter('hello') + title('Old name'))
+    const { host } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBe('Old name')
+    const replace = (text: string) => {
+      const next = `${path}.new`
+      writeFileSync(next, text)
+      renameSync(next, path)
+    }
+    // A new file (a new inode), larger, with no title: none, so the /rename store answers.
+    replace(chatter('x'.repeat(4096)))
+    expect(await titles.read()).toBeNull()
+    // Rewritten again, its title before where the last read ended: found by reading the new file's end.
+    replace(title('New name') + chatter('y'.repeat(8192)))
+    expect(await titles.read()).toBe('New name')
+  })
+
+  test('growth past a first read is read from the end, never as one long read', async () => {
+    const path = transcript(title('Start'))
+    const { host, reads } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBe('Start')
+    appendFileSync(path, chatter('z'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 256 * 1024) / 1024)) + title('Late'))
+    expect(await titles.read()).toBe('Late')
+    const size = statSync(path).size
+    expect(reads[1]).toEqual({ start: size - TRANSCRIPT_TITLE_FIRST_READ_BYTES, length: TRANSCRIPT_TITLE_FIRST_READ_BYTES })
+  })
+
+  test('a read that times out waits longer each time, and a region that keeps timing out is skipped', async () => {
+    const path = transcript(title('Kept'))
+    const { host, clock } = realHost()
+    let timingOut = false
+    let runs = 0
+    const titles = new TranscriptTitle(
+      {
+        ...host,
+        run: async (argv, init) => {
+          runs += 1
+          // What a run killed at its timeout looks like: a signal's exit code and no `end:` line.
+          return timingOut ? { exitCode: 143, stdout: '', stderr: '' } : host.run(argv, init)
+        },
+      },
+      SESSION,
+      async () => [path],
+    )
+    expect(await titles.read()).toBe('Kept')
+    appendFileSync(path, title('Slow region'))
+    timingOut = true
+    runs = 0
+    expect(await titles.read()).toBe('Kept')
+    // Every poll in the wait spawns nothing.
+    for (let i = 0; i < 10; i++) await titles.read()
+    expect(runs).toBe(1)
+    clock.now += TRANSCRIPT_TITLE_RETRY_MS
+    await titles.read()
+    expect(runs).toBe(2)
+    // The wait doubled.
+    clock.now += TRANSCRIPT_TITLE_RETRY_MS
+    await titles.read()
+    expect(runs).toBe(2)
+    clock.now += TRANSCRIPT_TITLE_RETRY_MS
+    await titles.read()
+    expect(runs).toBe(TRANSCRIPT_TITLE_FAILURES_MAX)
+    // Skipped: no more tries of that region, however long it waits, while the file does not grow.
+    clock.now += 60 * 60_000
+    for (let i = 0; i < 5; i++) await titles.read()
+    expect(runs).toBe(TRANSCRIPT_TITLE_FAILURES_MAX)
+    expect(await titles.read()).toBe('Kept')
+    // New bytes after it are read as usual once the shell answers again.
+    timingOut = false
+    appendFileSync(path, title('After the slow part'))
+    expect(await titles.read()).toBe('After the slow part')
   })
 })
 

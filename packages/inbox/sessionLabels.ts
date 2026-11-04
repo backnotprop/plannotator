@@ -1,32 +1,37 @@
 /**
  * Session labels beyond the To picker (issue #2450, after #2467): the name a session was given (`/rename` or the
  * transcript's title in Claude Code, Pi's and OpenCode's session names) on the `@` picker's rows, the list rows'
- * agents, Send to another session and an agent message's author. The same label the To picker shows, from the
- * session's own poll: never from the model, never stored, and only for this computer's owner (a tailnet guest's
- * list carries none, so it reads as before). An unnamed session reads exactly as it did.
+ * agents, Send to another session and an agent message's author. The same label the To picker shows, sent by the
+ * session's connection on each poll, never stored, and only for this computer's owner (a tailnet guest's list
+ * carries none, so it reads as before). An unnamed session reads exactly as it did.
+ *
+ * It is display only and not proof of who wrote: no tool takes a label, but Claude Code's comes from the session's
+ * transcript (its latest `custom-title` line), which the session's own model can append to. So the server refuses a
+ * label that reads as "You" or an agent's name, and nothing routes or decides on one.
  *
  * Every row and thread reads one map, the list's `session_labels` (App puts each list read here), so a rename shows
- * everywhere at once and a session that ended keeps its name while the Inbox runs.
+ * everywhere at once and a session that ended keeps its name while the Inbox runs. The map has no prototype and is
+ * read with `Object.hasOwn`, so a session id like "constructor" finds nothing.
  */
 import { useSyncExternalStore } from 'react';
 import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 
 export type SessionLabels = Readonly<Record<string, string>>;
 
-const EMPTY: SessionLabels = Object.freeze({});
+const EMPTY: SessionLabels = Object.freeze(Object.create(null) as Record<string, string>);
 let current: SessionLabels = EMPTY;
 const listeners = new Set<() => void>();
 
 /** The labels as a list read brought them; anything that is not a short string is dropped. Unchanged: no redraw. */
 export function setSessionLabels(next: unknown): void {
-  const clean: Record<string, string> = {};
+  const clean = Object.create(null) as Record<string, string>;
   if (next && typeof next === 'object' && !Array.isArray(next)) {
     for (const [session, label] of Object.entries(next as Record<string, unknown>)) {
       if (typeof label === 'string' && label.trim()) clean[session] = label;
     }
   }
   const keys = Object.keys(clean);
-  if (keys.length === Object.keys(current).length && keys.every((key) => current[key] === clean[key])) return;
+  if (keys.length === Object.keys(current).length && keys.every((key) => labelOf(current, key) === clean[key])) return;
   current = keys.length === 0 ? EMPTY : Object.freeze(clean);
   for (const listener of listeners) listener();
 }
@@ -43,9 +48,11 @@ export function useSessionLabels(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** One session's label, or null (no session, or none). */
+/** One session's label, or null (no session, or none). Own keys only: "constructor" or "toString" is no label. */
 export function labelOf(labels: SessionLabels, session: string | null | undefined): string | null {
-  return session ? (labels[session] ?? null) : null;
+  if (!session || !Object.hasOwn(labels, session)) return null;
+  const label = labels[session];
+  return typeof label === 'string' ? label : null;
 }
 
 /**
@@ -63,6 +70,6 @@ export function shortLabel(label: string, max = 32): string {
 
 /** "Fix login redirect (Claude Code)": a labelled session in words, its agent after it. */
 export function labelledAgent(label: string, host: string | null | undefined): string {
-  const agent = host ? (INBOX_HOST_NAMES[host] ?? host) : 'An agent';
+  const agent = host ? (Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host) : 'An agent';
   return `${label} (${agent})`;
 }

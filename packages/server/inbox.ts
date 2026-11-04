@@ -2372,8 +2372,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
         // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
+        // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
         const labelsHere = ownerOrLocal(req, via);
-        const sendDeliveries = (labels: boolean) => send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+        const sendDeliveries = (labels: boolean, moved: boolean) => {
+          if (!moved && !labelsHere) return;
+          send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+        };
         if (windowId) deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
         // the outbox, each in its own frame and never with an `id:`, so the local seq and Last-Event-ID stay this Inbox's.
@@ -2897,17 +2901,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // timer, only while a window listens, and `event: deliveries` tells the windows to read the list again.
   // A poll that changed a session's label (issue #2450) says `labels` on the same frame: the rows' agents and the
   // open thread's authors read the list again.
-  const deliveryListeners = new Set<(labels: boolean) => void>();
+  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only).
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean) => void>();
   let lastDeliverySignature = "";
   let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature();
+    const moved = signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    if (signature === lastDeliverySignature && !labels) return;
+    if (!moved && !labels) return;
     lastDeliverySignature = signature;
     lastLabelVersion = live.labelVersion();
-    for (const listener of deliveryListeners) listener(labels);
+    for (const listener of deliveryListeners) listener(labels, moved);
   }, INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 

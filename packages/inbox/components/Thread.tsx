@@ -2007,7 +2007,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
-  const tagOwner =wordsAsking?.session ?? taggable?.owner?.session ?? null;
+  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
   const composerTags = useMemo(
@@ -5367,7 +5367,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           }
           const isAgent = message.author.kind === 'agent';
           // A named session writes as its label (issue #2450), the agent's mark beside it and its name on hover;
-          // the session's poll names it, never the model, and an unnamed one reads as it always did.
+          // the session's poll names it, and an unnamed one reads as it always did. Display only: no tool takes a
+          // label, but Claude Code's comes from the transcript, which the session's own model can append to, so it
+          // never proves who wrote (the agent's name stays on hover, and the server refuses "You" and agent names).
           const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
           const name = isAgent ? (authorLabel ?? agentName(message.author)) : 'You';
           const nameTip = authorLabel ? labelledAgent(authorLabel, message.author.kind === 'agent' ? message.author.host : null) : name;
