@@ -58,6 +58,10 @@ export interface InboxPull {
   reviewers: string[];
   /** The latest commit's checks (GitHub's rollup, GitLab's head pipeline); null when none ran. */
   checks: InboxPullChecks | null;
+  /** The forge says it conflicts with its base branch (GitHub `mergeable: CONFLICTING`, GitLab `conflicts`); absent when unknown. */
+  conflicts?: boolean;
+  /** Its repository's default branch as the forge answered it (GitHub `defaultBranchRef`, GitLab `rootRef`); absent when unknown. */
+  default_branch?: string;
   updated_at: string;
   merged_at: string | null;
 }
@@ -82,8 +86,11 @@ export interface InboxPullLink {
   thread_id: string;
   thread_subject: string | null;
   project_id: string;
-  /** The agent that last wrote in the thread. */
-  agent: { host: string | null; session: string | null; name: string | null } | null;
+  /**
+   * The agent that last wrote in the thread. `ended`: its session sent with a wake (it polls while it runs) and is not
+   * live now, or the session the person handed it to is gone: it stays named, marked ended.
+   */
+  agent: { host: string | null; session: string | null; name: string | null; ended?: boolean } | null;
   /** The person's hand-off (`via: "owner"`): the session it went to, which Hand again for leaves out with `agent`. */
   handed_to?: string | null;
   /** The agent's last message there: what Reply answers, and its words, cut. */
@@ -101,7 +108,18 @@ export interface InboxPullHost {
   login: string | null;
   /** Why this host gave nothing this time; absent when it answered. */
   error?: "rate_limited" | "unavailable";
+  /** With `error`: when the answer still shown for this host was read; absent when there is none (its PRs are not shown). */
+  last_read?: string;
+  /**
+   * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
+   * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
+   * to the projects' repositories, so how many of the ones left out are the projects' is not known.
+   */
+  capped?: { shown: number; total: number | null };
 }
+
+/** A CLI as the Inbox found it: not installed, installed and signed in to no host, or signed in to at least one. */
+export type InboxPullCliState = "missing" | "signed_out" | "signed_in";
 
 /** `GET /api/inbox/pulls`. */
 export interface InboxPullsAnswer {
@@ -115,6 +133,10 @@ export interface InboxPullsAnswer {
   projects: Record<string, string[]>;
   /** By pull key: the Board card that links it. Empty while the Board is off (no Board UI then). */
   cards: Record<string, InboxPullCard>;
+  /** The CLIs asked which hosts they are signed in to, as found. Absent on an older Inbox. */
+  clis?: Partial<Record<"gh" | "glab", InboxPullCliState>>;
+  /** Hosts of the projects' origins that no CLI here is signed in to (never asked). Absent on an older Inbox. */
+  unsigned?: string[];
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
@@ -158,6 +180,21 @@ export function inboxPullSafeBranch(name: string): boolean {
   return BRANCH_NAME.test(name) && !name.includes("..") && !name.startsWith("-") && !name.startsWith("/");
 }
 
+/**
+ * A branch name the Inbox may compare on the forge (the Whole stack diff): any name git itself takes as a branch
+ * (`check-ref-format`), so `übersetzung/fehlermeldungen` is one; never starting with `-`, and without the
+ * bidirectional and zero-width characters that make one name read as another. It goes into the compare's URL
+ * percent-encoded; it is never put in words an agent reads (`inboxPullSafeBranch` decides that).
+ */
+export function inboxPullCompareBranch(name: string): boolean {
+  if (name.length === 0 || new TextEncoder().encode(name).length > 255) return false;
+  if (/[\u0000- \u007F~^:?*[\\]/.test(name)) return false;
+  if (/[؜​-‏‪-‮⁠-⁩﻿]/.test(name)) return false;
+  if (name.startsWith("-") || name.startsWith("/") || name.endsWith("/") || name.endsWith(".") || name.endsWith(".lock")) return false;
+  if (name.includes("..") || name.includes("//") || name.includes("@{") || name === "@") return false;
+  return name.split("/").every((part) => part !== "" && !part.startsWith(".") && !part.endsWith(".lock"));
+}
+
 /** The key of a repository on a host, as `InboxPullsAnswer.projects` holds it. */
 export function inboxPullRepoKey(host: string, repo: string): string {
   return `${host}/${repo}`.toLowerCase();
@@ -177,8 +214,13 @@ export interface InboxPullStack {
   platform: InboxPullPlatform;
   host: string;
   repo: string;
-  /** Bottom to top. */
+  /** Bottom to top: depth order, siblings by number (a fork's second branch may come after the first's upper layers). */
   layers: InboxPull[];
+  /**
+   * By layer key: the key of the layer it sits on (its base is that layer's head, a merged layer between included),
+   * null for the bottom layer. The one source of the stack's shape: never read it from `layers`' order.
+   */
+  parents: Record<string, string | null>;
   /** The branch the bottom layer merges into (`main`). */
   base: string;
   /**
@@ -188,12 +230,15 @@ export interface InboxPullStack {
   open_base: string;
 }
 
-/**
- * Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer,
- * and a review of one is never matched to a PR by its branch (Reviews).
- */
-export const INBOX_PULL_LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
-const LONG_LIVED = INBOX_PULL_LONG_LIVED;
+/** Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer. */
+const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
+/** A repository's usual trunk names, when the forge did not say its default branch. */
+const TRUNK = /^(main|master)$/;
+
+/** A long-lived branch (`main`, `develop`, `release/…`): what a stack's bottom layer lands on. */
+export function inboxPullLongLived(branch: string): boolean {
+  return LONG_LIVED.test(branch);
+}
 
 /**
  * The stacks among the PRs: one per chain of open PRs where each one's base is
@@ -201,10 +246,14 @@ const LONG_LIVED = INBOX_PULL_LONG_LIVED;
  * a stack of one. Merged PRs whose head is still the base of a stack's lowest
  * open layer go under it (at most 5), unless that head is a long-lived branch
  * or the base of another open PR outside the stack (then it is a shared
- * branch, not a layer). Closed PRs, and merged PRs under no
- * stack, are left out. A branch with two PRs on it (a tree) is one stack, its
- * layers in depth order, siblings by number. Stacks come in the PRs' order of
- * their top layers.
+ * branch, not a layer). A merged PR in the middle (merged into the branch of a
+ * PR still open) keeps the layers above it on that open PR: the stack runs
+ * from the open one up, the merged one between. Closed PRs, and merged PRs
+ * under no stack, are left out. A branch with two PRs on it (a tree) is one
+ * stack, its layers in depth order, siblings by number. Two open PRs from one
+ * branch (a backport): the layers based on that branch sit on the one into a
+ * long-lived branch, else on the lower number. Stacks come in the PRs' order
+ * of their top layers.
  */
 export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const seen = new Set<string>();
@@ -212,34 +261,63 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const open = unique.filter(inboxPullIsOpen);
   const merged = unique.filter((pull) => pull.state === "merged");
   const headOf = new Map<string, InboxPull>();
+  // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
+  // branch, into a release branch): the one into the repository's trunk (its default branch when the forge said,
+  // else main or master), then into another long-lived branch, then the lowest number, whatever the order.
+  const rank = (pull: InboxPull) => (pull.base === pull.default_branch || TRUNK.test(pull.base) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
   for (const pull of open) {
     if (!ownHead(pull)) continue;
     const at = `${repoKey(pull)}\u0000${pull.head}`;
-    if (!headOf.has(at)) headOf.set(at, pull);
+    const was = headOf.get(at);
+    if (!was || rank(pull) < rank(was) || (rank(pull) === rank(was) && pull.number < was.number)) headOf.set(at, pull);
   }
-  const parentOf = (pull: InboxPull): InboxPull | null => {
-    const parent = headOf.get(`${repoKey(pull)}\u0000${pull.base}`);
-    return parent && parent.key !== pull.key ? parent : null;
+  /** The open PR a PR sits on, through the merged layers between (a layer merged into an open PR's branch). */
+  const parentOf = (pull: InboxPull): { parent: InboxPull; via: InboxPull[] } | null => {
+    const via: InboxPull[] = [];
+    let base = pull.base;
+    for (let i = 0; i < 5; i++) {
+      const parent = headOf.get(`${repoKey(pull)}\u0000${base}`);
+      if (parent) return parent.key !== pull.key ? { parent, via } : null;
+      const between = merged.find((m) => ownHead(m) && repoKey(m) === repoKey(pull) && m.head === base && !LONG_LIVED.test(m.head) && !via.includes(m));
+      if (!between) return null;
+      via.unshift(between);
+      base = between.base;
+    }
+    return null;
   };
-  const children = new Map<string, InboxPull[]>();
+  const parentPull = (pull: InboxPull) => parentOf(pull)?.parent ?? null;
+  const children = new Map<string, { pull: InboxPull; via: InboxPull[] }[]>();
   const roots: InboxPull[] = [];
   for (const pull of open) {
-    const parent = parentOf(pull);
+    const found = parentOf(pull);
     // A loop (a's base is b's head and b's base a's head) has no root: its lowest number roots it.
-    if (parent && !loops(pull, parentOf)) {
-      const list = children.get(parent.key) ?? [];
-      list.push(pull);
-      children.set(parent.key, list);
+    if (found && !loops(pull, parentPull)) {
+      const list = children.get(found.parent.key) ?? [];
+      list.push({ pull, via: found.via });
+      children.set(found.parent.key, list);
     } else roots.push(pull);
   }
   const stacks: InboxPullStack[] = [];
   for (const root of roots) {
-    // Depth order, siblings by number: a chain reads bottom to top.
+    // Depth order, siblings by number: a chain reads bottom to top, a merged layer in the middle under the one above it.
     const layers: InboxPull[] = [];
-    let level = [root];
+    const parents: Record<string, string | null> = {};
+    let level: { pull: InboxPull; via: InboxPull[]; parent: string | null }[] = [{ pull: root, via: [], parent: null }];
     while (level.length > 0) {
-      layers.push(...level);
-      level = level.flatMap((pull) => [...(children.get(pull.key) ?? [])].sort((a, b) => a.number - b.number));
+      for (const { pull, via, parent } of level) {
+        // The merged layers between sit one on the other, from the open parent up; this layer on the last of them.
+        let under = parent;
+        for (const m of via) {
+          if (!layers.includes(m)) {
+            layers.push(m);
+            parents[m.key] = under;
+          }
+          under = m.key;
+        }
+        layers.push(pull);
+        parents[pull.key] = under;
+      }
+      level = level.flatMap(({ pull }) => [...(children.get(pull.key) ?? [])].sort((a, b) => a.pull.number - b.pull.number).map((c) => ({ ...c, parent: pull.key })));
     }
     const under: InboxPull[] = [];
     let base = root.base;
@@ -250,6 +328,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
           repoKey(pull) === repoKey(root) &&
           pull.head === base &&
           !under.includes(pull) &&
+          !layers.includes(pull) &&
           !LONG_LIVED.test(pull.head) &&
           !open.some((other) => repoKey(other) === repoKey(root) && other.base === pull.head && !layers.includes(other)),
       );
@@ -257,8 +336,11 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
       under.unshift(below);
       base = below.base;
     }
+    // The merged layers under the root sit one on the other, the root on the last of them.
+    under.forEach((pull, i) => (parents[pull.key] = i > 0 ? under[i - 1]!.key : null));
+    if (under.length > 0) parents[root.key] = under[under.length - 1]!.key;
     const all = [...under, ...layers];
-    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, base: all[0]!.base, open_base: root.base });
+    stacks.push({ id: all[all.length - 1]!.key, platform: root.platform, host: root.host, repo: root.repo, layers: all, parents, base: all[0]!.base, open_base: root.base });
   }
   const order = new Map(unique.map((pull, i) => [pull.key, i]));
   return stacks.sort((a, b) => Math.min(...a.layers.map((l) => order.get(l.key)!)) - Math.min(...b.layers.map((l) => order.get(l.key)!)));
@@ -281,6 +363,23 @@ export function inboxPullLandsNext(stack: InboxPullStack): InboxPull | null {
   return stack.layers.find(inboxPullIsOpen) ?? null;
 }
 
+/** The layer a layer sits on (`parents`), or null for the bottom one (or a key not in the stack). */
+export function inboxPullParent(stack: Pick<InboxPullStack, "layers" | "parents">, key: string): InboxPull | null {
+  const parent = stack.parents[key];
+  return parent ? (stack.layers.find((l) => l.key === parent) ?? null) : null;
+}
+
+/** The layers under a layer, nearest first, down to the bottom: its own line of the stack, never a sibling's. */
+export function inboxPullAncestors(stack: Pick<InboxPullStack, "layers" | "parents">, key: string): InboxPull[] {
+  const out: InboxPull[] = [];
+  let at = inboxPullParent(stack, key);
+  while (at && !out.includes(at)) {
+    out.push(at);
+    at = inboxPullParent(stack, at.key);
+  }
+  return out;
+}
+
 export type InboxPullMove = "on_you" | "ready" | "waiting";
 
 /**
@@ -290,6 +389,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
  * - `running`: the person's agent opened it and its checks still run;
  * - `changes`: a reviewer asked for changes on the person's PR;
  * - `failing`: its checks failed;
+ * - `conflicts`: the person's PR conflicts with its base branch (it can't land until that is resolved);
  * - `approved`: approved, checks passed (or none ran);
  * - `approved_running`: approved, checks still running;
  * - `draft`: still a draft;
@@ -303,6 +403,7 @@ export type InboxPullReason =
   | "running"
   | "changes"
   | "failing"
+  | "conflicts"
   | "approved"
   | "approved_running"
   | "draft"
@@ -320,6 +421,7 @@ export function inboxPullMove(pull: InboxPull, linked: boolean): { move: InboxPu
   if (!pull.mine) return { move: "waiting", reason: "others" };
   if (pull.review === "changes_requested") return { move: "on_you", reason: "changes" };
   if (pull.checks === "failure") return { move: "on_you", reason: "failing" };
+  if (pull.conflicts === true) return { move: "on_you", reason: "conflicts" };
   if (pull.review === "approved") return pull.checks === "pending" ? { move: "waiting", reason: "approved_running" } : { move: "ready", reason: "approved" };
   if (linked) return pull.checks === "pending" ? { move: "waiting", reason: "running" } : { move: "on_you", reason: "agent_ready" };
   return { move: "waiting", reason: "review" };

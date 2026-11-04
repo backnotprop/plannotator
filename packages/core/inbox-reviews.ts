@@ -21,7 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
-import { INBOX_PULL_LONG_LIVED, inboxPullIsOpen, type InboxPull, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -198,7 +198,8 @@ export interface InboxReviewRow {
 export interface InboxReviewsAnswer {
   /** When the oldest of the forge hosts' answers was read; null when no host was asked. */
   fetched_at: string | null;
-  hosts: { cli: "gh" | "glab"; host: string; login: string | null; error?: "rate_limited" | "unavailable" }[];
+  /** The forge hosts asked, as the pulls list answers them. */
+  hosts: InboxPullHost[];
   /** Newest first. */
   rows: InboxReviewRow[];
   /** `host/repo` (lowercased) → the Inbox projects on it. */
@@ -250,7 +251,7 @@ export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<Inb
   if (!source) return false;
   if (source.pr) return bareUrl(source.pr.url) === bareUrl(pull.url);
   if (!pull.mine || (pull.head_repo !== null && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase())) return false;
-  if (!source.branch || source.branch !== pull.head || INBOX_PULL_LONG_LIVED.test(pull.head)) return false;
+  if (!source.branch || source.branch !== pull.head || inboxPullLongLived(pull.head)) return false;
   if (!source.repo) return true;
   const repo = source.repo.toLowerCase();
   const of = pull.repo.toLowerCase();
