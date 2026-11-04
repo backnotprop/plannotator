@@ -136,6 +136,25 @@ describe("shape read", () => {
   });
 });
 
+describe("shape answer", () => {
+  test("the agent answers the person's Ask; the board's chat has it under the question, from that session", async () => {
+    const w = world({ PI_SESSION_ID: "sess-mine" });
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "whistles once"))).out);
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    const person = createShapeStore({ dataDir });
+    person.addNote(id, { kind: "ask", v: 1, text: "Why once?" });
+    const [ask] = JSON.parse((await w.run("read", id, "--notes")).out).notes;
+    expect(ask.kind).toBe("ask");
+
+    expect((await w.run("answer", id, "--re", ask.id, "--text", "So it never nags.")).code).toBe(0);
+    const answer = person.notes(id).find((n) => n.kind === "answer");
+    expect(answer).toMatchObject({ re: ask.id, text: "So it never nags.", from: { host: "pi", id: "sess-mine" } });
+    // An answer needs the Ask's id and words.
+    expect((await w.run("answer", id, "--text", "x")).code).toBe(2);
+  });
+});
+
 describe("shape done and drawing", () => {
   test("a finished shape refuses drawing and new versions", async () => {
     const w = world();

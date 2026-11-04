@@ -22,7 +22,7 @@
  * Spec: the approved Shape design record ("shape-living-board"), sections 3 and 4.
  */
 import type { CodeGuideOutput } from './guide';
-import { ulid } from './inbox-types';
+import { ulid } from './ulid';
 
 export const SHAPE_FORMAT_VERSION = 1;
 

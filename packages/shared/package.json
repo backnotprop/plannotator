@@ -146,6 +146,7 @@
     "./inbox/project-key": "./inbox/project-key.ts",
     "./shape/format": "./shape/format.ts",
     "./shape/store": "./shape/store.ts",
+    "./shape/routes": "./shape/routes.ts",
     "./inbox/board-seen": "./inbox/board-seen.ts",
     "./inbox/reveals": "./inbox/reveals.ts",
     "./inbox/card-refs": "./inbox/card-refs.ts",

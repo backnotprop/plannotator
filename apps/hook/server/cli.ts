@@ -292,6 +292,7 @@ export const SHAPE_COMMAND_USAGE = [
   "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
   "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
   "  plannotator shape drawing [<shp_id>]",
+  "  plannotator shape answer [<shp_id>] --re <shn_id> --text '<answer>'",
   "  plannotator shape done [<shp_id>]",
   "  plannotator shape list [--all] [--json]",
   "",
@@ -306,10 +307,12 @@ export const SHAPE_COMMAND_USAGE = [
   "read     Prints the latest version (or --version <n>). --notes also prints the notes",
   "         that wait for you (Change it and Ask) and marks them as received.",
   "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
+  "answer   Answers the person's Ask (its id is in read --notes). Change it notes need",
+  "         no answer: draw the change as a new version.",
   "done     Finishes the shape. Do this only when the person says so.",
   "list     Lists the active shapes, newest change first (--all: finished ones too).",
   "",
-  "Without <shp_id>, read, drawing and done use your session's newest active shape,",
+  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
   "else this project's.",
 ].join("\n");
 
