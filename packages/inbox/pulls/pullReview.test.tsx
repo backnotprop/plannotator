@@ -22,9 +22,12 @@ import { PULL_HANDOFF_TITLE_MAX, pullHandoffMessage, pullTitleCode } from './mod
 
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
+/** The reader's comment seam as the review last gave it (a test writes a comment through it). */
+let readerComments: { onSave: (annotation: unknown) => void } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } } }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void } }) => {
+      readerComments = props.comments;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -290,6 +293,41 @@ test.skipIf(!hasDom)("a teammate's PR posts the full verdict: Approve goes on th
   expect(sent.map((p) => p.body.action)).toEqual(['approve']);
   expect(posted.some((p) => p.path.includes('/reply'))).toBe(false);
   expect(el('[data-pull-review-posted]').textContent).toContain('Approved on GitHub');
+  // Done: the decision cannot post the same review again.
+  expect(document.querySelector('[data-review-posts] [data-decision-primary]')).toBeNull();
+  const doneButton = el<HTMLButtonElement>('[data-review-posted-done]');
+  expect(doneButton.disabled).toBe(true);
+  expect(doneButton.textContent).toContain('Approved on GitHub');
+  // A new comment makes a new review: the decision is back.
+  await act(async () => readerComments!.onSave({ id: 'c-new', type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 3, lineEnd: 3, side: 'new', text: 'One more.', createdAt: 2 }));
+  await settle();
+  expect(document.querySelector('[data-review-posted-done]')).toBeNull();
+  expect(el('[data-review-posts] [data-decision-primary]').textContent).toContain('Post Comments');
+});
+
+test.skipIf(!hasDom)('a new push after a post offers the decision again', async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const answer = (head: string) => ({ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? { ...theirs, head_sha: head } : p)) });
+  function Moving() {
+    const [now, setNow] = useState(answer(SHA));
+    return (
+      <>
+        <button type="button" data-test-push="" onClick={() => setNow(answer('b'.repeat(40)))} />
+        <PullReview model={now} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />
+      </>
+    );
+  }
+  mount(<Moving />);
+  await settle();
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(el<HTMLButtonElement>('[data-review-posted-done]').disabled).toBe(true);
+  await act(async () => el('[data-test-push]').click());
+  await settle();
+  expect(document.querySelector('[data-review-posted-done]')).toBeNull();
+  expect(el('[data-review-posts] [data-decision-primary]').textContent).toContain('Approve');
 });
 
 test.skipIf(!hasDom)('with an agent, the person chooses: the agent by default, Post to the PR on the other side', async () => {

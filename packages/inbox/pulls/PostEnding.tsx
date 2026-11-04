@@ -18,9 +18,10 @@ import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { inboxApi } from '../api';
 import { RowAgentTiles } from '../components/RowAgents';
+import { Icon } from '../icons';
 import { usePhone } from '../phone';
 import type { PlatformAction } from '../guide/platform-post-types';
-import { platformRules, postablePull, resolvePlatformDecisionAction } from './postRules';
+import { platformRules, postablePull, postedWords, resolvePlatformDecisionAction } from './postRules';
 
 // `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
 const PlatformPost = lazy(() => import('#platform-post'));
@@ -84,6 +85,9 @@ export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
+  // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written.
+  const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
+  const isDone = !!done && !!target && done.key === target.key && done.head === target.head_sha && comments.every((c) => done.ids.has(c.id));
   const name = useId();
 
   const spec = useMemo(
@@ -150,7 +154,14 @@ export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick
         agent.control
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
-          <DecisionControl spec={spec} handlers={handlers} busy={busy || !!open} isLoading={false} labelBreakpoint="md" />
+          {isDone ? (
+            <button type="button" className="ib-btn ib-sm ib-rv-posted-done" disabled data-review-posted-done={done!.action}>
+              <Icon name="checkCircle" size={14} />
+              {postedWords({ label: rules.label, action: done!.action })}
+            </button>
+          ) : (
+            <DecisionControl spec={spec} handlers={handlers} busy={busy || !!open} isLoading={false} labelBreakpoint="md" />
+          )}
         </span>
       )}
       {mounted && (
@@ -164,6 +175,7 @@ export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick
             onClose={() => setOpen(null)}
             onPosted={(result) => {
               setOpen(null);
+              setDone({ key: target.key, head: target.head_sha, action: result.action, ids: new Set(comments.map((c) => c.id)) });
               onPosted({ ...result, label: rules.label });
             }}
           />

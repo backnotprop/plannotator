@@ -483,6 +483,7 @@ export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
 /** A review posted to the forge from the Inbox: its main comment (GitHub refuses one over 65,536), and its comments. */
 const PULL_REVIEW_BODY_MAX = 65_536;
 const PULL_REVIEW_COMMENTS_MAX = 500;
+const PULL_REVIEW_POSTED_MAX = 1_000;
 
 /** The review's line comments as the review app builds them (`PRReviewFileComment`), or null when any is malformed. */
 function pullReviewComments(value: unknown): PRReviewFileComment[] | null {
@@ -975,6 +976,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
+  const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLinkStore: InboxPullLinkStore = {
@@ -3491,8 +3494,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               })()
             : { platform: "gitlab" as const, host: pull.host, projectPath: pull.repo, iid: pull.number };
         if (!ref) return json({ error: "That pull request's repository can't be read here.", code: "pull_unknown" }, 404);
+        // The same review twice (a second click, a replayed request): refused, never posted again. Kept while this
+        // Inbox runs, for a review that fully went.
+        const fingerprint = JSON.stringify([pull.key, pull.head_sha, action, text]);
+        if (postedReviews.has(fingerprint)) return json({ error: "This review is already on the pull request.", code: "already_posted" }, 409);
         try {
           const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, pull.head_sha, action, text, fileComments, fileLevelComments);
+          if (submission.status === "complete") {
+            postedReviews.add(fingerprint);
+            while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
+          }
           // The list reads the forge again on its next look: the review moved the PR's state there.
           return json({ serverSession, ok: true, prUrl: pull.url, submission });
         } catch (cause) {

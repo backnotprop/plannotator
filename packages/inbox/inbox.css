@@ -7376,6 +7376,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-dest .ib-seg-o { gap: 5px; }
 .ib-rv-dest .ib-rv-dest-mark { width: 14px; height: 14px; flex: none; }
 .ib-rv-dest .ib-atile { width: 16px; height: 16px; background: transparent; }
+/* A review that went to the forge: done, not offered again (no second post). */
+.pn-inbox .ib-btn.ib-rv-posted-done:disabled { opacity: 1; cursor: default; gap: 6px; color: var(--foreground); background: color-mix(in oklab, var(--success, var(--primary)) 10%, var(--card)); border-color: color-mix(in oklab, var(--success, var(--primary)) 30%, var(--border)); }
+.ib-rv-posted-done .ib-ic { color: var(--success, var(--primary)); }
 .ib-prr-posted { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); background: color-mix(in oklab, var(--success, var(--primary)) 9%, var(--card)); border: 1px solid color-mix(in oklab, var(--success, var(--primary)) 30%, var(--border)); }
 .ib-prr-posted > .ib-ic { color: var(--success, var(--primary)); flex: none; }
 .ib-prr-posted a { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--primary); font-weight: 550; text-decoration: none; }

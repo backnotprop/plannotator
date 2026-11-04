@@ -702,6 +702,20 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     ]);
   });
 
+  test("an identical second post is refused (409 already_posted) and runs nothing; another body still posts", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const review = { key: PR412, head_sha: SHA412, action: "approve", body: "Ship it." };
+    expect((await w.review(review)).status).toBe(200);
+    const again = await w.review(review);
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { code: string }).code).toBe("already_posted");
+    expect(w.post.calls).toHaveLength(1);
+    expect((await w.review({ ...review, body: "Ship it, and watch the retries." })).status).toBe(200);
+    expect(w.post.calls).toHaveLength(2);
+  });
+
   test("GitLab: a note, a discussion per line comment, then the approval", async () => {
     const w = await world({ codeReview: true, gitlab: true });
     await w.send("Ready.", "posting");
