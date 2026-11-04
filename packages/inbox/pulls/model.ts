@@ -261,7 +261,7 @@ export function rowLine(item: InboxPullItem, link: InboxPullLink | null): string
   return `${counts} · ${reason()}`;
 }
 
-/** Where "Review layer by layer" starts: the next layer to land that is not a draft, else the next to land. */
+/** Where "Open the diff" starts (layer by layer): the next layer to land that is not a draft, else the next to land. */
 export function startLayer(stack: InboxPullStack): InboxPull | null {
   const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
   return open.find((l) => l.state === 'open') ?? open[0] ?? null;

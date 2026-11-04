@@ -702,7 +702,9 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   const hand = pane.locator('[data-pulls-handoff="first"]');
   await expect(hand).toContainText('Ask for');
   await expect(hand.locator('.ib-pr-lab').nth(1)).toHaveText('Agent');
-  await expect(hand.locator('[data-pulls-hand-session][aria-pressed="true"]')).toHaveCount(1);
+  // The pills are one radio group: one agent is picked.
+  await expect(hand.getByRole('radiogroup', { name: 'Agent' }).getByRole('radio')).toHaveCount(2);
+  await expect(hand.locator('[data-pulls-hand-session] input:checked')).toHaveCount(1);
   await expect(pane.locator('[data-pulls-hand-menu], [role="menu"]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   // Only web-app's live sessions: billing-svc's is another project's.
@@ -719,7 +721,8 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   expect((await hand.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await reviewButton.boundingBox())!.y);
   // A pill only picks: nothing is sent until Review.
   await hand.locator('[data-pulls-hand-session="ses-web-claude"]').click();
-  await expect(hand.locator('[data-pulls-hand-session="ses-web-claude"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(hand.locator('[data-pulls-hand-session="ses-web-claude"] input')).toBeChecked();
+  await expect(hand.locator('[data-pulls-review]')).toHaveAccessibleDescription('With Claude Code');
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await shot(page, '4-no-agent');
   // The row opens the diff too: "Open diff ›" at its end, under the pointer.
@@ -734,6 +737,8 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   await hand.locator('[data-pulls-ask-option="guide"]').click();
   await hand.locator('[data-pulls-review]').click();
   await expect(hand).toHaveCount(0);
+  // Focus lands on the status line that says who has it.
+  await expect(pane.locator('[data-pulls-said]')).toBeFocused();
   const chip = pane.locator('[data-pulls-thread]');
   await expect(chip).toBeVisible();
   await expect(pane.locator('[data-pulls-said]')).toContainText(/Claude Code\s*· guided review on the way\s*·\s*Hand to another agent/);
@@ -771,7 +776,7 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   await expect(again.locator('[data-pulls-hand-session]')).toHaveCount(1);
   await expect(again.locator('[data-pulls-hand-session="ses-web-pi"]')).toBeVisible();
   await expect(again.locator('[data-pulls-launch]')).toHaveCount(0);
-  await expect(again.locator('[data-pulls-hand-session="ses-web-pi"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(again.locator('[data-pulls-hand-session="ses-web-pi"] input')).toBeChecked();
   await shot(page, '6c-start-review-rehand');
   await again.locator('[data-pulls-ask-option="guide"]').focus();
   await page.keyboard.press('Escape');

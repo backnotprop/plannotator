@@ -116,6 +116,9 @@ let sessionsAnswer: Record<string, unknown> = {};
 let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
 /** The head commit the layer patch is read at (`InboxPullDiffAnswer.head_sha`). */
 let diffHead: string | null = 'a'.repeat(40);
+/** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
+let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
+let sessionReads = 0;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -133,17 +136,26 @@ beforeEach(() => {
   shown.length = 0;
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
+  refuse = {};
+  sessionReads = 0;
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
       posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
-      if (url.pathname.endsWith('/api/inbox/messages')) return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
+      if (url.pathname.endsWith('/api/inbox/messages')) {
+        const no = refuse[String((JSON.parse(String(init.body)) as { to?: { session?: string } }).to?.session)];
+        if (no) return Response.json(no.body, { status: no.status });
+        return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
+      }
       if (url.pathname.endsWith('/pulls/owner')) return Response.json({ ok: true });
       if (url.pathname.endsWith('/pulls/review')) return Response.json(reviewAnswer.body, { status: reviewAnswer.status });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }
-    if (url.pathname.endsWith('/api/inbox/sessions')) return Response.json(sessionsAnswer);
+    if (url.pathname.endsWith('/api/inbox/sessions')) {
+      sessionReads += 1;
+      return Response.json(sessionsAnswer);
+    }
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
@@ -590,7 +602,7 @@ const sentPaths = () => posted.map((p) => p.path.replace(/^.*\/api\/inbox/, ''))
 
 /** Pick an agent's pill, then the purple Review: the hand-off goes to the picked agent. */
 async function handTo(session: string) {
-  await act(async () => el(`[data-pulls-hand-session="${session}"]`).click());
+  await act(async () => el(`[data-pulls-hand-session="${session}"] input`).click());
   await act(async () => el('[data-pulls-review]').click());
 }
 
@@ -667,11 +679,14 @@ test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the di
   const reviewed: string[] = [];
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
   await settle();
-  const pressed = () => [...document.querySelectorAll('[data-pulls-hand-session][aria-pressed="true"]')].map((b) => b.getAttribute('data-pulls-hand-session'));
+  const pressed = () => [...document.querySelectorAll('[data-pulls-hand-session]')].filter((b) => b.querySelector<HTMLInputElement>('input')!.checked).map((b) => b.getAttribute('data-pulls-hand-session'));
   // Nothing handed yet: the first live agent is picked.
   expect(pressed()).toEqual(['ses_a']);
   expect(el('[data-pulls-review]').textContent).toBe('Review');
-  await act(async () => el('[data-pulls-hand-session="ses_b"]').click());
+  // The pills are one radio group; Review says which agent it goes to.
+  expect(el('[role="radiogroup"][aria-label="Agent"]').querySelectorAll('input[type="radio"]')).toHaveLength(2);
+  expect(document.getElementById(el('[data-pulls-review]').getAttribute('aria-describedby')!)!.textContent).toBe('With Claude Code');
+  await act(async () => el('[data-pulls-hand-session="ses_b"] input').click());
   await settle();
   expect(posted).toEqual([]);
   expect(pressed()).toEqual(['ses_b']);
@@ -685,6 +700,98 @@ test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the di
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
   await settle();
   expect(pressed()).toEqual(['ses_b']);
+});
+
+test.skipIf(!hasDom)('an ended agent: Review reads the live agents again, drops the pick, and launches a new one when none is left', async () => {
+  sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  refuse = { ses_billing: { status: 409, body: { code: 'session_not_live', error: 'That session is not live any more: nothing was sent.' } } };
+  const launched: string[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
+  await settle();
+  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('ses_billing');
+  const reads = sessionReads;
+  // The agent ended after the page read it: compose's answer no longer has it.
+  sessionsAnswer = { ...sessionsAnswer, projects: [] };
+  await act(async () => el('[data-pulls-review]').click());
+  await settle();
+  expect(sessionReads).toBe(reads + 1);
+  expect(el('[data-pulls-handoff] [role="alert"]').textContent).toContain('not live');
+  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
+  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('new');
+  const sends = posted.filter((p) => p.path.endsWith('/messages')).length;
+  await act(async () => el('[data-pulls-review]').click());
+  expect(launched).toHaveLength(1);
+  expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(sends);
+});
+
+test.skipIf(!hasDom)('the window coming back reads the live agents again', async () => {
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(1);
+  const reads = sessionReads;
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_billing', 'prj_1'), liveSession('ses_new', 'prj_1')] }] };
+  await act(async () => window.dispatchEvent(new Event('focus')));
+  await settle();
+  expect(sessionReads).toBe(reads + 1);
+  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(2);
+});
+
+test.skipIf(!hasDom)('a new pick gets a new idempotency key: the retry to another agent is a new send, not the first one replayed', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
+  refuse = { ses_a: { status: 503, body: { code: 'busy', error: 'Try again.' } } };
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  await handTo('ses_a');
+  await settle();
+  await handTo('ses_a');
+  await settle();
+  await handTo('ses_b');
+  await settle();
+  const keys = posted.filter((p) => p.path.endsWith('/messages')).map((p) => [(p.body.to as { session: string }).session, p.body.idempotency_key]);
+  expect(keys.map(([to]) => to)).toEqual(['ses_a', 'ses_a', 'ses_b']);
+  // The same agent again: the same key (a retry). Another agent: a new one.
+  expect(keys[1]![1]).toBe(keys[0]![1]);
+  expect(keys[2]![1]).not.toBe(keys[0]![1]);
+});
+
+test.skipIf(!hasDom)("one PR's pick and words stay with it: the custom words typed for PR A are not sent with PR B", async () => {
+  const a = model.pulls.find((p) => p.number === 869)!;
+  const b = model.pulls.find((p) => p.number === 880)!;
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2'), liveSession('ses_web2', 'prj_2')] }] };
+  mount(<Page answer={{ ...model, links: {} }} stackId={a.key} />);
+  await settle();
+  await act(async () => el('[data-pulls-hand-session="ses_web2"] input').click());
+  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
+  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'only the fallback chain for #869');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  // The person moves to PR B in the same page.
+  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: {} }} stackId={b.key} /></div>));
+  await settle();
+  expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
+  expect(document.querySelector('[data-pulls-ask-words]')).toBeNull();
+  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('ses_web');
+  await act(async () => el('[data-pulls-review]').click());
+  await settle();
+  const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
+  expect(body).toContain('#880');
+  expect(body).not.toContain('fallback chain for #869');
+  expect(posted.at(-1)!.body).toMatchObject({ keys: [b.key], ask: 'guide' });
+});
+
+test.skipIf(!hasDom)('after a hand-off, focus moves to the status line that says who has it', async () => {
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  el<HTMLButtonElement>('[data-pulls-review]').focus();
+  await act(async () => el('[data-pulls-review]').click());
+  await settle();
+  // The list reads the new thread: the PR is that thread's now.
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_new', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_billing', name: null } };
+  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} /></div>));
+  await settle();
+  expect(document.activeElement?.hasAttribute('data-pulls-said')).toBe(true);
 });
 
 test.skipIf(!hasDom)('with no live agent, Review launches a new one with the chosen ask', async () => {

@@ -7480,6 +7480,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox button.ib-pr-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* The agent that has the PR: one status line, no box (take B), its last words under it. */
 .ib-pr-status { margin-top: 18px; }
+/* Focus lands here after a hand-off: a ring only for the keyboard. */
+.ib-pr-status:focus { outline: none; }
+.ib-pr-status:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 6px; }
 .ib-pr-status-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-pr-status-p { margin: 6px 0 0 25px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
 .pn-inbox .ib-pr-quietlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 40%, transparent); cursor: pointer; }
@@ -7493,12 +7496,17 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-askin { flex: 1; min-width: 220px; max-width: 360px; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent); border-color: var(--ring); }
 .pn-inbox .ib-pr-agbtn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; white-space: nowrap; }
-.pn-inbox .ib-pr-agbtn:hover:not(:disabled) { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
-.pn-inbox .ib-pr-agbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pn-inbox .ib-pr-agbtn:disabled { opacity: 0.55; cursor: default; }
+.pn-inbox .ib-pr-agbtn:hover:not(:disabled):not([data-disabled]) { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
+.pn-inbox .ib-pr-agbtn:focus-visible, .pn-inbox .ib-pr-agbtn:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-pr-agbtn:disabled, .pn-inbox .ib-pr-agbtn[data-disabled] { opacity: 0.55; cursor: default; }
+/* The agent pills are a radio group (one is picked): the group adds no box, each pill holds its own radio. */
+.ib-pr-agents { display: contents; }
+.pn-inbox label.ib-pr-agbtn { position: relative; cursor: pointer; }
+.pn-inbox .ib-pr-agbtn input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
+.pn-inbox .ib-pr-agbtn input:focus-visible { outline: none; }
 .pn-inbox .ib-pr-agbtn.ib-new { padding-left: 10px; border-style: dashed; color: var(--muted-foreground); }
 /* The picked agent, the one Review hands it to: tinted as an on button is (oklab, so light mode stays violet). */
-.pn-inbox .ib-pr-agbtn[aria-pressed="true"], .pn-inbox .ib-pr-agbtn[aria-pressed="true"]:hover:not(:disabled) { border-color: color-mix(in oklab, var(--primary) 55%, transparent); background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--primary); }
+.pn-inbox .ib-pr-agbtn[data-on], .pn-inbox .ib-pr-agbtn[data-on]:hover:not([data-disabled]) { border-color: color-mix(in oklab, var(--primary) 55%, transparent); background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--primary); }
 .ib-pr-busy { width: 6px; height: 6px; border-radius: 50%; background: var(--success, #16a34a); }
 .ib-pr-hgrid-err { grid-column: 1 / -1; }
 .pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }

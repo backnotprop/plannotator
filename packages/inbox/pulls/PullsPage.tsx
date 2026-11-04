@@ -10,9 +10,9 @@
  *   small chain of PR marks in landing order.
  * - The stack view beside it (a phone: in its place): the layers from the
  *   base branch up, the lowest open one marked "Lands next"; the agent
- *   behind it and its thread, or "No agent yet" with Hand to an agent (one
- *   of the project's live sessions) and Launch an agent (compose's own launch,
- *   while the Inbox can launch); a Board chip only when the Board is on and a
+ *   behind it and its thread, or "No agent yet" with the ask, the agent pills
+ *   (the project's live sessions; one is picked) and + New agent (compose's
+ *   own launch, while the Inbox can launch); a Board chip only when the Board is on and a
  *   card links it; the purple Review hands it to the picked agent, and "Open
  *   the diff" (phase 1's review mode, layer by layer) with "Whole stack" sits
  *   beside it in every state, as each layer's row does; Reply at the foot goes
@@ -81,7 +81,7 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** Launch an agent: compose's New thread, with the hand-off's words and the PRs it is for. */
   onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement) => void;
-  /** Hand to an agent sent the hand-off to `session`: the list reads the new thread. */
+  /** Review sent the hand-off to `session`, the picked agent: the list reads the new thread. */
   onHanded: (session: string) => void;
 }
 
@@ -133,14 +133,14 @@ export function PullsPage(props: PullsPageProps) {
   );
 
   if (phone && open && model) {
-    return <StackView {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
+    return <StackView key={open.stack.id} {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
   }
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
-          <StackView {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
+          <StackView key={open.stack.id} {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
             {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
@@ -338,7 +338,15 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const many = openLayers.length > 1;
   // "Hand to another agent": the two lines open again, under the agent that has it.
   const [rehand, setRehand] = useState(false);
-  useEffect(() => setRehand(false), [stack.id]);
+  // After a hand-off, focus moves to the status line that says who has it (the hand-off's controls are gone).
+  const said = useRef<HTMLDivElement>(null);
+  const focusSaid = useRef(false);
+  const linkThread = link?.thread_id ?? null;
+  useEffect(() => {
+    if (!focusSaid.current || !linkThread || !said.current) return;
+    focusSaid.current = false;
+    said.current.focus();
+  }, [linkThread]);
   // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
   const openDiff = start ? (
     <>
@@ -411,7 +419,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             ) : null)}
         </div>
         {link && (
-          <div className="ib-pr-status" data-pulls-said="" data-pulls-said-waiting={link.last ? undefined : ''}>
+          <div ref={said} tabIndex={-1} className="ib-pr-status" data-pulls-said="" data-pulls-said-waiting={link.last ? undefined : ''}>
             <div className="ib-pr-status-h">
               {link.agent && <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />}
               <b>{agent ?? 'Agent'}</b>
@@ -458,6 +466,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             launch={!link}
             onLaunch={(body, opener) => props.onLaunch(handoffKeys(stack), stackProjects(model, stack), body, pullHandoffAskLine(stack, { kind: 'guide' }), opener)}
             onHanded={(session) => {
+              focusSaid.current = true;
               setRehand(false);
               props.onHanded(session);
             }}
@@ -552,8 +561,16 @@ function HandLine({
   const [targets, setTargets] = useState<HandTargets | null>(null);
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const keyRef = useRef<string | null>(null);
+  // One idempotency key per send to one agent: a retry to the same agent reuses it, a new pick gets a new one.
+  const keyRef = useRef<{ session: string; key: string } | null>(null);
   const projectKey = projects.join('\u0000');
+  // Read again when an agent turns out to have ended, and when the window comes back (agents end while it is away).
+  const [readCount, setReadCount] = useState(0);
+  useEffect(() => {
+    const again = () => setReadCount((n) => n + 1);
+    window.addEventListener('focus', again);
+    return () => window.removeEventListener('focus', again);
+  }, []);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -574,7 +591,7 @@ function HandLine({
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectKey]);
+  }, [projectKey, readCount]);
   const keys = handoffKeys(stack);
   // What the hand-off asks for first: a guided review (the default) or the person's own curation.
   const [askKind, setAskKind] = useState<'guide' | 'custom'>('guide');
@@ -591,13 +608,13 @@ function HandLine({
     }
     setSending(session.session);
     setError(null);
-    keyRef.current ??= newUuid();
+    const idempotency = keyRef.current?.session === session.session ? keyRef.current : (keyRef.current = { session: session.session, key: newUuid() });
     try {
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
       await inboxApi.pullOwnerCheck(keys, session.project_id);
       // The ask's instructions are phase 1's /review-curate, carried as the skills block a Send adds for it.
       const body = withSkillsBlock(pullHandoffMessage(stack, ask), reviewCurateBlock());
-      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: keyRef.current });
+      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: idempotency.key });
       try {
         await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
       } catch (cause) {
@@ -610,6 +627,11 @@ function HandLine({
       rememberPullAgent(session.session);
       onHanded(session.session);
     } catch (cause) {
+      if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
+        // That agent has ended: drop the pick and read the live ones again, so Review goes to one that is there (or a new one).
+        setPickedSession(null);
+        setReadCount((n) => n + 1);
+      }
       setError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'It was not handed over.');
     } finally {
       setSending(null);
@@ -621,6 +643,8 @@ function HandLine({
   const [pickedSession, setPickedSession] = useState<string | null>(null);
   const picked = sessions.find((s) => s.session === pickedSession) ?? sessions.find((s) => s.session === lastPullAgent()) ?? sessions[0] ?? null;
   const canReview = targets !== null && (picked !== null || canLaunch);
+  const agentName = useId();
+  const reviewWhere = useId();
   return (
     <div
       className="ib-pr-handoff"
@@ -657,22 +681,19 @@ function HandLine({
           )}
         </div>
         <span className="ib-pr-lab">Agent</span>
-        <div className="ib-pr-hline" role="group" aria-label="Agent">
-          {sessions.map((session) => (
-            <button
-              type="button"
-              className="ib-pr-agbtn"
-              key={session.session}
-              data-pulls-hand-session={session.session}
-              aria-pressed={picked?.session === session.session}
-              disabled={sending !== null}
-              onClick={() => setPickedSession(session.session)}
-            >
-              <HostMark host={session.host} />
-              {`${hostLabel(session.host)}${session.label ? ` · ${session.label}` : ''}`}
-              {session.busy && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
-            </button>
-          ))}
+        <div className="ib-pr-hline">
+          {sessions.length > 0 && (
+            <div className="ib-pr-agents" role="radiogroup" aria-label="Agent">
+              {sessions.map((session) => (
+                <label className="ib-pr-agbtn" key={session.session} data-pulls-hand-session={session.session} data-on={picked?.session === session.session ? '' : undefined} data-disabled={sending !== null ? '' : undefined}>
+                  <input type="radio" name={agentName} checked={picked?.session === session.session} disabled={sending !== null} onChange={() => setPickedSession(session.session)} />
+                  <HostMark host={session.host} />
+                  {agentWords(session)}
+                  {session.busy && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
+                </label>
+              ))}
+            </div>
+          )}
           {canLaunch && (
             <button
               type="button"
@@ -704,13 +725,22 @@ function HandLine({
             else if (canLaunch) onLaunch(pullHandoffMessage(stack, ask), event.currentTarget);
           }}
           data-pulls-review={picked ? picked.session : canLaunch ? 'new' : ''}
+          aria-describedby={reviewWhere}
         >
           {sending !== null ? 'Handing it over…' : 'Review'}
         </button>
+        <span id={reviewWhere} className="ib-sr">
+          {picked ? `With ${agentWords(picked)}` : canLaunch ? 'With a new agent' : 'No live agent'}
+        </span>
         {diff}
       </div>
     </div>
   );
+}
+
+/** A live agent as its pill names it: the harness, and the session's label when it has one. */
+function agentWords(session: HandSession): string {
+  return `${hostLabel(session.host)}${session.label ? ` · ${session.label}` : ''}`;
 }
 
 const PULL_AGENT_KEY = 'plannotator-inbox-pr-agent';
@@ -786,7 +816,7 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
       {merged || layer.state === 'closed' ? (
         <div className="ib-pr-lrow">{body}</div>
       ) : (
-        <button type="button" className="ib-pr-lrow" onClick={onReview} aria-label={`Open the diff of ${inboxPullLabel(layer)} ${layer.title}${next ? ', lands next' : ''}`}>
+        <button type="button" className="ib-pr-lrow" onClick={onReview} aria-label={`Open diff ${inboxPullLabel(layer)} ${layer.title}${next ? ', lands next' : ''}`}>
           {body}
           <span className="ib-pr-lgo" aria-hidden="true">
             Open diff
