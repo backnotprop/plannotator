@@ -357,3 +357,24 @@ test.skipIf(!hasDom)('a verdict answered after the review closed leaves the pers
   await settle();
   expect(backs).toBe(0);
 });
+
+// A global comment (on the whole review) is a comment like a line comment: it flips Approve to Send feedback and
+// rides the verdict, under "Global comments" ahead of the files.
+test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and rides the verdict under Global comments', async () => {
+  others = [];
+  const text = 'Split the guard and the retry into two PRs.';
+  annotations = [
+    {
+      id: 'ann-guide-global', project_id: PROJECT.id, thread_id: REVIEW, message_id: REVIEW, attachment_id: '', path: '', version: 'a',
+      guide: { title: 'Token refresh', file: '', side: 'new', line_start: 0, line_end: 0, scope: 'general' },
+      annotation: { id: 'ann-guide-global', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text, createdAt: 1 },
+      created_at: '2026-10-11T10:45:00.000Z', updated_at: '2026-10-11T10:45:00.000Z', removed_at: null, sent_reply_id: null,
+    },
+  ];
+  await render();
+  expect(document.querySelector('[data-review-decision] [data-decision-primary]')!.textContent).toContain('Send Feedback');
+  await click('[data-review-decision] [data-decision-primary]');
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.annotation_ids).toEqual(['ann-guide-global']);
+  expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
+});

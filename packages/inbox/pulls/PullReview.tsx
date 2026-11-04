@@ -94,14 +94,30 @@ export function PullReview(props: PullReviewProps) {
   return <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />;
 }
 
-/** Stored comments of a layer from before its last push: their lines may have moved, so they go. */
+/**
+ * Stored comments of a layer from before its last push: their lines may have moved, so line comments go. Global
+ * comments are on no line: they move to this push's comments.
+ */
 function dropStale(layerKey: string, scope: string, keptId: string): void {
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
+    const carried: CodeAnnotation[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
-      if (name && name.startsWith(prefix) && name !== STORE + keptId) window.localStorage.removeItem(name);
+      if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
+      carried.push(...readKept(name.slice(STORE.length)).comments.filter((c) => c.scope === 'general'));
+      window.localStorage.removeItem(name);
     }
+    if (carried.length === 0) return;
+    const now = readKept(keptId);
+    const ids = new Set(now.comments.map((c) => c.id));
+    const comments = [...now.comments];
+    for (const c of carried) {
+      if (ids.has(c.id)) continue;
+      ids.add(c.id);
+      comments.push(c);
+    }
+    keep(keptId, { comments, viewed: now.viewed });
   } catch {
     // Storage off.
   }
@@ -150,7 +166,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer?.key, scope, layer?.updated_at]);
 
-  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean.
+  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean, but for the global comments.
   const keptId = `${layerKey}:${scope}:${layer?.updated_at ?? ''}`;
   useEffect(() => {
     if (layer) dropStale(layerKey, scope, keptId);
@@ -188,7 +204,20 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setSelectedId(id);
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
-  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget } : undefined;
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
+  const [sheet, setSheet] = useState(false);
+  const sheetId = useId();
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
+  const showGlobalComment = (id: string) => {
+    setSelectedId(id);
+    if (folded) setSheet(true);
+  };
+  // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
+  // global comments do.
+  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const snapshot = useMemo(
@@ -262,13 +291,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     [sendVerdict],
   );
 
-  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
-  const [sheet, setSheet] = useState(false);
-  const sheetId = useId();
   const scopeName = useId();
-  useEffect(() => {
-    if (!folded) setSheet(false);
-  }, [folded]);
 
   if (!model || !stack || !layer) {
     return (
@@ -355,8 +378,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             picked={picked}
             onPick={pick}
             onPosted={(result) => {
-              keep(keptId, { comments: [], viewed });
-              setComments([]);
+              // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
+              const went = new Set(result.posted);
+              const left = comments.filter((c) => !went.has(c.id));
+              keep(keptId, { comments: left, viewed });
+              setComments(left);
               setPosted({ label: result.label, url: result.url, action: result.action });
             }}
           />

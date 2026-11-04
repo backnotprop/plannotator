@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { GuideHostProvider, type GuideDiffRendererContext, type GuideHostValue } from '@plannotator/guide-viewer/host';
+import { GuideHostProvider, type GuideDiffRendererContext, type GuideGlobalComments, type GuideHostValue } from '@plannotator/guide-viewer/host';
 import { useReviewState } from '../../dock/ReviewStateContext';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '../AllFilesCodeView';
 import { overviewDiagramRenderer } from './overviewDiagram';
@@ -27,7 +27,7 @@ type InAppRendererProps = Omit<
   | 'allowScrollChaining'
 >;
 
-export const ReviewGuideHost: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const ReviewGuideHost: React.FC<{ children: React.ReactNode; globalComments?: GuideGlobalComments }> = ({ children, globalComments }) => {
   const state = useReviewState();
 
   const getDiffRendererProps = useCallback(
@@ -95,8 +95,9 @@ export const ReviewGuideHost: React.FC<{ children: React.ReactNode }> = ({ child
       activeSearchMatch: state.allFilesActiveSearchMatch,
       generatedFiles: state.generatedFiles,
       renderOverviewDiagram,
+      ...(globalComments ? { globalComments } : {}),
     }),
-    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram],
+    [state.files, getDiffRendererProps, state.guideRevealFile, state.onGuideRevealFile, state.allFilesActiveSearchMatch, state.generatedFiles, renderOverviewDiagram, globalComments],
   );
 
   return <GuideHostProvider value={value}>{children}</GuideHostProvider>;
