@@ -21,7 +21,8 @@ import { useCardMarks } from './useCardMarks';
 import { NewCardDialog, type NewCardInput } from './NewCardDialog';
 import { BoardIntro, useCopyBoardPrompt } from './BoardIntro';
 import { TidyMenu, type TidyController } from '../components/Tidy';
-import { BoardFilter, BoardFilterTokens, InitiativesDialog, initiativeLabel } from './BoardFilter';
+import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
+import { InitiativesDialog } from './InitiativesDialog';
 import { projectNames } from '../search/model';
 import {
   agentState,
