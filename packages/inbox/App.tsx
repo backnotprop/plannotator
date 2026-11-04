@@ -1794,7 +1794,8 @@ function Inbox() {
         if (routeRef.current.page === 'drafts' || draftsReadOwed(records, holding)) void refreshDrafts();
         else
           void listRead.then((next) => {
-            if (next && (draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next))) void refreshDrafts();
+            // A failed list read says nothing: the drafts are read, as before.
+            if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next)) void refreshDrafts();
           });
       }, 80);
     };

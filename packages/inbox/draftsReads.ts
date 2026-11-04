@@ -21,12 +21,18 @@
 import { inboxHasUnsent, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import type { RecordBatch } from './openThreadReads';
 
-/** The threads a list read shows holding unsent work (any section, and the snoozed ones). */
-export function unsentThreads(list: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[] } | null | undefined): Set<string> {
+/** The threads a list read shows holding unsent work (any section, and the snoozed ones); only the rows `keep` takes. */
+export function unsentThreads(
+  list: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[] } | null | undefined,
+  keep: (row: InboxListRow) => boolean = () => true,
+): Set<string> {
   const threads = new Set<string>();
   if (!list) return threads;
-  for (const section of list.sections) for (const row of section.threads) if (inboxHasUnsent(row.unsent)) threads.add(row.thread_id);
-  for (const row of list.snoozed ?? []) if (inboxHasUnsent(row.unsent)) threads.add(row.thread_id);
+  const add = (row: InboxListRow) => {
+    if (inboxHasUnsent(row.unsent) && keep(row)) threads.add(row.thread_id);
+  };
+  for (const section of list.sections) for (const row of section.threads) add(row);
+  for (const row of list.snoozed ?? []) add(row);
   return threads;
 }
 
@@ -41,12 +47,7 @@ export function replyDraftsDiffer(
   list: { sections: readonly InboxListSection[]; snoozed?: readonly InboxListRow[]; self?: string } | null | undefined,
 ): boolean {
   if (!list) return false;
-  const local = new Set<string>();
-  const add = (row: InboxListRow) => {
-    if (inboxHasUnsent(row.unsent) && (row.machine === undefined || row.machine === list.self)) local.add(row.thread_id);
-  };
-  for (const section of list.sections) for (const row of section.threads) add(row);
-  for (const row of list.snoozed ?? []) add(row);
+  const local = unsentThreads(list, (row) => row.machine === undefined || row.machine === list.self);
   const shown = new Set(replies.map((row) => row.thread_id));
   if (shown.size !== local.size) return true;
   for (const threadId of shown) if (!local.has(threadId)) return true;

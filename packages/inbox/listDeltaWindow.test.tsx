@@ -10,8 +10,9 @@
  * sections, the sidebar's counts). And the sidebar's Drafts count left
  * behind (#2604 review): a thread holding unsent work deleted, which no
  * record says; compose drafts saved or deleted in another window (the
- * Inbox's real `drafts` frames, relayed from its stream); and Tidy's old
- * count shown while a touch opens ⋮ before the plan read lands.
+ * Inbox's real `drafts` frames, relayed from its stream); the drafts not
+ * read when the list read after a record fails; and Tidy's old count shown
+ * while a touch opens ⋮ before the plan read lands.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -123,7 +124,7 @@ async function draftsOnServer(): Promise<string | null> {
 }
 const post = async (path: string, body: Record<string, unknown> = {}) => expect((await loopback(path, 'POST', JSON.stringify(body))).status).toBe(200);
 
-const TESTS = 5;
+const TESTS = 6;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -364,6 +365,27 @@ test('compose drafts saved and deleted in another window, with no reply draft he
   expect(draftsBadge(el)).toBe(await draftsOnServer());
   // None of it came by a record.
   expect(seq).toBe(records);
+}, 30_000);
+
+test('a list read after an agent message that fails: the drafts are read anyway, as before', async () => {
+  if (!hasDom) return;
+  const el = mount();
+  await until(() => listShown(el) && sendRecord !== null, 'the list and the stream');
+  await wait(500);
+  const drafts = count('/api/inbox/drafts');
+  const lists = listReads().length;
+  const through = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith('/api/inbox/threads?')) {
+      reads.push(String(input));
+      return new Response(JSON.stringify({ error: 'down' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+    return through(input, init);
+  }) as typeof fetch;
+  // A thread holding nothing unsent: only the failed list read could have said the drafts are owed.
+  await agentWrites(world.stopped);
+  await until(() => listReads().length > lists, 'the failed list read');
+  await until(() => count('/api/inbox/drafts') > drafts, 'the drafts read after the failed list read');
 }, 30_000);
 
 test('Tidy after a message elsewhere, on a touch: until the plan read lands the menu shows Tidy as while first read (no old count), then the plan\'s', async () => {

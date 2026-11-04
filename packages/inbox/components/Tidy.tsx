@@ -324,7 +324,10 @@ function combineGroups(pairs: readonly InboxTidyCombine[]) {
 }
 
 /** The last run (when there is one), then the picker when there is something to ask. */
-function TidyPanel({ tidy, onDone }: { tidy: TidyController; onDone: () => void }) {
+function TidyPanel({ tidy: given, onDone }: { tidy: TidyController; onDone: () => void }) {
+  // A stale plan still being read again (`pending`: a phone taps ⋮, then Tidy, before it lands): drawn as while
+  // it is first read, never the old plan or run.
+  const tidy = given.pending ? { ...given, plan: null, run: null } : given;
   const { plan, run } = tidy;
   const offered = (plan?.agents.length ?? 0) > 0 || (plan?.combine?.length ?? 0) > 0;
   return (
