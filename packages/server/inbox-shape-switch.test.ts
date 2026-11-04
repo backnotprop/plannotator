@@ -180,7 +180,7 @@ test("a window hears its boards on the Inbox's one event stream (no second conne
   expect(await listening).not.toContain("event: shapes");
 });
 
-test("a tailnet guest is refused every Shape route; the owner over the tailnet is not", async () => {
+test("a tailnet guest is refused every Shape route and hears no board on the event stream (no store reading for it); the owner over the tailnet is not", async () => {
   const MAGIC = "macbook-pro.tail0000.ts.net";
   const OWNER = "ramos@example.com";
   const GUEST = "guest@example.com";
@@ -206,6 +206,25 @@ test("a tailnet guest is refused every Shape route; the owner over the tailnet i
       expect(guest.status).toBe(403);
       expect((await through(OWNER, path)).status).toBe(200);
     }
+
+    // The event stream: a guest's window hears no board ids and starts no reading of the store; the owner's does.
+    const note = () =>
+      fetch(`http://127.0.0.1:${server.port}/api/shapes/${made.id}/notes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "change", v: 1, view: "picture", text: "Two whistles" }) });
+    const guestStream = await through(GUEST, "/api/inbox/events?window=shape-guest");
+    expect(guestStream.status).toBe(200);
+    const guestHeard = readUntil(guestStream, "event: shapes", 2_500);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(server.shapeWatchers()).toBe(0);
+    expect((await note()).status).toBe(200);
+    expect(await guestHeard).not.toContain("event: shapes");
+
+    const ownerStream = await through(OWNER, "/api/inbox/events?window=shape-owner");
+    expect(ownerStream.status).toBe(200);
+    const ownerHeard = readUntil(ownerStream, "event: shapes", 8_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(server.shapeWatchers()).toBe(1);
+    expect((await note()).status).toBe(200);
+    expect(await ownerHeard).toContain(made.id);
   } finally {
     if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;

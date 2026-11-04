@@ -276,5 +276,7 @@ export function createShapeWatch(store: ShapeStore, options: { intervalMs?: numb
     },
     /** Look now (after a write through the routes). */
     poke: tick,
+    /** How many listen (0: the watch reads nothing). Tests read it. */
+    watching: () => listeners.size,
   };
 }
