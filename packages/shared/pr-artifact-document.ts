@@ -95,17 +95,33 @@ function isReferencedByContext(url: URL, metadata: PRMetadata, context: PRContex
   return contextMarkdown(context).some((markdown) => {
     const decodedEntities = decodeHtmlEntities(markdown);
     if (needles.some((needle) => decodedEntities.includes(needle))) return true;
-    // Compare absolute references using the same normalization as the requested URL.
-    return [...decodedEntities.matchAll(/https?:\/\/[^\s<>"'`\)\]]+/gi)].some(([reference]) => {
-      try {
-        const candidate = new URL(reference);
-        candidate.hash = '';
-        return candidate.href === url.href;
-      } catch {
-        return false;
-      }
-    });
+    // An absolute reference written with another scheme or host case, or with
+    // the default port, still names the requested URL.
+    return [...decodedEntities.matchAll(/https?:\/\/[^\s<>"'`\)\]]+/gi)]
+      .some(([reference]) => referenceNamesUrl(reference, url));
   });
+}
+
+/** A dot segment (`.`/`..`, percent-encoded too) or a backslash, which URL parsing rewrites. */
+const PATH_REWRITTEN_BY_PARSING_RE = /(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)|\\/i;
+
+/**
+ * Whether an absolute URL written in the PR text names `url` once only its
+ * scheme, host case and default port are normalized. The path is compared as
+ * written: a reference whose path URL parsing would rewrite (dot segments, a
+ * backslash) never matches, so `…/assets/../../o/r/blob/main/x` does not
+ * authorize `o/r/blob/main/x`, a URL the text never names.
+ */
+function referenceNamesUrl(reference: string, url: URL): boolean {
+  const writtenPath = /^https?:\/\/[^/?#]*([^?#]*)/i.exec(reference)?.[1] ?? '';
+  if (PATH_REWRITTEN_BY_PARSING_RE.test(writtenPath)) return false;
+  try {
+    const candidate = new URL(reference);
+    candidate.hash = '';
+    return candidate.href === url.href;
+  } catch {
+    return false;
+  }
 }
 
 function providerOrigin(metadata: PRMetadata): string {

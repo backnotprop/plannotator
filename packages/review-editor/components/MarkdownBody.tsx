@@ -10,24 +10,30 @@ import { MAX_QUOTE_DEPTH, isProseQuote, parseQuoteBody } from '@plannotator/ui/c
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
 import { renderInlineMarkdown as renderInline } from '../utils/renderInlineMarkdown';
-import { prImageSrc } from '../utils/prImage';
+import { prImageSrc, prImageSrcset } from '../utils/prImage';
 
 function renderInlineMarkdown(content: string, authenticatedImages: boolean) {
   return renderInline(content, { resolveImageSrc: authenticatedImages ? prImageSrc : undefined });
 }
 
+/**
+ * Comment HTML with GitHub attachment image URLs (`src`, and every `srcset`
+ * candidate, so a `<picture>`'s dark-mode `<source>` still applies) routed
+ * through the proxy. The rewrite runs on an inert `<template>` first and the
+ * sanitizer last, so what is inserted is exactly DOMPurify's output.
+ */
 function sanitizePRHtml(content: string, authenticatedImages: boolean): string {
   if (!authenticatedImages) return sanitizeInlineHtml(content);
   const template = document.createElement('template');
-  template.innerHTML = sanitizeInlineHtml(content);
-  template.content.querySelectorAll('picture source').forEach(source => source.remove());
+  template.innerHTML = content;
   for (const image of template.content.querySelectorAll('img')) {
-    image.removeAttribute('srcset');
-    image.removeAttribute('sizes');
     const src = image.getAttribute('src');
     if (src) image.setAttribute('src', prImageSrc(src));
   }
-  return template.innerHTML;
+  for (const element of template.content.querySelectorAll('img[srcset], picture source[srcset]')) {
+    element.setAttribute('srcset', prImageSrcset(element.getAttribute('srcset') ?? ''));
+  }
+  return sanitizeInlineHtml(template.innerHTML);
 }
 
 

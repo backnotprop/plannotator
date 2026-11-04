@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils/parser';
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
-import { ImageResolverContext, PreserveResolvedVideosContext, type ImageResolver } from './ImageResolverContext';
+import { ImageResolverContext, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, type ImageResolver } from './ImageResolverContext';
 import { SoftLineBreaksContext } from './InlineMarkdown';
 import { buildHeadingSlugMap } from '../utils/slugify';
 
@@ -36,6 +36,8 @@ export interface RenderedMarkdownProps {
   resolveImage?: ImageResolver;
   /** Preserve raw HTML videos when the image resolver is only a URL rewriter. */
   preserveVideos?: boolean;
+  /** With `resolveImage`: keep raw HTML's `<picture><source>` and `srcset`, each candidate resolved (see ResolvedResponsiveImagesContext). */
+  responsiveImages?: boolean;
   /**
    * Optional: give headings slug ids (Viewer's slugger, GitHub dedup), so a
    * host can scroll to `#section` links. Absent/false, headings carry no id.
@@ -60,6 +62,7 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   resolveLocalLink,
   resolveImage,
   preserveVideos = false,
+  responsiveImages = false,
   headingAnchors = false,
   softLineBreaks = false,
 }) => {
@@ -98,6 +101,9 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   }
   if (preserveVideos) {
     body = <PreserveResolvedVideosContext.Provider value={true}>{body}</PreserveResolvedVideosContext.Provider>;
+  }
+  if (responsiveImages) {
+    body = <ResolvedResponsiveImagesContext.Provider value={true}>{body}</ResolvedResponsiveImagesContext.Provider>;
   }
   if (resolveImage) {
     body = <ImageResolverContext.Provider value={resolveImage}>{body}</ImageResolverContext.Provider>;

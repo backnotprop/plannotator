@@ -3,7 +3,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
 import { getImageSrc } from "../ImageThumbnail";
-import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
+import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
 
 interface HtmlBlockProps {
@@ -31,18 +31,43 @@ function unavailableMedia(doc: Document, label: string, title: string): HTMLSpan
  *   `srcset` / `sizes` are dropped, so the browser cannot pick a candidate
  *   the host never saw.
  * - `<picture><source>` is dropped; the `<img>` inside is the fallback.
+ *   With `responsiveImages` (ResolvedResponsiveImagesContext) both are kept
+ *   instead, every `srcset` candidate passed through the resolver.
  * - `<video>` (with its `src`, `poster` and `<source>`s) becomes a
  *   placeholder unless the host explicitly preserves videos: the resolver speaks
  *   for images only.
  */
-function resolveHostMedia(root: DocumentFragment, doc: Document, resolveImage: ImageResolver, preserveVideos: boolean): void {
+function resolveHostMedia(
+  root: DocumentFragment,
+  doc: Document,
+  resolveImage: ImageResolver,
+  preserveVideos: boolean,
+  responsiveImages = false,
+): void {
   if (!preserveVideos) root.querySelectorAll('video').forEach((video) => {
     video.replaceWith(unavailableMedia(doc, 'Video', 'Videos are not shown here'));
   });
-  root.querySelectorAll('picture source').forEach((source) => source.remove());
+  if (responsiveImages) {
+    root.querySelectorAll('img[srcset], picture source[srcset]').forEach((element) => {
+      const srcset = resolveSrcset(element.getAttribute('srcset') ?? '', resolveImage);
+      if (srcset !== null) {
+        element.setAttribute('srcset', srcset);
+      } else if (element.tagName === 'SOURCE') {
+        element.remove();
+      } else {
+        element.removeAttribute('srcset');
+        element.removeAttribute('sizes');
+      }
+    });
+    root.querySelectorAll('picture source:not([srcset])').forEach((source) => source.remove());
+  } else {
+    root.querySelectorAll('picture source').forEach((source) => source.remove());
+  }
   root.querySelectorAll('img').forEach((img) => {
-    img.removeAttribute('srcset');
-    img.removeAttribute('sizes');
+    if (!responsiveImages) {
+      img.removeAttribute('srcset');
+      img.removeAttribute('sizes');
+    }
     const src = img.getAttribute('src');
     const alt = img.getAttribute('alt') || 'Image';
     if (!src) {
@@ -61,6 +86,26 @@ function resolveHostMedia(root: DocumentFragment, doc: Document, resolveImage: I
     }
     img.setAttribute('data-host-image', '');
   });
+}
+
+/**
+ * A `srcset` with every candidate URL put through the host's resolver (its
+ * descriptors kept), or null when the resolver calls one `unavailable`, so the
+ * browser never picks a candidate the host refused. A relative candidate the
+ * resolver leaves alone loads like a relative `<img src>`.
+ */
+function resolveSrcset(srcset: string, resolveImage: ImageResolver): string | null {
+  const candidates: string[] = [];
+  for (const candidate of srcset.split(',').map((part) => part.trim()).filter(Boolean)) {
+    const [url = '', ...descriptors] = candidate.split(/\s+/);
+    const resolved = resolveImage(url);
+    if (resolved?.kind === 'unavailable') return null;
+    const src = resolved?.kind === 'src'
+      ? resolved.src
+      : /^(https?:|data:|blob:)/i.test(url) ? url : getImageSrc(url);
+    candidates.push([src, ...descriptors].join(' '));
+  }
+  return candidates.length > 0 ? candidates.join(', ') : null;
 }
 
 const IMAGE_NOT_FOUND_TITLE = 'Image could not be loaded';
@@ -202,6 +247,7 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
   const resolveLocalLink = useLocalLinkResolver();
   const resolveImage = useImageResolver();
   const preserveVideos = useContext(PreserveResolvedVideosContext);
+  const responsiveImages = useContext(ResolvedResponsiveImagesContext);
   const sanitized = React.useMemo(
     () => sanitizeBlockHtml(block.content),
     [block.content],
@@ -213,14 +259,14 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
       // there), then insert the result.
       const template = ref.current.ownerDocument.createElement('template');
       template.innerHTML = sanitized;
-      resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage, preserveVideos);
+      resolveHostMedia(template.content, ref.current.ownerDocument, resolveImage, preserveVideos, responsiveImages);
       ref.current.replaceChildren(template.content);
     } else if (ref.current.innerHTML !== sanitized) {
       ref.current.innerHTML = sanitized;
     }
     const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage);
     return cleanup;
-  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos]);
+  }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos, responsiveImages]);
   return (
     <div
       ref={ref}

@@ -107,6 +107,37 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(inert?.getAttribute('title')).toBe('From the outer host');
   });
 
+  // A README-style themed image (#2328): with a resolver, `responsiveImages`
+  // keeps the dark-mode `<source>`, its candidate resolved like the `<img>`.
+  // Without it the resolver host gets today's behavior (sources dropped), and
+  // a candidate the resolver refuses never reaches the browser.
+  test('responsiveImages keeps <picture> sources with each srcset candidate resolved', async () => {
+    const themed = [
+      '<picture>',
+      '<source media="(prefers-color-scheme: dark)" srcset="https://cdn.test/dark.png 1x, https://cdn.test/dark@2x.png 2x">',
+      '<img src="https://cdn.test/light.png" srcset="https://cdn.test/light@2x.png 2x" alt="themed">',
+      '</picture>',
+    ].join('');
+    const resolveImage = (src: string) => ({ kind: 'src' as const, src: `/proxy?u=${encodeURIComponent(src)}` });
+
+    const kept = await render(<RenderedMarkdown markdown={themed} resolveImage={resolveImage} responsiveImages />);
+    const source = kept.querySelector('picture source');
+    expect(source?.getAttribute('media')).toBe('(prefers-color-scheme: dark)');
+    expect(source?.getAttribute('srcset')).toBe(
+      `/proxy?u=${encodeURIComponent('https://cdn.test/dark.png')} 1x, /proxy?u=${encodeURIComponent('https://cdn.test/dark@2x.png')} 2x`,
+    );
+    expect(kept.querySelector('img')?.getAttribute('srcset')).toBe(`/proxy?u=${encodeURIComponent('https://cdn.test/light@2x.png')} 2x`);
+
+    const dropped = await render(<RenderedMarkdown markdown={themed} resolveImage={resolveImage} />);
+    expect(dropped.querySelector('picture source')).toBeNull();
+    expect(dropped.querySelector('img')?.hasAttribute('srcset')).toBe(false);
+
+    const refuseDark = (src: string) => (src.includes('dark') ? { kind: 'unavailable' as const, title: 'no' } : null);
+    const refused = await render(<RenderedMarkdown markdown={themed} resolveImage={refuseDark} responsiveImages />);
+    expect(refused.querySelector('picture source')).toBeNull();
+    expect(refused.innerHTML).not.toContain('dark');
+  });
+
   test('headingAnchors gives headings deduplicated slug ids', async () => {
     const el = await render(<RenderedMarkdown markdown={DOC} headingAnchors />);
     expect(Array.from(el.querySelectorAll('h1, h2')).map((h) => h.id)).toEqual(['title', 'title-1']);
